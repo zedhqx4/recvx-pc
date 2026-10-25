@@ -69,6 +69,12 @@ Every normal run records the controller input to `last_run_input.txt` next to th
 previous one is kept as `last_run_input.prev.txt`); replaying it reproduces a session exactly,
 which is the easiest way to report or debug a problem.
 
+UI texture A/B tests (in `recvx.ini`, next to `recvx.exe`; restart the game after editing):
+- `ui_snap_uv=0` disables the PC-side UV snapping workaround for selected 2D pieces (default: enabled).
+- `ui_uv_inset=0` disables the GS emulation's half-texel inset for fixed-UV textures (default: enabled).
+
+Test one key at a time. Remove the key or set it to `1` to restore the behavior. These are diagnostic switches; defaults preserve the current rendering.
+
 Environment variables for testing:
 
 | Variable | Effect |
