@@ -75,9 +75,10 @@ Internal render-resolution test (in `recvx.ini`, next to `recvx.exe`; restart th
 - `scale=1` is needed to test the selected dimensions directly. Higher `scale` values multiply them; `window=WxH` changes only the PC window size.
 - Game coordinates remain 640x480. The GS renderer resamples VRAM-to-render-target loads and render-target readback to accommodate the custom backing resolution.
 
-In-game geometry diagnostic:
-- Press `F12` to toggle a cyan wireframe overlay on textured primitives using fixed UVs (the usual 2D UI/text path). It draws over the original image and shows the triangle split too. The title bar confirms ON/OFF; press F12 again to turn it off.
-- F12 is reserved for this diagnostic; default controls remain F11 fullscreen, F9 return to title and F5 save anywhere.
+Debug mode (in `recvx.ini`, next to `recvx.exe`):
+- `debug=0` is the normal/release default. Diagnostic hotkeys are inert and cannot toggle overlays or edit UV crop values.
+- Set `debug=1` to enable developer diagnostics: F10 enters/leaves live UV crop tuning; F12 toggles the cyan wireframe. These keys remain reserved while debug mode is on.
+- Default game controls remain F11 fullscreen, F9 return to title and F5 save anywhere.
 
 Automatic UI atlas-edge correction:
 - The PC port defaults to trimming one texel from the high-U (right) and high-V (bottom) edges of eligible fixed-UV 2D primitives. Left/top default to no crop.
@@ -90,7 +91,7 @@ Developer diagnostics (in `recvx.ini`, next to `recvx.exe`):
 - The legacy `ui_uv_crop` key, if present, supplies a fallback for edge keys not specified.
 - `ui_snap_uv=0` disables the older PC-side UV snapping workaround; `ui_uv_inset=0` disables the GS renderer's half-texel inset. Keep these as A/B diagnostics rather than prerequisites for normal use.
 
-Live tuning (no restart required; intended for development):
+Live tuning (requires `debug=1`; no restart required after the initial config is read):
 - Press `F10` to enter or leave UV crop tuning. While tuning, the game does not receive keyboard input.
 - `Tab` selects the edge in order: left, right, top, bottom.
 - `Up` increases the selected crop by `1/16` texel; `Down` decreases it. Hold `Shift` for steps of `4/16` texel.

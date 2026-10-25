@@ -773,6 +773,19 @@ static int pause_until_active(void)
 
 static Uint32 last_mouse_move;
 
+/* Diagnostic hotkeys are inert in normal builds; enable them with debug=1 in recvx.ini. */
+static int pc_debug_mode_enabled(void)
+{
+    static int enabled = -1;
+
+    if (enabled < 0)
+    {
+        enabled = pcIniGetInt("debug", 0) != 0;
+    }
+
+    return enabled;
+}
+
 static int ui_uv_tuning;
 static int ui_uv_crop_selected_edge;
 static int ui_uv_consume_escape_up;
@@ -803,6 +816,12 @@ static int ui_uv_crop_handle_event(const SDL_Event* ev)
     }
 
     key = ev->key.keysym.scancode;
+
+    if (!pc_debug_mode_enabled())
+    {
+        /* Reserve diagnostic hotkeys without invoking tools or leaking them into game input. */
+        return (key == SDL_SCANCODE_F10 || key == SDL_SCANCODE_F12);
+    }
 
     if (key == SDL_SCANCODE_F10)
     {
