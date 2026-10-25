@@ -58,6 +58,29 @@ unsigned int Ps2_albinoid_flag;
 unsigned int Ps2_ice_flag;
 unsigned int PS2_Render_tex_sub_flag;
 unsigned int Ps2_tex_load_tp_cancel;
+
+#ifdef TARGET_PC
+/* Active only while bhDispFont/bhDispFontEx submit a glyph. */
+static unsigned int pc_ui_font_draw_depth;
+
+void pcUiFontDrawBegin(void)
+{
+    pc_ui_font_draw_depth++;
+}
+
+void pcUiFontDrawEnd(void)
+{
+    if (pc_ui_font_draw_depth > 0)
+    {
+        pc_ui_font_draw_depth--;
+    }
+}
+
+static int pc_ui_font_draw_active(void)
+{
+    return pc_ui_font_draw_depth != 0;
+}
+#endif
 /* unused below
 unsigned int Ps2_highlight;
 float Ps2_rand_seed[4];
@@ -737,7 +760,7 @@ void Ps2AddPrim(unsigned long prim, void* dp, unsigned int num, unsigned int cli
     {
         memcpy(wide_buf, dp, num * 48);
         dp = wide_buf;
-        if (pc_ui_snap_uv_enabled())
+        if (!pc_ui_font_draw_active() && pc_ui_snap_uv_enabled())
         {
             pc_snap_uv((unsigned int*)wide_buf, num);
         }
@@ -747,7 +770,8 @@ void Ps2AddPrim(unsigned long prim, void* dp, unsigned int num, unsigned int cli
             int crop[4];
 
             pc_ui_uv_crop_amounts(&crop[0], &crop[1], &crop[2], &crop[3]);
-            if ((crop[0] || crop[1] || crop[2] || crop[3]) &&
+            if (!pc_ui_font_draw_active() &&
+                (crop[0] || crop[1] || crop[2] || crop[3]) &&
                 pc_crop_uv_edges((unsigned int*)wide_buf, num, crop) > 0 && !crop_logged)
             {
                 pcLog("UI UV edge crop active (1/16 texel units): left=%d right=%d top=%d bottom=%d",
@@ -756,7 +780,7 @@ void Ps2AddPrim(unsigned long prim, void* dp, unsigned int num, unsigned int cli
             }
         }
 
-        if (pcWide2DTrimRight)
+        if (pcWide2DTrimRight && !pc_ui_font_draw_active())
         {
             unsigned int i2, umax = 0;
 
@@ -2226,7 +2250,15 @@ label:
         PS2_Render_tex_sub_flag = 0;
     }
 
+#ifdef TARGET_PC
+    {
+        /* The game asks for point sampling while drawing its bitmap font. */
+        unsigned int filter = pc_ui_font_draw_active() ? SCE_GS_NEAREST : SCE_GS_LINEAR;
+        *p++ = Ps2_gs_save.TEX1 = SCE_GS_SET_TEX1_1(0, 0, filter, filter, 0, 0, 0);
+    }
+#else
     *p++ = Ps2_gs_save.TEX1 = SCE_GS_SET_TEX1_1(0, 0, SCE_GS_LINEAR, SCE_GS_LINEAR, 0, 0, 0);
+#endif
     *p++ = SCE_GS_TEX1_1;
 
     *p++ = Ps2_gs_save.CLAMP = SCE_GS_SET_CLAMP_1(timp->ClampFlag, SCE_GS_REPEAT, 255, 0, 255, 0);
