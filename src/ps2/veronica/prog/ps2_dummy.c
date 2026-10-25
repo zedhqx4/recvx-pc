@@ -1,3 +1,6 @@
+#ifdef TARGET_PC
+#include <stdio.h>
+#endif
 #include "../../../ps2/veronica/prog/ps2_dummy.h"
 #include "../../../ps2/veronica/prog/ps2_loadtim2.h"
 #include "../../../ps2/veronica/prog/ps2_NaDraw2D.h"
@@ -322,6 +325,7 @@ void PS2_swap()
 // 99.93% matching
 #ifdef TARGET_PC
 extern int pcIniGetInt(const char* key, int def);
+extern void pcIniSet(const char* key, const char* value);
 
 /* Diagnostic switch: default ON, preserving the existing rendering. Set ui_snap_uv=0 in
  * recvx.ini to test this PC-only UV adjustment independently from the GS sampler inset. */
@@ -393,12 +397,13 @@ static void pc_snap_uv(unsigned int* v, unsigned int num)
     }
 }
 
-/* Testable alternative to translating a whole UV rectangle: move its low and high UV
- * edges inward independently. ui_uv_crop is expressed in 1/16-texel units (8 = 0.5 texel,
- * 16 = 1 texel); default 0 leaves behavior unchanged. Restrict it to non-mirrored,
- * approximately 1:1 axis-aligned 2D pieces so 3D and scaled texture mappings are untouched. */
-/* Each crop value is in 1/16-texel units (8 = half a texel). The older
- * ui_uv_crop value remains a fallback for all four edges, so existing test configs work. */
+/* Per-edge UI UV crop, expressed in 1/16-texel units (8 = half a texel).
+ * Runtime tuning writes these values to recvx.ini so the next launch keeps them. */
+static int pc_ui_uv_crop_values[4] = { -1, -1, -1, -1 };
+static const char* pc_ui_uv_crop_keys[4] = {
+    "ui_uv_crop_left", "ui_uv_crop_right", "ui_uv_crop_top", "ui_uv_crop_bottom"
+};
+
 static int pc_ui_uv_crop_value(const char* key, int fallback)
 {
     int value = pcIniGetInt(key, fallback);
@@ -408,28 +413,88 @@ static int pc_ui_uv_crop_value(const char* key, int fallback)
     return value;
 }
 
-static void pc_ui_uv_crop_amounts(int* left, int* right, int* top, int* bottom)
+static void pc_ui_uv_crop_init(void)
 {
-    static int values[4] = { -1, -1, -1, -1 };
-
-    if (values[0] < 0)
+    if (pc_ui_uv_crop_values[0] < 0)
     {
         int legacy = pc_ui_uv_crop_value("ui_uv_crop", 0);
-        values[0] = pc_ui_uv_crop_value("ui_uv_crop_left", legacy);
-        values[1] = pc_ui_uv_crop_value("ui_uv_crop_right", legacy);
-        values[2] = pc_ui_uv_crop_value("ui_uv_crop_top", legacy);
-        values[3] = pc_ui_uv_crop_value("ui_uv_crop_bottom", legacy);
-    }
+        int i;
 
-    *left = values[0];
-    *right = values[1];
-    *top = values[2];
-    *bottom = values[3];
+        for (i = 0; i < 4; i++)
+        {
+            pc_ui_uv_crop_values[i] = pc_ui_uv_crop_value(pc_ui_uv_crop_keys[i], legacy);
+        }
+    }
 }
 
-/* Trim the low/high sides independently: U-min=left, U-max=right,
- * V-min=top, V-max=bottom. Only touch axes that look like forward 1:1 UVs on
- * axis-aligned 2D geometry. Validate the whole axis before changing any vertex. */
+static void pc_ui_uv_crop_save_edge(int edge)
+{
+    char value[16];
+
+    if (edge < 0 || edge >= 4)
+    {
+        return;
+    }
+
+    snprintf(value, sizeof(value), "%d", pc_ui_uv_crop_values[edge]);
+    pcIniSet(pc_ui_uv_crop_keys[edge], value);
+}
+
+static void pc_ui_uv_crop_amounts(int* left, int* right, int* top, int* bottom)
+{
+    pc_ui_uv_crop_init();
+    *left = pc_ui_uv_crop_values[0];
+    *right = pc_ui_uv_crop_values[1];
+    *top = pc_ui_uv_crop_values[2];
+    *bottom = pc_ui_uv_crop_values[3];
+}
+
+/* Public PC-side controls used by the live keyboard tuner. Edge order: left, right, top, bottom. */
+void pcUiUvCropGet(int* left, int* right, int* top, int* bottom)
+{
+    pc_ui_uv_crop_amounts(left, right, top, bottom);
+}
+
+void pcUiUvCropAdjust(int edge, int delta)
+{
+    int value;
+
+    pc_ui_uv_crop_init();
+    if (edge < 0 || edge >= 4)
+    {
+        return;
+    }
+
+    value = pc_ui_uv_crop_values[edge] + delta;
+    if (value < 0) value = 0;
+    if (value > 64) value = 64;
+
+    if (value != pc_ui_uv_crop_values[edge])
+    {
+        pc_ui_uv_crop_values[edge] = value;
+        pc_ui_uv_crop_save_edge(edge);
+    }
+}
+
+void pcUiUvCropReset(int edge)
+{
+    int i, first = (edge == -1) ? 0 : edge, last = (edge == -1) ? 3 : edge;
+
+    pc_ui_uv_crop_init();
+    if (first < 0 || last >= 4)
+    {
+        return;
+    }
+
+    for (i = first; i <= last; i++)
+    {
+        pc_ui_uv_crop_values[i] = 0;
+        pc_ui_uv_crop_save_edge(i);
+    }
+}
+
+/* Independently trim U-min/U-max and V-min/V-max. Only touch axes that look like forward
+ * one-texel-per-pixel mappings on axis-aligned 2D geometry; 3D and scaled mappings stay alone. */
 static int pc_crop_uv_edges(unsigned int* v, unsigned int num, const int inset[4])
 {
     int axis, changed = 0;
@@ -460,7 +525,6 @@ static int pc_crop_uv_edges(unsigned int* v, unsigned int num, const int inset[4
 
             if (t < tmin) tmin = t;
             if (t > tmax) tmax = t;
-
             if (sc < smin)
             {
                 smin = sc;
@@ -469,7 +533,7 @@ static int pc_crop_uv_edges(unsigned int* v, unsigned int num, const int inset[4
             if (sc > smax) smax = sc;
         }
 
-        /* Avoid scaled, mirrored, degenerate, or non-axis-aligned mappings. */
+        /* Avoid scaled, mirrored, degenerate, or overflowing UV ranges. */
         if ((smax - smin < 1.0f) ||
             (fabsf(((float)(tmax - tmin) / 16.0f) - (smax - smin)) > 0.1f * (smax - smin)) ||
             (t_at_smin != tmin) || (tmax <= tmin) ||
@@ -480,7 +544,7 @@ static int pc_crop_uv_edges(unsigned int* v, unsigned int num, const int inset[4
             continue;
         }
 
-        /* Every vertex on this axis must belong to one of the two opposite edges. */
+        /* Validate the whole axis before changing anything: never partially edit a primitive. */
         for (i = 0; i < num; i++)
         {
             unsigned int t = v[(i * 12) + axis] & 0x3FFFu;
@@ -490,7 +554,6 @@ static int pc_crop_uv_edges(unsigned int* v, unsigned int num, const int inset[4
                 break;
             }
         }
-
         if (!valid)
         {
             continue;
@@ -510,7 +573,6 @@ static int pc_crop_uv_edges(unsigned int* v, unsigned int num, const int inset[4
             {
                 t -= (unsigned int)high_inset;
             }
-
             *word = (w & ~0x3FFFu) | (t & 0x3FFFu);
         }
 

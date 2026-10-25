@@ -22,6 +22,11 @@ int pcIniFileGetInt(const char* ini, const char* key, int def);
 /* Set (or with value NULL remove) "key=value" in recvx.ini, keeping every other line. */
 void pcIniSet(const char* key, const char* value);
 
+/* Live UI UV crop tuner. Edge order: left=0, right=1, top=2, bottom=3; reset edge -1 clears all. */
+void pcUiUvCropGet(int* left, int* right, int* top, int* bottom);
+void pcUiUvCropAdjust(int edge, int delta);
+void pcUiUvCropReset(int edge);
+
 /* First file in dir whose name ends with ext (case-insensitive); full path in out. */
 int pcPlatformFindFile(const char* dir, const char* ext, char* out, int size);
 

@@ -97,6 +97,13 @@ ui_uv_crop_top=0
 ui_uv_crop_bottom=0
 ```
 
+Live tuning (no restart required):
+- Press `F10` to enter or leave UV crop tuning. While tuning, the game does not receive keyboard input.
+- `Tab` selects the edge in order: left, right, top, bottom.
+- `Up` increases the selected crop by `1/16` texel; `Down` decreases it. Hold `Shift` for steps of `4/16` texel.
+- `Backspace` resets the selected edge; `Shift+Backspace` resets all four edges to zero. `F12` still toggles wireframe while tuning.
+- Every change takes effect on the next UI draw and is written to `recvx.ini` automatically.
+
 These are diagnostic switches; remove them or set crop values to `0` to restore unadjusted UV edges.
 
 Environment variables for testing:

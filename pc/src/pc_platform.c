@@ -773,6 +773,111 @@ static int pause_until_active(void)
 
 static Uint32 last_mouse_move;
 
+static int ui_uv_tuning;
+static int ui_uv_crop_selected_edge;
+static int ui_uv_consume_escape_up;
+static const char* ui_uv_crop_edge_names[4] = { "LEFT", "RIGHT", "TOP", "BOTTOM" };
+
+static void ui_uv_crop_show_status(const char* state)
+{
+    int left, right, top, bottom;
+    char notice[160];
+
+    pcUiUvCropGet(&left, &right, &top, &bottom);
+    snprintf(notice, sizeof(notice), "UV CROP %s | %s | L:%d R:%d T:%d B:%d",
+             state, ui_uv_crop_edge_names[ui_uv_crop_selected_edge], left, right, top, bottom);
+    pcLog("UI UV crop %s: left=%d right=%d top=%d bottom=%d; selected=%s (1/16 texel units)",
+          state, left, right, top, bottom, ui_uv_crop_edge_names[ui_uv_crop_selected_edge]);
+    title_notice_show(notice);
+}
+
+/* True means the key event was consumed and must not reach the game. */
+static int ui_uv_crop_handle_event(const SDL_Event* ev)
+{
+    int down = (ev->type == SDL_KEYDOWN);
+    SDL_Scancode key;
+
+    if (!down && ev->type != SDL_KEYUP)
+    {
+        return 0;
+    }
+
+    key = ev->key.keysym.scancode;
+
+    if (key == SDL_SCANCODE_F10)
+    {
+        if (down && !ev->key.repeat)
+        {
+            ui_uv_tuning = !ui_uv_tuning;
+            ui_uv_crop_show_status(ui_uv_tuning ? "TUNING ON (TAB edge, UP/DOWN adjust, BS reset, F10 done)" : "TUNING OFF");
+        }
+        return 1;
+    }
+
+    if (key == SDL_SCANCODE_ESCAPE)
+    {
+        if (down && ui_uv_tuning && !ev->key.repeat)
+        {
+            ui_uv_tuning = 0;
+            ui_uv_consume_escape_up = 1;
+            ui_uv_crop_show_status("TUNING OFF");
+            return 1;
+        }
+        if (!down && ui_uv_consume_escape_up)
+        {
+            ui_uv_consume_escape_up = 0;
+            return 1;
+        }
+    }
+
+    if (!ui_uv_tuning)
+    {
+        return 0;
+    }
+
+    if (!down)
+    {
+        return 1; /* swallow key-up while tuning to avoid leaking half a keypress */
+    }
+    if (ev->key.repeat)
+    {
+        return 1;
+    }
+
+    switch (key)
+    {
+    case SDL_SCANCODE_TAB:
+        ui_uv_crop_selected_edge = (ui_uv_crop_selected_edge + 1) & 3;
+        ui_uv_crop_show_status("EDGE SELECTED");
+        break;
+
+    case SDL_SCANCODE_UP:
+    case SDL_SCANCODE_DOWN:
+    {
+        int step = (ev->key.keysym.mod & KMOD_SHIFT) ? 4 : 1;
+        pcUiUvCropAdjust(ui_uv_crop_selected_edge, (key == SDL_SCANCODE_UP) ? step : -step);
+        ui_uv_crop_show_status("VALUE CHANGED");
+        break;
+    }
+
+    case SDL_SCANCODE_BACKSPACE:
+        pcUiUvCropReset((ev->key.keysym.mod & KMOD_SHIFT) ? -1 : ui_uv_crop_selected_edge);
+        ui_uv_crop_show_status((ev->key.keysym.mod & KMOD_SHIFT) ? "ALL EDGES RESET" : "EDGE RESET");
+        break;
+
+    case SDL_SCANCODE_F12:
+        pcGsToggleUiWireframe();
+        ui_uv_crop_show_status("WIREFRAME TOGGLED");
+        break;
+
+    default:
+        break;
+    }
+
+    return 1; /* tuning mode owns keyboard input; don't move the game cursor */
+}
+
+
 int pcVideoPumpEvents(void)
 {
     SDL_Event ev;
@@ -804,6 +909,12 @@ int pcVideoPumpEvents(void)
         {
             last_mouse_move = SDL_GetTicks();
             SDL_ShowCursor(SDL_ENABLE);
+        }
+
+        /* Live UV crop tuner; changes take effect on the next UI draw and are saved to recvx.ini. */
+        if (ui_uv_crop_handle_event(&ev))
+        {
+            continue;
         }
 
         /* F12: toggle a wireframe overlay on textured 2D primitives for graphics diagnosis.
@@ -1151,11 +1262,13 @@ static int title_event(const SDL_Event* ev)
 static int title_fps;
 
 static const char* title_notice;     /* shown in the title bar for a few seconds */
+static char title_notice_storage[160];
 static unsigned int title_notice_until;
 
 static void title_notice_show(const char* text)
 {
-    title_notice = text;
+    snprintf(title_notice_storage, sizeof(title_notice_storage), "%s", text ? text : "");
+    title_notice = title_notice_storage;
     title_notice_until = SDL_GetTicks() + 4000;
     update_title(0);
 }
