@@ -82,8 +82,22 @@ In-game geometry diagnostic:
 UI texture A/B tests (in `recvx.ini`, next to `recvx.exe`; restart the game after editing):
 - `ui_snap_uv=0` disables the PC-side UV snapping workaround for selected 2D pieces (default: enabled).
 - `ui_uv_inset=0` disables the GS emulation's half-texel inset for fixed-UV textures (default: enabled).
+- `ui_uv_crop_left`, `ui_uv_crop_right`, `ui_uv_crop_top` and `ui_uv_crop_bottom` independently crop the four UV edges for selected axis-aligned 1:1 2D pieces.
+- Crop values are in 1/16-texel units: `8` = half a texel; `16` = one texel; `0` = no crop on that edge. Each edge accepts 0–64 (up to four texels).
+- The legacy `ui_uv_crop` value is the fallback for any per-edge setting not specified. Set it to `0` while tuning edges individually.
 
-Test one key at a time. Remove the key or set it to `1` to restore the behavior. These are diagnostic switches; defaults preserve the current rendering.
+Example for testing only the right edge:
+```ini
+ui_snap_uv=0
+ui_uv_inset=0
+ui_uv_crop=0
+ui_uv_crop_left=0
+ui_uv_crop_right=8
+ui_uv_crop_top=0
+ui_uv_crop_bottom=0
+```
+
+These are diagnostic switches; remove them or set crop values to `0` to restore unadjusted UV edges.
 
 Environment variables for testing:
 
