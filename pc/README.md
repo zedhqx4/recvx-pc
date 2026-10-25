@@ -75,6 +75,10 @@ Internal render-resolution test (in `recvx.ini`, next to `recvx.exe`; restart th
 - `scale=1` is needed to test the selected dimensions directly. Higher `scale` values multiply them; `window=WxH` changes only the PC window size.
 - Game coordinates remain 640x480. The GS renderer resamples VRAM-to-render-target loads and render-target readback to accommodate the custom backing resolution.
 
+In-game geometry diagnostic:
+- Press `F12` to toggle a cyan wireframe overlay on textured primitives using fixed UVs (the usual 2D UI/text path). It draws over the original image and shows the triangle split too. The title bar confirms ON/OFF; press F12 again to turn it off.
+- F12 is reserved for this diagnostic; default controls remain F11 fullscreen, F9 return to title and F5 save anywhere.
+
 UI texture A/B tests (in `recvx.ini`, next to `recvx.exe`; restart the game after editing):
 - `ui_snap_uv=0` disables the PC-side UV snapping workaround for selected 2D pieces (default: enabled).
 - `ui_uv_inset=0` disables the GS emulation's half-texel inset for fixed-UV textures (default: enabled).

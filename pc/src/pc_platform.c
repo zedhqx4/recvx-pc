@@ -29,6 +29,7 @@ static void save_event(const SDL_Event* ev);
 static void save_tick(void);
 static void fps_tick(void);
 static void update_title(int force);
+static void title_notice_show(const char* text);
 static SDL_GLContext gl_context;
 static FILE* log_file;
 
@@ -803,6 +804,15 @@ int pcVideoPumpEvents(void)
         {
             last_mouse_move = SDL_GetTicks();
             SDL_ShowCursor(SDL_ENABLE);
+        }
+
+        /* F12: toggle a wireframe overlay on textured 2D primitives for graphics diagnosis.
+         * F12 is not one of the default game bindings (F11 fullscreen, F9 title, F5 save). */
+        if ((ev.type == SDL_KEYDOWN) && !ev.key.repeat && (ev.key.keysym.scancode == SDL_SCANCODE_F12))
+        {
+            int enabled = pcGsToggleUiWireframe();
+            title_notice_show(enabled ? "UI WIREFRAME ON (F12)" : "UI WIREFRAME OFF (F12)");
+            continue;   /* do not forward the diagnostic hotkey to the game */
         }
 
         /* Alt+Enter: fullscreen on/off, like other Windows games */

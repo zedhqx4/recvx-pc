@@ -77,6 +77,7 @@ static const char* fs_src =
     "flat in vec4 vClamp;\n"
     "uniform sampler2D uTex;\n"
     "uniform int uTme, uFst, uTfx, uTcc, uIip;\n"
+    "uniform int uWireframe;\n"
     "uniform vec3 uTexa;\n"                    /* TA0, TA1, AEM */
     "uniform int uHD;\n"                      /* replaced (HD) texture: filtered, any size */
     "uniform int uTexRT;\n"                     /* 1: texture is a render target */
@@ -133,7 +134,8 @@ static const char* fs_src =
     "    return r;\n"
     "}\n"
     "void main() {\n"
-    "    vec4 vc = (uIip != 0 ? vColor : vFlatColor) * 255.0;\n"
+    "    if (uWireframe != 0) { oColor = vec4(0.0, 1.0, 1.0, 1.0); return; }\n"
+"    vec4 vc = (uIip != 0 ? vColor : vFlatColor) * 255.0;\n"
     "    vec3 rgb = vc.rgb; float a = vc.a;\n"
     "    if (uTme != 0) {\n"
     "        vec2 uv = (uFst != 0) ? clamp(vUV, vClamp.xy, vClamp.zw) : (vSTQ.xy / vSTQ.z) * uTexSize;\n"
@@ -166,7 +168,7 @@ static GLuint vao, vbo;
 
 static struct {
     GLint target, tme, fst, tfx, tcc, iip, texrt, texsize, rtsize, wrap, region, linear;
-    GLint ate, atst, aref, atinv, fge, fogcol, tex, texa, hd;
+    GLint ate, atst, aref, atinv, fge, fogcol, tex, texa, hd, wireframe;
 } U;
 
 static GLuint compile(GLenum type, const char* src)
@@ -257,6 +259,15 @@ static RenderTarget rts[MAX_RT];
 static DepthBuffer dbs[MAX_DB];
 static unsigned int frame_counter;
 static int dump_frame;
+static int ui_wireframe;
+
+int pcGsToggleUiWireframe(void)
+{
+    ui_wireframe = !ui_wireframe;
+    pcLog("gs: UI wireframe overlay %s", ui_wireframe ? "enabled" : "disabled");
+    return ui_wireframe;
+}
+
 
 /* per-interval statistics for the periodic log */
 static struct { unsigned int frames, draws, verts, rt_loads, rt_reads, tex_decodes, tex_texels; double t_load, t_read, t_decode; } stats;
@@ -913,6 +924,7 @@ void gsRendererInit(void)
     UL(texrt, "uTexRT"); UL(texsize, "uTexSize"); UL(rtsize, "uRTSize"); UL(wrap, "uWrap"); UL(region, "uRegion");
     UL(linear, "uLinear"); UL(ate, "uAte"); UL(atst, "uAtst"); UL(aref, "uAref"); UL(atinv, "uAtestInvert");
     UL(fge, "uFge"); UL(fogcol, "uFogCol"); UL(tex, "uTex"); UL(texa, "uTexa"); UL(hd, "uHD");
+    UL(wireframe, "uWireframe");
 #undef UL
 
     glGenVertexArrays(1, &vao);
@@ -1417,6 +1429,8 @@ void gsRendererDraw(const GsDrawState* st, const GsVertex* v, int nverts)
     glBindBuffer(GL_ARRAY_BUFFER, vbo);
     glBufferData(GL_ARRAY_BUFFER, n * sizeof(GlVertex), glverts, GL_STREAM_DRAW);
 
+    glUniform1i(U.wireframe, 0);
+
     if (ate && (afail != 0) && (atst != 1))
     {
         /* alpha test with a fail action: pass 1 normal, pass 2 the failing pixels with the
@@ -1444,6 +1458,37 @@ void gsRendererDraw(const GsDrawState* st, const GsVertex* v, int nverts)
     else
     {
         glDrawArrays(mode, 0, n);
+    }
+
+    /* Diagnostic overlay only: fixed-UV textured primitives (the usual 2D UI/text path).
+     * Force a solid color so transparency and the suspect UVs cannot hide the geometry. */
+    if (ui_wireframe && st->tme && st->fst && (mode == GL_TRIANGLES) && (n > 0))
+    {
+        glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+        glDepthMask(GL_FALSE);
+        glDisable(GL_DEPTH_TEST);
+        glDisable(GL_BLEND);
+        glUniform1i(U.wireframe, 1);
+        glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
+        glDrawArrays(mode, 0, n);
+        glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+        glUniform1i(U.wireframe, 0);
+
+        /* Restore the GS state for the next primitive. */
+        glColorMask((fbmsk & 0xFF) != 0xFF, (fbmsk & 0xFF00) != 0xFF00, (fbmsk & 0xFF0000) != 0xFF0000,
+                    ((fbmsk & 0xFF000000) != 0xFF000000) && (fpsm != GS_PSMCT24));
+        setup_blend(st);
+        if (use_depth)
+        {
+            glEnable(GL_DEPTH_TEST);
+            glDepthFunc((ztst == 0) ? GL_NEVER : (ztst == 1) ? GL_ALWAYS : (ztst == 2) ? GL_GEQUAL : GL_GREATER);
+            glDepthMask(zmsk ? GL_FALSE : GL_TRUE);
+        }
+        else
+        {
+            glDisable(GL_DEPTH_TEST);
+            glDepthMask(GL_FALSE);
+        }
     }
 }
 
