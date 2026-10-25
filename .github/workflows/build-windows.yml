@@ -1,11 +1,11 @@
 
-name: Build Windows binaries
+name: Build Windows
 
 on:
   workflow_dispatch:
     inputs:
       build_randomizer:
-        description: Build the self-contained randomizer too
+        description: Build cvx-rando.exe
         required: true
         type: boolean
         default: true
@@ -24,7 +24,7 @@ jobs:
     runs-on: windows-2022
 
     steps:
-      - name: Checkout repository and submodules
+      - name: Checkout repository
         uses: actions/checkout@v4
         with:
           submodules: recursive
@@ -34,25 +34,33 @@ jobs:
         with:
           python-version: '3.x'
 
-      - name: Set up .NET 10 SDK
-        if: ${{ github.event_name != 'workflow_dispatch' || inputs.build_randomizer }}
+      - name: Set up .NET 10
+        if: github.event_name != 'workflow_dispatch' || inputs.build_randomizer
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '10.0.x'
 
-      - name: Build game and configuration tool
-        shell: pwsh
-        run: python pc/tools/build.py --clean
+      - name: Build game and randomizer
+        if: github.event_name != 'workflow_dispatch' || inputs.build_randomizer
+        shell: powershell
+        run: |
+          & "$env:GITHUB_WORKSPACE\build.ps1" -Yes
+          if ($LASTEXITCODE -ne 0) {
+            exit $LASTEXITCODE
+          }
 
-      - name: Build self-contained randomizer
-        if: ${{ github.event_name != 'workflow_dispatch' || inputs.build_randomizer }}
-        shell: pwsh
-        run: powershell -NoProfile -ExecutionPolicy Bypass -File rando/tools/publish.ps1
+      - name: Build game only
+        if: github.event_name == 'workflow_dispatch' && !inputs.build_randomizer
+        shell: powershell
+        run: |
+          & "$env:GITHUB_WORKSPACE\build.ps1" -Yes -NoRando
+          if ($LASTEXITCODE -ne 0) {
+            exit $LASTEXITCODE
+          }
 
-      - name: Upload Windows build
+      - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
           name: recvx-pc-windows
           path: build_pc/
           if-no-files-found: error
-          retention-days: 14
