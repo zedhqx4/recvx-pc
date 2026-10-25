@@ -71,6 +71,20 @@ void gsFlushPrims(void)
     out_valid = 0;
 }
 
+/* Diagnostic switch: default ON, preserving existing rendering. Set ui_uv_inset=0 in
+ * recvx.ini to disable only the half-texel inset used for fixed-UV textured primitives. */
+static int pc_ui_uv_inset_enabled(void)
+{
+    static int enabled = -1;
+
+    if (enabled < 0)
+    {
+        enabled = pcIniGetInt("ui_uv_inset", 1) != 0;
+    }
+
+    return enabled;
+}
+
 static void emit(const GsVertex* v, int n)
 {
     GsDrawState st;
@@ -83,7 +97,7 @@ static void emit(const GsVertex* v, int n)
      * upscaled, filtering at their edges would blend in the neighbouring image on the sheet
      * (thin lines at every tile edge). They may only sample their own texels: from half a
      * texel inside their UV rectangle. (3D surfaces use ST coordinates and are left alone.) */
-    if (st.tme && st.fst)
+    if (st.tme && st.fst && pc_ui_uv_inset_enabled())
     {
         cu0 = cv0 = 1e30f;
         cu1 = cv1 = -1e30f;
