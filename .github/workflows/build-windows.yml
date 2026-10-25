@@ -1,14 +1,8 @@
 ```yaml
-name: Build Windows
+name: Build recvx-pc for Windows
 
 on:
   workflow_dispatch:
-    inputs:
-      build_randomizer:
-        description: Build cvx-rando.exe
-        required: true
-        type: boolean
-        default: true
   push:
     branches:
       - pc-port
@@ -34,53 +28,52 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Set up .NET 10
-        if: github.event_name != 'workflow_dispatch' || inputs.build_randomizer
-        uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: '10.0.x'
-
-      - name: Apply temporary MSVC environment fix
-        shell: powershell
+      - name: Apply temporary MSVC fix
+        shell: pwsh
         run: |
-          $file = Join-Path $env:GITHUB_WORKSPACE "pc/tools/msvc.py"
-
+          $file = Join-Path $env:GITHUB_WORKSPACE 'pc/tools/msvc.py'
           $source = Get-Content $file -Raw
 
-          $old = 'exe = shutil.which(args[0], path=env["PATH"]) or args[0]'
-          $new = @'
-          path = next((v for k, v in env.items() if k.casefold() == "path"), "")
-              exe = shutil.which(args[0], path=path) or args[0]
-          '@.Trim()
+          $old = '    exe = shutil.which(args[0], path=env["PATH"]) or args[0]'
+          $new = '    path = next((v for k, v in env.items() if k.casefold() == "path"), "")' + "`r`n" + '    exe = shutil.which(args[0], path=path) or args[0]'
 
           if (-not $source.Contains($old)) {
-            throw "Expected MSVC code was not found; refusing to modify the file."
+            throw 'Expected MSVC code not found; refusing to patch.'
           }
 
           $source = $source.Replace($old, $new)
           Set-Content -Path $file -Value $source -Encoding utf8 -NoNewline
 
-      - name: Build game and randomizer
-        if: github.event_name != 'workflow_dispatch' || inputs.build_randomizer
-        shell: powershell
-        run: |
-          & "$env:GITHUB_WORKSPACE\build.ps1" -Yes
-          if ($LASTEXITCODE -ne 0) {
-            exit $LASTEXITCODE
-          }
-
-      - name: Build game only
-        if: github.event_name == 'workflow_dispatch' && !inputs.build_randomizer
-        shell: powershell
+      - name: Build game
+        shell: pwsh
         run: |
           & "$env:GITHUB_WORKSPACE\build.ps1" -Yes -NoRando
           if ($LASTEXITCODE -ne 0) {
             exit $LASTEXITCODE
           }
 
-      - name: Upload build artifacts
+      - name: Verify executables
+        shell: pwsh
+        run: |
+          $dir = Join-Path $env:GITHUB_WORKSPACE 'build_pc'
+          $required = @('recvx.exe', 'recvx-config.exe')
+
+          foreach ($name in $required) {
+            $file = Join-Path $dir $name
+            if (-not (Test-Path $file)) {
+              throw "Expected executable not found: $file"
+            }
+            Write-Host "Found: $file"
+          }
+
+          Get-ChildItem $dir -File
+
+      - name: Upload Windows build
         uses: actions/upload-artifact@v4
         with:
           name: recvx-pc-windows
-          path: build_pc/
+          path: |
+            build_pc/recvx.exe
+            build_pc/recvx-config.exe
           if-no-files-found: error
+```
