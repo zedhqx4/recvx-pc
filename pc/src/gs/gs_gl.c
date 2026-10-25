@@ -135,7 +135,7 @@ static const char* fs_src =
     "}\n"
     "void main() {\n"
     "    if (uWireframe != 0) { oColor = vec4(0.0, 1.0, 1.0, 1.0); return; }\n"
-"    vec4 vc = (uIip != 0 ? vColor : vFlatColor) * 255.0;\n"
+    "    vec4 vc = (uIip != 0 ? vColor : vFlatColor) * 255.0;\n"
     "    vec3 rgb = vc.rgb; float a = vc.a;\n"
     "    if (uTme != 0) {\n"
     "        vec2 uv = (uFst != 0) ? clamp(vUV, vClamp.xy, vClamp.zw) : (vSTQ.xy / vSTQ.z) * uTexSize;\n"

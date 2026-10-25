@@ -114,6 +114,7 @@ typedef ptrdiff_t GLintptr;
     X(void, glBufferData, (GLenum t, GLsizeiptr size, const void* data, GLenum usage)) \
     X(void, glVertexAttribPointer, (GLuint i, GLint size, GLenum type, GLboolean norm, GLsizei stride, const void* p)) \
     X(void, glEnableVertexAttribArray, (GLuint i)) \
+    X(void, glPolygonMode, (GLenum face, GLenum mode)) \
     X(void, glDrawArrays, (GLenum mode, GLint first, GLsizei count)) \
     X(void, glReadPixels, (GLint x, GLint y, GLsizei w, GLsizei h, GLenum fmt, GLenum type, void* data)) \
     X(void, glPixelStorei, (GLenum p, GLint v)) \
@@ -177,6 +178,7 @@ PC_GL_FUNCS(PC_GL_DECLARE)
 #define glBufferData pc_glBufferData
 #define glVertexAttribPointer pc_glVertexAttribPointer
 #define glEnableVertexAttribArray pc_glEnableVertexAttribArray
+#define glPolygonMode pc_glPolygonMode
 #define glDrawArrays pc_glDrawArrays
 #define glReadPixels pc_glReadPixels
 #define glPixelStorei pc_glPixelStorei
