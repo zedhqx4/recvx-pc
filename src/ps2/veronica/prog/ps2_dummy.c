@@ -408,7 +408,7 @@ static int pc_ui_uv_crop_value(const char* key, int fallback)
 {
     int value = pcIniGetInt(key, fallback);
 
-    if (value < 0) value = 0;
+    if (value < 0) value = fallback;
     if (value > 64) value = 64; /* max four texels per edge */
     return value;
 }
@@ -417,12 +417,16 @@ static void pc_ui_uv_crop_init(void)
 {
     if (pc_ui_uv_crop_values[0] < 0)
     {
-        int legacy = pc_ui_uv_crop_value("ui_uv_crop", 0);
+        /* A clean config gets the tested automatic correction: trim one texel from
+         * the high U/V edges. Explicit edge values override these defaults. */
+        static const int automatic_defaults[4] = { 0, 16, 0, 16 };
+        int legacy = pc_ui_uv_crop_value("ui_uv_crop", -1);
         int i;
 
         for (i = 0; i < 4; i++)
         {
-            pc_ui_uv_crop_values[i] = pc_ui_uv_crop_value(pc_ui_uv_crop_keys[i], legacy);
+            int fallback = (legacy >= 0) ? legacy : automatic_defaults[i];
+            pc_ui_uv_crop_values[i] = pc_ui_uv_crop_value(pc_ui_uv_crop_keys[i], fallback);
         }
     }
 }
@@ -544,11 +548,16 @@ static int pc_crop_uv_edges(unsigned int* v, unsigned int num, const int inset[4
             continue;
         }
 
-        /* Validate the whole axis before changing anything: never partially edit a primitive. */
+        /* Validate the whole axis before changing anything: never partially edit a primitive.
+         * Every low/high UV must lie on the corresponding screen-space edge. */
         for (i = 0; i < num; i++)
         {
             unsigned int t = v[(i * 12) + axis] & 0x3FFFu;
-            if (t != tmin && t != tmax)
+            float sc = ((float*)v)[(i * 12) + 8 + axis];
+
+            if ((t != tmin && t != tmax) ||
+                (t == tmin && fabsf(sc - smin) > 0.01f) ||
+                (t == tmax && fabsf(sc - smax) > 0.01f))
             {
                 valid = 0;
                 break;

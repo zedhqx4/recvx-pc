@@ -79,32 +79,23 @@ In-game geometry diagnostic:
 - Press `F12` to toggle a cyan wireframe overlay on textured primitives using fixed UVs (the usual 2D UI/text path). It draws over the original image and shows the triangle split too. The title bar confirms ON/OFF; press F12 again to turn it off.
 - F12 is reserved for this diagnostic; default controls remain F11 fullscreen, F9 return to title and F5 save anywhere.
 
-UI texture A/B tests (in `recvx.ini`, next to `recvx.exe`; restart the game after editing):
-- `ui_snap_uv=0` disables the PC-side UV snapping workaround for selected 2D pieces (default: enabled).
-- `ui_uv_inset=0` disables the GS emulation's half-texel inset for fixed-UV textures (default: enabled).
-- `ui_uv_crop_left`, `ui_uv_crop_right`, `ui_uv_crop_top` and `ui_uv_crop_bottom` independently crop the four UV edges for selected axis-aligned 1:1 2D pieces.
-- Crop values are in 1/16-texel units: `8` = half a texel; `16` = one texel; `0` = no crop on that edge. Each edge accepts 0–64 (up to four texels).
-- The legacy `ui_uv_crop` value is the fallback for any per-edge setting not specified. Set it to `0` while tuning edges individually.
+Automatic UI atlas-edge correction:
+- The PC port defaults to trimming one texel from the high-U (right) and high-V (bottom) edges of eligible fixed-UV 2D primitives. Left/top default to no crop.
+- The correction is deliberately limited to 2D geometry with an approximately 1:1 UV-to-screen span and matching edge orientation. 3D surfaces, scaled/mirrored mappings, and ambiguous shapes are left untouched.
+- This default works without adding crop keys to `recvx.ini`; it is not a per-game/user setup step.
 
-Example for testing only the right edge:
-```ini
-ui_snap_uv=0
-ui_uv_inset=0
-ui_uv_crop=0
-ui_uv_crop_left=0
-ui_uv_crop_right=8
-ui_uv_crop_top=0
-ui_uv_crop_bottom=0
-```
+Developer diagnostics (in `recvx.ini`, next to `recvx.exe`):
+- `ui_uv_crop_left`, `ui_uv_crop_right`, `ui_uv_crop_top` and `ui_uv_crop_bottom` override the automatic amount for each edge.
+- Values use 1/16-texel units: `8` = half a texel; `16` = one texel; `0` = no crop. Each edge accepts 0–64 (up to four texels).
+- The legacy `ui_uv_crop` key, if present, supplies a fallback for edge keys not specified.
+- `ui_snap_uv=0` disables the older PC-side UV snapping workaround; `ui_uv_inset=0` disables the GS renderer's half-texel inset. Keep these as A/B diagnostics rather than prerequisites for normal use.
 
-Live tuning (no restart required):
+Live tuning (no restart required; intended for development):
 - Press `F10` to enter or leave UV crop tuning. While tuning, the game does not receive keyboard input.
 - `Tab` selects the edge in order: left, right, top, bottom.
 - `Up` increases the selected crop by `1/16` texel; `Down` decreases it. Hold `Shift` for steps of `4/16` texel.
-- `Backspace` resets the selected edge; `Shift+Backspace` resets all four edges to zero. `F12` still toggles wireframe while tuning.
-- Every change takes effect on the next UI draw and is written to `recvx.ini` automatically.
-
-These are diagnostic switches; remove them or set crop values to `0` to restore unadjusted UV edges.
+- `Backspace` resets the selected edge to zero; `Shift+Backspace` resets all four edges to zero. `F12` toggles the wireframe while tuning.
+- Every live change takes effect on the next UI draw and is written to `recvx.ini` automatically.
 
 Environment variables for testing:
 
