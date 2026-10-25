@@ -1,9 +1,6 @@
 #include "../../../ps2/veronica/prog/message.h"
 #include "../../../ps2/veronica/prog/ps2_NaDraw2D.h"
 #include "../../../ps2/veronica/prog/main.h"
-#ifdef TARGET_PC
-#include "../../../ps2/veronica/prog/ps2_dummy.h"
-#endif
 
 float FontScaleX;
 float FontScaleY;
@@ -372,9 +369,6 @@ void bhDispFont(NJS_POINT2* pos, int code, int color, float pri)
     NJS_COLOR col[4];  
     NJS_COLOR uv[4];  
     
-#ifdef TARGET_PC
-    pcUiFontDrawBegin();
-#endif
     njTextureFilterMode(0);
     
     njColorBlendingMode(0, 8);
@@ -453,9 +447,6 @@ void bhDispFont(NJS_POINT2* pos, int code, int color, float pri)
     uv[3].tex.v = uv[0].tex.v + 14;
     
     njDrawPolygon2DM(&p2c, 4, pri, 0x80000060);
-#ifdef TARGET_PC
-    pcUiFontDrawEnd();
-#endif
 }
 
 // 100% matching! 
@@ -466,9 +457,6 @@ void bhDispFontEx(NJS_POINT2* pos, int code, unsigned int argb, float pri)
     NJS_COLOR col[4];  
     NJS_COLOR uv[4];  
     
-#ifdef TARGET_PC
-    pcUiFontDrawBegin();
-#endif
     njTextureFilterMode(0);
     
     njColorBlendingMode(0, 8);
@@ -518,9 +506,6 @@ void bhDispFontEx(NJS_POINT2* pos, int code, unsigned int argb, float pri)
     uv[3].tex.v = uv[0].tex.v + 14;
     
     njDrawPolygon2DM(&p2c, 4, pri, 0x80000060);
-#ifdef TARGET_PC
-    pcUiFontDrawEnd();
-#endif
 }
 
 // 100% matching!
