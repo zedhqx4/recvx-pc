@@ -397,36 +397,61 @@ static void pc_snap_uv(unsigned int* v, unsigned int num)
  * edges inward independently. ui_uv_crop is expressed in 1/16-texel units (8 = 0.5 texel,
  * 16 = 1 texel); default 0 leaves behavior unchanged. Restrict it to non-mirrored,
  * approximately 1:1 axis-aligned 2D pieces so 3D and scaled texture mappings are untouched. */
-static int pc_ui_uv_crop_amount(void)
+/* Each crop value is in 1/16-texel units (8 = half a texel). The older
+ * ui_uv_crop value remains a fallback for all four edges, so existing test configs work. */
+static int pc_ui_uv_crop_value(const char* key, int fallback)
 {
-    static int amount = -1;
+    int value = pcIniGetInt(key, fallback);
 
-    if (amount < 0)
-    {
-        amount = pcIniGetInt("ui_uv_crop", 0);
-        if (amount < 0) amount = 0;
-        if (amount > 16) amount = 16;
-    }
-
-    return amount;
+    if (value < 0) value = 0;
+    if (value > 64) value = 64; /* max four texels per edge */
+    return value;
 }
 
-static int pc_crop_uv_edges(unsigned int* v, unsigned int num, int inset)
+static void pc_ui_uv_crop_amounts(int* left, int* right, int* top, int* bottom)
+{
+    static int values[4] = { -1, -1, -1, -1 };
+
+    if (values[0] < 0)
+    {
+        int legacy = pc_ui_uv_crop_value("ui_uv_crop", 0);
+        values[0] = pc_ui_uv_crop_value("ui_uv_crop_left", legacy);
+        values[1] = pc_ui_uv_crop_value("ui_uv_crop_right", legacy);
+        values[2] = pc_ui_uv_crop_value("ui_uv_crop_top", legacy);
+        values[3] = pc_ui_uv_crop_value("ui_uv_crop_bottom", legacy);
+    }
+
+    *left = values[0];
+    *right = values[1];
+    *top = values[2];
+    *bottom = values[3];
+}
+
+/* Trim the low/high sides independently: U-min=left, U-max=right,
+ * V-min=top, V-max=bottom. Only touch axes that look like forward 1:1 UVs on
+ * axis-aligned 2D geometry. Validate the whole axis before changing any vertex. */
+static int pc_crop_uv_edges(unsigned int* v, unsigned int num, const int inset[4])
 {
     int axis, changed = 0;
     unsigned int i;
 
-    if (inset <= 0 || num < 2)
+    if (num < 2)
     {
         return 0;
     }
 
-    for (axis = 0; axis < 2; axis++)   /* U along x, V along y */
+    for (axis = 0; axis < 2; axis++)
     {
-        unsigned int tmin = 0x3FFFu, tmax = 0;
-        unsigned int t_at_smin = 0;
+        int low_inset = inset[axis == 0 ? 0 : 2];
+        int high_inset = inset[axis == 0 ? 1 : 3];
+        unsigned int tmin = 0x3FFFu, tmax = 0, t_at_smin = 0;
         float smin = 1e9f, smax = -1e9f;
         int valid = 1;
+
+        if (low_inset == 0 && high_inset == 0)
+        {
+            continue;
+        }
 
         for (i = 0; i < num; i++)
         {
@@ -444,11 +469,29 @@ static int pc_crop_uv_edges(unsigned int* v, unsigned int num, int inset)
             if (sc > smax) smax = sc;
         }
 
-        /* Only a forward, approximately one-texel-per-pixel mapping on this axis. */
+        /* Avoid scaled, mirrored, degenerate, or non-axis-aligned mappings. */
         if ((smax - smin < 1.0f) ||
             (fabsf(((float)(tmax - tmin) / 16.0f) - (smax - smin)) > 0.1f * (smax - smin)) ||
             (t_at_smin != tmin) || (tmax <= tmin) ||
-            ((tmax - tmin) <= (unsigned int)(inset * 2)))
+            (tmin + (unsigned int)low_inset >= tmax - (unsigned int)high_inset) ||
+            (tmin + (unsigned int)low_inset > 0x3FFFu) ||
+            (tmax < (unsigned int)high_inset))
+        {
+            continue;
+        }
+
+        /* Every vertex on this axis must belong to one of the two opposite edges. */
+        for (i = 0; i < num; i++)
+        {
+            unsigned int t = v[(i * 12) + axis] & 0x3FFFu;
+            if (t != tmin && t != tmax)
+            {
+                valid = 0;
+                break;
+            }
+        }
+
+        if (!valid)
         {
             continue;
         }
@@ -461,38 +504,17 @@ static int pc_crop_uv_edges(unsigned int* v, unsigned int num, int inset)
 
             if (t == tmin)
             {
-                t += (unsigned int)inset;
-            }
-            else if (t == tmax)
-            {
-                t -= (unsigned int)inset;
+                t += (unsigned int)low_inset;
             }
             else
             {
-                valid = 0;
-                break;
+                t -= (unsigned int)high_inset;
             }
 
             *word = (w & ~0x3FFFu) | (t & 0x3FFFu);
         }
 
-        if (valid)
-        {
-            changed++;
-        }
-        else
-        {
-            /* Avoid leaving a partially adjusted primitive if it has interior UV values. */
-            for (i = 0; i < num; i++)
-            {
-                unsigned int* word = &v[(i * 12) + axis];
-                unsigned int t = *word & 0x3FFFu;
-                if (t == tmin + (unsigned int)inset)
-                    *word = (*word & ~0x3FFFu) | tmin;
-                else if (t == tmax - (unsigned int)inset)
-                    *word = (*word & ~0x3FFFu) | tmax;
-            }
-        }
+        changed++;
     }
 
     return changed;
@@ -651,11 +673,14 @@ void Ps2AddPrim(unsigned long prim, void* dp, unsigned int num, unsigned int cli
 
         {
             static int crop_logged;
-            int crop = pc_ui_uv_crop_amount();
+            int crop[4];
 
-            if ((crop > 0) && pc_crop_uv_edges((unsigned int*)wide_buf, num, crop) > 0 && !crop_logged)
+            pc_ui_uv_crop_amounts(&crop[0], &crop[1], &crop[2], &crop[3]);
+            if ((crop[0] || crop[1] || crop[2] || crop[3]) &&
+                pc_crop_uv_edges((unsigned int*)wide_buf, num, crop) > 0 && !crop_logged)
             {
-                pcLog("UI UV edge crop active: %d/16 texel on axis-aligned 1:1 2D geometry", crop);
+                pcLog("UI UV edge crop active (1/16 texel units): left=%d right=%d top=%d bottom=%d",
+                      crop[0], crop[1], crop[2], crop[3]);
                 crop_logged = 1;
             }
         }
