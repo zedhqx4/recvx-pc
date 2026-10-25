@@ -393,6 +393,111 @@ static void pc_snap_uv(unsigned int* v, unsigned int num)
     }
 }
 
+/* Testable alternative to translating a whole UV rectangle: move its low and high UV
+ * edges inward independently. ui_uv_crop is expressed in 1/16-texel units (8 = 0.5 texel,
+ * 16 = 1 texel); default 0 leaves behavior unchanged. Restrict it to non-mirrored,
+ * approximately 1:1 axis-aligned 2D pieces so 3D and scaled texture mappings are untouched. */
+static int pc_ui_uv_crop_amount(void)
+{
+    static int amount = -1;
+
+    if (amount < 0)
+    {
+        amount = pcIniGetInt("ui_uv_crop", 0);
+        if (amount < 0) amount = 0;
+        if (amount > 16) amount = 16;
+    }
+
+    return amount;
+}
+
+static int pc_crop_uv_edges(unsigned int* v, unsigned int num, int inset)
+{
+    int axis, changed = 0;
+    unsigned int i;
+
+    if (inset <= 0 || num < 2)
+    {
+        return 0;
+    }
+
+    for (axis = 0; axis < 2; axis++)   /* U along x, V along y */
+    {
+        unsigned int tmin = 0x3FFFu, tmax = 0;
+        unsigned int t_at_smin = 0;
+        float smin = 1e9f, smax = -1e9f;
+        int valid = 1;
+
+        for (i = 0; i < num; i++)
+        {
+            unsigned int t = v[(i * 12) + axis] & 0x3FFFu;
+            float sc = ((float*)v)[(i * 12) + 8 + axis];
+
+            if (t < tmin) tmin = t;
+            if (t > tmax) tmax = t;
+
+            if (sc < smin)
+            {
+                smin = sc;
+                t_at_smin = t;
+            }
+            if (sc > smax) smax = sc;
+        }
+
+        /* Only a forward, approximately one-texel-per-pixel mapping on this axis. */
+        if ((smax - smin < 1.0f) ||
+            (fabsf(((float)(tmax - tmin) / 16.0f) - (smax - smin)) > 0.1f * (smax - smin)) ||
+            (t_at_smin != tmin) || (tmax <= tmin) ||
+            ((tmax - tmin) <= (unsigned int)(inset * 2)))
+        {
+            continue;
+        }
+
+        for (i = 0; i < num; i++)
+        {
+            unsigned int* word = &v[(i * 12) + axis];
+            unsigned int w = *word;
+            unsigned int t = w & 0x3FFFu;
+
+            if (t == tmin)
+            {
+                t += (unsigned int)inset;
+            }
+            else if (t == tmax)
+            {
+                t -= (unsigned int)inset;
+            }
+            else
+            {
+                valid = 0;
+                break;
+            }
+
+            *word = (w & ~0x3FFFu) | (t & 0x3FFFu);
+        }
+
+        if (valid)
+        {
+            changed++;
+        }
+        else
+        {
+            /* Avoid leaving a partially adjusted primitive if it has interior UV values. */
+            for (i = 0; i < num; i++)
+            {
+                unsigned int* word = &v[(i * 12) + axis];
+                unsigned int t = *word & 0x3FFFu;
+                if (t == tmin + (unsigned int)inset)
+                    *word = (*word & ~0x3FFFu) | tmin;
+                else if (t == tmax - (unsigned int)inset)
+                    *word = (*word & ~0x3FFFu) | tmax;
+            }
+        }
+    }
+
+    return changed;
+}
+
 int pcWide2DUnclipped;   /* widescreen: 2D drawn into the side areas on purpose (backgrounds) */
 int pcWide2DFullWidth;   /* widescreen: full-width 2D that covers the picture (screen filters) */
 int pcWide2DKeep43;      /* widescreen: full screen 2D that is 4:3 art although translucent */
@@ -542,6 +647,17 @@ void Ps2AddPrim(unsigned long prim, void* dp, unsigned int num, unsigned int cli
         if (pc_ui_snap_uv_enabled())
         {
             pc_snap_uv((unsigned int*)wide_buf, num);
+        }
+
+        {
+            static int crop_logged;
+            int crop = pc_ui_uv_crop_amount();
+
+            if ((crop > 0) && pc_crop_uv_edges((unsigned int*)wide_buf, num, crop) > 0 && !crop_logged)
+            {
+                pcLog("UI UV edge crop active: %d/16 texel on axis-aligned 1:1 2D geometry", crop);
+                crop_logged = 1;
+            }
         }
 
         if (pcWide2DTrimRight)
