@@ -497,6 +497,73 @@ void pcUiUvCropReset(int edge)
     }
 }
 
+/* Optional diagnostics for why an individual edge crop is accepted or skipped.
+ * Enable with ui_uv_crop_debug=1 in recvx.ini. This only logs; it does not alter rendering. */
+static int pc_ui_uv_crop_debug_enabled(void)
+{
+    static int enabled = -1;
+
+    if (enabled < 0)
+    {
+        enabled = pcIniGetInt("ui_uv_crop_debug", 0) != 0;
+    }
+
+    return enabled;
+}
+
+static unsigned int pc_ui_uv_crop_hash_add(unsigned int hash, unsigned int value)
+{
+    return (hash ^ value) * 16777619u;
+}
+
+static void pc_ui_uv_crop_debug_log(int axis, unsigned int num, int low_inset, int high_inset,
+                                    int reason, const char* result, unsigned int tmin, unsigned int tmax,
+                                    float smin, float smax, unsigned int bad_index,
+                                    unsigned int bad_t, float bad_sc)
+{
+    static unsigned int seen[128];
+    static unsigned int seen_count;
+    unsigned int hash = 2166136261u;
+    unsigned int i;
+
+    if (!pc_ui_uv_crop_debug_enabled())
+    {
+        return;
+    }
+
+    /* Deduplicate repeated frames while retaining different UV ranges, sizes and rejection causes. */
+    hash = pc_ui_uv_crop_hash_add(hash, (unsigned int)axis);
+    hash = pc_ui_uv_crop_hash_add(hash, num);
+    hash = pc_ui_uv_crop_hash_add(hash, (unsigned int)low_inset);
+    hash = pc_ui_uv_crop_hash_add(hash, (unsigned int)high_inset);
+    hash = pc_ui_uv_crop_hash_add(hash, (unsigned int)reason);
+    hash = pc_ui_uv_crop_hash_add(hash, tmin);
+    hash = pc_ui_uv_crop_hash_add(hash, tmax);
+    hash = pc_ui_uv_crop_hash_add(hash, (unsigned int)(int)(smin * 16.0f));
+    hash = pc_ui_uv_crop_hash_add(hash, (unsigned int)(int)(smax * 16.0f));
+    hash = pc_ui_uv_crop_hash_add(hash, bad_index);
+    hash = pc_ui_uv_crop_hash_add(hash, bad_t);
+    hash = pc_ui_uv_crop_hash_add(hash, (unsigned int)(int)(bad_sc * 16.0f));
+
+    for (i = 0; i < seen_count; i++)
+    {
+        if (seen[i] == hash)
+        {
+            return;
+        }
+    }
+
+    if (seen_count >= (unsigned int)(sizeof(seen) / sizeof(seen[0])))
+    {
+        return;
+    }
+    seen[seen_count++] = hash;
+
+    pcLog("UI UV crop debug: %c %s num=%u UV=[%.3f..%.3f] screen=[%.2f..%.2f] inset=[%d,%d] badVertex=%u badUV=%.3f badScreen=%.2f",
+          axis == 0 ? 'U' : 'V', result, num, tmin / 16.0f, tmax / 16.0f,
+          smin, smax, low_inset, high_inset, bad_index, bad_t / 16.0f, bad_sc);
+}
+
 /* Independently trim U-min/U-max and V-min/V-max. Only touch axes that look like forward
  * one-texel-per-pixel mappings on axis-aligned 2D geometry; 3D and scaled mappings stay alone. */
 static int pc_crop_uv_edges(unsigned int* v, unsigned int num, const int inset[4])
@@ -516,6 +583,9 @@ static int pc_crop_uv_edges(unsigned int* v, unsigned int num, const int inset[4
         unsigned int tmin = 0x3FFFu, tmax = 0, t_at_smin = 0;
         float smin = 1e9f, smax = -1e9f;
         int valid = 1;
+        int reason = 0;
+        unsigned int bad_index = 0, bad_t = 0;
+        float bad_sc = 0.0f;
 
         if (low_inset == 0 && high_inset == 0)
         {
@@ -537,14 +607,41 @@ static int pc_crop_uv_edges(unsigned int* v, unsigned int num, const int inset[4
             if (sc > smax) smax = sc;
         }
 
-        /* Avoid scaled, mirrored, degenerate, or overflowing UV ranges. */
-        if ((smax - smin < 1.0f) ||
-            (fabsf(((float)(tmax - tmin) / 16.0f) - (smax - smin)) > 0.1f * (smax - smin)) ||
-            (t_at_smin != tmin) || (tmax <= tmin) ||
-            (tmin + (unsigned int)low_inset > 0x3FFFu) ||
-            (tmax < (unsigned int)high_inset) ||
-            (tmin + (unsigned int)low_inset >= tmax - (unsigned int)high_inset))
+        /* Keep the original eligibility rules, but identify the first rule that rejects an axis. */
+        if (smax - smin < 1.0f)
         {
+            reason = 1; /* degenerate screen span */
+        }
+        else if (fabsf(((float)(tmax - tmin) / 16.0f) - (smax - smin)) > 0.1f * (smax - smin))
+        {
+            reason = 2; /* UV span does not match screen span */
+        }
+        else if (t_at_smin != tmin)
+        {
+            reason = 3; /* mirrored or mismatched orientation */
+        }
+        else if (tmax <= tmin)
+        {
+            reason = 4; /* degenerate UV range */
+        }
+        else if (tmin + (unsigned int)low_inset > 0x3FFFu || tmax < (unsigned int)high_inset)
+        {
+            reason = 5; /* inset would overflow or underflow UV */
+        }
+        else if (tmin + (unsigned int)low_inset >= tmax - (unsigned int)high_inset)
+        {
+            reason = 6; /* requested crop would collapse the UV range */
+        }
+
+        if (reason != 0)
+        {
+            pc_ui_uv_crop_debug_log(axis, num, low_inset, high_inset, reason,
+                                    reason == 1 ? "SKIP:degenerate-screen" :
+                                    reason == 2 ? "SKIP:scale-mismatch" :
+                                    reason == 3 ? "SKIP:orientation" :
+                                    reason == 4 ? "SKIP:degenerate-uv" :
+                                    reason == 5 ? "SKIP:uv-overflow" : "SKIP:crop-collapses",
+                                    tmin, tmax, smin, smax, 0, 0, 0.0f);
             continue;
         }
 
@@ -555,16 +652,36 @@ static int pc_crop_uv_edges(unsigned int* v, unsigned int num, const int inset[4
             unsigned int t = v[(i * 12) + axis] & 0x3FFFu;
             float sc = ((float*)v)[(i * 12) + 8 + axis];
 
-            if ((t != tmin && t != tmax) ||
-                (t == tmin && fabsf(sc - smin) > 0.01f) ||
-                (t == tmax && fabsf(sc - smax) > 0.01f))
+            if (t != tmin && t != tmax)
             {
                 valid = 0;
+                reason = 7; /* UV is not on either edge */
+            }
+            else if (t == tmin && fabsf(sc - smin) > 0.01f)
+            {
+                valid = 0;
+                reason = 8; /* low UV is not on the low screen edge */
+            }
+            else if (t == tmax && fabsf(sc - smax) > 0.01f)
+            {
+                valid = 0;
+                reason = 9; /* high UV is not on the high screen edge */
+            }
+
+            if (!valid)
+            {
+                bad_index = i;
+                bad_t = t;
+                bad_sc = sc;
                 break;
             }
         }
         if (!valid)
         {
+            pc_ui_uv_crop_debug_log(axis, num, low_inset, high_inset, reason,
+                                    reason == 7 ? "SKIP:uv-not-edge" :
+                                    reason == 8 ? "SKIP:low-edge-mismatch" : "SKIP:high-edge-mismatch",
+                                    tmin, tmax, smin, smax, bad_index, bad_t, bad_sc);
             continue;
         }
 
@@ -586,6 +703,8 @@ static int pc_crop_uv_edges(unsigned int* v, unsigned int num, const int inset[4
         }
 
         changed++;
+        pc_ui_uv_crop_debug_log(axis, num, low_inset, high_inset, 10, "APPLIED",
+                                tmin, tmax, smin, smax, 0, 0, 0.0f);
     }
 
     return changed;
