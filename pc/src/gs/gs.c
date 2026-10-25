@@ -93,10 +93,10 @@ static void emit(const GsVertex* v, int n)
 
     current_state(&st);
 
-    /* Fixed-UV 2D pieces cut from a texture sheet must not filter into neighbouring cells.
-     * GS corner UVs may already carry asymmetric quarter/half-texel offsets, so derive the
-     * limits from the centers of the first and last texels covered by the UV range instead
-     * of blindly adding/subtracting half a texel from the vertex extrema. 3D ST stays untouched. */
+    /* 2D pieces (textured with integer UV coordinates) cut from a larger texture sheet: when
+     * upscaled, filtering at their edges would blend in the neighbouring image on the sheet
+     * (thin lines at every tile edge). They may only sample their own texels: from half a
+     * texel inside their UV rectangle. (3D surfaces use ST coordinates and are left alone.) */
     if (st.tme && st.fst && pc_ui_uv_inset_enabled())
     {
         cu0 = cv0 = 1e30f;
@@ -110,25 +110,8 @@ static void emit(const GsVertex* v, int n)
             if (v[i].v > cv1) cv1 = v[i].v;
         }
 
-        if (cu1 - cu0 >= 1.0f)
-        {
-            cu0 = floorf(cu0) + 0.5f;
-            cu1 = floorf(cu1 - 0.5f) + 0.5f;
-        }
-        else
-        {
-            cu0 = cu1 = (cu0 + cu1) * 0.5f;
-        }
-
-        if (cv1 - cv0 >= 1.0f)
-        {
-            cv0 = floorf(cv0) + 0.5f;
-            cv1 = floorf(cv1 - 0.5f) + 0.5f;
-        }
-        else
-        {
-            cv0 = cv1 = (cv0 + cv1) * 0.5f;
-        }
+        if (cu1 - cu0 >= 1.0f) { cu0 += 0.5f; cu1 -= 0.5f; } else { cu0 = cu1 = (cu0 + cu1) * 0.5f; }
+        if (cv1 - cv0 >= 1.0f) { cv0 += 0.5f; cv1 -= 0.5f; } else { cv0 = cv1 = (cv0 + cv1) * 0.5f; }
     }
 
     /* sprites, points and lines become separate batches by type */
