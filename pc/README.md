@@ -69,6 +69,12 @@ Every normal run records the controller input to `last_run_input.txt` next to th
 previous one is kept as `last_run_input.prev.txt`); replaying it reproduces a session exactly,
 which is the easiest way to report or debug a problem.
 
+Internal render-resolution test (in `recvx.ini`, next to `recvx.exe`; restart the game after editing):
+- `render=512x448` renders the game's logical 640x480 frame into a 512x448 backing resolution when `scale=1` and the aspect is 4:3.
+- `render=WxH` accepts widths 320–640 and heights 240–480; without it the default remains 640x480.
+- `scale=1` is needed to test the selected dimensions directly. Higher `scale` values multiply them; `window=WxH` changes only the PC window size.
+- Game coordinates remain 640x480. The GS renderer resamples VRAM-to-render-target loads and render-target readback to accommodate the custom backing resolution.
+
 UI texture A/B tests (in `recvx.ini`, next to `recvx.exe`; restart the game after editing):
 - `ui_snap_uv=0` disables the PC-side UV snapping workaround for selected 2D pieces (default: enabled).
 - `ui_uv_inset=0` disables the GS emulation's half-texel inset for fixed-UV textures (default: enabled).

@@ -434,7 +434,7 @@ int pcPlatformFindFile(const char* dir, const char* ext, char* out, int size)
 /* ------------------------------------------------------------------------------------------- */
 /* video */
 
-/* recvx.ini video settings: scale=N, window=WxH, fullscreen=0|1|desktop, aspect=W:H */
+/* recvx.ini video settings: render=WxH, scale=N, window=WxH, fullscreen=0|1|desktop, aspect=W:H */
 static struct {
     int loaded;
     int win_w, win_h;
@@ -443,6 +443,7 @@ static struct {
     int fullscreen;          /* 0 window, 1 exclusive, 2 desktop */
     int pause_unfocused;     /* pause_unfocused= (default 1) */
     float aspect;            /* display aspect, 4:3 = 1.333 */
+    int render_w, render_h;   /* internal render size at scale=1; game coordinates remain 640x480 */
 } video_cfg;
 
 /* the window as it was last seen windowed: saved to recvx.ini when the game closes */
@@ -464,11 +465,22 @@ static void video_settings(void)
     video_cfg.win_w = PS2_WIDTH * 2;
     video_cfg.win_h = PS2_HEIGHT * 2;
     video_cfg.aspect = 4.0f / 3.0f;
+    video_cfg.render_w = PS2_WIDTH;
+    video_cfg.render_h = PS2_HEIGHT;
 
     pcGsScale = pcIniGetInt("scale", pcGsScale);
 
     if (pcGsScale < 1) pcGsScale = 1;
     if (pcGsScale > 8) pcGsScale = 8;
+
+    /* Experimental lower internal render resolution; keep the game's logical 640x480 coordinates. */
+    if (pcIniGet("render", v, sizeof(v)) &&
+        (sscanf(v, "%dx%d", &w, &h) == 2) &&
+        (w >= 320) && (w <= PS2_WIDTH) && (h >= 240) && (h <= PS2_HEIGHT))
+    {
+        video_cfg.render_w = w;
+        video_cfg.render_h = h;
+    }
 
     if (pcIniGet("fullscreen", v, sizeof(v)))
     {
@@ -503,8 +515,11 @@ static void video_settings(void)
     video_cfg.maximized = pcIniGetInt("window_max", 0) != 0;
     video_cfg.pause_unfocused = pcIniGetInt("pause_unfocused", 1) != 0;
 
-    /* the 640 wide frame is stretched to the display aspect: render more columns to match */
-    pcGsScaleX = (int)(pcGsScale * video_cfg.aspect / (4.0f / 3.0f) + 0.5f);
+    /* Keep the existing aspect-derived horizontal multiplier, then scale the backing buffer
+     * to the requested internal render dimensions. The default 640x480 remains unchanged. */
+    pcGsScaleX = (float)((int)(pcGsScale * video_cfg.aspect / (4.0f / 3.0f) + 0.5f)) *
+                 ((float)video_cfg.render_w / PS2_WIDTH);
+    pcGsScaleY = (float)pcGsScale * ((float)video_cfg.render_h / PS2_HEIGHT);
 }
 
 float pcVideoAspect(void)
