@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - pc-port
+      - graphics-fixes
     paths-ignore:
       - '**.md'
       - 'docs/**'
