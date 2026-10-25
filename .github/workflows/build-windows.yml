@@ -75,4 +75,3 @@ jobs:
             build_pc/recvx.exe
             build_pc/recvx-config.exe
           if-no-files-found: error
-```
