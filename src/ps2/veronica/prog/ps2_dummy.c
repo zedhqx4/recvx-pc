@@ -321,6 +321,22 @@ void PS2_swap()
 
 // 99.93% matching
 #ifdef TARGET_PC
+extern int pcIniGetInt(const char* key, int def);
+
+/* Diagnostic switch: default ON, preserving the existing rendering. Set ui_snap_uv=0 in
+ * recvx.ini to test this PC-only UV adjustment independently from the GS sampler inset. */
+static int pc_ui_snap_uv_enabled(void)
+{
+    static int enabled = -1;
+
+    if (enabled < 0)
+    {
+        enabled = pcIniGetInt("ui_snap_uv", 1) != 0;
+    }
+
+    return enabled;
+}
+
 /* Upscaling: 2D pieces drawn texel for pixel (UI panels, backgrounds) often start half a texel
  * into their image (u = 60.5). At the PS2's resolution the screen samples never fall in that
  * outer half texel; upscaled, the outermost sub-pixels do and pick up a sliver of the next image
@@ -523,7 +539,10 @@ void Ps2AddPrim(unsigned long prim, void* dp, unsigned int num, unsigned int cli
     {
         memcpy(wide_buf, dp, num * 48);
         dp = wide_buf;
-        pc_snap_uv((unsigned int*)wide_buf, num);
+        if (pc_ui_snap_uv_enabled())
+        {
+            pc_snap_uv((unsigned int*)wide_buf, num);
+        }
 
         if (pcWide2DTrimRight)
         {
