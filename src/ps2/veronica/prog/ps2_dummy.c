@@ -473,9 +473,9 @@ static int pc_crop_uv_edges(unsigned int* v, unsigned int num, const int inset[4
         if ((smax - smin < 1.0f) ||
             (fabsf(((float)(tmax - tmin) / 16.0f) - (smax - smin)) > 0.1f * (smax - smin)) ||
             (t_at_smin != tmin) || (tmax <= tmin) ||
-            (tmin + (unsigned int)low_inset >= tmax - (unsigned int)high_inset) ||
             (tmin + (unsigned int)low_inset > 0x3FFFu) ||
-            (tmax < (unsigned int)high_inset))
+            (tmax < (unsigned int)high_inset) ||
+            (tmin + (unsigned int)low_inset >= tmax - (unsigned int)high_inset))
         {
             continue;
         }
