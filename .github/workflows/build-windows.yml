@@ -1,0 +1,58 @@
+
+name: Build Windows binaries
+
+on:
+  workflow_dispatch:
+    inputs:
+      build_randomizer:
+        description: Build the self-contained randomizer too
+        required: true
+        type: boolean
+        default: true
+  push:
+    branches:
+      - pc-port
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-2022
+
+    steps:
+      - name: Checkout repository and submodules
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Set up .NET 10 SDK
+        if: ${{ github.event_name != 'workflow_dispatch' || inputs.build_randomizer }}
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Build game and configuration tool
+        shell: pwsh
+        run: python pc/tools/build.py --clean
+
+      - name: Build self-contained randomizer
+        if: ${{ github.event_name != 'workflow_dispatch' || inputs.build_randomizer }}
+        shell: pwsh
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File rando/tools/publish.ps1
+
+      - name: Upload Windows build
+        uses: actions/upload-artifact@v4
+        with:
+          name: recvx-pc-windows
+          path: build_pc/
+          if-no-files-found: error
+          retention-days: 14
