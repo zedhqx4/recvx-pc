@@ -423,9 +423,9 @@ static void pc_ui_uv_crop_init(void)
 {
     if (!pc_ui_uv_crop_initialized)
     {
-        /* A clean config gets the tested automatic correction: trim one texel from
-         * the high U/V edges. Explicit edge values override these defaults. */
-        static const int automatic_defaults[4] = { 0, 16, 0, 16 };
+        /* Defaults are in 1/16-texel units. Explicit recvx.ini values override them. */
+        static const int automatic_defaults[4] = { -8, 16, -16, 16 };
+        static const int rot90_cw_defaults[4] = { 0, 8, 16, 1 };
         int legacy = pc_ui_uv_crop_value("ui_uv_crop", -1);
         int i;
 
@@ -433,9 +433,8 @@ static void pc_ui_uv_crop_init(void)
         {
             int fallback = (legacy >= 0) ? legacy : automatic_defaults[i];
             pc_ui_uv_crop_values[i] = pc_ui_uv_crop_value(pc_ui_uv_crop_keys[i], fallback);
-            /* Until configured separately, rotated sprites inherit the standard edge values. */
             pc_ui_uv_crop_rot90_cw_values[i] =
-                pc_ui_uv_crop_value(pc_ui_uv_crop_rot90_cw_keys[i], pc_ui_uv_crop_values[i]);
+                pc_ui_uv_crop_value(pc_ui_uv_crop_rot90_cw_keys[i], rot90_cw_defaults[i]);
         }
         pc_ui_uv_crop_initialized = 1;
     }
