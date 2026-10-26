@@ -196,6 +196,25 @@ void njDrawPolygon2DM(NJS_POINT2COL* p, int n, float pri, unsigned int attr)
         {
             switch (i) 
             {                 
+#ifdef TARGET_PC   /* texel centres pulled half a texel inwards on every edge (corners 1-3 sat on the
+                      far texel's edge and sampled the neighbouring glyph: seams around font letters) */
+            case 0: // Top-Left (Near U, Near V)
+                *(int*)&bp[0][0] = (p->tex[i].tex.u * 16) + 8;
+                *(int*)&bp[0][1] = (p->tex[i].tex.v * 16) + 8;
+                break;
+            case 1: // Top-Right (Far U, Near V)
+                *(int*)&bp[0][0] = (p->tex[i].tex.u * 16) - 8;
+                *(int*)&bp[0][1] = (p->tex[i].tex.v * 16) + 8;
+                break;
+            case 2: // Bottom-Right (Far U, Far V)
+                *(int*)&bp[0][0] = (p->tex[i].tex.u * 16) - 8;
+                *(int*)&bp[0][1] = (p->tex[i].tex.v * 16) - 8;
+                break;
+            case 3: // Bottom-Left (Near U, Far V)
+                *(int*)&bp[0][0] = (p->tex[i].tex.u * 16) + 8;
+                *(int*)&bp[0][1] = (p->tex[i].tex.v * 16) - 8;
+                break;
+#else
             case 0:
                 *(int*)&bp[0][0] = (p->tex[i].tex.u * 16) + 8;
                 *(int*)&bp[0][1] = (p->tex[i].tex.v * 16) + 8;
@@ -212,6 +231,7 @@ void njDrawPolygon2DM(NJS_POINT2COL* p, int n, float pri, unsigned int attr)
                 *(int*)&bp[0][0] = (p->tex[i].tex.u * 16) + 8;
                 *(int*)&bp[0][1] = (p->tex[i].tex.v * 16) + 4;
                 break;
+#endif
             }
             
             *(int*)&bp[0][2] = 4096;
