@@ -400,7 +400,7 @@ static void pc_snap_uv(unsigned int* v, unsigned int num)
 /* Per-edge UI UV crop, expressed in 1/16-texel units (16 = one texel).
  * Positive values trim the edge; negative values expand the sampled UV range.
  * Runtime tuning writes these values to recvx.ini so the next launch keeps them. */
-static int pc_ui_uv_crop_values[4] = { 0, 16, 0, 16 };
+static int pc_ui_uv_crop_values[4] = { -16, 16, -16, 16 };
 static int pc_ui_uv_crop_initialized;
 static const char* pc_ui_uv_crop_keys[4] = {
     "ui_uv_crop_left", "ui_uv_crop_right", "ui_uv_crop_top", "ui_uv_crop_bottom"
@@ -423,7 +423,7 @@ static void pc_ui_uv_crop_init(void)
     {
         /* A missing ui_uv_crop keeps the tested automatic correction. Use -65 as a
          * sentinel because -1 is now a valid crop value. Explicit edge values override it. */
-        static const int automatic_defaults[4] = { 0, 16, 0, 16 };
+        static const int automatic_defaults[4] = { -16, 16, -16, 16 };
         int legacy = pc_ui_uv_crop_value("ui_uv_crop", -65);
         int i;
 
