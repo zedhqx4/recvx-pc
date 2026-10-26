@@ -630,21 +630,20 @@ void pcVideoInit(void)
     }
 
     pcOsInstallDiagnostics();
+    SDL_SetMainReady();
 
-    /* Reserve the PS2's fixed-address scratchpad before SDL creates an OpenGL context.
+    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMECONTROLLER | SDL_INIT_AUDIO) != 0)
+    {
+        pcPlatformFatal("SDL_Init failed: %s", SDL_GetError());
+    }
+
+    /* Reserve the PS2's fixed-address scratchpad before creating an OpenGL window/context.
      * Loading the graphics driver can occupy 0x70000000, which the PS2 code requires. */
     spr = pcOsAllocScratchpad();
 
     if (spr == NULL)
     {
         pcPlatformFatal("Could not reserve the PS2 scratchpad address range (0x70000000). See recvx.log for the address-space diagnostic.");
-    }
-
-    SDL_SetMainReady();
-
-    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMECONTROLLER | SDL_INIT_AUDIO) != 0)
-    {
-        pcPlatformFatal("SDL_Init failed: %s", SDL_GetError());
     }
 
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
