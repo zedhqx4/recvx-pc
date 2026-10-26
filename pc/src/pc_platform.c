@@ -16,7 +16,7 @@
 #include "pc_audio.h"
 
 static unsigned int frames;   /* frames presented */
-static struct { double last, sum, worst, swap; int n; } frame_time;
+static struct { double last, sum, worst, swap, present; int n; } frame_time;
 
 #define PS2_WIDTH  640
 #define PS2_HEIGHT 480
@@ -1015,6 +1015,7 @@ int pcVideoPumpEvents(void)
 void pcVideoPresent(void)
 {
     static double last_report;
+    double present_start = pcOsTime();
 
     if (!pcVideoPumpEvents())
     {
@@ -1059,6 +1060,8 @@ void pcVideoPresent(void)
     }
 
 
+    frame_time.present += pcOsTime() - present_start;
+
     {
         double t0 = pcOsTime();
 
@@ -1091,10 +1094,18 @@ void pcVideoPresent(void)
 
     if (SDL_GetTicks() - last_report >= 5000)
     {
-        pcLog("frame %u: %.1f ms per frame (worst %.1f ms), %.1f ms waiting for the GPU", frames,
-              frame_time.n ? frame_time.sum * 1000 / frame_time.n : 0.0, frame_time.worst * 1000,
-              frame_time.n ? frame_time.swap * 1000 / frame_time.n : 0.0);
-        frame_time.sum = frame_time.swap = frame_time.worst = 0;
+        {
+            double avg_frame = frame_time.n ? frame_time.sum * 1000 / frame_time.n : 0.0;
+            double avg_swap = frame_time.n ? frame_time.swap * 1000 / frame_time.n : 0.0;
+            double avg_present = frame_time.n ? frame_time.present * 1000 / frame_time.n : 0.0;
+            double outside_present = avg_frame - avg_swap - avg_present;
+
+            if (outside_present < 0.0) outside_present = 0.0;
+
+            pcLog("frame %u: %.1f ms per frame (worst %.1f ms), %.1f ms waiting for the GPU; pcVideoPresent %.1f ms, outside present %.1f ms",
+                  frames, avg_frame, frame_time.worst * 1000, avg_swap, avg_present, outside_present);
+        }
+        frame_time.sum = frame_time.swap = frame_time.present = frame_time.worst = 0;
         frame_time.n = 0;
         {
             extern long pcAudioStarved(int v);
