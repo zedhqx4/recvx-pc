@@ -397,9 +397,11 @@ static void pc_snap_uv(unsigned int* v, unsigned int num)
     }
 }
 
-/* Per-edge UI UV crop, expressed in 1/16-texel units (8 = half a texel).
+/* Per-edge UI UV crop, expressed in 1/16-texel units (16 = one texel).
+ * Positive values trim the edge; negative values expand the sampled UV range.
  * Runtime tuning writes these values to recvx.ini so the next launch keeps them. */
-static int pc_ui_uv_crop_values[4] = { -1, -1, -1, -1 };
+static int pc_ui_uv_crop_values[4] = { 0, 16, 0, 16 };
+static int pc_ui_uv_crop_initialized;
 static const char* pc_ui_uv_crop_keys[4] = {
     "ui_uv_crop_left", "ui_uv_crop_right", "ui_uv_crop_top", "ui_uv_crop_bottom"
 };
@@ -408,26 +410,29 @@ static int pc_ui_uv_crop_value(const char* key, int fallback)
 {
     int value = pcIniGetInt(key, fallback);
 
-    if (value < 0) value = fallback;
-    if (value > 64) value = 64; /* max four texels per edge */
+    if (value < -64 || value > 64)
+    {
+        value = fallback;
+    }
     return value;
 }
 
 static void pc_ui_uv_crop_init(void)
 {
-    if (pc_ui_uv_crop_values[0] < 0)
+    if (!pc_ui_uv_crop_initialized)
     {
-        /* A clean config gets the tested automatic correction: trim one texel from
-         * the high U/V edges. Explicit edge values override these defaults. */
+        /* A missing ui_uv_crop keeps the tested automatic correction. Use -65 as a
+         * sentinel because -1 is now a valid crop value. Explicit edge values override it. */
         static const int automatic_defaults[4] = { 0, 16, 0, 16 };
-        int legacy = pc_ui_uv_crop_value("ui_uv_crop", -1);
+        int legacy = pc_ui_uv_crop_value("ui_uv_crop", -65);
         int i;
 
         for (i = 0; i < 4; i++)
         {
-            int fallback = (legacy >= 0) ? legacy : automatic_defaults[i];
+            int fallback = (legacy >= -64 && legacy <= 64) ? legacy : automatic_defaults[i];
             pc_ui_uv_crop_values[i] = pc_ui_uv_crop_value(pc_ui_uv_crop_keys[i], fallback);
         }
+        pc_ui_uv_crop_initialized = 1;
     }
 }
 
@@ -470,7 +475,7 @@ void pcUiUvCropAdjust(int edge, int delta)
     }
 
     value = pc_ui_uv_crop_values[edge] + delta;
-    if (value < 0) value = 0;
+    if (value < -64) value = -64;
     if (value > 64) value = 64;
 
     if (value != pc_ui_uv_crop_values[edge])
@@ -645,15 +650,18 @@ static int pc_crop_uv_edges(unsigned int* v, unsigned int num, const int inset[4
 
                 /* Select the safe UV range after applying insets at the low/high screen edges.
                  * On a mirrored mapping, those screen edges correspond to the opposite UV ends. */
-                if ((tmin + (unsigned int)(reversed ? high_inset : low_inset) > 0x3FFFu) ||
-                    (tmax < (unsigned int)(reversed ? low_inset : high_inset)))
                 {
-                    reason = 5; /* inset would overflow or underflow UV */
-                }
-                else if (tmin + (unsigned int)(reversed ? high_inset : low_inset) >=
-                         tmax - (unsigned int)(reversed ? low_inset : high_inset))
-                {
-                    reason = 6; /* requested crop would collapse the UV range */
+                    int adjusted_min = (int)tmin + (reversed ? high_inset : low_inset);
+                    int adjusted_max = (int)tmax - (reversed ? low_inset : high_inset);
+
+                    if (adjusted_min < 0 || adjusted_max > 0x3FFF)
+                    {
+                        reason = 5; /* signed inset would overflow or underflow UV */
+                    }
+                    else if (adjusted_min >= adjusted_max)
+                    {
+                        reason = 6; /* requested crop would collapse the UV range */
+                    }
                 }
                 else
                 {
@@ -741,22 +749,22 @@ static int pc_crop_uv_edges(unsigned int* v, unsigned int num, const int inset[4
             {
                 if (t == chosen_tmin)
                 {
-                    t += (unsigned int)low_inset;
+                    t = (unsigned int)((int)t + low_inset);
                 }
                 else if (t == chosen_tmax)
                 {
-                    t -= (unsigned int)high_inset;
+                    t = (unsigned int)((int)t - high_inset);
                 }
             }
             else
             {
                 if (t == chosen_tmax)
                 {
-                    t -= (unsigned int)low_inset;
+                    t = (unsigned int)((int)t - low_inset);
                 }
                 else if (t == chosen_tmin)
                 {
-                    t += (unsigned int)high_inset;
+                    t = (unsigned int)((int)t + high_inset);
                 }
             }
 
