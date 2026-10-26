@@ -26,6 +26,9 @@ void pcIniSet(const char* key, const char* value);
 void pcUiUvCropGet(int* left, int* right, int* top, int* bottom);
 void pcUiUvCropAdjust(int edge, int delta);
 void pcUiUvCropReset(int edge);
+void pcUiUvCropRot90CWGet(int* left, int* right, int* top, int* bottom);
+void pcUiUvCropRot90CWAdjust(int edge, int delta);
+void pcUiUvCropRot90CWReset(int edge);
 
 /* First file in dir whose name ends with ext (case-insensitive); full path in out. */
 int pcPlatformFindFile(const char* dir, const char* ext, char* out, int size);

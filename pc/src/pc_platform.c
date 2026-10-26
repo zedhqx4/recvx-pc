@@ -435,13 +435,14 @@ int pcPlatformFindFile(const char* dir, const char* ext, char* out, int size)
 /* ------------------------------------------------------------------------------------------- */
 /* video */
 
-/* recvx.ini video settings: render=WxH, scale=N, window=WxH, fullscreen=0|1|desktop, aspect=W:H */
+/* recvx.ini video settings: render=WxH, scale=N, window=WxH, fullscreen=0|1|desktop, aspect=W:H, vsync=0|1 */
 static struct {
     int loaded;
     int win_w, win_h;
     int win_x, win_y, has_pos;   /* window_pos= (remembered from the last run) */
     int maximized;               /* window_max= */
     int fullscreen;          /* 0 window, 1 exclusive, 2 desktop */
+    int vsync;               /* vsync= (default 1) */
     int pause_unfocused;     /* pause_unfocused= (default 1) */
     float aspect;            /* display aspect, 4:3 = 1.333 */
     int render_w, render_h;   /* internal render size at scale=1; game coordinates remain 640x480 */
@@ -514,6 +515,7 @@ static void video_settings(void)
     }
 
     video_cfg.maximized = pcIniGetInt("window_max", 0) != 0;
+    video_cfg.vsync = pcIniGetInt("vsync", 1) != 0;
     video_cfg.pause_unfocused = pcIniGetInt("pause_unfocused", 1) != 0;
 
     /* Keep the existing aspect-derived horizontal multiplier, then scale the backing buffer
@@ -691,7 +693,22 @@ void pcVideoInit(void)
         pcPlatformFatal("Could not create an OpenGL 3.3 context: %s", SDL_GetError());
     }
 
-    SDL_GL_SetSwapInterval(0);   /* frame pacing comes from the emulated VBLANK */
+    {
+        int swap_interval = video_cfg.vsync ? 1 : 0;
+        int swap_result = SDL_GL_SetSwapInterval(swap_interval);
+        int active_interval = SDL_GL_GetSwapInterval();
+
+        if (swap_result == 0)
+        {
+            pcLog("video: VSync %s (active swap interval=%d)",
+                  (active_interval != 0) ? "enabled" : "disabled", active_interval);
+        }
+        else
+        {
+            pcLog("video: SDL_GL_SetSwapInterval(%d) failed: %s (active swap interval=%d)",
+                  swap_interval, SDL_GetError(), active_interval);
+        }
+    }
 
     {
         unsigned char* spr = pcOsAllocScratchpad();
@@ -788,19 +805,26 @@ static int pc_debug_mode_enabled(void)
 
 static int ui_uv_tuning;
 static int ui_uv_crop_selected_edge;
+static int ui_uv_crop_rot90_cw;
 static int ui_uv_consume_escape_up;
 static const char* ui_uv_crop_edge_names[4] = { "LEFT", "RIGHT", "TOP", "BOTTOM" };
 
 static void ui_uv_crop_show_status(const char* state)
 {
     int left, right, top, bottom;
+    const char* profile = ui_uv_crop_rot90_cw ? "ROT90_CW" : "STANDARD";
     char notice[160];
 
-    pcUiUvCropGet(&left, &right, &top, &bottom);
-    snprintf(notice, sizeof(notice), "UV CROP %s | %s | L:%d R:%d T:%d B:%d",
-             state, ui_uv_crop_edge_names[ui_uv_crop_selected_edge], left, right, top, bottom);
-    pcLog("UI UV crop %s: left=%d right=%d top=%d bottom=%d; selected=%s (1/16 texel units)",
-          state, left, right, top, bottom, ui_uv_crop_edge_names[ui_uv_crop_selected_edge]);
+    if (ui_uv_crop_rot90_cw)
+        pcUiUvCropRot90CWGet(&left, &right, &top, &bottom);
+    else
+        pcUiUvCropGet(&left, &right, &top, &bottom);
+
+    snprintf(notice, sizeof(notice), "UV %s %s | %s | L:%d R:%d T:%d B:%d",
+             profile, state, ui_uv_crop_edge_names[ui_uv_crop_selected_edge],
+             left, right, top, bottom);
+    pcLog("UI UV crop profile=%s %s: left=%d right=%d top=%d bottom=%d; selected=%s (1/16 texel units)",
+          profile, state, left, right, top, bottom, ui_uv_crop_edge_names[ui_uv_crop_selected_edge]);
     title_notice_show(notice);
 }
 
@@ -828,7 +852,7 @@ static int ui_uv_crop_handle_event(const SDL_Event* ev)
         if (down && !ev->key.repeat)
         {
             ui_uv_tuning = !ui_uv_tuning;
-            ui_uv_crop_show_status(ui_uv_tuning ? "TUNING ON (TAB edge, UP/DOWN adjust, BS reset, F10 done)" : "TUNING OFF");
+            ui_uv_crop_show_status(ui_uv_tuning ? "ON (TAB edge, R profile, UP/DOWN adjust, BS reset, F10 done)" : "OFF");
         }
         return 1;
     }
@@ -870,17 +894,29 @@ static int ui_uv_crop_handle_event(const SDL_Event* ev)
         ui_uv_crop_show_status("EDGE SELECTED");
         break;
 
+    case SDL_SCANCODE_R:
+        ui_uv_crop_rot90_cw = !ui_uv_crop_rot90_cw;
+        ui_uv_crop_show_status("PROFILE SELECTED");
+        break;
+
     case SDL_SCANCODE_UP:
     case SDL_SCANCODE_DOWN:
     {
         int step = (ev->key.keysym.mod & KMOD_SHIFT) ? 4 : 1;
-        pcUiUvCropAdjust(ui_uv_crop_selected_edge, (key == SDL_SCANCODE_UP) ? step : -step);
+        int delta = (key == SDL_SCANCODE_UP) ? step : -step;
+        if (ui_uv_crop_rot90_cw)
+            pcUiUvCropRot90CWAdjust(ui_uv_crop_selected_edge, delta);
+        else
+            pcUiUvCropAdjust(ui_uv_crop_selected_edge, delta);
         ui_uv_crop_show_status("VALUE CHANGED");
         break;
     }
 
     case SDL_SCANCODE_BACKSPACE:
-        pcUiUvCropReset((ev->key.keysym.mod & KMOD_SHIFT) ? -1 : ui_uv_crop_selected_edge);
+        if (ui_uv_crop_rot90_cw)
+            pcUiUvCropRot90CWReset((ev->key.keysym.mod & KMOD_SHIFT) ? -1 : ui_uv_crop_selected_edge);
+        else
+            pcUiUvCropReset((ev->key.keysym.mod & KMOD_SHIFT) ? -1 : ui_uv_crop_selected_edge);
         ui_uv_crop_show_status((ev->key.keysym.mod & KMOD_SHIFT) ? "ALL EDGES RESET" : "EDGE RESET");
         break;
 

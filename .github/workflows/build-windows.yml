@@ -6,6 +6,8 @@ on:
     branches:
       - pc-port
       - graphics-fixes
+      - c3853984-baseline
+      - merge-c3853984-into-graphics-fixes
     paths-ignore:
       - '**.md'
       - 'docs/**'

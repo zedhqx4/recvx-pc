@@ -397,23 +397,25 @@ static void pc_snap_uv(unsigned int* v, unsigned int num)
     }
 }
 
-/* Per-edge UI UV crop, expressed in 1/16-texel units (16 = one texel).
- * Positive values trim the edge; negative values expand the sampled UV range.
+/* Per-edge UI UV crop, expressed in 1/16-texel units (8 = half a texel).
  * Runtime tuning writes these values to recvx.ini so the next launch keeps them. */
-static int pc_ui_uv_crop_values[4] = { -16, 16, -16, 16 };
+static int pc_ui_uv_crop_values[4];
+static int pc_ui_uv_crop_rot90_cw_values[4];
 static int pc_ui_uv_crop_initialized;
 static const char* pc_ui_uv_crop_keys[4] = {
     "ui_uv_crop_left", "ui_uv_crop_right", "ui_uv_crop_top", "ui_uv_crop_bottom"
+};
+static const char* pc_ui_uv_crop_rot90_cw_keys[4] = {
+    "ui_uv_crop_rot90_cw_left", "ui_uv_crop_rot90_cw_right",
+    "ui_uv_crop_rot90_cw_top", "ui_uv_crop_rot90_cw_bottom"
 };
 
 static int pc_ui_uv_crop_value(const char* key, int fallback)
 {
     int value = pcIniGetInt(key, fallback);
 
-    if (value < -64 || value > 64)
-    {
-        value = fallback;
-    }
+    if (value < -64) value = -64; /* max four texels per edge in either direction */
+    if (value > 64) value = 64;
     return value;
 }
 
@@ -421,41 +423,70 @@ static void pc_ui_uv_crop_init(void)
 {
     if (!pc_ui_uv_crop_initialized)
     {
-        /* A missing ui_uv_crop keeps the tested automatic correction. Use -65 as a
-         * sentinel because -1 is now a valid crop value. Explicit edge values override it. */
-        static const int automatic_defaults[4] = { -16, 16, -16, 16 };
-        int legacy = pc_ui_uv_crop_value("ui_uv_crop", -65);
+        /* Defaults are in 1/16-texel units. Explicit recvx.ini values override them. */
+        static const int automatic_defaults[4] = { -8, 16, -16, 16 };
+        static const int rot90_cw_defaults[4] = { 0, 8, 16, 1 };
+        int legacy = pc_ui_uv_crop_value("ui_uv_crop", -1);
         int i;
 
         for (i = 0; i < 4; i++)
         {
-            int fallback = (legacy >= -64 && legacy <= 64) ? legacy : automatic_defaults[i];
+            int fallback = (legacy >= 0) ? legacy : automatic_defaults[i];
             pc_ui_uv_crop_values[i] = pc_ui_uv_crop_value(pc_ui_uv_crop_keys[i], fallback);
+            pc_ui_uv_crop_rot90_cw_values[i] =
+                pc_ui_uv_crop_value(pc_ui_uv_crop_rot90_cw_keys[i], rot90_cw_defaults[i]);
         }
         pc_ui_uv_crop_initialized = 1;
     }
 }
 
-static void pc_ui_uv_crop_save_edge(int edge)
+static int* pc_ui_uv_crop_values_for_profile(int profile)
+{
+    return profile ? pc_ui_uv_crop_rot90_cw_values : pc_ui_uv_crop_values;
+}
+
+static const char* const* pc_ui_uv_crop_keys_for_profile(int profile)
+{
+    return profile ? pc_ui_uv_crop_rot90_cw_keys : pc_ui_uv_crop_keys;
+}
+
+static void pc_ui_uv_crop_save_edge_profile(int edge, int profile)
 {
     char value[16];
+    int* values = pc_ui_uv_crop_values_for_profile(profile);
+    const char* const* keys = pc_ui_uv_crop_keys_for_profile(profile);
 
     if (edge < 0 || edge >= 4)
     {
         return;
     }
 
-    snprintf(value, sizeof(value), "%d", pc_ui_uv_crop_values[edge]);
-    pcIniSet(pc_ui_uv_crop_keys[edge], value);
+    snprintf(value, sizeof(value), "%d", values[edge]);
+    pcIniSet(keys[edge], value);
+}
+
+static void pc_ui_uv_crop_amounts_from(const int values[4], int* left, int* right, int* top, int* bottom)
+{
+    *left = values[0];
+    *right = values[1];
+    *top = values[2];
+    *bottom = values[3];
+}
+
+static void pc_ui_uv_crop_amounts_profile(int profile, int* left, int* right, int* top, int* bottom)
+{
+    pc_ui_uv_crop_init();
+    pc_ui_uv_crop_amounts_from(pc_ui_uv_crop_values_for_profile(profile), left, right, top, bottom);
 }
 
 static void pc_ui_uv_crop_amounts(int* left, int* right, int* top, int* bottom)
 {
-    pc_ui_uv_crop_init();
-    *left = pc_ui_uv_crop_values[0];
-    *right = pc_ui_uv_crop_values[1];
-    *top = pc_ui_uv_crop_values[2];
-    *bottom = pc_ui_uv_crop_values[3];
+    pc_ui_uv_crop_amounts_profile(0, left, right, top, bottom);
+}
+
+static void pc_ui_uv_crop_rot90_cw_amounts(int* left, int* right, int* top, int* bottom)
+{
+    pc_ui_uv_crop_amounts_profile(1, left, right, top, bottom);
 }
 
 /* Public PC-side controls used by the live keyboard tuner. Edge order: left, right, top, bottom. */
@@ -464,9 +495,15 @@ void pcUiUvCropGet(int* left, int* right, int* top, int* bottom)
     pc_ui_uv_crop_amounts(left, right, top, bottom);
 }
 
-void pcUiUvCropAdjust(int edge, int delta)
+void pcUiUvCropRot90CWGet(int* left, int* right, int* top, int* bottom)
+{
+    pc_ui_uv_crop_rot90_cw_amounts(left, right, top, bottom);
+}
+
+static void pc_ui_uv_crop_adjust_profile(int profile, int edge, int delta)
 {
     int value;
+    int* values;
 
     pc_ui_uv_crop_init();
     if (edge < 0 || edge >= 4)
@@ -474,20 +511,32 @@ void pcUiUvCropAdjust(int edge, int delta)
         return;
     }
 
-    value = pc_ui_uv_crop_values[edge] + delta;
+    values = pc_ui_uv_crop_values_for_profile(profile);
+    value = values[edge] + delta;
     if (value < -64) value = -64;
     if (value > 64) value = 64;
 
-    if (value != pc_ui_uv_crop_values[edge])
+    if (value != values[edge])
     {
-        pc_ui_uv_crop_values[edge] = value;
-        pc_ui_uv_crop_save_edge(edge);
+        values[edge] = value;
+        pc_ui_uv_crop_save_edge_profile(edge, profile);
     }
 }
 
-void pcUiUvCropReset(int edge)
+void pcUiUvCropAdjust(int edge, int delta)
+{
+    pc_ui_uv_crop_adjust_profile(0, edge, delta);
+}
+
+void pcUiUvCropRot90CWAdjust(int edge, int delta)
+{
+    pc_ui_uv_crop_adjust_profile(1, edge, delta);
+}
+
+static void pc_ui_uv_crop_reset_profile(int profile, int edge)
 {
     int i, first = (edge == -1) ? 0 : edge, last = (edge == -1) ? 3 : edge;
+    int* values = pc_ui_uv_crop_values_for_profile(profile);
 
     pc_ui_uv_crop_init();
     if (first < 0 || last >= 4)
@@ -497,9 +546,19 @@ void pcUiUvCropReset(int edge)
 
     for (i = first; i <= last; i++)
     {
-        pc_ui_uv_crop_values[i] = 0;
-        pc_ui_uv_crop_save_edge(i);
+        values[i] = 0;
+        pc_ui_uv_crop_save_edge_profile(i, profile);
     }
+}
+
+void pcUiUvCropReset(int edge)
+{
+    pc_ui_uv_crop_reset_profile(0, edge);
+}
+
+void pcUiUvCropRot90CWReset(int edge)
+{
+    pc_ui_uv_crop_reset_profile(1, edge);
 }
 
 /* Optional diagnostics for why an individual edge crop is accepted or skipped.
@@ -521,34 +580,67 @@ static unsigned int pc_ui_uv_crop_hash_add(unsigned int hash, unsigned int value
     return (hash ^ value) * 16777619u;
 }
 
-static void pc_ui_uv_crop_debug_log(int axis, unsigned int num, int low_inset, int high_inset,
-                                    int reason, const char* result, unsigned int tmin, unsigned int tmax,
-                                    float smin, float smax, unsigned int bad_index,
-                                    unsigned int bad_t, float bad_sc)
+static void pc_ui_uv_crop_debug_log(const unsigned int* v, int screen_axis, unsigned int num,
+                                    int low_inset, int high_inset, int reason, const char* result,
+                                    unsigned int tmin, unsigned int tmax, float smin, float smax,
+                                    unsigned int bad_index, unsigned int bad_t, float bad_sc)
 {
-    static unsigned int seen[128];
+    static unsigned int seen[512];
     static unsigned int seen_count;
     unsigned int hash = 2166136261u;
     unsigned int i;
+    unsigned int umin = 0x3FFFu, umax = 0, vmin = 0x3FFFu, vmax = 0;
+    float xmin = 1e9f, xmax = -1e9f, ymin = 1e9f, ymax = -1e9f;
+    const unsigned char* label;
 
     if (!pc_ui_uv_crop_debug_enabled())
     {
         return;
     }
 
-    /* Deduplicate repeated frames while retaining different UV ranges, sizes and rejection causes. */
-    hash = pc_ui_uv_crop_hash_add(hash, (unsigned int)axis);
+    /* Log and deduplicate by the complete primitive rectangle and UV bounds, not just
+     * one axis. This lets us map a visible UI piece to both its screen position and atlas area. */
+    for (i = 0; i < num; i++)
+    {
+        unsigned int u = v[(i * 12) + 0] & 0x3FFFu;
+        unsigned int tv = v[(i * 12) + 1] & 0x3FFFu;
+        float x = ((const float*)v)[(i * 12) + 8];
+        float y = ((const float*)v)[(i * 12) + 9];
+
+        if (u < umin) umin = u;
+        if (u > umax) umax = u;
+        if (tv < vmin) vmin = tv;
+        if (tv > vmax) vmax = tv;
+        if (x < xmin) xmin = x;
+        if (x > xmax) xmax = x;
+        if (y < ymin) ymin = y;
+        if (y > ymax) ymax = y;
+    }
+
+    hash = pc_ui_uv_crop_hash_add(hash, (unsigned int)screen_axis);
     hash = pc_ui_uv_crop_hash_add(hash, num);
     hash = pc_ui_uv_crop_hash_add(hash, (unsigned int)low_inset);
     hash = pc_ui_uv_crop_hash_add(hash, (unsigned int)high_inset);
     hash = pc_ui_uv_crop_hash_add(hash, (unsigned int)reason);
     hash = pc_ui_uv_crop_hash_add(hash, tmin);
     hash = pc_ui_uv_crop_hash_add(hash, tmax);
+    hash = pc_ui_uv_crop_hash_add(hash, umin);
+    hash = pc_ui_uv_crop_hash_add(hash, umax);
+    hash = pc_ui_uv_crop_hash_add(hash, vmin);
+    hash = pc_ui_uv_crop_hash_add(hash, vmax);
+    hash = pc_ui_uv_crop_hash_add(hash, (unsigned int)(int)(xmin * 16.0f));
+    hash = pc_ui_uv_crop_hash_add(hash, (unsigned int)(int)(xmax * 16.0f));
+    hash = pc_ui_uv_crop_hash_add(hash, (unsigned int)(int)(ymin * 16.0f));
+    hash = pc_ui_uv_crop_hash_add(hash, (unsigned int)(int)(ymax * 16.0f));
     hash = pc_ui_uv_crop_hash_add(hash, (unsigned int)(int)(smin * 16.0f));
     hash = pc_ui_uv_crop_hash_add(hash, (unsigned int)(int)(smax * 16.0f));
     hash = pc_ui_uv_crop_hash_add(hash, bad_index);
     hash = pc_ui_uv_crop_hash_add(hash, bad_t);
     hash = pc_ui_uv_crop_hash_add(hash, (unsigned int)(int)(bad_sc * 16.0f));
+    for (label = (const unsigned char*)result; *label != 0; label++)
+    {
+        hash = pc_ui_uv_crop_hash_add(hash, *label);
+    }
 
     for (i = 0; i < seen_count; i++)
     {
@@ -564,20 +656,21 @@ static void pc_ui_uv_crop_debug_log(int axis, unsigned int num, int low_inset, i
     }
     seen[seen_count++] = hash;
 
-    pcLog("UI UV crop debug: %c %s num=%u UV=[%.3f..%.3f] screen=[%.2f..%.2f] inset=[%d,%d] badVertex=%u badUV=%.3f badScreen=%.2f",
-          axis == 0 ? 'U' : 'V', result, num, tmin / 16.0f, tmax / 16.0f,
-          smin, smax, low_inset, high_inset, bad_index, bad_t / 16.0f, bad_sc);
+    pcLog("UI UV crop debug: %c %s num=%u edgeUV=[%.3f..%.3f] screenAxis=[%.2f..%.2f] rect=[X %.2f..%.2f,Y %.2f..%.2f] UVrect=[U %.3f..%.3f,V %.3f..%.3f] inset=[%d,%d] badVertex=%u badUV=%.3f badScreen=%.2f",
+          screen_axis == 0 ? 'X' : 'Y', result, num, tmin / 16.0f, tmax / 16.0f,
+          smin, smax, xmin, xmax, ymin, ymax,
+          umin / 16.0f, umax / 16.0f, vmin / 16.0f, vmax / 16.0f,
+          low_inset, high_inset, bad_index, bad_t / 16.0f, bad_sc);
 }
 
-/* Original eligibility rules: crop U against screen X and V against screen Y only.
- * Mirrored, rotated, scaled, and otherwise mismatched mappings stay untouched. Signed
- * insets are supported: positive values trim; negative values expand the sampled UV range. */
-/* Experimental mode: apply each configured edge directly to the raw UV extrema.
- * No screen/UV orientation inference and no rotation or mirror compensation are performed.
- * Only reject ranges that would overflow the representable UV coordinates or collapse. */
-static int pc_crop_uv_edges(unsigned int* v, unsigned int num, const int inset[4])
+/* Identify the specific clockwise quarter-turn mapping:
+ * screen X follows V in reverse, while screen Y follows U forward. */
+static int pc_ui_uv_mapping_is_rot90_cw(const unsigned int* v, unsigned int num)
 {
-    int axis, changed = 0;
+    int uv_axis_for_screen[2] = { -1, -1 };
+    int reversed_for_screen[2] = { 0, 0 };
+    const float* fv = (const float*)v;
+    int screen_axis;
     unsigned int i;
 
     if (num < 2)
@@ -585,83 +678,281 @@ static int pc_crop_uv_edges(unsigned int* v, unsigned int num, const int inset[4
         return 0;
     }
 
-    for (axis = 0; axis < 2; axis++)
+    for (screen_axis = 0; screen_axis < 2; screen_axis++)
     {
-        int low_inset = inset[axis == 0 ? 0 : 2];
-        int high_inset = inset[axis == 0 ? 1 : 3];
-        unsigned int tmin = 0x3FFFu, tmax = 0;
-        float smin = 1e9f, smax = -1e9f;
-        int adjusted_min, adjusted_max, reason = 0;
+        int uv_axis;
+
+        for (uv_axis = 0; uv_axis < 2; uv_axis++)
+        {
+            unsigned int tmin = 0x3FFFu, tmax = 0, t_at_smin = 0;
+            float smin = 1e9f, smax = -1e9f;
+            int reversed, valid = 1;
+
+            for (i = 0; i < num; i++)
+            {
+                unsigned int t = v[(i * 12) + uv_axis] & 0x3FFFu;
+                float sc = fv[(i * 12) + 8 + screen_axis];
+
+                if (t < tmin) tmin = t;
+                if (t > tmax) tmax = t;
+                if (sc < smin)
+                {
+                    smin = sc;
+                    t_at_smin = t;
+                }
+                if (sc > smax) smax = sc;
+            }
+
+            if (smax - smin < 1.0f || tmax <= tmin ||
+                fabsf(((float)(tmax - tmin) / 16.0f) - (smax - smin)) >
+                    0.1f * (smax - smin) ||
+                (t_at_smin != tmin && t_at_smin != tmax))
+            {
+                continue;
+            }
+
+            reversed = (t_at_smin == tmax);
+            for (i = 0; i < num; i++)
+            {
+                unsigned int t = v[(i * 12) + uv_axis] & 0x3FFFu;
+                float sc = fv[(i * 12) + 8 + screen_axis];
+
+                if ((t != tmin && t != tmax) ||
+                    (t == tmin && fabsf(sc - (reversed ? smax : smin)) > 0.01f) ||
+                    (t == tmax && fabsf(sc - (reversed ? smin : smax)) > 0.01f))
+                {
+                    valid = 0;
+                    break;
+                }
+            }
+
+            if (valid)
+            {
+                uv_axis_for_screen[screen_axis] = uv_axis;
+                reversed_for_screen[screen_axis] = reversed;
+                break;
+            }
+        }
+
+        if (uv_axis_for_screen[screen_axis] < 0)
+        {
+            return 0;
+        }
+    }
+
+    return uv_axis_for_screen[0] == 1 && reversed_for_screen[0] &&
+           uv_axis_for_screen[1] == 0 && !reversed_for_screen[1];
+}
+
+/* Apply left/right or top/bottom crop to whichever UV component actually follows that screen
+ * axis. This handles normal, mirrored and 90-degree-rotated atlas mappings while keeping the
+ * original safety checks for scaled, non-axis-aligned, and degenerate geometry. */
+static int pc_crop_uv_edges(unsigned int* v, unsigned int num, const int inset[4])
+{
+    int screen_axis, changed = 0;
+    unsigned int i;
+
+    if (num < 2)
+    {
+        return 0;
+    }
+
+    for (screen_axis = 0; screen_axis < 2; screen_axis++)
+    {
+        int low_inset = inset[screen_axis == 0 ? 0 : 2];
+        int high_inset = inset[screen_axis == 0 ? 1 : 3];
+        int found = 0, chosen_uv_axis = 0, chosen_reversed = 0;
+        unsigned int chosen_tmin = 0, chosen_tmax = 0;
+        float chosen_smin = 0.0f, chosen_smax = 0.0f;
+        int fail_reason = 1;
+        unsigned int fail_tmin = 0, fail_tmax = 0, fail_bad_index = 0, fail_bad_t = 0;
+        float fail_smin = 0.0f, fail_smax = 0.0f, fail_bad_sc = 0.0f;
+        int uv_axis;
 
         if (low_inset == 0 && high_inset == 0)
         {
             continue;
         }
 
-        /* Use U extrema for Left/Right and V extrema for Top/Bottom, regardless
-         * of which on-screen edge those UV extrema actually represent. */
-        for (i = 0; i < num; i++)
+        /* U and V are candidates; choose the one whose UV coordinate follows X or Y. */
+        for (uv_axis = 0; uv_axis < 2; uv_axis++)
         {
-            unsigned int t = v[(i * 12) + axis] & 0x3FFFu;
-            float sc = ((float*)v)[(i * 12) + 8 + axis];
+            unsigned int tmin = 0x3FFFu, tmax = 0, t_at_smin = 0;
+            float smin = 1e9f, smax = -1e9f;
+            int reason = 0, reversed = 0, valid = 1;
+            int adjusted_tmin, adjusted_tmax;
+            unsigned int bad_index = 0, bad_t = 0;
+            float bad_sc = 0.0f;
 
-            if (t < tmin) tmin = t;
-            if (t > tmax) tmax = t;
-            if (sc < smin) smin = sc;
-            if (sc > smax) smax = sc;
-        }
-
-        if (tmax <= tmin)
-        {
-            reason = 4; /* degenerate UV range */
-        }
-        else
-        {
-            adjusted_min = (int)tmin + low_inset;
-            adjusted_max = (int)tmax - high_inset;
-
-            if (adjusted_min < 0 || adjusted_max > 0x3FFF)
+            for (i = 0; i < num; i++)
             {
-                reason = 5; /* signed inset would overflow or underflow UV */
+                unsigned int t = v[(i * 12) + uv_axis] & 0x3FFFu;
+                float sc = ((float*)v)[(i * 12) + 8 + screen_axis];
+
+                if (t < tmin) tmin = t;
+                if (t > tmax) tmax = t;
+                if (sc < smin)
+                {
+                    smin = sc;
+                    t_at_smin = t;
+                }
+                if (sc > smax) smax = sc;
             }
-            else if (adjusted_min >= adjusted_max)
+
+            if (smax - smin < 1.0f)
             {
-                reason = 6; /* requested crop would collapse the UV range */
+                reason = 1; /* degenerate screen span */
             }
+            else if (tmax <= tmin)
+            {
+                reason = 4; /* degenerate UV range */
+            }
+            else if (fabsf(((float)(tmax - tmin) / 16.0f) - (smax - smin)) > 0.1f * (smax - smin))
+            {
+                reason = 2; /* this UV component follows the other screen axis or has a different scale */
+            }
+            else if (t_at_smin != tmin && t_at_smin != tmax)
+            {
+                reason = 3; /* orientation cannot be represented by a simple axis-aligned mapping */
+            }
+            else
+            {
+                reversed = (t_at_smin == tmax);
+
+                /* Select the safe UV range after applying insets at the low/high screen edges.
+                 * On a mirrored mapping, those screen edges correspond to the opposite UV ends. */
+                adjusted_tmin = (int)tmin + (reversed ? high_inset : low_inset);
+                adjusted_tmax = (int)tmax - (reversed ? low_inset : high_inset);
+                if (adjusted_tmin < 0 || adjusted_tmin > 0x3FFF ||
+                    adjusted_tmax < 0 || adjusted_tmax > 0x3FFF)
+                {
+                    reason = 5; /* inset would overflow or underflow UV */
+                }
+                else if (adjusted_tmin >= adjusted_tmax)
+                {
+                    reason = 6; /* requested crop would collapse the UV range */
+                }
+                else
+                {
+                    /* Validate the whole axis before changing anything. All vertices carrying
+                     * an endpoint UV must sit on its corresponding screen-space edge. */
+                    for (i = 0; i < num; i++)
+                    {
+                        unsigned int t = v[(i * 12) + uv_axis] & 0x3FFFu;
+                        float sc = ((float*)v)[(i * 12) + 8 + screen_axis];
+
+                        if (t != tmin && t != tmax)
+                        {
+                            valid = 0;
+                            reason = 7; /* UV is not on either edge */
+                        }
+                        else if (t == tmin && fabsf(sc - (reversed ? smax : smin)) > 0.01f)
+                        {
+                            valid = 0;
+                            reason = 8; /* UV endpoint does not match its screen edge */
+                        }
+                        else if (t == tmax && fabsf(sc - (reversed ? smin : smax)) > 0.01f)
+                        {
+                            valid = 0;
+                            reason = 8;
+                        }
+
+                        if (!valid)
+                        {
+                            bad_index = i;
+                            bad_t = t;
+                            bad_sc = sc;
+                            break;
+                        }
+                    }
+                }
+            }
+
+            if (reason == 0 && valid)
+            {
+                chosen_uv_axis = uv_axis;
+                chosen_reversed = reversed;
+                chosen_tmin = tmin;
+                chosen_tmax = tmax;
+                chosen_smin = smin;
+                chosen_smax = smax;
+                found = 1;
+                break;
+            }
+
+            /* Keep the most recent candidate's rejection details for the diagnostic log. */
+            fail_reason = reason;
+            fail_tmin = tmin;
+            fail_tmax = tmax;
+            fail_smin = smin;
+            fail_smax = smax;
+            fail_bad_index = bad_index;
+            fail_bad_t = bad_t;
+            fail_bad_sc = bad_sc;
         }
 
-        if (reason != 0)
+        if (!found)
         {
-            pc_ui_uv_crop_debug_log(axis, num, low_inset, high_inset, reason,
-                                    reason == 4 ? "SKIP:degenerate-uv" :
-                                    reason == 5 ? "SKIP:uv-overflow" : "SKIP:crop-collapses",
-                                    tmin, tmax, smin, smax, 0, 0, 0.0f);
+            const char* result = fail_reason == 1 ? "SKIP:degenerate-screen" :
+                                 fail_reason == 2 ? "SKIP:scale-mismatch" :
+                                 fail_reason == 3 ? "SKIP:orientation" :
+                                 fail_reason == 4 ? "SKIP:degenerate-uv" :
+                                 fail_reason == 5 ? "SKIP:uv-overflow" :
+                                 fail_reason == 6 ? "SKIP:crop-collapses" :
+                                 fail_reason == 7 ? "SKIP:uv-not-edge" : "SKIP:edge-mismatch";
+
+            pc_ui_uv_crop_debug_log(v, screen_axis, num, low_inset, high_inset, fail_reason, result,
+                                    fail_tmin, fail_tmax, fail_smin, fail_smax,
+                                    fail_bad_index, fail_bad_t, fail_bad_sc);
             continue;
         }
 
-        /* Deliberately do not compensate for mirrored/rotated UVs. */
+        /* Apply the named screen-edge inset to the matching UV component and direction. */
         for (i = 0; i < num; i++)
         {
-            unsigned int* word = &v[(i * 12) + axis];
+            unsigned int* word = &v[(i * 12) + chosen_uv_axis];
             unsigned int w = *word;
             unsigned int t = w & 0x3FFFu;
             int adjusted = (int)t;
 
-            if (t == tmin)
+            if (!chosen_reversed)
             {
-                adjusted += low_inset;
+                if (t == chosen_tmin)
+                {
+                    adjusted += low_inset;
+                }
+                else if (t == chosen_tmax)
+                {
+                    adjusted -= high_inset;
+                }
             }
-            else if (t == tmax)
+            else
             {
-                adjusted -= high_inset;
+                if (t == chosen_tmax)
+                {
+                    adjusted -= low_inset;
+                }
+                else if (t == chosen_tmin)
+                {
+                    adjusted += high_inset;
+                }
             }
 
-            *word = (w & ~0x3FFFu) | ((unsigned int)adjusted & 0x3FFFu);
+            t = (unsigned int)adjusted;
+            *word = (w & ~0x3FFFu) | (t & 0x3FFFu);
+        }
+
+        {
+            char result[32];
+            snprintf(result, sizeof(result), "APPLIED:%c-%s",
+                     chosen_uv_axis == 0 ? 'U' : 'V',
+                     chosen_reversed ? "reversed" : "forward");
+            pc_ui_uv_crop_debug_log(v, screen_axis, num, low_inset, high_inset, 10, result,
+                                    chosen_tmin, chosen_tmax, chosen_smin, chosen_smax,
+                                    0, 0, 0.0f);
         }
 
         changed++;
-        pc_ui_uv_crop_debug_log(axis, num, low_inset, high_inset, 10, "APPLIED:raw-extrema",
-                                tmin, tmax, smin, smax, 0, 0, 0.0f);
     }
 
     return changed;
@@ -820,13 +1111,23 @@ void Ps2AddPrim(unsigned long prim, void* dp, unsigned int num, unsigned int cli
 
         {
             static int crop_logged;
-            int crop[4];
+            int crop[4], crop_rot90_cw[4];
+            int is_rot90_cw;
 
             pc_ui_uv_crop_amounts(&crop[0], &crop[1], &crop[2], &crop[3]);
+            pc_ui_uv_crop_rot90_cw_amounts(&crop_rot90_cw[0], &crop_rot90_cw[1],
+                                           &crop_rot90_cw[2], &crop_rot90_cw[3]);
+            is_rot90_cw = pc_ui_uv_mapping_is_rot90_cw((const unsigned int*)wide_buf, num);
+            if (is_rot90_cw)
+            {
+                memcpy(crop, crop_rot90_cw, sizeof(crop));
+            }
+
             if ((crop[0] || crop[1] || crop[2] || crop[3]) &&
                 pc_crop_uv_edges((unsigned int*)wide_buf, num, crop) > 0 && !crop_logged)
             {
-                pcLog("UI UV edge crop active (1/16 texel units): left=%d right=%d top=%d bottom=%d",
+                pcLog("UI UV edge crop active profile=%s (1/16 texel units): left=%d right=%d top=%d bottom=%d",
+                      is_rot90_cw ? "rot90_cw" : "standard",
                       crop[0], crop[1], crop[2], crop[3]);
                 crop_logged = 1;
             }
