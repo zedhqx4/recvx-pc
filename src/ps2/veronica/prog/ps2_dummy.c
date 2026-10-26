@@ -502,18 +502,11 @@ void pcUiUvCropReset(int edge)
     }
 }
 
-/* Optional diagnostics for why an individual edge crop is accepted or skipped.
- * Enable with ui_uv_crop_debug=1 in recvx.ini. This only logs; it does not alter rendering. */
+/* Keep UI UV crop diagnostics disabled. Ignore ui_uv_crop_debug in recvx.ini,
+ * matching the previous behavior where this switch had no effect. */
 static int pc_ui_uv_crop_debug_enabled(void)
 {
-    static int enabled = -1;
-
-    if (enabled < 0)
-    {
-        enabled = pcIniGetInt("ui_uv_crop_debug", 0) != 0;
-    }
-
-    return enabled;
+    return 0;
 }
 
 static unsigned int pc_ui_uv_crop_hash_add(unsigned int hash, unsigned int value)
