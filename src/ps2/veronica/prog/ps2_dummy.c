@@ -516,75 +516,57 @@ static int pc_ui_uv_crop_debug_enabled(void)
     return enabled;
 }
 
-/* One-shot click picker: IDs count UV-cropped draw calls during this run. */
-static unsigned int pc_ui_uv_crop_primitive_id;
-static unsigned int pc_ui_uv_pick_id;
-static unsigned int pc_ui_uv_pick_match_count;
-static unsigned int pc_ui_uv_crop_current_primitive_id;
-static int pc_ui_uv_pick_armed;
-static int pc_ui_uv_pick_this_primitive;
-static float pc_ui_uv_pick_x, pc_ui_uv_pick_y;
-static float pc_ui_uv_pick_xmin, pc_ui_uv_pick_xmax, pc_ui_uv_pick_ymin, pc_ui_uv_pick_ymax;
+static unsigned int pc_ui_uv_crop_hash_add(unsigned int hash, unsigned int value)
+{
+    return (hash ^ value) * 16777619u;
+}
 
 static void pc_ui_uv_crop_debug_log(int axis, unsigned int num, int low_inset, int high_inset,
                                     int reason, const char* result, unsigned int tmin, unsigned int tmax,
                                     float smin, float smax, unsigned int bad_index,
                                     unsigned int bad_t, float bad_sc)
 {
-    if (!pc_ui_uv_crop_debug_enabled() || !pc_ui_uv_pick_this_primitive)
-    {
-        return;
-    }
+    static unsigned int seen[128];
+    static unsigned int seen_count;
+    unsigned int hash = 2166136261u;
+    unsigned int i;
 
-    pcLog("UI UV PICK #%u primitive=%u %c %s num=%u rect=[%.2f..%.2f,%.2f..%.2f] UV=[%.3f..%.3f] screen=[%.2f..%.2f] inset=[%d,%d] badVertex=%u badUV=%.3f badScreen=%.2f click=[%.2f,%.2f]",
-          pc_ui_uv_pick_id, pc_ui_uv_crop_current_primitive_id,
-          axis == 0 ? 'U' : 'V', result, num,
-          pc_ui_uv_pick_xmin, pc_ui_uv_pick_xmax, pc_ui_uv_pick_ymin, pc_ui_uv_pick_ymax,
-          tmin / 16.0f, tmax / 16.0f, smin, smax, low_inset, high_inset,
-          bad_index, bad_t / 16.0f, bad_sc, pc_ui_uv_pick_x, pc_ui_uv_pick_y);
-}
-
-void pcUiUvCropDebugPick(float screen_x, float screen_y)
-{
     if (!pc_ui_uv_crop_debug_enabled())
     {
         return;
     }
 
-    pc_ui_uv_pick_id++;
-    if (pc_ui_uv_pick_id == 0)
+    /* Deduplicate repeated frames while retaining different UV ranges, sizes and rejection causes. */
+    hash = pc_ui_uv_crop_hash_add(hash, (unsigned int)axis);
+    hash = pc_ui_uv_crop_hash_add(hash, num);
+    hash = pc_ui_uv_crop_hash_add(hash, (unsigned int)low_inset);
+    hash = pc_ui_uv_crop_hash_add(hash, (unsigned int)high_inset);
+    hash = pc_ui_uv_crop_hash_add(hash, (unsigned int)reason);
+    hash = pc_ui_uv_crop_hash_add(hash, tmin);
+    hash = pc_ui_uv_crop_hash_add(hash, tmax);
+    hash = pc_ui_uv_crop_hash_add(hash, (unsigned int)(int)(smin * 16.0f));
+    hash = pc_ui_uv_crop_hash_add(hash, (unsigned int)(int)(smax * 16.0f));
+    hash = pc_ui_uv_crop_hash_add(hash, bad_index);
+    hash = pc_ui_uv_crop_hash_add(hash, bad_t);
+    hash = pc_ui_uv_crop_hash_add(hash, (unsigned int)(int)(bad_sc * 16.0f));
+
+    for (i = 0; i < seen_count; i++)
     {
-        pc_ui_uv_pick_id = 1;
+        if (seen[i] == hash)
+        {
+            return;
+        }
     }
 
-    pc_ui_uv_pick_x = screen_x;
-    pc_ui_uv_pick_y = screen_y;
-    pc_ui_uv_pick_match_count = 0;
-    pc_ui_uv_pick_this_primitive = 0;
-    pc_ui_uv_pick_armed = 1;
-    pcLog("UI UV PICK #%u armed at GS=(%.2f,%.2f); click matches are collected for one frame",
-          pc_ui_uv_pick_id, screen_x, screen_y);
-}
-
-void pcUiUvCropDebugFinishPick(void)
-{
-    if (!pc_ui_uv_pick_armed)
+    if (seen_count >= (unsigned int)(sizeof(seen) / sizeof(seen[0])))
     {
         return;
     }
+    seen[seen_count++] = hash;
 
-    if (pc_ui_uv_pick_match_count == 0)
-    {
-        pcLog("UI UV PICK #%u: no UV-cropped primitives intersected the click", pc_ui_uv_pick_id);
-    }
-    else
-    {
-        pcLog("UI UV PICK #%u complete: %u matching primitive(s)", pc_ui_uv_pick_id,
-              pc_ui_uv_pick_match_count);
-    }
-
-    pc_ui_uv_pick_armed = 0;
-    pc_ui_uv_pick_this_primitive = 0;
+    pcLog("UI UV crop debug: %c %s num=%u UV=[%.3f..%.3f] screen=[%.2f..%.2f] inset=[%d,%d] badVertex=%u badUV=%.3f badScreen=%.2f",
+          axis == 0 ? 'U' : 'V', result, num, tmin / 16.0f, tmax / 16.0f,
+          smin, smax, low_inset, high_inset, bad_index, bad_t / 16.0f, bad_sc);
 }
 
 /* Original eligibility rules: crop U against screen X and V against screen Y only.
@@ -598,33 +580,6 @@ static int pc_crop_uv_edges(unsigned int* v, unsigned int num, const int inset[4
     if (num < 2)
     {
         return 0;
-    }
-
-    pc_ui_uv_crop_current_primitive_id = ++pc_ui_uv_crop_primitive_id;
-    pc_ui_uv_pick_this_primitive = 0;
-    pc_ui_uv_pick_xmin = pc_ui_uv_pick_ymin = 1.0e30f;
-    pc_ui_uv_pick_xmax = pc_ui_uv_pick_ymax = -1.0e30f;
-
-    for (i = 0; i < num; i++)
-    {
-        float x = ((float*)v)[(i * 12) + 8];
-        float y = ((float*)v)[(i * 12) + 9];
-
-        if (x < pc_ui_uv_pick_xmin) pc_ui_uv_pick_xmin = x;
-        if (x > pc_ui_uv_pick_xmax) pc_ui_uv_pick_xmax = x;
-        if (y < pc_ui_uv_pick_ymin) pc_ui_uv_pick_ymin = y;
-        if (y > pc_ui_uv_pick_ymax) pc_ui_uv_pick_ymax = y;
-    }
-
-    if (pc_ui_uv_pick_armed &&
-        pc_ui_uv_pick_x >= pc_ui_uv_pick_xmin - 0.5f &&
-        pc_ui_uv_pick_x <= pc_ui_uv_pick_xmax + 0.5f &&
-        pc_ui_uv_pick_y >= pc_ui_uv_pick_ymin - 0.5f &&
-        pc_ui_uv_pick_y <= pc_ui_uv_pick_ymax + 0.5f)
-    {
-        pc_ui_uv_pick_match_count++;
-        /* Bound diagnostics even if a click lands on a large stack of overlapping UI pieces. */
-        pc_ui_uv_pick_this_primitive = (pc_ui_uv_pick_match_count <= 32);
     }
 
     for (axis = 0; axis < 2; axis++)
