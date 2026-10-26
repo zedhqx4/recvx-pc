@@ -1054,8 +1054,8 @@ static void pc_ui_uv_apply_menu_fixes(unsigned int* v, unsigned int num)
     if (fabsf(ymin - 2292.0f) <= 0.5f &&
         fabsf(ymax - 2300.0f) <= 0.5f &&
         xmin >= 1771.5f && xmax <= 2136.5f && width > 0.0f && width <= 29.0f &&
-        umin == 61u && (umax == 88u || umax == 89u) &&
-        vmin == 237u && (vmax == 244u || vmax == 245u) &&
+        umin == (61u * 16u) && (umax == (88u * 16u) || umax == (89u * 16u)) &&
+        vmin == (237u * 16u) && (vmax == (244u * 16u) || vmax == (245u * 16u)) &&
         pc_ui_uv_move_y_edge(v, num, uv_axis, 1, -16))
     {
         if (!logged_low_edge)
@@ -1072,7 +1072,7 @@ static void pc_ui_uv_apply_menu_fixes(unsigned int* v, unsigned int num)
         fabsf(ymax - 2400.0f) <= 0.5f &&
         xmin >= 1771.5f && xmax <= 2136.5f && width > 0.0f && width <= 29.0f &&
         umin == 61u && (umax == 88u || umax == 89u) &&
-        vmin == 245u && (vmax == 252u || vmax == 253u) &&
+        vmin == (245u * 16u) && (vmax == (252u * 16u) || vmax == (253u * 16u)) &&
         pc_ui_uv_move_y_edge(v, num, uv_axis, 0, 16))
     {
         if (!logged_bottom_edge)
