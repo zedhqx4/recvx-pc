@@ -399,7 +399,8 @@ static void pc_snap_uv(unsigned int* v, unsigned int num)
 
 /* Per-edge UI UV crop, expressed in 1/16-texel units (8 = half a texel).
  * Runtime tuning writes these values to recvx.ini so the next launch keeps them. */
-static int pc_ui_uv_crop_values[4] = { -1, -1, -1, -1 };
+static int pc_ui_uv_crop_values[4];
+static int pc_ui_uv_crop_initialized;
 static const char* pc_ui_uv_crop_keys[4] = {
     "ui_uv_crop_left", "ui_uv_crop_right", "ui_uv_crop_top", "ui_uv_crop_bottom"
 };
@@ -408,14 +409,14 @@ static int pc_ui_uv_crop_value(const char* key, int fallback)
 {
     int value = pcIniGetInt(key, fallback);
 
-    if (value < 0) value = fallback;
-    if (value > 64) value = 64; /* max four texels per edge */
+    if (value < -64) value = -64; /* max four texels per edge in either direction */
+    if (value > 64) value = 64;
     return value;
 }
 
 static void pc_ui_uv_crop_init(void)
 {
-    if (pc_ui_uv_crop_values[0] < 0)
+    if (!pc_ui_uv_crop_initialized)
     {
         /* A clean config gets the tested automatic correction: trim one texel from
          * the high U/V edges. Explicit edge values override these defaults. */
@@ -428,6 +429,7 @@ static void pc_ui_uv_crop_init(void)
             int fallback = (legacy >= 0) ? legacy : automatic_defaults[i];
             pc_ui_uv_crop_values[i] = pc_ui_uv_crop_value(pc_ui_uv_crop_keys[i], fallback);
         }
+        pc_ui_uv_crop_initialized = 1;
     }
 }
 
@@ -470,7 +472,7 @@ void pcUiUvCropAdjust(int edge, int delta)
     }
 
     value = pc_ui_uv_crop_values[edge] + delta;
-    if (value < 0) value = 0;
+    if (value < -64) value = -64;
     if (value > 64) value = 64;
 
     if (value != pc_ui_uv_crop_values[edge])
@@ -635,6 +637,7 @@ static int pc_crop_uv_edges(unsigned int* v, unsigned int num, const int inset[4
             unsigned int tmin = 0x3FFFu, tmax = 0, t_at_smin = 0;
             float smin = 1e9f, smax = -1e9f;
             int reason = 0, reversed = 0, valid = 1;
+            int adjusted_tmin, adjusted_tmax;
             unsigned int bad_index = 0, bad_t = 0;
             float bad_sc = 0.0f;
 
@@ -675,13 +678,14 @@ static int pc_crop_uv_edges(unsigned int* v, unsigned int num, const int inset[4
 
                 /* Select the safe UV range after applying insets at the low/high screen edges.
                  * On a mirrored mapping, those screen edges correspond to the opposite UV ends. */
-                if ((tmin + (unsigned int)(reversed ? high_inset : low_inset) > 0x3FFFu) ||
-                    (tmax < (unsigned int)(reversed ? low_inset : high_inset)))
+                adjusted_tmin = (int)tmin + (reversed ? high_inset : low_inset);
+                adjusted_tmax = (int)tmax - (reversed ? low_inset : high_inset);
+                if (adjusted_tmin < 0 || adjusted_tmin > 0x3FFF ||
+                    adjusted_tmax < 0 || adjusted_tmax > 0x3FFF)
                 {
                     reason = 5; /* inset would overflow or underflow UV */
                 }
-                else if (tmin + (unsigned int)(reversed ? high_inset : low_inset) >=
-                         tmax - (unsigned int)(reversed ? low_inset : high_inset))
+                else if (adjusted_tmin >= adjusted_tmax)
                 {
                     reason = 6; /* requested crop would collapse the UV range */
                 }
@@ -766,30 +770,32 @@ static int pc_crop_uv_edges(unsigned int* v, unsigned int num, const int inset[4
             unsigned int* word = &v[(i * 12) + chosen_uv_axis];
             unsigned int w = *word;
             unsigned int t = w & 0x3FFFu;
+            int adjusted = (int)t;
 
             if (!chosen_reversed)
             {
                 if (t == chosen_tmin)
                 {
-                    t += (unsigned int)low_inset;
+                    adjusted += low_inset;
                 }
                 else if (t == chosen_tmax)
                 {
-                    t -= (unsigned int)high_inset;
+                    adjusted -= high_inset;
                 }
             }
             else
             {
                 if (t == chosen_tmax)
                 {
-                    t -= (unsigned int)low_inset;
+                    adjusted -= low_inset;
                 }
                 else if (t == chosen_tmin)
                 {
-                    t += (unsigned int)high_inset;
+                    adjusted += high_inset;
                 }
             }
 
+            t = (unsigned int)adjusted;
             *word = (w & ~0x3FFFu) | (t & 0x3FFFu);
         }
 
