@@ -789,7 +789,57 @@ static int pc_debug_mode_enabled(void)
 static int ui_uv_tuning;
 static int ui_uv_crop_selected_edge;
 static int ui_uv_consume_escape_up;
+static int ui_uv_crop_debug_click_this_poll;
 static const char* ui_uv_crop_edge_names[4] = { "LEFT", "RIGHT", "TOP", "BOTTOM" };
+
+/* Convert a window click to the pre-wide-scale GS coordinates used by Ps2AddPrim. */
+static int ui_uv_crop_debug_pick_mouse(const SDL_MouseButtonEvent* button)
+{
+    int ww, wh, vw, vh, vx, vy;
+    float aspect, wide_scale, frame_x, frame_y, screen_x, screen_y;
+
+    if ((button->button != SDL_BUTTON_LEFT) || (pcIniGetInt("ui_uv_crop_debug", 0) == 0))
+    {
+        return 0;
+    }
+
+    SDL_GetWindowSize(window, &ww, &wh);
+    if (ww <= 0 || wh <= 0)
+    {
+        return 0;
+    }
+
+    aspect = pcVideoAspect();
+    vw = (int)(wh * aspect + 0.5f);
+    vh = wh;
+    if (vw > ww)
+    {
+        vw = ww;
+        vh = (int)(ww / aspect + 0.5f);
+    }
+
+    vx = (ww - vw) / 2;
+    vy = (wh - vh) / 2;
+    if ((button->x < vx) || (button->x >= vx + vw) ||
+        (button->y < vy) || (button->y >= vy + vh))
+    {
+        return 0;
+    }
+
+    frame_x = (button->x - vx) * (640.0f / vw);
+    frame_y = (button->y - vy) * (480.0f / vh);
+    screen_x = 1728.0f + frame_x;
+    screen_y = 1728.0f + frame_y;
+
+    wide_scale = pcVideoWideScale();
+    if (wide_scale > 0.01f && wide_scale < 0.9999f)
+    {
+        screen_x = 2048.0f + (screen_x - 2048.0f) / wide_scale;
+    }
+
+    pcUiUvCropDebugPick(screen_x, screen_y);
+    return 1;
+}
 
 static void ui_uv_crop_show_status(const char* state)
 {
@@ -930,6 +980,12 @@ int pcVideoPumpEvents(void)
             SDL_ShowCursor(SDL_ENABLE);
         }
 
+        /* Temporary UV diagnostic picker; left-click the on-screen artifact. */
+        if ((ev.type == SDL_MOUSEBUTTONDOWN) && ui_uv_crop_debug_pick_mouse(&ev.button))
+        {
+            ui_uv_crop_debug_click_this_poll = 1;
+        }
+
         /* Live UV crop tuner; changes take effect on the next UI draw and are saved to recvx.ini. */
         if (ui_uv_crop_handle_event(&ev))
         {
@@ -971,6 +1027,16 @@ int pcVideoPumpEvents(void)
         {
             return 0;
         }
+    }
+
+    /* A click is sampled on the next frame's UI draw; finish when the following poll arrives. */
+    if (ui_uv_crop_debug_click_this_poll)
+    {
+        ui_uv_crop_debug_click_this_poll = 0;
+    }
+    else
+    {
+        pcUiUvCropDebugFinishPick();
     }
 
     return 1;

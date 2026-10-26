@@ -26,6 +26,9 @@ void pcIniSet(const char* key, const char* value);
 void pcUiUvCropGet(int* left, int* right, int* top, int* bottom);
 void pcUiUvCropAdjust(int edge, int delta);
 void pcUiUvCropReset(int edge);
+/* Temporary one-shot picker for ui_uv_crop_debug=1; coordinates are GS screen coordinates. */
+void pcUiUvCropDebugPick(float screen_x, float screen_y);
+void pcUiUvCropDebugFinishPick(void);
 
 /* First file in dir whose name ends with ext (case-insensitive); full path in out. */
 int pcPlatformFindFile(const char* dir, const char* ext, char* out, int size);
