@@ -57,7 +57,38 @@ void pcOsFiberDelete(void* fiber)
  * (WORKBASE, DMA tags), so it is placed at that very address. */
 void* pcOsAllocScratchpad(void)
 {
-    void* p = VirtualAlloc((void*)0x70000000, 0x4000, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
+    const uintptr_t address = (uintptr_t)0x70000000u;
+    void* p = VirtualAlloc((void*)address, 0x4000, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
+
+    if (p == NULL)
+    {
+        DWORD alloc_error = GetLastError();
+        MEMORY_BASIC_INFORMATION mbi;
+
+        if (VirtualQuery((const void*)address, &mbi, sizeof(mbi)) == sizeof(mbi))
+        {
+            char owner_path[MAX_PATH] = "";
+            HMODULE owner = NULL;
+
+            /* Identify a DLL occupying the requested address when possible. */
+            if ((mbi.AllocationBase != NULL) &&
+                GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                                   (LPCSTR)mbi.AllocationBase, &owner))
+            {
+                GetModuleFileNameA(owner, owner_path, sizeof(owner_path));
+            }
+
+            pcLog("scratchpad: VirtualAlloc at 0x70000000 failed (error=%lu); region base=%p allocation=%p size=0x%Ix state=0x%lx type=0x%lx owner=%s",
+                  (unsigned long)alloc_error, mbi.BaseAddress, mbi.AllocationBase, (size_t)mbi.RegionSize,
+                  (unsigned long)mbi.State, (unsigned long)mbi.Type,
+                  owner_path[0] ? owner_path : "(not identified as a loaded DLL)");
+        }
+        else
+        {
+            pcLog("scratchpad: VirtualAlloc at 0x70000000 failed (error=%lu); VirtualQuery failed (error=%lu)",
+                  (unsigned long)alloc_error, (unsigned long)GetLastError());
+        }
+    }
 
     return p;
 }
