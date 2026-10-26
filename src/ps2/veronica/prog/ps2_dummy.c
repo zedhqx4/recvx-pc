@@ -572,6 +572,9 @@ static void pc_ui_uv_crop_debug_log(int axis, unsigned int num, int low_inset, i
 /* Original eligibility rules: crop U against screen X and V against screen Y only.
  * Mirrored, rotated, scaled, and otherwise mismatched mappings stay untouched. Signed
  * insets are supported: positive values trim; negative values expand the sampled UV range. */
+/* Experimental mode: apply each configured edge directly to the raw UV extrema.
+ * No screen/UV orientation inference and no rotation or mirror compensation are performed.
+ * Only reject ranges that would overflow the representable UV coordinates or collapse. */
 static int pc_crop_uv_edges(unsigned int* v, unsigned int num, const int inset[4])
 {
     int axis, changed = 0;
@@ -586,19 +589,17 @@ static int pc_crop_uv_edges(unsigned int* v, unsigned int num, const int inset[4
     {
         int low_inset = inset[axis == 0 ? 0 : 2];
         int high_inset = inset[axis == 0 ? 1 : 3];
-        unsigned int tmin = 0x3FFFu, tmax = 0, t_at_smin = 0;
+        unsigned int tmin = 0x3FFFu, tmax = 0;
         float smin = 1e9f, smax = -1e9f;
-        int valid = 1;
-        int reason = 0;
-        int adjusted_min, adjusted_max;
-        unsigned int bad_index = 0, bad_t = 0;
-        float bad_sc = 0.0f;
+        int adjusted_min, adjusted_max, reason = 0;
 
         if (low_inset == 0 && high_inset == 0)
         {
             continue;
         }
 
+        /* Use U extrema for Left/Right and V extrema for Top/Bottom, regardless
+         * of which on-screen edge those UV extrema actually represent. */
         for (i = 0; i < num; i++)
         {
             unsigned int t = v[(i * 12) + axis] & 0x3FFFu;
@@ -606,27 +607,11 @@ static int pc_crop_uv_edges(unsigned int* v, unsigned int num, const int inset[4
 
             if (t < tmin) tmin = t;
             if (t > tmax) tmax = t;
-            if (sc < smin)
-            {
-                smin = sc;
-                t_at_smin = t;
-            }
+            if (sc < smin) smin = sc;
             if (sc > smax) smax = sc;
         }
 
-        if (smax - smin < 1.0f)
-        {
-            reason = 1; /* degenerate screen span */
-        }
-        else if (fabsf(((float)(tmax - tmin) / 16.0f) - (smax - smin)) > 0.1f * (smax - smin))
-        {
-            reason = 2; /* UV span does not match screen span */
-        }
-        else if (t_at_smin != tmin)
-        {
-            reason = 3; /* mirrored or mismatched orientation */
-        }
-        else if (tmax <= tmin)
+        if (tmax <= tmin)
         {
             reason = 4; /* degenerate UV range */
         }
@@ -648,55 +633,13 @@ static int pc_crop_uv_edges(unsigned int* v, unsigned int num, const int inset[4
         if (reason != 0)
         {
             pc_ui_uv_crop_debug_log(axis, num, low_inset, high_inset, reason,
-                                    reason == 1 ? "SKIP:degenerate-screen" :
-                                    reason == 2 ? "SKIP:scale-mismatch" :
-                                    reason == 3 ? "SKIP:orientation" :
                                     reason == 4 ? "SKIP:degenerate-uv" :
                                     reason == 5 ? "SKIP:uv-overflow" : "SKIP:crop-collapses",
                                     tmin, tmax, smin, smax, 0, 0, 0.0f);
             continue;
         }
 
-        /* Validate the whole axis before changing anything: never partially edit a primitive. */
-        for (i = 0; i < num; i++)
-        {
-            unsigned int t = v[(i * 12) + axis] & 0x3FFFu;
-            float sc = ((float*)v)[(i * 12) + 8 + axis];
-
-            if (t != tmin && t != tmax)
-            {
-                valid = 0;
-                reason = 7; /* UV is not on either edge */
-            }
-            else if (t == tmin && fabsf(sc - smin) > 0.01f)
-            {
-                valid = 0;
-                reason = 8; /* low UV is not on the low screen edge */
-            }
-            else if (t == tmax && fabsf(sc - smax) > 0.01f)
-            {
-                valid = 0;
-                reason = 9; /* high UV is not on the high screen edge */
-            }
-
-            if (!valid)
-            {
-                bad_index = i;
-                bad_t = t;
-                bad_sc = sc;
-                break;
-            }
-        }
-
-        if (!valid)
-        {
-            pc_ui_uv_crop_debug_log(axis, num, low_inset, high_inset, reason,
-                                    reason == 7 ? "SKIP:uv-not-edge" :
-                                    reason == 8 ? "SKIP:low-edge-mismatch" : "SKIP:high-edge-mismatch",
-                                    tmin, tmax, smin, smax, bad_index, bad_t, bad_sc);
-            continue;
-        }
-
+        /* Deliberately do not compensate for mirrored/rotated UVs. */
         for (i = 0; i < num; i++)
         {
             unsigned int* word = &v[(i * 12) + axis];
@@ -717,7 +660,7 @@ static int pc_crop_uv_edges(unsigned int* v, unsigned int num, const int inset[4
         }
 
         changed++;
-        pc_ui_uv_crop_debug_log(axis, num, low_inset, high_inset, 10, "APPLIED",
+        pc_ui_uv_crop_debug_log(axis, num, low_inset, high_inset, 10, "APPLIED:raw-extrema",
                                 tmin, tmax, smin, smax, 0, 0, 0.0f);
     }
 
