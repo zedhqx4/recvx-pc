@@ -2,8 +2,12 @@
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <timeapi.h>
+#include <stdint.h>
 
 #include "pc_os.h"
+
+/* Scratchpad allocation diagnostics are logged by the platform layer. */
+void pcLog(const char* fmt, ...);
 
 #pragma comment(lib, "winmm.lib")
 #pragma comment(lib, "user32.lib")
