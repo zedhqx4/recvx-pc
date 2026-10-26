@@ -1030,7 +1030,7 @@ static void pc_ui_uv_apply_menu_fixes(unsigned int* v, unsigned int num)
 
     /* 2) Middle strip: screen bounds approx X=1789..2141, Y=2275..2288 (352x13).
      * Accept its constituent faces too; each face must lie completely within that strip. */
-    if (!logged_mid_pan && xmin >= 1787.0f && xmax <= 2143.0f &&
+    if (xmin >= 1787.0f && xmax <= 2143.0f &&
         ymin >= 2271.0f && ymin <= 2279.0f &&
         ymax >= 2284.0f && ymax <= 2292.0f &&
         width > 0.0f && width <= 356.0f &&
@@ -1039,39 +1039,48 @@ static void pc_ui_uv_apply_menu_fixes(unsigned int* v, unsigned int num)
         int delta = reversed ? 16 : -16;
         if (pc_ui_uv_move_all(v, num, uv_axis, delta))
         {
-            logged_mid_pan = 1;
-            if (pc_ui_uv_crop_debug_enabled())
-                pcLog("UI UV fix: middle strip pan DOWN 1px at rect X=%.1f..%.1f Y=%.1f..%.1f", xmin, xmax, ymin, ymax);
+            if (!logged_mid_pan)
+            {
+                logged_mid_pan = 1;
+                if (pc_ui_uv_crop_debug_enabled())
+                    pcLog("UI UV fix: middle strip pan DOWN 1px at rect X=%.1f..%.1f Y=%.1f..%.1f", xmin, xmax, ymin, ymax);
+            }
         }
         return;
     }
 
     /* 3) Repeated 364x8 strip made from adjacent faces. Move ONLY the lower UV edge
      * upward one texel; the general crop has already run, so the expected V range is 237..244. */
-    if (!logged_low_edge && fabsf(ymin - 2292.0f) <= 0.5f &&
+    if (fabsf(ymin - 2292.0f) <= 0.5f &&
         fabsf(ymax - 2300.0f) <= 0.5f &&
         xmin >= 1771.5f && xmax <= 2136.5f && width > 0.0f && width <= 29.0f &&
         umin == 61u && (umax == 88u || umax == 89u) &&
         vmin == 237u && (vmax == 244u || vmax == 245u) &&
         pc_ui_uv_move_y_edge(v, num, uv_axis, 1, -16))
     {
-        logged_low_edge = 1;
-        if (pc_ui_uv_crop_debug_enabled())
-            pcLog("UI UV fix: 364x8 strip LOWER UV edge UP 1px");
+        if (!logged_low_edge)
+        {
+            logged_low_edge = 1;
+            if (pc_ui_uv_crop_debug_enabled())
+                pcLog("UI UV fix: 364x8 strip LOWER UV edge UP 1px");
+        }
         return;
     }
 
     /* 4) Matching lower strip: move ONLY its upper UV edge down one texel. */
-    if (!logged_bottom_edge && fabsf(ymin - 2392.0f) <= 0.5f &&
+    if (fabsf(ymin - 2392.0f) <= 0.5f &&
         fabsf(ymax - 2400.0f) <= 0.5f &&
         xmin >= 1771.5f && xmax <= 2136.5f && width > 0.0f && width <= 29.0f &&
         umin == 61u && (umax == 88u || umax == 89u) &&
         vmin == 245u && (vmax == 252u || vmax == 253u) &&
         pc_ui_uv_move_y_edge(v, num, uv_axis, 0, 16))
     {
-        logged_bottom_edge = 1;
-        if (pc_ui_uv_crop_debug_enabled())
-            pcLog("UI UV fix: 364x8 strip UPPER UV edge DOWN 1px");
+        if (!logged_bottom_edge)
+        {
+            logged_bottom_edge = 1;
+            if (pc_ui_uv_crop_debug_enabled())
+                pcLog("UI UV fix: 364x8 strip UPPER UV edge DOWN 1px");
+        }
     }
 }
 
