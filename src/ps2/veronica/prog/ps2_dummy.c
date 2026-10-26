@@ -662,38 +662,38 @@ static int pc_crop_uv_edges(unsigned int* v, unsigned int num, const int inset[4
                     {
                         reason = 6; /* requested crop would collapse the UV range */
                     }
-                }
-                else
-                {
-                    /* Validate the whole axis before changing anything. All vertices carrying
-                     * an endpoint UV must sit on its corresponding screen-space edge. */
-                    for (i = 0; i < num; i++)
+                    else
                     {
-                        unsigned int t = v[(i * 12) + uv_axis] & 0x3FFFu;
-                        float sc = ((float*)v)[(i * 12) + 8 + screen_axis];
+                        /* Validate the whole axis before changing anything. All vertices carrying
+                         * an endpoint UV must sit on its corresponding screen-space edge. */
+                        for (i = 0; i < num; i++)
+                        {
+                            unsigned int t = v[(i * 12) + uv_axis] & 0x3FFFu;
+                            float sc = ((float*)v)[(i * 12) + 8 + screen_axis];
 
-                        if (t != tmin && t != tmax)
-                        {
-                            valid = 0;
-                            reason = 7; /* UV is not on either edge */
-                        }
-                        else if (t == tmin && fabsf(sc - (reversed ? smax : smin)) > 0.01f)
-                        {
-                            valid = 0;
-                            reason = 8; /* UV endpoint does not match its screen edge */
-                        }
-                        else if (t == tmax && fabsf(sc - (reversed ? smin : smax)) > 0.01f)
-                        {
-                            valid = 0;
-                            reason = 8;
-                        }
+                            if (t != tmin && t != tmax)
+                            {
+                                valid = 0;
+                                reason = 7; /* UV is not on either edge */
+                            }
+                            else if (t == tmin && fabsf(sc - (reversed ? smax : smin)) > 0.01f)
+                            {
+                                valid = 0;
+                                reason = 8; /* UV endpoint does not match its screen edge */
+                            }
+                            else if (t == tmax && fabsf(sc - (reversed ? smin : smax)) > 0.01f)
+                            {
+                                valid = 0;
+                                reason = 8;
+                            }
 
-                        if (!valid)
-                        {
-                            bad_index = i;
-                            bad_t = t;
-                            bad_sc = sc;
-                            break;
+                            if (!valid)
+                            {
+                                bad_index = i;
+                                bad_t = t;
+                                bad_sc = sc;
+                                break;
+                            }
                         }
                     }
                 }
