@@ -270,11 +270,28 @@ int pcGsToggleUiWireframe(void)
 
 
 /* per-interval statistics for the periodic log */
-static struct { unsigned int frames, draws, verts, rt_loads, rt_reads, tex_decodes, tex_texels; double t_load, t_read, t_decode; } stats;
+static struct {
+    unsigned int frames, draws, verts, rt_loads, rt_reads, tex_decodes, tex_texels;
+    double t_load, t_read, t_decode;
+    double t_pre, t_geom, t_setup, t_upload, t_submit, t_draw;
+} stats;
 static int tex_cached;                     /* textures in the cache, decoded from GS memory */
 static double tex_cached_bytes;            /* their size */
 
 double pcOsTime(void);
+
+/* Detailed CPU-stage profiling is opt-in; it stays off in normal play. */
+static int gs_perf_timing_enabled(void)
+{
+    static int enabled = -1;
+
+    if (enabled < 0)
+    {
+        enabled = pcIniGetInt("debug", 0) != 0;
+    }
+
+    return enabled;
+}
 
 void pcGsLogStats(void)
 {
@@ -284,6 +301,12 @@ void pcGsLogStats(void)
           stats.draws / f, stats.verts / f, (double)stats.rt_loads / f, stats.t_load * 1000 / f, (double)stats.rt_reads / f,
           stats.t_read * 1000 / f, (double)stats.tex_decodes / f, stats.tex_texels / f, stats.t_decode * 1000 / f);
     pcLog("gs: %d textures cached (%.0f MB)", tex_cached, tex_cached_bytes / 1048576.0);
+    if (gs_perf_timing_enabled())
+    {
+        pcLog("gs CPU/present: pre %.2f ms, geometry %.2f ms, GL setup %.2f ms, buffer upload %.2f ms, draw/restore %.2f ms, total gs draw CPU %.2f ms",
+              stats.t_pre * 1000 / f, stats.t_geom * 1000 / f, stats.t_setup * 1000 / f,
+              stats.t_upload * 1000 / f, stats.t_submit * 1000 / f, stats.t_draw * 1000 / f);
+    }
     memset(&stats, 0, sizeof(stats));
 }
 
@@ -1167,6 +1190,9 @@ void gsRendererDraw(const GsDrawState* st, const GsVertex* v, int nverts)
     int atst = GSF(st->test, 1, 3);
     GLenum mode;
     int n = 0, i;
+    int perf_timing = gs_perf_timing_enabled();
+    double perf_total_start = perf_timing ? pcOsTime() : 0.0;
+    double perf_phase_start = perf_total_start;
 
     rt->last_use = frame_counter;
     stats.draws++;
@@ -1243,6 +1269,13 @@ void gsRendererDraw(const GsDrawState* st, const GsVertex* v, int nverts)
         }
     }
 
+    if (perf_timing)
+    {
+        double now = pcOsTime();
+        stats.t_pre += now - perf_total_start;
+        perf_phase_start = now;
+    }
+
     /* build GL vertices */
     if (st->type == 6)
     {
@@ -1296,6 +1329,13 @@ void gsRendererDraw(const GsDrawState* st, const GsVertex* v, int nverts)
     for (i = 0; i < n; i++)
     {
         if (glverts[i].z > 1.0f) glverts[i].z = 1.0f;
+    }
+
+    if (perf_timing)
+    {
+        double now = pcOsTime();
+        stats.t_geom += now - perf_phase_start;
+        perf_phase_start = now;
     }
 
     glBindFramebuffer(GL_FRAMEBUFFER, rt->fbo);
@@ -1427,7 +1467,22 @@ void gsRendererDraw(const GsDrawState* st, const GsVertex* v, int nverts)
 
     glBindVertexArray(vao);
     glBindBuffer(GL_ARRAY_BUFFER, vbo);
+
+    if (perf_timing)
+    {
+        double now = pcOsTime();
+        stats.t_setup += now - perf_phase_start;
+        perf_phase_start = now;
+    }
+
     glBufferData(GL_ARRAY_BUFFER, n * sizeof(GlVertex), glverts, GL_STREAM_DRAW);
+
+    if (perf_timing)
+    {
+        double now = pcOsTime();
+        stats.t_upload += now - perf_phase_start;
+        perf_phase_start = now;
+    }
 
     glUniform1i(U.wireframe, 0);
 
@@ -1489,6 +1544,13 @@ void gsRendererDraw(const GsDrawState* st, const GsVertex* v, int nverts)
             glDisable(GL_DEPTH_TEST);
             glDepthMask(GL_FALSE);
         }
+    }
+
+    if (perf_timing)
+    {
+        double now = pcOsTime();
+        stats.t_submit += now - perf_phase_start;
+        stats.t_draw += now - perf_total_start;
     }
 }
 
