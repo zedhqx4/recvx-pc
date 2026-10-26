@@ -1006,11 +1006,11 @@ static void pc_ui_uv_apply_menu_fixes(unsigned int* v, unsigned int num)
     width = xmax - xmin;
     height = ymax - ymin;
 
-    if (!pc_ui_uv_find_y_mapping(v, num, &uv_axis, &reversed))
+    /* The first two fixes infer the Y-following UV component. The two thin strips below
+     * have already been confirmed by the renderer log as V-forward, so they must not depend
+     * on this inference after edge cropping changes their UV span. */
+    if (pc_ui_uv_find_y_mapping(v, num, &uv_axis, &reversed))
     {
-        return;
-    }
-
     /* 1) Small upper item: move its sampled content up by one screen pixel.
      * Its measured top-left is approximately (48,100) in a 640x480 view:
      * X=1728+48, Y=1960+100. */
@@ -1048,6 +1048,7 @@ static void pc_ui_uv_apply_menu_fixes(unsigned int* v, unsigned int num)
         }
         return;
     }
+    }
 
     /* 3) Repeated 364x8 strip made from adjacent faces. Move ONLY the lower UV edge
      * upward one texel; the general crop has already run, so the expected V range is 237..244. */
@@ -1056,7 +1057,7 @@ static void pc_ui_uv_apply_menu_fixes(unsigned int* v, unsigned int num)
         xmin >= 1771.5f && xmax <= 2136.5f && width > 0.0f && width <= 29.0f &&
         umin == (61u * 16u) && (umax == (88u * 16u) || umax == (89u * 16u)) &&
         vmin == (237u * 16u) && (vmax == (244u * 16u) || vmax == (245u * 16u)) &&
-        pc_ui_uv_move_y_edge(v, num, uv_axis, 1, -16))
+        pc_ui_uv_move_y_edge(v, num, 1, 1, -16))
     {
         if (!logged_low_edge)
         {
@@ -1073,7 +1074,7 @@ static void pc_ui_uv_apply_menu_fixes(unsigned int* v, unsigned int num)
         xmin >= 1771.5f && xmax <= 2136.5f && width > 0.0f && width <= 29.0f &&
         umin == 61u && (umax == 88u || umax == 89u) &&
         vmin == (245u * 16u) && (vmax == (252u * 16u) || vmax == (253u * 16u)) &&
-        pc_ui_uv_move_y_edge(v, num, uv_axis, 0, 16))
+        pc_ui_uv_move_y_edge(v, num, 1, 0, 16))
     {
         if (!logged_bottom_edge)
         {
