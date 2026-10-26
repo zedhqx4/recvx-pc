@@ -516,15 +516,17 @@ static unsigned int pc_ui_uv_crop_hash_add(unsigned int hash, unsigned int value
     return (hash ^ value) * 16777619u;
 }
 
-static void pc_ui_uv_crop_debug_log(int screen_axis, unsigned int num, int low_inset, int high_inset,
-                                    int reason, const char* result, unsigned int tmin, unsigned int tmax,
-                                    float smin, float smax, unsigned int bad_index,
-                                    unsigned int bad_t, float bad_sc)
+static void pc_ui_uv_crop_debug_log(const unsigned int* v, int screen_axis, unsigned int num,
+                                    int low_inset, int high_inset, int reason, const char* result,
+                                    unsigned int tmin, unsigned int tmax, float smin, float smax,
+                                    unsigned int bad_index, unsigned int bad_t, float bad_sc)
 {
-    static unsigned int seen[128];
+    static unsigned int seen[512];
     static unsigned int seen_count;
     unsigned int hash = 2166136261u;
     unsigned int i;
+    unsigned int umin = 0x3FFFu, umax = 0, vmin = 0x3FFFu, vmax = 0;
+    float xmin = 1e9f, xmax = -1e9f, ymin = 1e9f, ymax = -1e9f;
     const unsigned char* label;
 
     if (!pc_ui_uv_crop_debug_enabled())
@@ -532,7 +534,25 @@ static void pc_ui_uv_crop_debug_log(int screen_axis, unsigned int num, int low_i
         return;
     }
 
-    /* Deduplicate repeated frames, including the mapped UV component and orientation in result. */
+    /* Log and deduplicate by the complete primitive rectangle and UV bounds, not just
+     * one axis. This lets us map a visible UI piece to both its screen position and atlas area. */
+    for (i = 0; i < num; i++)
+    {
+        unsigned int u = v[(i * 12) + 0] & 0x3FFFu;
+        unsigned int tv = v[(i * 12) + 1] & 0x3FFFu;
+        float x = ((const float*)v)[(i * 12) + 8];
+        float y = ((const float*)v)[(i * 12) + 9];
+
+        if (u < umin) umin = u;
+        if (u > umax) umax = u;
+        if (tv < vmin) vmin = tv;
+        if (tv > vmax) vmax = tv;
+        if (x < xmin) xmin = x;
+        if (x > xmax) xmax = x;
+        if (y < ymin) ymin = y;
+        if (y > ymax) ymax = y;
+    }
+
     hash = pc_ui_uv_crop_hash_add(hash, (unsigned int)screen_axis);
     hash = pc_ui_uv_crop_hash_add(hash, num);
     hash = pc_ui_uv_crop_hash_add(hash, (unsigned int)low_inset);
@@ -540,6 +560,14 @@ static void pc_ui_uv_crop_debug_log(int screen_axis, unsigned int num, int low_i
     hash = pc_ui_uv_crop_hash_add(hash, (unsigned int)reason);
     hash = pc_ui_uv_crop_hash_add(hash, tmin);
     hash = pc_ui_uv_crop_hash_add(hash, tmax);
+    hash = pc_ui_uv_crop_hash_add(hash, umin);
+    hash = pc_ui_uv_crop_hash_add(hash, umax);
+    hash = pc_ui_uv_crop_hash_add(hash, vmin);
+    hash = pc_ui_uv_crop_hash_add(hash, vmax);
+    hash = pc_ui_uv_crop_hash_add(hash, (unsigned int)(int)(xmin * 16.0f));
+    hash = pc_ui_uv_crop_hash_add(hash, (unsigned int)(int)(xmax * 16.0f));
+    hash = pc_ui_uv_crop_hash_add(hash, (unsigned int)(int)(ymin * 16.0f));
+    hash = pc_ui_uv_crop_hash_add(hash, (unsigned int)(int)(ymax * 16.0f));
     hash = pc_ui_uv_crop_hash_add(hash, (unsigned int)(int)(smin * 16.0f));
     hash = pc_ui_uv_crop_hash_add(hash, (unsigned int)(int)(smax * 16.0f));
     hash = pc_ui_uv_crop_hash_add(hash, bad_index);
@@ -564,9 +592,11 @@ static void pc_ui_uv_crop_debug_log(int screen_axis, unsigned int num, int low_i
     }
     seen[seen_count++] = hash;
 
-    pcLog("UI UV crop debug: %c %s num=%u UV=[%.3f..%.3f] screen=[%.2f..%.2f] inset=[%d,%d] badVertex=%u badUV=%.3f badScreen=%.2f",
+    pcLog("UI UV crop debug: %c %s num=%u edgeUV=[%.3f..%.3f] screenAxis=[%.2f..%.2f] rect=[X %.2f..%.2f,Y %.2f..%.2f] UVrect=[U %.3f..%.3f,V %.3f..%.3f] inset=[%d,%d] badVertex=%u badUV=%.3f badScreen=%.2f",
           screen_axis == 0 ? 'X' : 'Y', result, num, tmin / 16.0f, tmax / 16.0f,
-          smin, smax, low_inset, high_inset, bad_index, bad_t / 16.0f, bad_sc);
+          smin, smax, xmin, xmax, ymin, ymax,
+          umin / 16.0f, umax / 16.0f, vmin / 16.0f, vmax / 16.0f,
+          low_inset, high_inset, bad_index, bad_t / 16.0f, bad_sc);
 }
 
 /* Apply left/right or top/bottom crop to whichever UV component actually follows that screen
@@ -724,7 +754,7 @@ static int pc_crop_uv_edges(unsigned int* v, unsigned int num, const int inset[4
                                  fail_reason == 6 ? "SKIP:crop-collapses" :
                                  fail_reason == 7 ? "SKIP:uv-not-edge" : "SKIP:edge-mismatch";
 
-            pc_ui_uv_crop_debug_log(screen_axis, num, low_inset, high_inset, fail_reason, result,
+            pc_ui_uv_crop_debug_log(v, screen_axis, num, low_inset, high_inset, fail_reason, result,
                                     fail_tmin, fail_tmax, fail_smin, fail_smax,
                                     fail_bad_index, fail_bad_t, fail_bad_sc);
             continue;
@@ -768,7 +798,7 @@ static int pc_crop_uv_edges(unsigned int* v, unsigned int num, const int inset[4
             snprintf(result, sizeof(result), "APPLIED:%c-%s",
                      chosen_uv_axis == 0 ? 'U' : 'V',
                      chosen_reversed ? "reversed" : "forward");
-            pc_ui_uv_crop_debug_log(screen_axis, num, low_inset, high_inset, 10, result,
+            pc_ui_uv_crop_debug_log(v, screen_axis, num, low_inset, high_inset, 10, result,
                                     chosen_tmin, chosen_tmax, chosen_smin, chosen_smax,
                                     0, 0, 0.0f);
         }
