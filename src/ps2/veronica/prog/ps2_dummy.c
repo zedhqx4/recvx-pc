@@ -441,17 +441,29 @@ static void pc_ui_uv_crop_init(void)
     }
 }
 
-static void pc_ui_uv_crop_save_edge(int edge)
+static int* pc_ui_uv_crop_values_for_profile(int profile)
+{
+    return profile ? pc_ui_uv_crop_rot90_cw_values : pc_ui_uv_crop_values;
+}
+
+static const char* const* pc_ui_uv_crop_keys_for_profile(int profile)
+{
+    return profile ? pc_ui_uv_crop_rot90_cw_keys : pc_ui_uv_crop_keys;
+}
+
+static void pc_ui_uv_crop_save_edge_profile(int edge, int profile)
 {
     char value[16];
+    int* values = pc_ui_uv_crop_values_for_profile(profile);
+    const char* const* keys = pc_ui_uv_crop_keys_for_profile(profile);
 
     if (edge < 0 || edge >= 4)
     {
         return;
     }
 
-    snprintf(value, sizeof(value), "%d", pc_ui_uv_crop_values[edge]);
-    pcIniSet(pc_ui_uv_crop_keys[edge], value);
+    snprintf(value, sizeof(value), "%d", values[edge]);
+    pcIniSet(keys[edge], value);
 }
 
 static void pc_ui_uv_crop_amounts_from(const int values[4], int* left, int* right, int* top, int* bottom)
@@ -462,16 +474,20 @@ static void pc_ui_uv_crop_amounts_from(const int values[4], int* left, int* righ
     *bottom = values[3];
 }
 
-static void pc_ui_uv_crop_amounts(int* left, int* right, int* top, int* bottom)
+static void pc_ui_uv_crop_amounts_profile(int profile, int* left, int* right, int* top, int* bottom)
 {
     pc_ui_uv_crop_init();
-    pc_ui_uv_crop_amounts_from(pc_ui_uv_crop_values, left, right, top, bottom);
+    pc_ui_uv_crop_amounts_from(pc_ui_uv_crop_values_for_profile(profile), left, right, top, bottom);
+}
+
+static void pc_ui_uv_crop_amounts(int* left, int* right, int* top, int* bottom)
+{
+    pc_ui_uv_crop_amounts_profile(0, left, right, top, bottom);
 }
 
 static void pc_ui_uv_crop_rot90_cw_amounts(int* left, int* right, int* top, int* bottom)
 {
-    pc_ui_uv_crop_init();
-    pc_ui_uv_crop_amounts_from(pc_ui_uv_crop_rot90_cw_values, left, right, top, bottom);
+    pc_ui_uv_crop_amounts_profile(1, left, right, top, bottom);
 }
 
 /* Public PC-side controls used by the live keyboard tuner. Edge order: left, right, top, bottom. */
@@ -480,9 +496,15 @@ void pcUiUvCropGet(int* left, int* right, int* top, int* bottom)
     pc_ui_uv_crop_amounts(left, right, top, bottom);
 }
 
-void pcUiUvCropAdjust(int edge, int delta)
+void pcUiUvCropRot90CWGet(int* left, int* right, int* top, int* bottom)
+{
+    pc_ui_uv_crop_rot90_cw_amounts(left, right, top, bottom);
+}
+
+static void pc_ui_uv_crop_adjust_profile(int profile, int edge, int delta)
 {
     int value;
+    int* values;
 
     pc_ui_uv_crop_init();
     if (edge < 0 || edge >= 4)
@@ -490,20 +512,32 @@ void pcUiUvCropAdjust(int edge, int delta)
         return;
     }
 
-    value = pc_ui_uv_crop_values[edge] + delta;
+    values = pc_ui_uv_crop_values_for_profile(profile);
+    value = values[edge] + delta;
     if (value < -64) value = -64;
     if (value > 64) value = 64;
 
-    if (value != pc_ui_uv_crop_values[edge])
+    if (value != values[edge])
     {
-        pc_ui_uv_crop_values[edge] = value;
-        pc_ui_uv_crop_save_edge(edge);
+        values[edge] = value;
+        pc_ui_uv_crop_save_edge_profile(edge, profile);
     }
 }
 
-void pcUiUvCropReset(int edge)
+void pcUiUvCropAdjust(int edge, int delta)
+{
+    pc_ui_uv_crop_adjust_profile(0, edge, delta);
+}
+
+void pcUiUvCropRot90CWAdjust(int edge, int delta)
+{
+    pc_ui_uv_crop_adjust_profile(1, edge, delta);
+}
+
+static void pc_ui_uv_crop_reset_profile(int profile, int edge)
 {
     int i, first = (edge == -1) ? 0 : edge, last = (edge == -1) ? 3 : edge;
+    int* values = pc_ui_uv_crop_values_for_profile(profile);
 
     pc_ui_uv_crop_init();
     if (first < 0 || last >= 4)
@@ -513,9 +547,19 @@ void pcUiUvCropReset(int edge)
 
     for (i = first; i <= last; i++)
     {
-        pc_ui_uv_crop_values[i] = 0;
-        pc_ui_uv_crop_save_edge(i);
+        values[i] = 0;
+        pc_ui_uv_crop_save_edge_profile(i, profile);
     }
+}
+
+void pcUiUvCropReset(int edge)
+{
+    pc_ui_uv_crop_reset_profile(0, edge);
+}
+
+void pcUiUvCropRot90CWReset(int edge)
+{
+    pc_ui_uv_crop_reset_profile(1, edge);
 }
 
 /* Optional diagnostics for why an individual edge crop is accepted or skipped.
