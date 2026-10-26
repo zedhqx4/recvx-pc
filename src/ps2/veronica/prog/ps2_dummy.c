@@ -400,9 +400,14 @@ static void pc_snap_uv(unsigned int* v, unsigned int num)
 /* Per-edge UI UV crop, expressed in 1/16-texel units (8 = half a texel).
  * Runtime tuning writes these values to recvx.ini so the next launch keeps them. */
 static int pc_ui_uv_crop_values[4];
+static int pc_ui_uv_crop_rot90_cw_values[4];
 static int pc_ui_uv_crop_initialized;
 static const char* pc_ui_uv_crop_keys[4] = {
     "ui_uv_crop_left", "ui_uv_crop_right", "ui_uv_crop_top", "ui_uv_crop_bottom"
+};
+static const char* pc_ui_uv_crop_rot90_cw_keys[4] = {
+    "ui_uv_crop_rot90_cw_left", "ui_uv_crop_rot90_cw_right",
+    "ui_uv_crop_rot90_cw_top", "ui_uv_crop_rot90_cw_bottom"
 };
 
 static int pc_ui_uv_crop_value(const char* key, int fallback)
@@ -428,6 +433,9 @@ static void pc_ui_uv_crop_init(void)
         {
             int fallback = (legacy >= 0) ? legacy : automatic_defaults[i];
             pc_ui_uv_crop_values[i] = pc_ui_uv_crop_value(pc_ui_uv_crop_keys[i], fallback);
+            /* Until configured separately, rotated sprites inherit the standard edge values. */
+            pc_ui_uv_crop_rot90_cw_values[i] =
+                pc_ui_uv_crop_value(pc_ui_uv_crop_rot90_cw_keys[i], pc_ui_uv_crop_values[i]);
         }
         pc_ui_uv_crop_initialized = 1;
     }
@@ -446,13 +454,24 @@ static void pc_ui_uv_crop_save_edge(int edge)
     pcIniSet(pc_ui_uv_crop_keys[edge], value);
 }
 
+static void pc_ui_uv_crop_amounts_from(const int values[4], int* left, int* right, int* top, int* bottom)
+{
+    *left = values[0];
+    *right = values[1];
+    *top = values[2];
+    *bottom = values[3];
+}
+
 static void pc_ui_uv_crop_amounts(int* left, int* right, int* top, int* bottom)
 {
     pc_ui_uv_crop_init();
-    *left = pc_ui_uv_crop_values[0];
-    *right = pc_ui_uv_crop_values[1];
-    *top = pc_ui_uv_crop_values[2];
-    *bottom = pc_ui_uv_crop_values[3];
+    pc_ui_uv_crop_amounts_from(pc_ui_uv_crop_values, left, right, top, bottom);
+}
+
+static void pc_ui_uv_crop_rot90_cw_amounts(int* left, int* right, int* top, int* bottom)
+{
+    pc_ui_uv_crop_init();
+    pc_ui_uv_crop_amounts_from(pc_ui_uv_crop_rot90_cw_values, left, right, top, bottom);
 }
 
 /* Public PC-side controls used by the live keyboard tuner. Edge order: left, right, top, bottom. */
@@ -599,6 +618,87 @@ static void pc_ui_uv_crop_debug_log(const unsigned int* v, int screen_axis, unsi
           smin, smax, xmin, xmax, ymin, ymax,
           umin / 16.0f, umax / 16.0f, vmin / 16.0f, vmax / 16.0f,
           low_inset, high_inset, bad_index, bad_t / 16.0f, bad_sc);
+}
+
+/* Identify the specific clockwise quarter-turn mapping:
+ * screen X follows V in reverse, while screen Y follows U forward. */
+static int pc_ui_uv_mapping_is_rot90_cw(const unsigned int* v, unsigned int num)
+{
+    int uv_axis_for_screen[2] = { -1, -1 };
+    int reversed_for_screen[2] = { 0, 0 };
+    const float* fv = (const float*)v;
+    int screen_axis;
+    unsigned int i;
+
+    if (num < 2)
+    {
+        return 0;
+    }
+
+    for (screen_axis = 0; screen_axis < 2; screen_axis++)
+    {
+        int uv_axis;
+
+        for (uv_axis = 0; uv_axis < 2; uv_axis++)
+        {
+            unsigned int tmin = 0x3FFFu, tmax = 0, t_at_smin = 0;
+            float smin = 1e9f, smax = -1e9f;
+            int reversed, valid = 1;
+
+            for (i = 0; i < num; i++)
+            {
+                unsigned int t = v[(i * 12) + uv_axis] & 0x3FFFu;
+                float sc = fv[(i * 12) + 8 + screen_axis];
+
+                if (t < tmin) tmin = t;
+                if (t > tmax) tmax = t;
+                if (sc < smin)
+                {
+                    smin = sc;
+                    t_at_smin = t;
+                }
+                if (sc > smax) smax = sc;
+            }
+
+            if (smax - smin < 1.0f || tmax <= tmin ||
+                fabsf(((float)(tmax - tmin) / 16.0f) - (smax - smin)) >
+                    0.1f * (smax - smin) ||
+                (t_at_smin != tmin && t_at_smin != tmax))
+            {
+                continue;
+            }
+
+            reversed = (t_at_smin == tmax);
+            for (i = 0; i < num; i++)
+            {
+                unsigned int t = v[(i * 12) + uv_axis] & 0x3FFFu;
+                float sc = fv[(i * 12) + 8 + screen_axis];
+
+                if ((t != tmin && t != tmax) ||
+                    (t == tmin && fabsf(sc - (reversed ? smax : smin)) > 0.01f) ||
+                    (t == tmax && fabsf(sc - (reversed ? smin : smax)) > 0.01f))
+                {
+                    valid = 0;
+                    break;
+                }
+            }
+
+            if (valid)
+            {
+                uv_axis_for_screen[screen_axis] = uv_axis;
+                reversed_for_screen[screen_axis] = reversed;
+                break;
+            }
+        }
+
+        if (uv_axis_for_screen[screen_axis] < 0)
+        {
+            return 0;
+        }
+    }
+
+    return uv_axis_for_screen[0] == 1 && reversed_for_screen[0] &&
+           uv_axis_for_screen[1] == 0 && !reversed_for_screen[1];
 }
 
 /* Apply left/right or top/bottom crop to whichever UV component actually follows that screen
@@ -968,13 +1068,23 @@ void Ps2AddPrim(unsigned long prim, void* dp, unsigned int num, unsigned int cli
 
         {
             static int crop_logged;
-            int crop[4];
+            int crop[4], crop_rot90_cw[4];
+            int is_rot90_cw;
 
             pc_ui_uv_crop_amounts(&crop[0], &crop[1], &crop[2], &crop[3]);
+            pc_ui_uv_crop_rot90_cw_amounts(&crop_rot90_cw[0], &crop_rot90_cw[1],
+                                           &crop_rot90_cw[2], &crop_rot90_cw[3]);
+            is_rot90_cw = pc_ui_uv_mapping_is_rot90_cw((const unsigned int*)wide_buf, num);
+            if (is_rot90_cw)
+            {
+                memcpy(crop, crop_rot90_cw, sizeof(crop));
+            }
+
             if ((crop[0] || crop[1] || crop[2] || crop[3]) &&
                 pc_crop_uv_edges((unsigned int*)wide_buf, num, crop) > 0 && !crop_logged)
             {
-                pcLog("UI UV edge crop active (1/16 texel units): left=%d right=%d top=%d bottom=%d",
+                pcLog("UI UV edge crop active profile=%s (1/16 texel units): left=%d right=%d top=%d bottom=%d",
+                      is_rot90_cw ? "rot90_cw" : "standard",
                       crop[0], crop[1], crop[2], crop[3]);
                 crop_logged = 1;
             }
