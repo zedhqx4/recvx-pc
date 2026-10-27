@@ -15,8 +15,8 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include <SDL.h>
-#include <SDL_syswm.h>
+#include <SDL3/SDL.h>
+#include <SDL3/SDL_main.h>
 
 #include "pc_bindings.h"
 #include "setup_game.h"
@@ -210,18 +210,19 @@ static int cmp_res(const void* a, const void* b)
 
 static void list_resolutions(void)
 {
-    int i, n = SDL_GetNumDisplayModes(0);
+    SDL_DisplayMode** modes;
+    int i, n = 0;
 
     nres = 1;   /* automatic */
-
-    for (i = 0; i < n; i++)
+    modes = SDL_GetFullscreenDisplayModes(SDL_GetPrimaryDisplay(), &n);
+    if (modes != NULL)
     {
-        SDL_DisplayMode m;
-
-        if ((SDL_GetDisplayMode(0, i, &m) == 0) && (m.w >= 640) && (m.h >= 480))
+        for (i = 0; i < n; i++)
         {
-            add_res(m.w, m.h);
+            if ((modes[i] != NULL) && (modes[i]->w >= 640) && (modes[i]->h >= 480))
+                add_res(modes[i]->w, modes[i]->h);
         }
+        SDL_free(modes);
     }
 
     qsort(&res[1], nres - 1, sizeof(res[0]), cmp_res);
@@ -515,20 +516,17 @@ static int save_settings(void)
 
 static void paint_prompt(SDL_Window* w, const char* text)
 {
-    SDL_SysWMinfo info;
+    HWND hwnd = (HWND)SDL_GetPointerProperty(SDL_GetWindowProperties(w),
+                                             SDL_PROP_WINDOW_WIN32_HWND_POINTER, NULL);
     HDC dc;
     RECT rc;
     HFONT old;
 
-    SDL_VERSION(&info.version);
-
-    if (!SDL_GetWindowWMInfo(w, &info))
-    {
+    if (hwnd == NULL)
         return;
-    }
 
-    dc = GetDC(info.info.win.window);
-    GetClientRect(info.info.win.window, &rc);
+    dc = GetDC(hwnd);
+    GetClientRect(hwnd, &rc);
     FillRect(dc, &rc, GetSysColorBrush(COLOR_WINDOW));
     SetBkMode(dc, TRANSPARENT);
     SetTextColor(dc, GetSysColor(COLOR_WINDOWTEXT));
@@ -536,7 +534,7 @@ static void paint_prompt(SDL_Window* w, const char* text)
     InflateRect(&rc, -S(16), -S(12));
     DrawTextA(dc, text, -1, &rc, DT_CENTER | DT_WORDBREAK);
     SelectObject(dc, old);
-    ReleaseDC(info.info.win.window, dc);
+    ReleaseDC(hwnd, dc);
 }
 
 /* 1 = bound (name in out), 0 = cancelled, -1 = cleared */
@@ -554,14 +552,15 @@ static int capture(int pad, int index, char* out, int size)
 
     GetWindowRect(main_wnd, &r);
     w = SDL_CreateWindow(pad ? "Controller binding" : "Keyboard binding",
-                         (r.left + r.right) / 2 - S(180), (r.top + r.bottom) / 2 - S(50), S(360), S(100),
-                         SDL_WINDOW_ALWAYS_ON_TOP | SDL_WINDOW_SKIP_TASKBAR);
+                         S(360), S(100),
+                         SDL_WINDOW_ALWAYS_ON_TOP | SDL_WINDOW_UTILITY);
 
     if (w == NULL)
     {
         return 0;
     }
 
+    SDL_SetWindowPosition(w, (r.left + r.right) / 2 - S(180), (r.top + r.bottom) / 2 - S(50));
     EnableWindow(main_wnd, FALSE);
     SDL_RaiseWindow(w);
 
@@ -569,42 +568,42 @@ static int capture(int pad, int index, char* out, int size)
     {
         while (SDL_PollEvent(&ev))
         {
-            if ((ev.type == SDL_QUIT) || ((ev.type == SDL_WINDOWEVENT) && (ev.window.event == SDL_WINDOWEVENT_CLOSE)))
+            if ((ev.type == SDL_EVENT_QUIT) || (ev.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED))
             {
                 done = 1;
             }
-            else if (ev.type == SDL_CONTROLLERDEVICEADDED)
+            else if (ev.type == SDL_EVENT_GAMEPAD_ADDED)
             {
-                SDL_GameControllerOpen(ev.cdevice.which);
+                SDL_OpenGamepad(ev.gdevice.which);
             }
-            else if ((ev.type == SDL_KEYDOWN) && !ev.key.repeat)
+            else if ((ev.type == SDL_EVENT_KEY_DOWN) && !ev.key.repeat)
             {
-                if (ev.key.keysym.scancode == SDL_SCANCODE_ESCAPE)
+                if (ev.key.scancode == SDL_SCANCODE_ESCAPE)
                 {
                     done = 1;
                 }
-                else if (ev.key.keysym.scancode == SDL_SCANCODE_DELETE)
+                else if (ev.key.scancode == SDL_SCANCODE_DELETE)
                 {
                     result = -1;
                     done = 1;
                 }
                 else if (!pad)
                 {
-                    snprintf(out, size, "%s", SDL_GetScancodeName(ev.key.keysym.scancode));
+                    snprintf(out, size, "%s", SDL_GetScancodeName(ev.key.scancode));
                     result = (out[0] != 0);
                     done = 1;
                 }
             }
-            else if (pad && (ev.type == SDL_CONTROLLERBUTTONDOWN))
+            else if (pad && (ev.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN))
             {
-                snprintf(out, size, "%s", SDL_GameControllerGetStringForButton((SDL_GameControllerButton)ev.cbutton.button));
+                snprintf(out, size, "%s", SDL_GetGamepadStringForButton((SDL_GamepadButton)ev.gbutton.button));
                 result = 1;
                 done = 1;
             }
-            else if (pad && (ev.type == SDL_CONTROLLERAXISMOTION) && (ev.caxis.value > 16000) &&
-                     ((ev.caxis.axis == SDL_CONTROLLER_AXIS_TRIGGERLEFT) || (ev.caxis.axis == SDL_CONTROLLER_AXIS_TRIGGERRIGHT)))
+            else if (pad && (ev.type == SDL_EVENT_GAMEPAD_AXIS_MOTION) && (ev.gaxis.value > 16000) &&
+                     ((ev.gaxis.axis == SDL_GAMEPAD_AXIS_LEFT_TRIGGER) || (ev.gaxis.axis == SDL_GAMEPAD_AXIS_RIGHT_TRIGGER)))
             {
-                snprintf(out, size, "%s", SDL_GameControllerGetStringForAxis((SDL_GameControllerAxis)ev.caxis.axis));
+                snprintf(out, size, "%s", SDL_GetGamepadStringForAxis((SDL_GamepadAxis)ev.gaxis.axis));
                 result = 1;
                 done = 1;
             }
@@ -1236,7 +1235,7 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmd, int show)
     SDL_SetMainReady();
     SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, "1");
 
-    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMECONTROLLER) != 0)
+    if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD))
     {
         MessageBoxA(NULL, SDL_GetError(), APP_TITLE, MB_ICONERROR);
         return 1;

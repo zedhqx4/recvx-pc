@@ -1639,7 +1639,7 @@ void gsRendererPresent(unsigned int dispfb_fbp, unsigned int dispfb_fbw)
         dump_frame = (dump_at >= 0) && ((frame_counter == (unsigned int)dump_at) || (frame_counter == (unsigned int)dump_at + 1));
     }
 
-    SDL_GL_GetDrawableSize(SDL_GL_GetCurrentWindow(), &ww, &wh);
+    SDL_GetWindowSizeInPixels(SDL_GL_GetCurrentWindow(), &ww, &wh);
 
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
     glViewport(0, 0, ww, wh);

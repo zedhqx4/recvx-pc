@@ -6,6 +6,7 @@ on:
     branches:
       - pc-port
       - graphics-fixes
+      - SDL3
       - c3853984-baseline
       - merge-c3853984-into-graphics-fixes
     paths-ignore:
@@ -77,4 +78,6 @@ jobs:
           path: |
             build_pc/recvx.exe
             build_pc/recvx-config.exe
+            build_pc/SDL3.dll
+            build_pc/libusb-1.0.dll
           if-no-files-found: error

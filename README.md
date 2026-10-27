@@ -44,7 +44,7 @@ include the seed's share code or its `spoiler.txt`.
 | Music and voices (CRI ADX) | done |
 | Sound effects with room reverb (Tamsoft sound driver replacement) | done |
 | Saving and loading (to a `saves` folder, no memory card screens) | done |
-| Keyboard and game controllers (SDL2), with vibration | done |
+| Keyboard and game controllers (SDL3 HIDAPI, including the Wii U GameCube adapter), with vibration | done |
 | Fast-forward (hold Numpad 0) | done |
 | Randomizer: items, doors, enemies, music, NPC looks and voices (Biorand++) | in progress |
 
@@ -71,9 +71,7 @@ git clone --recursive https://github.com/ViolentlyVia/recvx-pc.git
 python pc/tools/build.py
 ```
 
-`build.py` downloads SDL2 into `build_pc/deps` on first run and writes `build_pc/recvx.exe` and
-`build_pc/recvx-config.exe` (add `--debug` for an unoptimised build, `--clean` to rebuild
-everything). If you cloned without `--recursive`, run `git submodule update --init --recursive`
+`build.py` builds SDL 3.4.18 from source with HIDAPI/libusb enabled for the Nintendo Wii U GameCube adapter (the first build downloads SDL's source and libusb through vcpkg). It writes `build_pc/recvx.exe` and `build_pc/recvx-config.exe`, plus `SDL3.dll` and `libusb-1.0.dll`. Add `--debug` for an unoptimised build or `--clean` to rebuild everything. If you cloned without `--recursive`, run `git submodule update --init --recursive`
 first (it also fetches BioRand's source for the randomizer).
 
 ```bash
