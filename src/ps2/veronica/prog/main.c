@@ -29,6 +29,10 @@
 #include "../../../ps2/veronica/prog/sync.h"
 #include "../../../ps2/veronica/prog/system.h"
 
+#ifdef TARGET_PC
+#include "../../../../pc/src/pc_os.h"
+#endif
+
 typedef void(*bhSysTaskJumpTab_proc)();
 
 NJS_TEXMEMLIST tbuf[256];
@@ -86,7 +90,10 @@ bhSysTaskJumpTab_proc bhSysTaskJumpTab[23] =
 
 // 100% matching!
 void njUserInit(void)
-{ 
+{
+#ifdef TARGET_PC
+    pcOsStartupLog("njUserInit: entered");
+#endif
     switch (syCblCheck())
     {              
     case 1:
@@ -121,12 +128,24 @@ void njUserInit(void)
     
     hws->vtx_total = bhCalcVtxBuffer(327680, 32768, 0xFFF70000); 
     
-    InitFirstSofdec(); 
-    
+#ifdef TARGET_PC
+    pcOsStartupLog("njUserInit: before InitFirstSofdec");
+#endif
+    InitFirstSofdec();
+#ifdef TARGET_PC
+    pcOsStartupLog("njUserInit: after InitFirstSofdec");
+#endif
+
     njSetBorderColor(0x00000000);
     
-    sbInitSystem(hws->mode, hws->frame, hws->count); 
-    
+#ifdef TARGET_PC
+    pcOsStartupLog("njUserInit: before sbInitSystem");
+#endif
+    sbInitSystem(hws->mode, hws->frame, hws->count);
+#ifdef TARGET_PC
+    pcOsStartupLog("njUserInit: after sbInitSystem");
+#endif
+
     pdSetMode(0); 
     
     npSetMemory((unsigned char*)sys, sizeof(SYS_WORK), 0); 
@@ -163,8 +182,14 @@ void njUserInit(void)
     
     npPlusInit(); 
     
-    njInitTexture(tbuf, 256); 
-    
+#ifdef TARGET_PC
+    pcOsStartupLog("njUserInit: before njInitTexture");
+#endif
+    njInitTexture(tbuf, 256);
+#ifdef TARGET_PC
+    pcOsStartupLog("njUserInit: after njInitTexture");
+#endif
+
     njSetPaletteMode(2); 
     
     njPrintSize(13); 
@@ -180,9 +205,18 @@ void njUserInit(void)
 
     BupInit(); 
   
+#ifdef TARGET_PC
+    pcOsStartupLog("njUserInit: before InitSoundProgram");
+#endif
     InitSoundProgram(0);
-    
-    Init_Expand(); 
+#ifdef TARGET_PC
+    pcOsStartupLog("njUserInit: after InitSoundProgram");
+    pcOsStartupLog("njUserInit: before Init_Expand");
+#endif
+    Init_Expand();
+#ifdef TARGET_PC
+    pcOsStartupLog("njUserInit: completed");
+#endif 
 }
 
 // 100% matching!

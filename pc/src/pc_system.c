@@ -7,6 +7,7 @@
 #include "../../include/ps2/veronica/prog/main.h"
 
 #include "pc_platform.h"
+#include "pc_os.h"
 
 extern unsigned char Ps2_tex_mem[10485760];
 
@@ -18,7 +19,9 @@ void Ps2Init()
 {
     Ps2_tex_buff = &Ps2_tex_mem;
 
+    pcOsStartupLog("Ps2Init: before pcVideoInit");
     pcVideoInit();
+    pcOsStartupLog("Ps2Init: after pcVideoInit");
 
     sceGsResetPath();
     sceGsResetGraph(0, SCE_GS_INTERLACE, SCE_GS_NTSC, SCE_GS_FIELD);
@@ -57,16 +60,24 @@ void Ps2Init()
     {
         extern void pcGsSelfTest(void);
 
+        pcOsStartupLog("Ps2Init: before pcGsSelfTest");
         pcGsSelfTest();
+        pcOsStartupLog("Ps2Init: after pcGsSelfTest");
     }
 
+    pcOsStartupLog("Ps2Init: before ClearVram");
     ClearVram();
+    pcOsStartupLog("Ps2Init: after ClearVram");
 
+    pcOsStartupLog("Ps2Init: before pcCdOpen");
     pcCdOpen();
+    pcOsStartupLog("Ps2Init: after pcCdOpen");
 
     Ps2SetVSyncCounter();
 
+    pcOsStartupLog("Ps2Init: before Ps2InitFunc");
     Ps2InitFunc();
+    pcOsStartupLog("Ps2Init: after Ps2InitFunc");
 
     Ps2DispScreenClear();
     Ps2ScreenClear();

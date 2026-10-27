@@ -293,7 +293,7 @@ void pcPlatformNotSetUp(void)
 
 void pcPlatformExeDir(char* out, int size)
 {
-    char* base = SDL_GetBasePath();
+    const char* base = SDL_GetBasePath();
     size_t n;
 
     if (base == NULL)
@@ -304,7 +304,7 @@ void pcPlatformExeDir(char* out, int size)
 
     strncpy(out, base, size - 1);
     out[size - 1] = '\0';
-    SDL_free(base);
+    /* SDL3 owns and caches this pointer; unlike SDL2, callers must not free it. */
 
     n = strlen(out);
 
@@ -500,12 +500,15 @@ static void video_settings(void)
     video_cfg.render_w = PS2_WIDTH;
     video_cfg.render_h = PS2_HEIGHT;
 
+    pcOsStartupLog("video_settings: before scale lookup");
     pcGsScale = pcIniGetInt("scale", pcGsScale);
+    pcOsStartupLog("video_settings: after scale lookup");
 
     if (pcGsScale < 1) pcGsScale = 1;
     if (pcGsScale > 8) pcGsScale = 8;
 
     /* Experimental lower internal render resolution; keep the game's logical 640x480 coordinates. */
+    pcOsStartupLog("video_settings: before render lookup");
     if (pcIniGet("render", v, sizeof(v)) &&
         (sscanf(v, "%dx%d", &w, &h) == 2) &&
         (w >= 320) && (w <= PS2_WIDTH) && (h >= 240) && (h <= PS2_HEIGHT))
@@ -513,12 +516,16 @@ static void video_settings(void)
         video_cfg.render_w = w;
         video_cfg.render_h = h;
     }
+    pcOsStartupLog("video_settings: after render lookup");
 
+    pcOsStartupLog("video_settings: before fullscreen lookup");
     if (pcIniGet("fullscreen", v, sizeof(v)))
     {
         video_cfg.fullscreen = (_stricmp(v, "desktop") == 0) ? 2 : (atoi(v) != 0);
     }
+    pcOsStartupLog("video_settings: after fullscreen lookup");
 
+    pcOsStartupLog("video_settings: before aspect lookup");
     if (pcIniGet("aspect", v, sizeof(v)) && (sscanf(v, "%d:%d", &w, &h) == 2) && (w > 0) && (h > 0))
     {
         float a = (float)w / (float)h;
@@ -530,23 +537,30 @@ static void video_settings(void)
         video_cfg.aspect = a;
         video_cfg.win_w = (int)(video_cfg.win_h * a + 0.5f);
     }
+    pcOsStartupLog("video_settings: after aspect lookup");
 
+    pcOsStartupLog("video_settings: before window-size lookup");
     if (pcIniGet("window", v, sizeof(v)) && (sscanf(v, "%dx%d", &w, &h) == 2) && (w >= 320) && (h >= 240))
     {
         video_cfg.win_w = w;
         video_cfg.win_h = h;
     }
+    pcOsStartupLog("video_settings: after window-size lookup");
 
+    pcOsStartupLog("video_settings: before window-position lookup");
     if (pcIniGet("window_pos", v, sizeof(v)) && (sscanf(v, "%d,%d", &w, &h) == 2))
     {
         video_cfg.win_x = w;
         video_cfg.win_y = h;
         video_cfg.has_pos = 1;
     }
+    pcOsStartupLog("video_settings: after window-position lookup");
 
+    pcOsStartupLog("video_settings: before integer settings");
     video_cfg.maximized = pcIniGetInt("window_max", 0) != 0;
     video_cfg.vsync = pcIniGetInt("vsync", 1) != 0;
     video_cfg.pause_unfocused = pcIniGetInt("pause_unfocused", 1) != 0;
+    pcOsStartupLog("video_settings: after integer settings");
 
     /* Keep the existing aspect-derived horizontal multiplier, then scale the backing buffer
      * to the requested internal render dimensions. The default 640x480 remains unchanged. */
@@ -678,8 +692,11 @@ void pcVideoInit(void)
         return;
     }
 
+    pcOsStartupLog("pcVideoInit: entered");
     pcOsInstallDiagnostics();
+    pcOsStartupLog("pcVideoInit: diagnostics ready");
     SDL_SetMainReady();
+    pcOsStartupLog("pcVideoInit: enabling HIDAPI/libusb GameCube adapter support");
 
     /* Built with HIDAPI/libusb support: explicitly enable the Nintendo Wii U GameCube adapter. */
     pcLog("controller: enabling HIDAPI/libusb GameCube adapter support");
@@ -688,27 +705,38 @@ void pcVideoInit(void)
     SDL_SetHint(SDL_HINT_HIDAPI_LIBUSB, "1");
     SDL_SetHint(SDL_HINT_HIDAPI_LIBUSB_GAMECUBE, "1");
 
+    pcOsStartupLog("pcVideoInit: calling SDL_Init");
     if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD | SDL_INIT_AUDIO))
     {
+        pcOsStartupLog("pcVideoInit: SDL_Init failed");
         pcPlatformFatal("SDL_Init failed: %s", SDL_GetError());
     }
+    pcOsStartupLog("pcVideoInit: SDL_Init succeeded");
 
     /* Reserve the PS2's fixed-address scratchpad before creating an OpenGL window/context.
      * Loading the graphics driver can occupy 0x70000000, which the PS2 code requires. */
+    pcOsStartupLog("pcVideoInit: reserving PS2 scratchpad");
     spr = pcOsAllocScratchpad();
 
     if (spr == NULL)
     {
+        pcOsStartupLog("pcVideoInit: scratchpad reservation failed");
         pcPlatformFatal("Could not reserve the PS2 scratchpad address range (0x70000000). See recvx.log for the address-space diagnostic.");
     }
+    pcOsStartupLog("pcVideoInit: scratchpad reservation succeeded");
 
+    pcOsStartupLog("pcVideoInit: setting OpenGL attributes");
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 3);
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
     SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
+    pcOsStartupLog("pcVideoInit: OpenGL attributes set");
 
+    pcOsStartupLog("pcVideoInit: loading video settings");
     video_settings();
+    pcOsStartupLog("pcVideoInit: video settings loaded");
 
+    pcOsStartupLog("pcVideoInit: checking saved window position");
     if (video_cfg.has_pos && position_visible(video_cfg.win_x, video_cfg.win_y, video_cfg.win_w, video_cfg.win_h))
     {
         x = video_cfg.win_x;
@@ -719,13 +747,17 @@ void pcVideoInit(void)
     {
         flags |= SDL_WINDOW_MAXIMIZED;
     }
+    pcOsStartupLog("pcVideoInit: window flags configured");
 
+    pcOsStartupLog("pcVideoInit: creating SDL window");
     window = SDL_CreateWindow("Resident Evil Code: Veronica X", video_cfg.win_w, video_cfg.win_h, flags);
 
     if (window == NULL)
     {
+        pcOsStartupLog("pcVideoInit: SDL_CreateWindow failed");
         pcPlatformFatal("Could not create the window: %s", SDL_GetError());
     }
+    pcOsStartupLog("pcVideoInit: SDL window created");
     SDL_SetWindowPosition(window, x, y);
 
     {
@@ -744,12 +776,15 @@ void pcVideoInit(void)
     atexit(save_window);
     if (video_cfg.fullscreen) set_fullscreen(1);
 
+    pcOsStartupLog("pcVideoInit: creating OpenGL context");
     gl_context = SDL_GL_CreateContext(window);
 
     if (gl_context == NULL)
     {
+        pcOsStartupLog("pcVideoInit: OpenGL context creation failed");
         pcPlatformFatal("Could not create an OpenGL 3.3 context: %s", SDL_GetError());
     }
+    pcOsStartupLog("pcVideoInit: OpenGL context created");
 
     {
         int swap_interval = video_cfg.vsync ? 1 : 0;
@@ -769,12 +804,16 @@ void pcVideoInit(void)
         }
     }
 
+    pcOsStartupLog("pcVideoInit: initializing GS renderer");
     pcGsInit(spr);
+    pcOsStartupLog("pcVideoInit: GS renderer initialized");
 
     pcPadInit();
+    pcOsStartupLog("pcVideoInit: controller initialized");
 
     pcLog("video: SDL %d.%d.%d, window %dx%d%s, aspect %.3f", SDL_MAJOR_VERSION, SDL_MINOR_VERSION, SDL_MICRO_VERSION,
           video_cfg.win_w, video_cfg.win_h, video_cfg.fullscreen ? " (fullscreen)" : "", video_cfg.aspect);
+    pcOsStartupLog("pcVideoInit: complete");
 }
 
 /* testing aids drive the game without the window being active: never pause for them */

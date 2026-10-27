@@ -3,6 +3,8 @@
 #include <windows.h>
 #include <timeapi.h>
 #include <stdint.h>
+#include <stdio.h>
+#include <string.h>
 
 #include "pc_os.h"
 
@@ -313,6 +315,55 @@ static DWORD WINAPI watchdog(LPVOID param)
             }
         }
     }
+}
+
+/* A tiny synchronous trace that does not depend on SDL, the normal logger, or its worker
+ * thread. The first call truncates the previous run; every marker is flushed before returning. */
+void pcOsStartupLog(const char* message)
+{
+    static int started;
+    char path[1024], line[768];
+    char* slash;
+    DWORD path_len, written;
+    SYSTEMTIME now;
+    HANDLE file;
+    int n;
+
+    path_len = GetModuleFileNameA(NULL, path, (DWORD)sizeof(path));
+    if ((path_len == 0) || (path_len >= sizeof(path)))
+        return;
+
+    slash = strrchr(path, '\\');
+    {
+        char* other = strrchr(path, '/');
+        if ((other != NULL) && ((slash == NULL) || (other > slash)))
+            slash = other;
+    }
+    if (slash != NULL)
+        slash[1] = '\0';
+
+    if (strlen(path) + sizeof("recvx-startup.log") >= sizeof(path))
+        return;
+    strcat(path, "recvx-startup.log");
+
+    file = CreateFileA(path, FILE_APPEND_DATA, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL,
+                       started ? OPEN_ALWAYS : CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (file == INVALID_HANDLE_VALUE)
+        return;
+    started = 1;
+
+    GetLocalTime(&now);
+    n = snprintf(line, sizeof(line), "%04u-%02u-%02u %02u:%02u:%02u.%03u  %s\r\n",
+                 now.wYear, now.wMonth, now.wDay, now.wHour, now.wMinute, now.wSecond,
+                 now.wMilliseconds, message != NULL ? message : "(null)");
+    if (n > 0)
+    {
+        if (n >= (int)sizeof(line))
+            n = (int)sizeof(line) - 1;
+        WriteFile(file, line, (DWORD)n, &written, NULL);
+        FlushFileBuffers(file);
+    }
+    CloseHandle(file);
 }
 
 /* recvx.exe is a Windows (not console) program: the log goes to recvx.log, and a console

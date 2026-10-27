@@ -55,6 +55,45 @@ jobs:
             exit $LASTEXITCODE
           }
 
+      - name: Smoke-test executable startup
+        shell: pwsh
+        run: |
+          $dir = Join-Path $env:GITHUB_WORKSPACE 'build_pc'
+          $exe = Join-Path $dir 'recvx.exe'
+          $trace = Join-Path $dir 'recvx-startup.log'
+          $log = Join-Path $dir 'recvx.log'
+          Remove-Item $trace, $log -Force -ErrorAction SilentlyContinue
+
+          # The runner has no game disc, so the app may stop at the setup prompt.
+          # Verify startup reaches SDL, creates an OpenGL context, and record any earlier failure.
+          $proc = Start-Process -FilePath $exe -WorkingDirectory $dir -PassThru -WindowStyle Hidden
+          try {
+            $null = $proc.WaitForExit(10000)
+          } finally {
+            if (-not $proc.HasExited) {
+              Stop-Process -Id $proc.Id -Force
+              $proc.WaitForExit()
+            }
+          }
+
+          if (Test-Path $trace) {
+            Write-Host '--- recvx-startup.log ---'
+            Get-Content $trace
+          } else {
+            throw 'recvx-startup.log was not created: recvx did not reach main(), or could not write beside the executable.'
+          }
+          if (Test-Path $log) {
+            Write-Host '--- recvx.log ---'
+            Get-Content $log -Tail 100
+          }
+          if (-not (Select-String -Path $trace -Pattern 'main entered' -Quiet)) {
+            throw 'The startup trace does not confirm entry to main().'
+          }
+          if (-not (Select-String -Path $trace -Pattern 'pcVideoInit: OpenGL context created' -Quiet)) {
+            throw 'recvx did not reach a working SDL window and OpenGL context; see the startup trace above.'
+          }
+          Write-Host 'Startup smoke test passed: main, SDL initialization, window, and OpenGL context.'
+
       - name: Verify executables
         shell: pwsh
         run: |
