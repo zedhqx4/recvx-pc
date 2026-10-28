@@ -11,6 +11,8 @@
 #include "../../../ps2/veronica/prog/ps2_Vu1Strip.h"
 #ifdef TARGET_PC
 #include "../../../../pc/include/pc_game_profile.h"
+void pcVu0CalcPointN(const float* in, void* out, int n);
+int pcVu0CalcPointBatchEnabled(void);
 #endif
 
 static VU1_STRIP_BUF* pNaCnkVerBufTop;
@@ -1541,6 +1543,26 @@ CHUNK_HEAD* njCnkCvVnPs2(CHUNK_HEAD* pCnk)
     
     fpCnk += 8;
     
+#ifdef TARGET_PC
+    if ((ulIndex != 0) && pcVu0CalcPointBatchEnabled())
+    {
+        pcVu0CalcPointN(fpCnk, pBuffer, (int)ulIndex);
+
+        pBuffer[-1].fFog = njCalcFogPowerEx(fog);
+        for (; ulIndex != 1; ulIndex--, pBuffer++, fpCnk += 8)
+        {
+            pBuffer->fFog = njCalcFogPowerEx(pBuffer->fFog);
+        }
+
+        fog = pBuffer->fFog;
+        Vu0ClipFlag = a2c_cfc2(11);
+
+        ulIndex--;
+        pBuffer++;
+        fpCnk += 8;
+    }
+#endif
+
     while (ulIndex != 0)
     {
 #ifdef TARGET_PC
