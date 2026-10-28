@@ -342,6 +342,13 @@ static void pcGsDeleteTextures(GLsizei n, const GLuint* textures)
     memset(pcGsGlState.texture_2d_valid, 0, sizeof(pcGsGlState.texture_2d_valid));
 }
 
+/* gs_replace.c uses raw OpenGL texture calls. Invalidate its side effects before
+ * returning to the renderer's cached binding path. */
+static void pcGsInvalidateTextureBindings(void)
+{
+    memset(pcGsGlState.texture_2d_valid, 0, sizeof(pcGsGlState.texture_2d_valid));
+}
+
 /* ------------------------------------------------------------------------------------------- */
 /* shaders */
 
@@ -1017,7 +1024,10 @@ static GLuint get_texture(u64 tex0, u64 texa, u64 texclut, int w, int h, int row
 
     {
         extern GLuint gsReplaceLookup(u64 tex0, u64 texa);
-        GLuint r = gsReplaceLookup(tex0, texa);
+        GLuint r;
+
+        pcGsInvalidateTextureBindings();
+        r = gsReplaceLookup(tex0, texa);
 
         if (r != 0)
         {
