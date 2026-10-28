@@ -1,5 +1,6 @@
 #ifdef TARGET_PC
 #include <stdio.h>
+#include "../../../../pc/include/pc_game_profile.h"
 #endif
 #include "../../../ps2/veronica/prog/ps2_dummy.h"
 #include "../../../ps2/veronica/prog/ps2_loadtim2.h"
@@ -2488,6 +2489,13 @@ int Ps2TexLoad(NJS_TEXMEMLIST* addr)
     TIM2_PICTUREHEADER_EX* timp; 
     unsigned int cache_flag;  
     unsigned int temp; // not from the debugging symbols
+#ifdef TARGET_PC
+    int profile_texture = pcGameProfileEnabled();
+    double profile_texload_t0 = profile_texture ? pcGameProfileNowMs() : 0.0;
+    double profile_send_t0 = 0.0;
+    double profile_send_ms = 0.0;
+    unsigned int profile_send_calls = 0;
+#endif
 
     cache_flag = 1;
 
@@ -2529,7 +2537,22 @@ label:
         
         if ((PS2_Render_tex_sub_flag == 0) || ((timp->PictFormat >= 5) && (timp->PictFormat <= 8)) || ((timp->ImageType == 4) || (timp->ImageType == 5)))
         {
+#ifdef TARGET_PC
+            if (profile_texture)
+            {
+                profile_send_t0 = pcGameProfileNowMs();
+                pcGameProfileSetTextureUploadScope(1);
+            }
+#endif
             Send_Tim2_dataEx(Ps2_tex_cache_buff[0], 190 * 64, 254 * 64);
+#ifdef TARGET_PC
+            if (profile_texture)
+            {
+                pcGameProfileSetTextureUploadScope(0);
+                profile_send_ms += pcGameProfileNowMs() - profile_send_t0;
+                profile_send_calls++;
+            }
+#endif
         }
     }
 
@@ -2614,6 +2637,13 @@ label:
 
     loadImage((void*)0xF0000000);
 
+#ifdef TARGET_PC
+    if (profile_texture)
+    {
+        pcGameProfileRecordTextureLoad(pcGameProfileNowMs() - profile_texload_t0,
+                                       profile_send_ms, profile_send_calls);
+    }
+#endif
     return cache_flag;
 }
 
