@@ -616,7 +616,6 @@ static GLuint get_texture(u64 tex0, u64 texa, u64 texclut, int w, int h, int row
     u64 key1 = ((psm == GS_PSMCT24) || (gsPsmBits(psm) == 16) || (GSF(tex0, 51, 4) >= 2)) ? texa : 0;
     u64 key2 = gsClutHash(tex0);   /* palette contents (0-entry hash for direct color) */
     int pw, ph, i, slot = -1, oldest = 0, cached_slot;
-    unsigned int hash_bucket;
     unsigned int page_lo, page_hi, clut_page, stride;
     unsigned long long gen;
     CachedTex* t;
