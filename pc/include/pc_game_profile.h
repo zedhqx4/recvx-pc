@@ -13,7 +13,7 @@ enum
 int pcGameProfileEnabled(void);
 double pcGameProfileNowMs(void);
 void pcGameProfileSetScope(int scope);
-int pcGameProfileGetScope(void);
+extern int pcGameProfileScope;
 void pcGameProfileRecordCnk(int scope, double vlist_ms, double plist_ms,
                             unsigned int model_calls, unsigned int plist_chunks);
 #endif
