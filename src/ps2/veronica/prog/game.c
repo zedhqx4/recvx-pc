@@ -26,7 +26,7 @@ enum
     GP_EFFECT_UPDATE, GP_OBJECT_UPDATE, GP_CAMERA, GP_LIGHT,
     GP_DRAW_MODEL, GP_RENDER_TEXTURE, GP_MIRROR, GP_OVERLAYS, GP_OTHER,
     GP_MODEL_ROOM, GP_MODEL_ENEOBJ, GP_MODEL_EFFECT, GP_MODEL_OBJITEM,
-    GP_MODEL_ENEMY, GP_MODEL_PLAYER, GP_MODEL_WATER, GP_COUNT
+    GP_MODEL_ENEMY, GP_MODEL_PLAYER, GP_MODEL_WATER, GP_MODEL_MISC, GP_COUNT
 };
 
 static struct
@@ -122,14 +122,15 @@ static void pcGameProfileEnd(int loop_ct, double total_ms)
               game_profile.sum[GP_OVERLAYS] / n, game_profile.max[GP_OVERLAYS],
               game_profile.sum[GP_OTHER] / n, game_profile.max[GP_OTHER]);
 
-        pcLog("PROFILE bhAllDrawModel avg/max ms: room geometry %.2f/%.2f enemy objects %.2f/%.2f effects %.2f/%.2f objects/items %.2f/%.2f enemies %.2f/%.2f player %.2f/%.2f water %.2f/%.2f",
+        pcLog("PROFILE bhAllDrawModel avg/max ms: room geometry %.2f/%.2f enemy objects %.2f/%.2f effects %.2f/%.2f objects/items %.2f/%.2f enemies %.2f/%.2f player %.2f/%.2f water %.2f/%.2f other/setup %.2f/%.2f",
               game_profile.sum[GP_MODEL_ROOM] / n, game_profile.max[GP_MODEL_ROOM],
               game_profile.sum[GP_MODEL_ENEOBJ] / n, game_profile.max[GP_MODEL_ENEOBJ],
               game_profile.sum[GP_MODEL_EFFECT] / n, game_profile.max[GP_MODEL_EFFECT],
               game_profile.sum[GP_MODEL_OBJITEM] / n, game_profile.max[GP_MODEL_OBJITEM],
               game_profile.sum[GP_MODEL_ENEMY] / n, game_profile.max[GP_MODEL_ENEMY],
               game_profile.sum[GP_MODEL_PLAYER] / n, game_profile.max[GP_MODEL_PLAYER],
-              game_profile.sum[GP_MODEL_WATER] / n, game_profile.max[GP_MODEL_WATER]);
+              game_profile.sum[GP_MODEL_WATER] / n, game_profile.max[GP_MODEL_WATER],
+              game_profile.sum[GP_MODEL_MISC] / n, game_profile.max[GP_MODEL_MISC]);
 
         pcLog("PROFILE worst frame %.2f ms: pre %.2f anim %.2f enemy-up %.2f player-up %.2f effects-up %.2f objects-up %.2f camera %.2f light %.2f draw-model %.2f mirror %.2f overlays %.2f other %.2f",
               game_profile.worst_total,
@@ -475,6 +476,18 @@ void bhAllDrawModel()
 {
 #ifdef TARGET_PC
     int profile = pcGameProfileEnabled();
+    double model_profile_start = 0.0;
+    double model_profile_children_start = 0.0;
+
+    if (profile)
+    {
+        model_profile_start = pcGameProfileNowMs();
+        model_profile_children_start =
+            game_profile.frame[GP_MODEL_ROOM] + game_profile.frame[GP_MODEL_ENEOBJ] +
+            game_profile.frame[GP_MODEL_EFFECT] + game_profile.frame[GP_MODEL_OBJITEM] +
+            game_profile.frame[GP_MODEL_ENEMY] + game_profile.frame[GP_MODEL_PLAYER] +
+            game_profile.frame[GP_MODEL_WATER];
+    }
 #endif
     njControl3D(0x2500);
     njSetCheapShadowMode(0x80);
@@ -534,6 +547,18 @@ void bhAllDrawModel()
     njControl3D(0x2400);
     PC_PROFILE_CALL(profile, GP_MODEL_WATER, bhDrawGeneralPurposeWater());
     njControl3D(0);
+#ifdef TARGET_PC
+    if (profile)
+    {
+        double children_ms =
+            game_profile.frame[GP_MODEL_ROOM] + game_profile.frame[GP_MODEL_ENEOBJ] +
+            game_profile.frame[GP_MODEL_EFFECT] + game_profile.frame[GP_MODEL_OBJITEM] +
+            game_profile.frame[GP_MODEL_ENEMY] + game_profile.frame[GP_MODEL_PLAYER] +
+            game_profile.frame[GP_MODEL_WATER] - model_profile_children_start;
+        double model_ms = pcGameProfileNowMs() - model_profile_start;
+        pcGameProfileAdd(GP_MODEL_MISC, model_ms - children_ms);
+    }
+#endif
 }
 
 // 100% matching
