@@ -504,7 +504,7 @@ void bhAllDrawModel()
     njCnkSetSimpleMultiAmbient(rom->amb_r[rom->amb_chr], rom->amb_g[rom->amb_chr], rom->amb_b[rom->amb_chr]);
     if (Ps2_albinoid_flag == 0) {
         if (sys->pt_flg & 0x10) {
-            bhDrawEffect();
+            PC_PROFILE_CALL(profile, GP_MODEL_EFFECT, bhDrawEffect());
         }
     }
     njControl3D(0);
@@ -523,7 +523,7 @@ void bhAllDrawModel()
                     PC_PROFILE_CALL(profile, GP_MODEL_PLAYER, bhPutModel(plp));
                 }
             } else {
-                bhPutModel(plp);
+                PC_PROFILE_CALL(profile, GP_MODEL_PLAYER, bhPutModel(plp));
             }
         }
     }
