@@ -68,11 +68,6 @@ void pcGameProfileSetScope(int scope)
                           scope <= PC_GAME_PROFILE_SCOPE_MISC) ? scope : PC_GAME_PROFILE_SCOPE_NONE;
 }
 
-int pcGameProfileGetScope(void)
-{
-    return pcGameProfileScope;
-}
-
 void pcGameProfileRecordCnk(int scope, double vlist_ms, double plist_ms,
                             unsigned int model_calls, unsigned int plist_chunks)
 {
