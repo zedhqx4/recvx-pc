@@ -684,7 +684,7 @@ int njCnkDrawModelLocal(NJS_CNK_MODEL* pModel)
     unsigned int modelclipflag; 
     float temp, temp2; // not from the debugging symbols
 #ifdef TARGET_PC
-    int profile_scope = pcGameProfileGetScope();
+    int profile_scope = pcGameProfileScope;
     double profile_vlist_ms = 0.0;
     double profile_plist_ms = 0.0;
     double profile_t0 = 0.0;
