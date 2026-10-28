@@ -38,7 +38,7 @@ static struct
     int active;
 } game_profile;
 
-static int game_profile_scope;
+int pcGameProfileScope;
 static struct
 {
     double frame_vlist[4], sum_vlist[4], max_vlist[4];
@@ -64,13 +64,13 @@ double pcGameProfileNowMs(void)
 
 void pcGameProfileSetScope(int scope)
 {
-    game_profile_scope = (scope >= PC_GAME_PROFILE_SCOPE_NONE &&
+    pcGameProfileScope = (scope >= PC_GAME_PROFILE_SCOPE_NONE &&
                           scope <= PC_GAME_PROFILE_SCOPE_MISC) ? scope : PC_GAME_PROFILE_SCOPE_NONE;
 }
 
 int pcGameProfileGetScope(void)
 {
-    return game_profile_scope;
+    return pcGameProfileScope;
 }
 
 void pcGameProfileRecordCnk(int scope, double vlist_ms, double plist_ms,
@@ -240,7 +240,7 @@ static void pcGameProfileEnd(int loop_ct, double total_ms)
     do { if (enabled) { double _profile_t0 = pcGameProfileNowMs(); call; \
          pcGameProfileAdd((slot), pcGameProfileNowMs() - _profile_t0); } else { call; } } while (0)
 #define PC_PROFILE_SCOPE_CALL(enabled, scope, slot, call) \
-    do { if (enabled) { int _old_scope = pcGameProfileGetScope(); \
+    do { if (enabled) { int _old_scope = pcGameProfileScope; \
          double _profile_t0 = pcGameProfileNowMs(); \
          pcGameProfileSetScope(scope); call; pcGameProfileSetScope(_old_scope); \
          pcGameProfileAdd((slot), pcGameProfileNowMs() - _profile_t0); } else { call; } } while (0)
