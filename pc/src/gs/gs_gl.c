@@ -44,6 +44,304 @@ int pcGlLoad(void)
     return 1;
 }
 
+/* Redundant OpenGL state changes are expensive on the CPU-side driver path.
+ * Keep this cache in one place and route every state change in this renderer
+ * through the wrappers below. Unknown state always falls back to OpenGL. */
+#define PC_GS_TEXTURE_UNITS_TRACKED 32
+
+typedef struct {
+    int valid;
+    GLuint value;
+} PcGsGlObjectState;
+
+typedef struct {
+    int read_fbo_valid, draw_fbo_valid;
+    GLuint read_fbo, draw_fbo;
+
+    int viewport_valid;
+    GLint viewport[4];
+
+    int scissor_valid;
+    GLint scissor[4];
+
+    int depth_func_valid;
+    GLenum depth_func;
+    int depth_mask_valid;
+    GLboolean depth_mask;
+
+    int color_mask_valid;
+    GLboolean color_mask[4];
+
+    int blend_color_valid;
+    GLfloat blend_color[4];
+    int blend_equation_valid;
+    GLenum blend_equation_rgb, blend_equation_alpha;
+    int blend_func_valid;
+    GLenum blend_src_rgb, blend_dst_rgb, blend_src_alpha, blend_dst_alpha;
+
+    unsigned char cap_valid[3];
+    unsigned char cap_enabled[3];
+
+    int program_valid;
+    GLuint program;
+    int vao_valid;
+    GLuint vao;
+    int array_buffer_valid;
+    GLuint array_buffer;
+
+    int active_texture_valid;
+    GLenum active_texture;
+    unsigned char texture_2d_valid[PC_GS_TEXTURE_UNITS_TRACKED];
+    GLuint texture_2d[PC_GS_TEXTURE_UNITS_TRACKED];
+} PcGsGlState;
+
+static PcGsGlState pcGsGlState;
+
+static void pcGsGlStateResetCache(void)
+{
+    memset(&pcGsGlState, 0, sizeof(pcGsGlState));
+}
+
+static int pcGsGlCapIndex(GLenum cap)
+{
+    switch (cap)
+    {
+    case GL_BLEND: return 0;
+    case GL_DEPTH_TEST: return 1;
+    case GL_SCISSOR_TEST: return 2;
+    default: return -1;
+    }
+}
+
+static int pcGsGlTextureUnitIndex(GLenum unit)
+{
+    if ((unit < GL_TEXTURE0) || (unit >= GL_TEXTURE0 + PC_GS_TEXTURE_UNITS_TRACKED))
+        return -1;
+    return (int)(unit - GL_TEXTURE0);
+}
+
+static void pcGsBindFramebuffer(GLenum target, GLuint fbo)
+{
+    int skip = 0;
+
+    if (target == GL_FRAMEBUFFER)
+    {
+        skip = pcGsGlState.read_fbo_valid && pcGsGlState.draw_fbo_valid &&
+               (pcGsGlState.read_fbo == fbo) && (pcGsGlState.draw_fbo == fbo);
+    }
+    else if (target == GL_READ_FRAMEBUFFER)
+    {
+        skip = pcGsGlState.read_fbo_valid && (pcGsGlState.read_fbo == fbo);
+    }
+    else if (target == GL_DRAW_FRAMEBUFFER)
+    {
+        skip = pcGsGlState.draw_fbo_valid && (pcGsGlState.draw_fbo == fbo);
+    }
+
+    if (skip)
+        return;
+
+    glBindFramebuffer(target, fbo);
+
+    if (target == GL_FRAMEBUFFER)
+    {
+        pcGsGlState.read_fbo_valid = pcGsGlState.draw_fbo_valid = 1;
+        pcGsGlState.read_fbo = pcGsGlState.draw_fbo = fbo;
+    }
+    else if (target == GL_READ_FRAMEBUFFER)
+    {
+        pcGsGlState.read_fbo_valid = 1;
+        pcGsGlState.read_fbo = fbo;
+    }
+    else if (target == GL_DRAW_FRAMEBUFFER)
+    {
+        pcGsGlState.draw_fbo_valid = 1;
+        pcGsGlState.draw_fbo = fbo;
+    }
+    else
+    {
+        pcGsGlState.read_fbo_valid = pcGsGlState.draw_fbo_valid = 0;
+    }
+}
+
+static void pcGsDeleteFramebuffers(GLsizei n, const GLuint* framebuffers)
+{
+    glDeleteFramebuffers(n, framebuffers);
+    /* A deleted framebuffer name can be reused by GL; don't trust stale names. */
+    pcGsGlState.read_fbo_valid = pcGsGlState.draw_fbo_valid = 0;
+}
+
+static void pcGsViewport(GLint x, GLint y, GLsizei w, GLsizei h)
+{
+    GLint value[4] = { x, y, w, h };
+    if (pcGsGlState.viewport_valid && memcmp(pcGsGlState.viewport, value, sizeof(value)) == 0)
+        return;
+
+    glViewport(x, y, w, h);
+    memcpy(pcGsGlState.viewport, value, sizeof(value));
+    pcGsGlState.viewport_valid = 1;
+}
+
+static void pcGsScissor(GLint x, GLint y, GLsizei w, GLsizei h)
+{
+    GLint value[4] = { x, y, w, h };
+    if (pcGsGlState.scissor_valid && memcmp(pcGsGlState.scissor, value, sizeof(value)) == 0)
+        return;
+
+    glScissor(x, y, w, h);
+    memcpy(pcGsGlState.scissor, value, sizeof(value));
+    pcGsGlState.scissor_valid = 1;
+}
+
+static void pcGsSetCapability(GLenum cap, int enabled)
+{
+    int index = pcGsGlCapIndex(cap);
+
+    if (index < 0)
+    {
+        if (enabled) glEnable(cap); else glDisable(cap);
+        return;
+    }
+
+    if (pcGsGlState.cap_valid[index] && pcGsGlState.cap_enabled[index] == (unsigned char)enabled)
+        return;
+
+    if (enabled) glEnable(cap); else glDisable(cap);
+    pcGsGlState.cap_valid[index] = 1;
+    pcGsGlState.cap_enabled[index] = (unsigned char)enabled;
+}
+
+static void pcGsEnable(GLenum cap)  { pcGsSetCapability(cap, 1); }
+static void pcGsDisable(GLenum cap) { pcGsSetCapability(cap, 0); }
+
+static void pcGsDepthFunc(GLenum func)
+{
+    if (pcGsGlState.depth_func_valid && pcGsGlState.depth_func == func)
+        return;
+    glDepthFunc(func);
+    pcGsGlState.depth_func_valid = 1;
+    pcGsGlState.depth_func = func;
+}
+
+static void pcGsDepthMask(GLboolean mask)
+{
+    if (pcGsGlState.depth_mask_valid && pcGsGlState.depth_mask == mask)
+        return;
+    glDepthMask(mask);
+    pcGsGlState.depth_mask_valid = 1;
+    pcGsGlState.depth_mask = mask;
+}
+
+static void pcGsColorMask(GLboolean r, GLboolean g, GLboolean b, GLboolean a)
+{
+    GLboolean value[4] = { r, g, b, a };
+    if (pcGsGlState.color_mask_valid && memcmp(pcGsGlState.color_mask, value, sizeof(value)) == 0)
+        return;
+    glColorMask(r, g, b, a);
+    memcpy(pcGsGlState.color_mask, value, sizeof(value));
+    pcGsGlState.color_mask_valid = 1;
+}
+
+static void pcGsBlendColor(GLfloat r, GLfloat g, GLfloat b, GLfloat a)
+{
+    GLfloat value[4] = { r, g, b, a };
+    if (pcGsGlState.blend_color_valid && memcmp(pcGsGlState.blend_color, value, sizeof(value)) == 0)
+        return;
+    glBlendColor(r, g, b, a);
+    memcpy(pcGsGlState.blend_color, value, sizeof(value));
+    pcGsGlState.blend_color_valid = 1;
+}
+
+static void pcGsBlendEquationSeparate(GLenum rgb, GLenum alpha)
+{
+    if (pcGsGlState.blend_equation_valid &&
+        pcGsGlState.blend_equation_rgb == rgb && pcGsGlState.blend_equation_alpha == alpha)
+        return;
+    glBlendEquationSeparate(rgb, alpha);
+    pcGsGlState.blend_equation_valid = 1;
+    pcGsGlState.blend_equation_rgb = rgb;
+    pcGsGlState.blend_equation_alpha = alpha;
+}
+
+static void pcGsBlendFuncSeparate(GLenum src_rgb, GLenum dst_rgb, GLenum src_alpha, GLenum dst_alpha)
+{
+    if (pcGsGlState.blend_func_valid &&
+        pcGsGlState.blend_src_rgb == src_rgb && pcGsGlState.blend_dst_rgb == dst_rgb &&
+        pcGsGlState.blend_src_alpha == src_alpha && pcGsGlState.blend_dst_alpha == dst_alpha)
+        return;
+    glBlendFuncSeparate(src_rgb, dst_rgb, src_alpha, dst_alpha);
+    pcGsGlState.blend_func_valid = 1;
+    pcGsGlState.blend_src_rgb = src_rgb;
+    pcGsGlState.blend_dst_rgb = dst_rgb;
+    pcGsGlState.blend_src_alpha = src_alpha;
+    pcGsGlState.blend_dst_alpha = dst_alpha;
+}
+
+static void pcGsUseProgram(GLuint program)
+{
+    if (pcGsGlState.program_valid && pcGsGlState.program == program)
+        return;
+    glUseProgram(program);
+    pcGsGlState.program_valid = 1;
+    pcGsGlState.program = program;
+}
+
+static void pcGsBindVertexArray(GLuint vao)
+{
+    if (pcGsGlState.vao_valid && pcGsGlState.vao == vao)
+        return;
+    glBindVertexArray(vao);
+    pcGsGlState.vao_valid = 1;
+    pcGsGlState.vao = vao;
+}
+
+static void pcGsBindBuffer(GLenum target, GLuint buffer)
+{
+    if (target == GL_ARRAY_BUFFER)
+    {
+        if (pcGsGlState.array_buffer_valid && pcGsGlState.array_buffer == buffer)
+            return;
+        glBindBuffer(target, buffer);
+        pcGsGlState.array_buffer_valid = 1;
+        pcGsGlState.array_buffer = buffer;
+        return;
+    }
+    glBindBuffer(target, buffer);
+}
+
+static void pcGsActiveTexture(GLenum unit)
+{
+    if (pcGsGlState.active_texture_valid && pcGsGlState.active_texture == unit)
+        return;
+    glActiveTexture(unit);
+    pcGsGlState.active_texture_valid = 1;
+    pcGsGlState.active_texture = unit;
+}
+
+static void pcGsBindTexture(GLenum target, GLuint texture)
+{
+    int unit = pcGsGlState.active_texture_valid ? pcGsGlTextureUnitIndex(pcGsGlState.active_texture) : -1;
+
+    if ((target == GL_TEXTURE_2D) && (unit >= 0))
+    {
+        if (pcGsGlState.texture_2d_valid[unit] && pcGsGlState.texture_2d[unit] == texture)
+            return;
+        glBindTexture(target, texture);
+        pcGsGlState.texture_2d_valid[unit] = 1;
+        pcGsGlState.texture_2d[unit] = texture;
+        return;
+    }
+
+    glBindTexture(target, texture);
+}
+
+static void pcGsDeleteTextures(GLsizei n, const GLuint* textures)
+{
+    glDeleteTextures(n, textures);
+    /* Deletion unbinds matching textures and may allow the numeric name to be reused. */
+    memset(pcGsGlState.texture_2d_valid, 0, sizeof(pcGsGlState.texture_2d_valid));
+}
+
 /* ------------------------------------------------------------------------------------------- */
 /* shaders */
 
@@ -315,7 +613,7 @@ static GLuint make_texture(int w, int h, GLint ifmt, GLenum fmt, GLenum type, GL
     GLuint t;
 
     glGenTextures(1, &t);
-    glBindTexture(GL_TEXTURE_2D, t);
+    pcGsBindTexture(GL_TEXTURE_2D, t);
     glTexImage2D(GL_TEXTURE_2D, 0, ifmt, w, h, 0, fmt, type, NULL);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, filter);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, filter);
@@ -377,8 +675,8 @@ static RenderTarget* get_rt(unsigned int fbp, unsigned int fbw)
 
     if (rt->used)
     {
-        glDeleteFramebuffers(1, &rt->fbo);
-        glDeleteTextures(1, &rt->color);
+        pcGsDeleteFramebuffers(1, &rt->fbo);
+        pcGsDeleteTextures(1, &rt->color);
     }
 
     memset(rt, 0, sizeof(*rt));
@@ -390,7 +688,7 @@ static RenderTarget* get_rt(unsigned int fbp, unsigned int fbw)
     rt->color = make_texture(gs_scale_x(rt->w), gs_scale_y(rt->h), GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE, GL_LINEAR);
 
     glGenFramebuffers(1, &rt->fbo);
-    glBindFramebuffer(GL_FRAMEBUFFER, rt->fbo);
+    pcGsBindFramebuffer(GL_FRAMEBUFFER, rt->fbo);
     glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, rt->color, 0);
 
     /* start from whatever GS memory holds there (normally cleared) */
@@ -694,7 +992,7 @@ static GLuint get_texture(u64 tex0, u64 texa, u64 texclut, int w, int h, int row
 
         if (!texcache[slot].hd)
         {
-            glDeleteTextures(1, &texcache[slot].tex);
+            pcGsDeleteTextures(1, &texcache[slot].tex);
             tex_cached--;
             tex_cached_bytes -= (double)texcache[slot].w * texcache[slot].h * 4;
         }
@@ -763,14 +1061,14 @@ void pcGsMovieFrame(unsigned int tbp, const unsigned char* rgba, int w, int h, i
     {
         if (movie_tex != 0)
         {
-            glDeleteTextures(1, &movie_tex);
+            pcGsDeleteTextures(1, &movie_tex);
         }
 
         movie_size = 512 * scale;
         movie_tex = make_texture(movie_size, movie_size, GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE, GL_LINEAR);
     }
 
-    glBindTexture(GL_TEXTURE_2D, movie_tex);
+    pcGsBindTexture(GL_TEXTURE_2D, movie_tex);
     glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
     glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, w, h, GL_RGBA, GL_UNSIGNED_BYTE, rgba);
     movie_tbp = tbp;
@@ -863,7 +1161,7 @@ static void rt_load_rows(RenderTarget* rt, int y0, int y1)
         }
     }
 
-    glBindTexture(GL_TEXTURE_2D, rt->color);
+    pcGsBindTexture(GL_TEXTURE_2D, rt->color);
     glTexSubImage2D(GL_TEXTURE_2D, 0, 0, py0, rw, out_h, GL_RGBA, GL_UNSIGNED_BYTE, buf);
     free(buf);
 
@@ -981,29 +1279,29 @@ void gsFlushLocalToLocal(unsigned int bp, unsigned int bw, unsigned int psm, uns
             {
                 if (down_fbo != 0)
                 {
-                    glDeleteFramebuffers(1, &down_fbo);
-                    glDeleteTextures(1, &down_tex);
+                    pcGsDeleteFramebuffers(1, &down_fbo);
+                    pcGsDeleteTextures(1, &down_tex);
                 }
 
                 down_tex = make_texture(rt->w, rt->h, GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE, GL_NEAREST);
                 glGenFramebuffers(1, &down_fbo);
-                glBindFramebuffer(GL_FRAMEBUFFER, down_fbo);
+                pcGsBindFramebuffer(GL_FRAMEBUFFER, down_fbo);
                 glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, down_tex, 0);
                 down_w = rt->w;
                 down_h = rt->h;
             }
 
             /* one sample per PS2 pixel, as before, but picked on the GPU */
-            glDisable(GL_SCISSOR_TEST);
-            glBindFramebuffer(GL_READ_FRAMEBUFFER, rt->fbo);
-            glBindFramebuffer(GL_DRAW_FRAMEBUFFER, down_fbo);
+            pcGsDisable(GL_SCISSOR_TEST);
+            pcGsBindFramebuffer(GL_READ_FRAMEBUFFER, rt->fbo);
+            pcGsBindFramebuffer(GL_DRAW_FRAMEBUFFER, down_fbo);
             glBlitFramebuffer(0, 0, gs_scale_x(rt->w), gs_scale_y(rows), 0, 0, rt->w, rows, GL_COLOR_BUFFER_BIT, GL_NEAREST);
 
             buf = malloc(rt->w * rows * 4);
-            glBindFramebuffer(GL_FRAMEBUFFER, down_fbo);
+            pcGsBindFramebuffer(GL_FRAMEBUFFER, down_fbo);
             glPixelStorei(GL_PACK_ALIGNMENT, 4);
             glReadPixels(0, 0, rt->w, rows, GL_RGBA, GL_UNSIGNED_BYTE, buf);
-            glBindFramebuffer(GL_FRAMEBUFFER, rt->fbo);
+            pcGsBindFramebuffer(GL_FRAMEBUFFER, rt->fbo);
 
             for (py = 0; py < rows; py++)
             {
@@ -1033,6 +1331,7 @@ void gsFlushLocalToLocal(unsigned int bp, unsigned int bw, unsigned int psm, uns
 void gsRendererInit(void)
 {
     texture_cache_init();
+    pcGsGlStateResetCache();
 
     if (!pcGlLoad())
     {
@@ -1054,9 +1353,9 @@ void gsRendererInit(void)
 #undef UL
 
     glGenVertexArrays(1, &vao);
-    glBindVertexArray(vao);
+    pcGsBindVertexArray(vao);
     glGenBuffers(1, &vbo);
-    glBindBuffer(GL_ARRAY_BUFFER, vbo);
+    pcGsBindBuffer(GL_ARRAY_BUFFER, vbo);
 
     glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(GlVertex), (void*)offsetof(GlVertex, x));
     glVertexAttribPointer(1, 4, GL_UNSIGNED_BYTE, GL_TRUE, sizeof(GlVertex), (void*)offsetof(GlVertex, r));
@@ -1159,12 +1458,12 @@ static void setup_blend(const GsDrawState* st)
 
     if (!st->abe)
     {
-        glDisable(GL_BLEND);
+        pcGsDisable(GL_BLEND);
         return;
     }
 
-    glEnable(GL_BLEND);
-    glBlendColor(0, 0, 0, GSF(st->alpha, 32, 8) / 128.0f);
+    pcGsEnable(GL_BLEND);
+    pcGsBlendColor(0, 0, 0, GSF(st->alpha, 32, 8) / 128.0f);
 
     {
         static unsigned char seen[256];
@@ -1213,8 +1512,8 @@ static void setup_blend(const GsDrawState* st)
     }
 
     /* the written alpha is As (never blended) */
-    glBlendEquationSeparate(eq, GL_FUNC_ADD);
-    glBlendFuncSeparate(src, dst, GL_ONE, GL_ZERO);
+    pcGsBlendEquationSeparate(eq, GL_FUNC_ADD);
+    pcGsBlendFuncSeparate(src, dst, GL_ONE, GL_ZERO);
 }
 
 /* how many texture rows (vertical = 1) or columns a draw can sample, or size when it may wrap or the
@@ -1441,8 +1740,8 @@ void gsRendererDraw(const GsDrawState* st, const GsVertex* v, int nverts)
         perf_phase_start = now;
     }
 
-    glBindFramebuffer(GL_FRAMEBUFFER, rt->fbo);
-    glViewport(0, 0, gs_scale_x(rt->w), gs_scale_y(rt->h));
+    pcGsBindFramebuffer(GL_FRAMEBUFFER, rt->fbo);
+    pcGsViewport(0, 0, gs_scale_x(rt->w), gs_scale_y(rt->h));
 
     /* depth */
     if (use_depth)
@@ -1455,14 +1754,14 @@ void gsRendererDraw(const GsDrawState* st, const GsVertex* v, int nverts)
             rt->depth_attached = db->tex;
         }
 
-        glEnable(GL_DEPTH_TEST);
-        glDepthFunc((ztst == 0) ? GL_NEVER : (ztst == 1) ? GL_ALWAYS : (ztst == 2) ? GL_GEQUAL : GL_GREATER);
-        glDepthMask(zmsk ? GL_FALSE : GL_TRUE);
+        pcGsEnable(GL_DEPTH_TEST);
+        pcGsDepthFunc((ztst == 0) ? GL_NEVER : (ztst == 1) ? GL_ALWAYS : (ztst == 2) ? GL_GEQUAL : GL_GREATER);
+        pcGsDepthMask(zmsk ? GL_FALSE : GL_TRUE);
     }
     else
     {
-        glDisable(GL_DEPTH_TEST);
-        glDepthMask(GL_FALSE);
+        pcGsDisable(GL_DEPTH_TEST);
+        pcGsDepthMask(GL_FALSE);
     }
 
     /* scissor */
@@ -1472,16 +1771,16 @@ void gsRendererDraw(const GsDrawState* st, const GsVertex* v, int nverts)
 
         int sx0 = gs_scale_x(x0), sy0 = gs_scale_y(y0);
         int sx1 = gs_scale_x(x1 + 1), sy1 = gs_scale_y(y1 + 1);
-        glEnable(GL_SCISSOR_TEST);
-        glScissor(sx0, sy0, sx1 - sx0, sy1 - sy0);
+        pcGsEnable(GL_SCISSOR_TEST);
+        pcGsScissor(sx0, sy0, sx1 - sx0, sy1 - sy0);
     }
 
-    glColorMask((fbmsk & 0xFF) != 0xFF, (fbmsk & 0xFF00) != 0xFF00, (fbmsk & 0xFF0000) != 0xFF0000,
+    pcGsColorMask((fbmsk & 0xFF) != 0xFF, (fbmsk & 0xFF00) != 0xFF00, (fbmsk & 0xFF0000) != 0xFF0000,
                 ((fbmsk & 0xFF000000) != 0xFF000000) && (fpsm != GS_PSMCT24));
 
     setup_blend(st);
 
-    glUseProgram(prog);
+    pcGsUseProgram(prog);
     glUniform2f(U.target, (float)rt->w, (float)rt->h);
     glUniform1i(U.iip, (st->type == 6) ? 0 : st->iip);
     glUniform1i(U.tme, st->tme);
@@ -1517,17 +1816,17 @@ void gsRendererDraw(const GsDrawState* st, const GsVertex* v, int nverts)
             }
         }
 
-        glActiveTexture(GL_TEXTURE0);
+        pcGsActiveTexture(GL_TEXTURE0);
 
         if ((src != NULL) && (src != rt))
         {
             if (src->vram_dirty || (src->load_y1 > src->load_y0))
             {
                 rt_sync(src);
-                glBindFramebuffer(GL_FRAMEBUFFER, rt->fbo);
+                pcGsBindFramebuffer(GL_FRAMEBUFFER, rt->fbo);
             }
 
-            glBindTexture(GL_TEXTURE_2D, src->color);
+            pcGsBindTexture(GL_TEXTURE_2D, src->color);
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, linear ? GL_LINEAR : GL_NEAREST);
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, linear ? GL_LINEAR : GL_NEAREST);
             glUniform1i(U.texrt, (gsPsmBits(tpsm) == 16) ? 2 : 1);
@@ -1537,7 +1836,7 @@ void gsRendererDraw(const GsDrawState* st, const GsVertex* v, int nverts)
         }
         else if (movie_on && (GSF(st->tex0, 0, 14) == movie_tbp))
         {
-            glBindTexture(GL_TEXTURE_2D, movie_tex);
+            pcGsBindTexture(GL_TEXTURE_2D, movie_tex);
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
             glUniform1i(U.texrt, 0);
@@ -1549,7 +1848,7 @@ void gsRendererDraw(const GsDrawState* st, const GsVertex* v, int nverts)
             GLuint gt = get_texture(st->tex0, st->texa, st->texclut, tw, th, texture_extent(st, v, nverts, th, 1),
                                     texture_extent(st, v, nverts, tw, 0), &hd);
 
-            glBindTexture(GL_TEXTURE_2D, gt);
+            pcGsBindTexture(GL_TEXTURE_2D, gt);
             glUniform1i(U.texrt, 0);
             glUniform1i(U.hd, hd);
 
@@ -1568,8 +1867,8 @@ void gsRendererDraw(const GsDrawState* st, const GsVertex* v, int nverts)
         glUniform1i(U.linear, linear);
     }
 
-    glBindVertexArray(vao);
-    glBindBuffer(GL_ARRAY_BUFFER, vbo);
+    pcGsBindVertexArray(vao);
+    pcGsBindBuffer(GL_ARRAY_BUFFER, vbo);
 
     if (perf_timing)
     {
@@ -1599,16 +1898,16 @@ void gsRendererDraw(const GsDrawState* st, const GsVertex* v, int nverts)
 
         if (afail == 1)
         {
-            glDepthMask(GL_FALSE);
+            pcGsDepthMask(GL_FALSE);
         }
         else if (afail == 2)
         {
-            glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
+            pcGsColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
         }
         else
         {
-            glDepthMask(GL_FALSE);
-            glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_FALSE);
+            pcGsDepthMask(GL_FALSE);
+            pcGsColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_FALSE);
         }
 
         glDrawArrays(mode, 0, n);
@@ -1622,10 +1921,10 @@ void gsRendererDraw(const GsDrawState* st, const GsVertex* v, int nverts)
      * Force a solid color so transparency and the suspect UVs cannot hide the geometry. */
     if (ui_wireframe && st->tme && st->fst && (mode == GL_TRIANGLES) && (n > 0))
     {
-        glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
-        glDepthMask(GL_FALSE);
-        glDisable(GL_DEPTH_TEST);
-        glDisable(GL_BLEND);
+        pcGsColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+        pcGsDepthMask(GL_FALSE);
+        pcGsDisable(GL_DEPTH_TEST);
+        pcGsDisable(GL_BLEND);
         glUniform1i(U.wireframe, 1);
         glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
         glDrawArrays(mode, 0, n);
@@ -1633,19 +1932,19 @@ void gsRendererDraw(const GsDrawState* st, const GsVertex* v, int nverts)
         glUniform1i(U.wireframe, 0);
 
         /* Restore the GS state for the next primitive. */
-        glColorMask((fbmsk & 0xFF) != 0xFF, (fbmsk & 0xFF00) != 0xFF00, (fbmsk & 0xFF0000) != 0xFF0000,
+        pcGsColorMask((fbmsk & 0xFF) != 0xFF, (fbmsk & 0xFF00) != 0xFF00, (fbmsk & 0xFF0000) != 0xFF0000,
                     ((fbmsk & 0xFF000000) != 0xFF000000) && (fpsm != GS_PSMCT24));
         setup_blend(st);
         if (use_depth)
         {
-            glEnable(GL_DEPTH_TEST);
-            glDepthFunc((ztst == 0) ? GL_NEVER : (ztst == 1) ? GL_ALWAYS : (ztst == 2) ? GL_GEQUAL : GL_GREATER);
-            glDepthMask(zmsk ? GL_FALSE : GL_TRUE);
+            pcGsEnable(GL_DEPTH_TEST);
+            pcGsDepthFunc((ztst == 0) ? GL_NEVER : (ztst == 1) ? GL_ALWAYS : (ztst == 2) ? GL_GEQUAL : GL_GREATER);
+            pcGsDepthMask(zmsk ? GL_FALSE : GL_TRUE);
         }
         else
         {
-            glDisable(GL_DEPTH_TEST);
-            glDepthMask(GL_FALSE);
+            pcGsDisable(GL_DEPTH_TEST);
+            pcGsDepthMask(GL_FALSE);
         }
     }
 
@@ -1691,7 +1990,7 @@ static void draw_overlay(const unsigned char* img, int ow, int oh, int x, int y,
         glGenTextures(1, &overlay_tex);
     }
 
-    glBindTexture(GL_TEXTURE_2D, overlay_tex);
+    pcGsBindTexture(GL_TEXTURE_2D, overlay_tex);
     glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, ow, oh, 0, GL_RGBA, GL_UNSIGNED_BYTE, img);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
@@ -1744,12 +2043,12 @@ void gsRendererPresent(unsigned int dispfb_fbp, unsigned int dispfb_fbw)
 
     SDL_GetWindowSizeInPixels(SDL_GL_GetCurrentWindow(), &ww, &wh);
 
-    glBindFramebuffer(GL_FRAMEBUFFER, 0);
-    glViewport(0, 0, ww, wh);
-    glDisable(GL_SCISSOR_TEST);
-    glDisable(GL_DEPTH_TEST);
-    glDisable(GL_BLEND);
-    glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+    pcGsBindFramebuffer(GL_FRAMEBUFFER, 0);
+    pcGsViewport(0, 0, ww, wh);
+    pcGsDisable(GL_SCISSOR_TEST);
+    pcGsDisable(GL_DEPTH_TEST);
+    pcGsDisable(GL_BLEND);
+    pcGsColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
     glClearColor(0, 0, 0, 1);
     glClear(GL_COLOR_BUFFER_BIT);
 
@@ -1761,7 +2060,7 @@ void gsRendererPresent(unsigned int dispfb_fbp, unsigned int dispfb_fbw)
     if (rt->vram_dirty || (rt->load_y1 > rt->load_y0))
     {
         rt_sync(rt);
-        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+        pcGsBindFramebuffer(GL_FRAMEBUFFER, 0);
     }
 
     /* 640x480 shown at the display aspect (4:3, or stretched for widescreen) */
@@ -1778,7 +2077,7 @@ void gsRendererPresent(unsigned int dispfb_fbp, unsigned int dispfb_fbw)
         }
     }
 
-    glViewport((ww - vw) / 2, (wh - vh) / 2, vw, vh);
+    pcGsViewport((ww - vw) / 2, (wh - vh) / 2, vw, vh);
 
     tw = 640.0f / rt->w;
     th = 480.0f / rt->h;
@@ -1798,10 +2097,10 @@ void gsRendererPresent(unsigned int dispfb_fbp, unsigned int dispfb_fbw)
         }
     }
 
-    glUseProgram(present_prog);
-    glActiveTexture(GL_TEXTURE0);
-    glBindVertexArray(vao);
-    glBindBuffer(GL_ARRAY_BUFFER, vbo);
+    pcGsUseProgram(present_prog);
+    pcGsActiveTexture(GL_TEXTURE0);
+    pcGsBindVertexArray(vao);
+    pcGsBindBuffer(GL_ARRAY_BUFFER, vbo);
 
     /* a notice from the PC port (pc_overlay.c) in the middle of a black screen, instead of the
      * picture */
@@ -1819,11 +2118,11 @@ void gsRendererPresent(unsigned int dispfb_fbp, unsigned int dispfb_fbw)
         }
     }
 
-    glBindTexture(GL_TEXTURE_2D, rt->color);
+    pcGsBindTexture(GL_TEXTURE_2D, rt->color);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    glBindVertexArray(vao);
-    glBindBuffer(GL_ARRAY_BUFFER, vbo);
+    pcGsBindVertexArray(vao);
+    pcGsBindBuffer(GL_ARRAY_BUFFER, vbo);
     glBufferData(GL_ARRAY_BUFFER, sizeof(q), q, GL_STREAM_DRAW);
     glDrawArrays(GL_TRIANGLES, 0, 6);
 
@@ -1840,11 +2139,11 @@ void gsRendererPresent(unsigned int dispfb_fbp, unsigned int dispfb_fbw)
         {
             /* the present shader writes alpha 1, so blend the premultiplied text as a screen:
              * text + picture * (1 - text) */
-            glEnable(GL_BLEND);
-            glBlendEquationSeparate(GL_FUNC_ADD, GL_FUNC_ADD);
-            glBlendFuncSeparate(GL_ONE, GL_ONE_MINUS_SRC_COLOR, GL_ZERO, GL_ONE);
+            pcGsEnable(GL_BLEND);
+            pcGsBlendEquationSeparate(GL_FUNC_ADD, GL_FUNC_ADD);
+            pcGsBlendFuncSeparate(GL_ONE, GL_ONE_MINUS_SRC_COLOR, GL_ZERO, GL_ONE);
             draw_overlay(img, ow, oh, (vw - ow) / 2, vh * 465 / 480 - oh / 2, vw, vh);
-            glDisable(GL_BLEND);
+            pcGsDisable(GL_BLEND);
         }
     }
 
@@ -1880,7 +2179,7 @@ void pcGsScreenshot(const char* path, unsigned int fbp)
         return;
     }
 
-    glBindFramebuffer(GL_FRAMEBUFFER, rt->fbo);
+    pcGsBindFramebuffer(GL_FRAMEBUFFER, rt->fbo);
     glPixelStorei(GL_PACK_ALIGNMENT, 4);
     glReadPixels(0, 0, W, H, GL_RGBA, GL_UNSIGNED_BYTE, px);
 
