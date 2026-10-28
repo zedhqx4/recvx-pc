@@ -211,28 +211,28 @@ static void pcVu0StripClipTransform(const uint8_t* position)
 
     memcpy(&pcVu0.vf[4], position, sizeof(VuVec));
 
-    for (k_ = 0; k_ < 4; k_)
+    for (k_ = 0; k_ < 4; k_++)
     {
         r_.f[k_] = vu_f(pcVu0.vf[24].f[k_] * pcVu0.vf[4].f[0]);
     }
     pcVu0.acc = r_;
     vu_set_mac(&pcVu0, &r_, 15);
 
-    for (k_ = 0; k_ < 4; k_)
+    for (k_ = 0; k_ < 4; k_++)
     {
         r_.f[k_] = vu_f(pcVu0.acc.f[k_] + pcVu0.vf[25].f[k_] * pcVu0.vf[4].f[1]);
     }
     pcVu0.acc = r_;
     vu_set_mac(&pcVu0, &r_, 15);
 
-    for (k_ = 0; k_ < 4; k_)
+    for (k_ = 0; k_ < 4; k_++)
     {
         r_.f[k_] = vu_f(pcVu0.acc.f[k_] + pcVu0.vf[26].f[k_] * pcVu0.vf[4].f[2]);
     }
     pcVu0.acc = r_;
     vu_set_mac(&pcVu0, &r_, 15);
 
-    for (k_ = 0; k_ < 4; k_)
+    for (k_ = 0; k_ < 4; k_++)
     {
         r_.f[k_] = vu_f(pcVu0.acc.f[k_] + pcVu0.vf[27].f[k_] * pcVu0.vf[0].f[3]);
     }
