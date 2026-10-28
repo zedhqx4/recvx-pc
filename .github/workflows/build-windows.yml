@@ -9,6 +9,7 @@ on:
       - SDL3
       - performance-sdl3
       - experiment/gs-block-upload
+      - experiment/texture-cache-index
       - c3853984-baseline
       - merge-c3853984-into-graphics-fixes
     paths-ignore:
