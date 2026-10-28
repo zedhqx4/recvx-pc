@@ -26,11 +26,32 @@ static int out_count;
 static GsDrawState out_state;
 static int out_valid;
 
-static void current_state(GsDrawState* st)
+/* GS draw state is stable across the many XYZ kicks that make up a model.
+ * Rebuild it only after a register that affects drawing actually changes, and only
+ * compare it with the current batch once after such a change. This avoids a memset,
+ * register gather and full-state memcmp for every emitted triangle. */
+static GsDrawState gsDrawStateCache;
+static int gsDrawStateDirty = 1;
+static int gsDrawStatePendingChange = 1;
+
+static void gsDrawStateInvalidate(void)
 {
-    u64 p = (GSF(gsRegs.prmodecont, 0, 1)) ? gsRegs.prim : (gsRegs.prmode | (gsRegs.prim & 7));
+    gsDrawStateDirty = 1;
+    gsDrawStatePendingChange = 1;
+}
+
+static const GsDrawState* current_state(void)
+{
+    GsDrawState* st = &gsDrawStateCache;
+    u64 p;
     int c;
 
+    if (!gsDrawStateDirty)
+    {
+        return st;
+    }
+
+    p = (GSF(gsRegs.prmodecont, 0, 1)) ? gsRegs.prim : (gsRegs.prmode | (gsRegs.prim & 7));
     memset(st, 0, sizeof(*st));
 
     st->type = GSF(gsRegs.prim, 0, 3);
@@ -58,6 +79,9 @@ static void current_state(GsDrawState* st)
     st->dthe = gsRegs.dthe;
     st->colclamp = gsRegs.colclamp;
     st->texclut = gsRegs.texclut;
+
+    gsDrawStateDirty = 0;
+    return st;
 }
 
 void gsFlushPrims(void)
@@ -87,17 +111,17 @@ static int pc_ui_uv_inset_enabled(void)
 
 static void emit(const GsVertex* v, int n)
 {
-    GsDrawState st;
+    const GsDrawState* st;
     float cu0 = -1e30f, cv0 = -1e30f, cu1 = 1e30f, cv1 = 1e30f;
     int i;
 
-    current_state(&st);
+    st = current_state();
 
     /* 2D pieces (textured with integer UV coordinates) cut from a larger texture sheet: when
      * upscaled, filtering at their edges would blend in the neighbouring image on the sheet
      * (thin lines at every tile edge). They may only sample their own texels: from half a
      * texel inside their UV rectangle. (3D surfaces use ST coordinates and are left alone.) */
-    if (st.tme && st.fst && pc_ui_uv_inset_enabled())
+    if (st->tme && st->fst && pc_ui_uv_inset_enabled())
     {
         cu0 = cv0 = 1e30f;
         cu1 = cv1 = -1e30f;
@@ -115,16 +139,19 @@ static void emit(const GsVertex* v, int n)
     }
 
     /* sprites, points and lines become separate batches by type */
-    if (out_valid && ((memcmp(&st, &out_state, sizeof(st)) != 0) || (out_count + n > (int)(sizeof(out_verts) / sizeof(out_verts[0])))))
+    if (out_valid && ((out_count + n > (int)(sizeof(out_verts) / sizeof(out_verts[0]))) ||
+                      (gsDrawStatePendingChange && (memcmp(st, &out_state, sizeof(*st)) != 0))))
     {
         gsFlushPrims();
     }
 
     if (!out_valid)
     {
-        out_state = st;
+        out_state = *st;
         out_valid = 1;
     }
+
+    gsDrawStatePendingChange = 0;
 
     for (i = 0; i < n; i++)
     {
@@ -232,61 +259,72 @@ static void latch_vertex(u64 xyz, int has_f, int kick)
 
 static void clut_load(u64 tex0);
 
+#define GS_SET_DRAW_STATE_FIELD(field, new_value) do { \
+    u64 gs_new_state_value = (new_value); \
+    if ((field) != gs_new_state_value) { (field) = gs_new_state_value; gsDrawStateInvalidate(); } \
+} while (0)
+
 void gsWriteReg(int reg, u64 value)
 {
     switch (reg)
     {
-    case 0x00: gsRegs.prim = value; vq_count = 0; break;
+    case 0x00: GS_SET_DRAW_STATE_FIELD(gsRegs.prim, value); vq_count = 0; break;
     case 0x01: gsRegs.rgbaq = value; { unsigned int q = GSF(value, 32, 32); gsRegs.q = *(float*)&q; } break;
     case 0x02: gsRegs.st = value; break;
     case 0x03: gsRegs.uv = value; break;
     case 0x04: latch_vertex(value, 1, 1); break;
     case 0x05: latch_vertex(value, 0, 1); break;
-    case 0x06: gsRegs.tex0[0] = value; clut_load(value); break;
-    case 0x07: gsRegs.tex0[1] = value; clut_load(value); break;
-    case 0x08: gsRegs.clamp[0] = value; break;
-    case 0x09: gsRegs.clamp[1] = value; break;
+    case 0x06: GS_SET_DRAW_STATE_FIELD(gsRegs.tex0[0], value); clut_load(value); break;
+    case 0x07: GS_SET_DRAW_STATE_FIELD(gsRegs.tex0[1], value); clut_load(value); break;
+    case 0x08: GS_SET_DRAW_STATE_FIELD(gsRegs.clamp[0], value); break;
+    case 0x09: GS_SET_DRAW_STATE_FIELD(gsRegs.clamp[1], value); break;
     case 0x0a: gsRegs.fog = value; break;
     case 0x0c: latch_vertex(value, 1, 0); break;
     case 0x0d: latch_vertex(value, 0, 0); break;
-    case 0x14: gsRegs.tex1[0] = value; break;
-    case 0x15: gsRegs.tex1[1] = value; break;
+    case 0x14: GS_SET_DRAW_STATE_FIELD(gsRegs.tex1[0], value); break;
+    case 0x15: GS_SET_DRAW_STATE_FIELD(gsRegs.tex1[1], value); break;
     case 0x16: /* TEX2: replaces PSM and CLUT fields of TEX0 */
     case 0x17:
     {
         int c = reg - 0x16;
         u64 mask = (0x3FULL << 20) | (0xFFFFFFFULL << 37);
 
+        u64 old_tex0 = gsRegs.tex0[c];
+
         gsRegs.tex2[c] = value;
         gsRegs.tex0[c] = (gsRegs.tex0[c] & ~mask) | (value & mask);
+        if (gsRegs.tex0[c] != old_tex0)
+        {
+            gsDrawStateInvalidate();
+        }
         clut_load(gsRegs.tex0[c] | (value & (7ULL << 61)));
         break;
     }
     case 0x18: gsRegs.xyoffset[0] = value; break;
     case 0x19: gsRegs.xyoffset[1] = value; break;
-    case 0x1a: gsRegs.prmodecont = value; break;
-    case 0x1b: gsRegs.prmode = value; break;
-    case 0x1c: gsRegs.texclut = value; break;
+    case 0x1a: GS_SET_DRAW_STATE_FIELD(gsRegs.prmodecont, value); break;
+    case 0x1b: GS_SET_DRAW_STATE_FIELD(gsRegs.prmode, value); break;
+    case 0x1c: GS_SET_DRAW_STATE_FIELD(gsRegs.texclut, value); break;
     case 0x22: gsRegs.scanmsk = value; break;
-    case 0x3b: gsRegs.texa = value; break;
-    case 0x3d: gsRegs.fogcol = value; break;
+    case 0x3b: GS_SET_DRAW_STATE_FIELD(gsRegs.texa, value); break;
+    case 0x3d: GS_SET_DRAW_STATE_FIELD(gsRegs.fogcol, value); break;
     case 0x3f: break; /* TEXFLUSH */
-    case 0x40: gsRegs.scissor[0] = value; break;
-    case 0x41: gsRegs.scissor[1] = value; break;
-    case 0x42: gsRegs.alpha[0] = value; break;
-    case 0x43: gsRegs.alpha[1] = value; break;
+    case 0x40: GS_SET_DRAW_STATE_FIELD(gsRegs.scissor[0], value); break;
+    case 0x41: GS_SET_DRAW_STATE_FIELD(gsRegs.scissor[1], value); break;
+    case 0x42: GS_SET_DRAW_STATE_FIELD(gsRegs.alpha[0], value); break;
+    case 0x43: GS_SET_DRAW_STATE_FIELD(gsRegs.alpha[1], value); break;
     case 0x44: gsRegs.dimx = value; break;
-    case 0x45: gsRegs.dthe = value; break;
-    case 0x46: gsRegs.colclamp = value; break;
-    case 0x47: gsRegs.test[0] = value; break;
-    case 0x48: gsRegs.test[1] = value; break;
-    case 0x49: gsRegs.pabe = value; break;
-    case 0x4a: gsRegs.fba[0] = value; break;
-    case 0x4b: gsRegs.fba[1] = value; break;
-    case 0x4c: gsRegs.frame[0] = value; break;
-    case 0x4d: gsRegs.frame[1] = value; break;
-    case 0x4e: gsRegs.zbuf[0] = value; break;
-    case 0x4f: gsRegs.zbuf[1] = value; break;
+    case 0x45: GS_SET_DRAW_STATE_FIELD(gsRegs.dthe, value); break;
+    case 0x46: GS_SET_DRAW_STATE_FIELD(gsRegs.colclamp, value); break;
+    case 0x47: GS_SET_DRAW_STATE_FIELD(gsRegs.test[0], value); break;
+    case 0x48: GS_SET_DRAW_STATE_FIELD(gsRegs.test[1], value); break;
+    case 0x49: GS_SET_DRAW_STATE_FIELD(gsRegs.pabe, value); break;
+    case 0x4a: GS_SET_DRAW_STATE_FIELD(gsRegs.fba[0], value); break;
+    case 0x4b: GS_SET_DRAW_STATE_FIELD(gsRegs.fba[1], value); break;
+    case 0x4c: GS_SET_DRAW_STATE_FIELD(gsRegs.frame[0], value); break;
+    case 0x4d: GS_SET_DRAW_STATE_FIELD(gsRegs.frame[1], value); break;
+    case 0x4e: GS_SET_DRAW_STATE_FIELD(gsRegs.zbuf[0], value); break;
+    case 0x4f: GS_SET_DRAW_STATE_FIELD(gsRegs.zbuf[1], value); break;
     case 0x50: gsRegs.bitbltbuf = value; break;
     case 0x51: gsRegs.trxpos = value; break;
     case 0x52: gsRegs.trxreg = value; break;
@@ -299,6 +337,7 @@ void gsWriteReg(int reg, u64 value)
         break;
     }
 }
+#undef GS_SET_DRAW_STATE_FIELD
 
 /* ------------------------------------------------------------------------------------------- */
 /* GIF (PATH3) */
