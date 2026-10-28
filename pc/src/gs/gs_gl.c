@@ -443,12 +443,109 @@ typedef struct {
     GLuint tex;
     int hd;              /* tex is an HD replacement (owned by gs_replace.c) */
     unsigned int last_use;
+    int hash_next;
 } CachedTex;
 
 #define MAX_TEX 2048
 
 static CachedTex texcache[MAX_TEX];
 static unsigned int* decode_buf;
+
+/* A hit should not scan all 2048 cached textures. Use bucket chains for exact-key
+ * lookup; keep the existing LRU scan only on cache misses/evictions. */
+#define TEX_HASH_BUCKETS 4096
+
+static int texcache_hash_heads[TEX_HASH_BUCKETS];
+
+static unsigned int texture_cache_hash(u64 gen, u64 key0, u64 key1, u64 key2,
+                                       int w, int h, int rows, int cols)
+{
+    unsigned long long hash = 14695981039346656037ULL;
+
+#define TEX_HASH_MIX(value) hash = (hash ^ (unsigned long long)(value)) * 1099511628211ULL
+    TEX_HASH_MIX(gen);
+    TEX_HASH_MIX(key0);
+    TEX_HASH_MIX(key1);
+    TEX_HASH_MIX(key2);
+    TEX_HASH_MIX((unsigned int)w);
+    TEX_HASH_MIX((unsigned int)h);
+    TEX_HASH_MIX((unsigned int)rows);
+    TEX_HASH_MIX((unsigned int)cols);
+#undef TEX_HASH_MIX
+
+    return (unsigned int)(hash ^ (hash >> 32)) & (TEX_HASH_BUCKETS - 1);
+}
+
+static int texture_cache_find(u64 gen, u64 key0, u64 key1, u64 key2,
+                              int w, int h, int rows, int cols)
+{
+    unsigned int bucket = texture_cache_hash(gen, key0, key1, key2, w, h, rows, cols);
+    int i;
+
+    for (i = texcache_hash_heads[bucket]; i >= 0; i = texcache[i].hash_next)
+    {
+        CachedTex* t = &texcache[i];
+
+        if (t->used && t->gen == gen && t->key0 == key0 && t->key1 == key1 &&
+            t->key2 == key2 && t->w == w && t->h == h &&
+            t->rows == rows && t->cols == cols)
+        {
+            return i;
+        }
+    }
+
+    return -1;
+}
+
+static void texture_cache_remove(int slot)
+{
+    CachedTex* t = &texcache[slot];
+    unsigned int bucket;
+    int* link;
+
+    if (!t->used)
+        return;
+
+    bucket = texture_cache_hash(t->gen, t->key0, t->key1, t->key2,
+                                t->w, t->h, t->rows, t->cols);
+    link = &texcache_hash_heads[bucket];
+
+    while (*link >= 0)
+    {
+        if (*link == slot)
+        {
+            *link = t->hash_next;
+            t->hash_next = -1;
+            return;
+        }
+
+        link = &texcache[*link].hash_next;
+    }
+
+    /* Defensive recovery if the index is ever out of sync. */
+    t->hash_next = -1;
+}
+
+static void texture_cache_insert(int slot)
+{
+    CachedTex* t = &texcache[slot];
+    unsigned int bucket = texture_cache_hash(t->gen, t->key0, t->key1, t->key2,
+                                             t->w, t->h, t->rows, t->cols);
+
+    t->hash_next = texcache_hash_heads[bucket];
+    texcache_hash_heads[bucket] = slot;
+}
+
+static void texture_cache_init(void)
+{
+    unsigned int i;
+
+    for (i = 0; i < TEX_HASH_BUCKETS; i++)
+        texcache_hash_heads[i] = -1;
+
+    for (i = 0; i < MAX_TEX; i++)
+        texcache[i].hash_next = -1;
+}
 
 static void psm_page_size(int psm, int* pw, int* ph)
 {
@@ -518,7 +615,8 @@ static GLuint get_texture(u64 tex0, u64 texa, u64 texclut, int w, int h, int row
     u64 cpsm_key = ((u64)GSF(tex0, 51, 4) << 37);
     u64 key1 = ((psm == GS_PSMCT24) || (gsPsmBits(psm) == 16) || (GSF(tex0, 51, 4) >= 2)) ? texa : 0;
     u64 key2 = gsClutHash(tex0);   /* palette contents (0-entry hash for direct color) */
-    int pw, ph, i, slot = -1, oldest = 0;
+    int pw, ph, i, slot = -1, oldest = 0, cached_slot;
+    unsigned int hash_bucket;
     unsigned int page_lo, page_hi, clut_page, stride;
     unsigned long long gen;
     CachedTex* t;
@@ -565,17 +663,19 @@ static GLuint get_texture(u64 tex0, u64 texa, u64 texclut, int w, int h, int row
     clut_page = GSF(tex0, 37, 14) >> 5;
     gen = gen_sum_rect(page_lo, stride, (rows + ph - 1) / ph, (cols + pw - 1) / pw);
 
+    cached_slot = texture_cache_find(gen, key0, key1, key2, w, h, rows, cols);
+    if (cached_slot >= 0)
+    {
+        t = &texcache[cached_slot];
+        t->last_use = frame_counter;
+        *hd = t->hd;
+        return t->tex;
+    }
+
+    /* Only a miss needs the existing free-slot / least-recently-used scan. */
     for (i = 0; i < MAX_TEX; i++)
     {
         t = &texcache[i];
-
-        if (t->used && (t->gen == gen) && (t->key0 == key0) && (t->key1 == key1) && (t->key2 == key2) && (t->w == w) && (t->h == h) &&
-            (t->rows == rows) && (t->cols == cols))
-        {
-            t->last_use = frame_counter;
-            *hd = t->hd;
-            return t->tex;
-        }
 
         if (!t->used && (slot < 0))
         {
@@ -591,6 +691,7 @@ static GLuint get_texture(u64 tex0, u64 texa, u64 texclut, int w, int h, int row
     if (slot < 0)
     {
         slot = oldest;
+        texture_cache_remove(slot);
 
         if (!texcache[slot].hd)
         {
@@ -615,6 +716,7 @@ static GLuint get_texture(u64 tex0, u64 texa, u64 texclut, int w, int h, int row
     t->gen = gen;
     t->last_use = frame_counter;
     t->hd = 0;
+    texture_cache_insert(slot);
 
     {
         extern GLuint gsReplaceLookup(u64 tex0, u64 texa);
@@ -931,6 +1033,8 @@ void gsFlushLocalToLocal(unsigned int bp, unsigned int bw, unsigned int psm, uns
 
 void gsRendererInit(void)
 {
+    texture_cache_init();
+
     if (!pcGlLoad())
     {
         pcPlatformFatal("The graphics driver does not support OpenGL 3.3, which the game needs.\n\n"
