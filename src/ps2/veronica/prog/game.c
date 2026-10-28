@@ -56,6 +56,20 @@ static struct
     unsigned int frame_plist_calls[4][256], sum_plist_calls[4][256];
 } cnk_type_profile;
 
+/* Focused breakdown of type-8 texture selection and GS IMAGE-data transfers. */
+static struct
+{
+    double frame_load_ms, sum_load_ms, max_load_ms;
+    double frame_send_ms, sum_send_ms, max_send_ms;
+    double frame_gs_ms, sum_gs_ms, max_gs_ms;
+    double frame_load_calls, sum_load_calls, max_load_calls;
+    double frame_send_calls, sum_send_calls, max_send_calls;
+    double frame_no_send_calls, sum_no_send_calls, max_no_send_calls;
+    double frame_gs_calls, sum_gs_calls, max_gs_calls;
+    double frame_gs_qwc, sum_gs_qwc, max_gs_qwc;
+} texture_profile;
+static int texture_upload_scope;
+
 int pcGameProfileEnabled(void)
 {
     static int enabled = -1;
@@ -110,10 +124,53 @@ void pcGameProfileRecordCnkType(int scope, unsigned int type, int plist, double 
     }
 }
 
+void pcGameProfileSetTextureUploadScope(int active)
+{
+    texture_upload_scope = (active && game_profile.active) ? 1 : 0;
+}
+
+int pcGameProfileTextureUploadActive(void)
+{
+    return game_profile.active && texture_upload_scope;
+}
+
+void pcGameProfileRecordTextureLoad(double total_ms, double send_ms, unsigned int send_calls)
+{
+    if (!game_profile.active)
+        return;
+
+    texture_profile.frame_load_ms += (total_ms >= 0.0) ? total_ms : 0.0;
+    texture_profile.frame_load_calls += 1.0;
+    texture_profile.frame_send_ms += (send_ms >= 0.0) ? send_ms : 0.0;
+    texture_profile.frame_send_calls += send_calls;
+    if (send_calls == 0)
+        texture_profile.frame_no_send_calls += 1.0;
+}
+
+void pcGameProfileRecordTextureTransfer(double ms, unsigned int qwc)
+{
+    if (!pcGameProfileTextureUploadActive())
+        return;
+
+    texture_profile.frame_gs_ms += (ms >= 0.0) ? ms : 0.0;
+    texture_profile.frame_gs_calls += 1.0;
+    texture_profile.frame_gs_qwc += qwc;
+}
+
 static void pcGameProfileBegin(void)
 {
     int i;
     unsigned int type;
+
+    texture_profile.frame_load_ms = 0.0;
+    texture_profile.frame_send_ms = 0.0;
+    texture_profile.frame_gs_ms = 0.0;
+    texture_profile.frame_load_calls = 0.0;
+    texture_profile.frame_send_calls = 0.0;
+    texture_profile.frame_no_send_calls = 0.0;
+    texture_profile.frame_gs_calls = 0.0;
+    texture_profile.frame_gs_qwc = 0.0;
+    texture_upload_scope = 0;
 
     for (i = 0; i < GP_COUNT; i++)
         game_profile.frame[i] = 0.0;
@@ -185,6 +242,7 @@ static void pcGameProfileEnd(int loop_ct, double total_ms)
     double covered;
 
     game_profile.active = 0;
+    texture_upload_scope = 0;
     game_profile.frame[GP_TOTAL] = total_ms;
 
     /* GP_OTHER is the uninstrumented remainder, including state/event bookkeeping. */
@@ -203,6 +261,31 @@ static void pcGameProfileEnd(int loop_ct, double total_ms)
         if (value > game_profile.max[i])
             game_profile.max[i] = value;
     }
+
+    texture_profile.sum_load_ms += texture_profile.frame_load_ms;
+    texture_profile.sum_send_ms += texture_profile.frame_send_ms;
+    texture_profile.sum_gs_ms += texture_profile.frame_gs_ms;
+    texture_profile.sum_load_calls += texture_profile.frame_load_calls;
+    texture_profile.sum_send_calls += texture_profile.frame_send_calls;
+    texture_profile.sum_no_send_calls += texture_profile.frame_no_send_calls;
+    texture_profile.sum_gs_calls += texture_profile.frame_gs_calls;
+    texture_profile.sum_gs_qwc += texture_profile.frame_gs_qwc;
+    if (texture_profile.frame_load_ms > texture_profile.max_load_ms)
+        texture_profile.max_load_ms = texture_profile.frame_load_ms;
+    if (texture_profile.frame_send_ms > texture_profile.max_send_ms)
+        texture_profile.max_send_ms = texture_profile.frame_send_ms;
+    if (texture_profile.frame_gs_ms > texture_profile.max_gs_ms)
+        texture_profile.max_gs_ms = texture_profile.frame_gs_ms;
+    if (texture_profile.frame_load_calls > texture_profile.max_load_calls)
+        texture_profile.max_load_calls = texture_profile.frame_load_calls;
+    if (texture_profile.frame_send_calls > texture_profile.max_send_calls)
+        texture_profile.max_send_calls = texture_profile.frame_send_calls;
+    if (texture_profile.frame_no_send_calls > texture_profile.max_no_send_calls)
+        texture_profile.max_no_send_calls = texture_profile.frame_no_send_calls;
+    if (texture_profile.frame_gs_calls > texture_profile.max_gs_calls)
+        texture_profile.max_gs_calls = texture_profile.frame_gs_calls;
+    if (texture_profile.frame_gs_qwc > texture_profile.max_gs_qwc)
+        texture_profile.max_gs_qwc = texture_profile.frame_gs_qwc;
 
     for (i = PC_GAME_PROFILE_SCOPE_ROOM; i <= PC_GAME_PROFILE_SCOPE_MISC; i++)
     {
@@ -301,6 +384,17 @@ static void pcGameProfileEnd(int loop_ct, double total_ms)
               cnk_profile.sum_chunks[PC_GAME_PROFILE_SCOPE_ENEMY] / game_profile.count,
               cnk_profile.max_chunks[PC_GAME_PROFILE_SCOPE_ENEMY]);
 
+        pcLog("PROFILE TEX Ps2TexLoad avg/max ms %.2f/%.2f calls/frame %.2f/%.2f | Send_Tim2_dataEx ms %.2f/%.2f calls/frame %.2f/%.2f no-send/frame %.2f",
+              texture_profile.sum_load_ms / n, texture_profile.max_load_ms,
+              texture_profile.sum_load_calls / n, texture_profile.max_load_calls,
+              texture_profile.sum_send_ms / n, texture_profile.max_send_ms,
+              texture_profile.sum_send_calls / n, texture_profile.max_send_calls,
+              texture_profile.sum_no_send_calls / n);
+        pcLog("PROFILE TEX GS IMAGE upload avg/max ms %.2f/%.2f calls/frame %.2f/%.2f QWC/frame %.0f/%.0f",
+              texture_profile.sum_gs_ms / n, texture_profile.max_gs_ms,
+              texture_profile.sum_gs_calls / n, texture_profile.max_gs_calls,
+              texture_profile.sum_gs_qwc / n, texture_profile.max_gs_qwc);
+
         pcGameProfileLogCnkTypes(PC_GAME_PROFILE_SCOPE_ROOM, "room", n);
         pcGameProfileLogCnkTypes(PC_GAME_PROFILE_SCOPE_ENEMY, "enemy", n);
 
@@ -325,6 +419,14 @@ static void pcGameProfileEnd(int loop_ct, double total_ms)
                 cnk_type_profile.sum_plist_calls[i][type] = 0;
             }
         }
+        texture_profile.sum_load_ms = texture_profile.max_load_ms = 0.0;
+        texture_profile.sum_send_ms = texture_profile.max_send_ms = 0.0;
+        texture_profile.sum_gs_ms = texture_profile.max_gs_ms = 0.0;
+        texture_profile.sum_load_calls = texture_profile.max_load_calls = 0.0;
+        texture_profile.sum_send_calls = texture_profile.max_send_calls = 0.0;
+        texture_profile.sum_no_send_calls = texture_profile.max_no_send_calls = 0.0;
+        texture_profile.sum_gs_calls = texture_profile.max_gs_calls = 0.0;
+        texture_profile.sum_gs_qwc = texture_profile.max_gs_qwc = 0.0;
         game_profile.count = 0;
         game_profile.worst_total = 0.0;
     }
