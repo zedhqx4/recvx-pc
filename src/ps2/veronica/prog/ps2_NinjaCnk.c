@@ -11,6 +11,8 @@
 #include "../../../ps2/veronica/prog/ps2_Vu1Strip.h"
 #ifdef TARGET_PC
 #include "../../../../pc/include/pc_game_profile.h"
+#include <emmintrin.h>
+#include <stdlib.h>
 void pcVu0CalcPointN(const float* in, void* out, int n);
 int pcVu0CalcPointBatchEnabled(void);
 unsigned int pcVu0StripClip(const unsigned short* idx, int n, const void* vbuf);
@@ -1192,6 +1194,137 @@ CHUNK_HEAD* njCnkCoSt(CHUNK_HEAD* pCnk)
     return (CHUNK_HEAD*)((char*)&pCnk[1] + (pCnk->usSize * 2));
 }
 
+#ifdef TARGET_PC
+/* SSE2 fast path for the common CNK vertex-list case where all active lights
+ * are directional. The old scalar implementation remains the reference path
+ * for point lights and for small tails. Set RECVX_CV_VN_BATCH=0 to A/B test. */
+static int pcCnkCvVnBatchEnabled(void)
+{
+    static int enabled = -1;
+    if (enabled < 0)
+    {
+        const char* value = getenv("RECVX_CV_VN_BATCH");
+        enabled = (value == NULL) || (atoi(value) != 0);
+    }
+    return enabled;
+}
+
+static int pcCnkCvVnDirectionalOnly(const CNK_LIGHT* lights, int lightCount)
+{
+    int i;
+    for (i = 0; i < lightCount; i++)
+    {
+        if (lights[i].ulState != 0 && lights[i].ulMode != 0)
+        {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+static unsigned int pcCnkCvVnDirectionalBatch(
+    const float* src, VU1_STRIP_BUF* dst, unsigned int count,
+    const float* matrix, float dist, float aspectW, float aspectH,
+    const CNK_LIGHT* lights, int lightCount)
+{
+    const unsigned int processed = count & ~3u;
+    const __m128 r00 = _mm_set1_ps(matrix[0]);
+    const __m128 r01 = _mm_set1_ps(matrix[1]);
+    const __m128 r02 = _mm_set1_ps(matrix[2]);
+    const __m128 r10 = _mm_set1_ps(matrix[4]);
+    const __m128 r11 = _mm_set1_ps(matrix[5]);
+    const __m128 r12 = _mm_set1_ps(matrix[6]);
+    const __m128 r20 = _mm_set1_ps(matrix[8]);
+    const __m128 r21 = _mm_set1_ps(matrix[9]);
+    const __m128 r22 = _mm_set1_ps(matrix[10]);
+    const __m128 trx = _mm_set1_ps(matrix[12]);
+    const __m128 try_ = _mm_set1_ps(matrix[13]);
+    const __m128 trz = _mm_set1_ps(matrix[14]);
+    const __m128 vdist = _mm_set1_ps(dist);
+    const __m128 vaspW = _mm_set1_ps(aspectW);
+    const __m128 vaspH = _mm_set1_ps(aspectH);
+    const __m128 zero = _mm_setzero_ps();
+    const __m128 one = _mm_set1_ps(1.0f);
+    unsigned int base;
+
+    for (base = 0; base < processed; base += 4, src += 24, dst += 4)
+    {
+        /* Input is interleaved as position.xyz, normal.xyz per vertex.
+         * Gather four vertices into SoA lanes for SSE2 arithmetic. */
+        const __m128 x = _mm_set_ps(src[18], src[12], src[6], src[0]);
+        const __m128 y = _mm_set_ps(src[19], src[13], src[7], src[1]);
+        const __m128 z = _mm_set_ps(src[20], src[14], src[8], src[2]);
+        const __m128 nx = _mm_set_ps(src[21], src[15], src[9], src[3]);
+        const __m128 ny = _mm_set_ps(src[22], src[16], src[10], src[4]);
+        const __m128 nz = _mm_set_ps(src[23], src[17], src[11], src[5]);
+
+        /* Preserve the scalar expression's left-to-right arithmetic order. */
+        const __m128 vsx = _mm_add_ps(_mm_add_ps(_mm_add_ps(trx, _mm_mul_ps(r00, x)), _mm_mul_ps(r10, y)), _mm_mul_ps(r20, z));
+        const __m128 vsy = _mm_add_ps(_mm_add_ps(_mm_add_ps(try_, _mm_mul_ps(r01, x)), _mm_mul_ps(r11, y)), _mm_mul_ps(r21, z));
+        const __m128 vsz = _mm_add_ps(_mm_add_ps(_mm_add_ps(trz, _mm_mul_ps(r02, x)), _mm_mul_ps(r12, y)), _mm_mul_ps(r22, z));
+        const __m128 normalX = _mm_add_ps(_mm_add_ps(_mm_mul_ps(r00, nx), _mm_mul_ps(r10, ny)), _mm_mul_ps(r20, nz));
+        const __m128 normalY = _mm_add_ps(_mm_add_ps(_mm_mul_ps(r01, nx), _mm_mul_ps(r11, ny)), _mm_mul_ps(r21, nz));
+        const __m128 normalZ = _mm_add_ps(_mm_add_ps(_mm_mul_ps(r02, nx), _mm_mul_ps(r12, ny)), _mm_mul_ps(r22, nz));
+        const __m128 iz = _mm_div_ps(one, vsz);
+        const __m128 projection = _mm_mul_ps(vdist, iz);
+        const __m128 sx = _mm_mul_ps(vaspW, _mm_mul_ps(vsx, projection));
+        const __m128 sy = _mm_mul_ps(vaspH, _mm_mul_ps(vsy, projection));
+        __m128 red = zero, green = zero, blue = zero;
+        float outX[4], outY[4], outZ[4], outIZ[4], outSX[4], outSY[4], outNZ[4];
+        float outR[4], outG[4], outB[4];
+        int light;
+
+        for (light = 0; light < lightCount; light++)
+        {
+            const CNK_LIGHT* lp = &lights[light];
+            __m128 dot, lit, mask;
+            if (lp->ulState == 0)
+            {
+                continue;
+            }
+
+            dot = _mm_add_ps(
+                _mm_add_ps(_mm_mul_ps(normalX, _mm_set1_ps(lp->fCx)),
+                           _mm_mul_ps(normalY, _mm_set1_ps(lp->fCy))),
+                _mm_mul_ps(normalZ, _mm_set1_ps(lp->fCz)));
+            mask = _mm_cmpgt_ps(dot, zero);
+            lit = _mm_and_ps(_mm_mul_ps(dot, _mm_set1_ps(lp->fI)), mask);
+            red = _mm_add_ps(red, _mm_and_ps(_mm_mul_ps(lit, _mm_set1_ps(lp->fR)), mask));
+            green = _mm_add_ps(green, _mm_and_ps(_mm_mul_ps(lit, _mm_set1_ps(lp->fG)), mask));
+            blue = _mm_add_ps(blue, _mm_and_ps(_mm_mul_ps(lit, _mm_set1_ps(lp->fB)), mask));
+        }
+
+        _mm_storeu_ps(outX, vsx);
+        _mm_storeu_ps(outY, vsy);
+        _mm_storeu_ps(outZ, vsz);
+        _mm_storeu_ps(outIZ, iz);
+        _mm_storeu_ps(outSX, sx);
+        _mm_storeu_ps(outSY, sy);
+        _mm_storeu_ps(outNZ, normalZ);
+        _mm_storeu_ps(outR, red);
+        _mm_storeu_ps(outG, green);
+        _mm_storeu_ps(outB, blue);
+
+        for (light = 0; light < 4; light++)
+        {
+            dst[light].fVx = outX[light];
+            dst[light].fVy = outY[light];
+            dst[light].fVz = outZ[light];
+            dst[light].fFog = njCalcFogPower(outZ[light]);
+            dst[light].fSx = outSX[light];
+            dst[light].fSy = outSY[light];
+            dst[light].fIz = outIZ[light];
+            dst[light].fNz = outNZ[light];
+            dst[light].fIr = outR[light];
+            dst[light].fIg = outG[light];
+            dst[light].fIb = outB[light];
+        }
+    }
+
+    return processed;
+}
+#endif
+
 // 100% matching! 
 CHUNK_HEAD* njCnkCvVn(CHUNK_HEAD* pCnk)
 {
@@ -1200,7 +1333,12 @@ CHUNK_HEAD* njCnkCvVn(CHUNK_HEAD* pCnk)
     float* fpCnk;         
     unsigned int ulIndex;  
     CNK_LIGHT* pLightPtr;  
-    int lLightCnt;          
+    const CNK_LIGHT* pLightTop;
+    int lLightMax;
+    int lLightCnt;
+#ifdef TARGET_PC
+    unsigned int pcProcessed;
+#endif          
     float fI;             
     float fR;              
     float fG;             
@@ -1252,7 +1390,24 @@ CHUNK_HEAD* njCnkCvVn(CHUNK_HEAD* pCnk)
     fTRY = pNaMatMatrixStuckPtr[0][13];
     fTRZ = pNaMatMatrixStuckPtr[0][14];
     
-    for (ulIndex = ((unsigned short*)&pCnk[1])[1]; ulIndex != 0; ulIndex--, pBuffer++)
+    pLightTop = pNaCnkCrntLighting->pLightTop;
+    lLightMax = pNaCnkCrntLighting->lLightMax;
+    ulIndex = ((unsigned short*)&pCnk[1])[1];
+
+#ifdef TARGET_PC
+    if (ulIndex >= 8 && pcCnkCvVnBatchEnabled() && pcCnkCvVnDirectionalOnly(pLightTop, lLightMax))
+    {
+        pcProcessed = pcCnkCvVnDirectionalBatch(fpCnk, pBuffer, ulIndex,
+                                                pNaMatMatrixStuckPtr[0], _nj_screen_.dist,
+                                                fNaViwAspectW, fNaViwAspectH,
+                                                pLightTop, lLightMax);
+        fpCnk += pcProcessed * 6;
+        pBuffer += pcProcessed;
+        ulIndex -= pcProcessed;
+    }
+#endif
+
+    for (; ulIndex != 0; ulIndex--, pBuffer++)
     {
         fX = *fpCnk++;
         fY = *fpCnk++;
@@ -1290,9 +1445,9 @@ CHUNK_HEAD* njCnkCvVn(CHUNK_HEAD* pCnk)
 
         pBuffer->fNz = f28;
 
-        pLightPtr = pNaCnkCrntLighting->pLightTop;
+        pLightPtr = (CNK_LIGHT*)pLightTop;
         
-        for (lLightCnt = pNaCnkCrntLighting->lLightMax; lLightCnt != 0; lLightCnt--, pLightPtr++) 
+        for (lLightCnt = lLightMax; lLightCnt != 0; lLightCnt--, pLightPtr++) 
         {
             if (pLightPtr->ulState != 0)
             {
