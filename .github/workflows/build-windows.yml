@@ -11,6 +11,7 @@ on:
       - experiment/gs-block-upload
       - experiment/texture-cache-index
       - experiment/texture-cache-gl-state
+      - experiment/clut-identical-skip
       - c3853984-baseline
       - merge-c3853984-into-graphics-fixes
     paths-ignore:
@@ -74,7 +75,7 @@ jobs:
       - name: Upload experimental Windows build
         uses: actions/upload-artifact@v4
         with:
-          name: recvx-pc-windows-texture-cache-gl-state
+          name: recvx-pc-windows-clut-identical-skip
           path: |
             build_pc/recvx.exe
             build_pc/recvx-config.exe
