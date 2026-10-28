@@ -557,6 +557,65 @@ void gsMemStartTransfer(const GsRegs* r)
     }
 }
 
+/* Fast path for 32-bit host-to-GS transfers. GS swizzling is constant for an 8-pixel
+ * horizontal run: compute the page/block once, then only look up each pixel's column offset.
+ * This preserves pixel writes and page-generation invalidation while avoiding a full addr32()
+ * calculation and transfer-advance branch for every pixel. */
+static void transfer32Run(const unsigned char* data, int bytes, const unsigned char bt[4][8])
+{
+    int i = 0;
+
+    while ((i + 4 <= bytes) && xfer.active)
+    {
+        unsigned int run = 8u - (xfer.x & 7u);
+        unsigned int row_left = xfer.sx + xfer.w - xfer.x;
+        unsigned int available = (unsigned int)((bytes - i) / 4);
+        unsigned int page, block, block_base;
+        unsigned int j;
+
+        if (run > row_left)
+            run = row_left;
+        if (run > available)
+            run = available;
+
+        page = (xfer.y >> 5) * xfer.bw + (xfer.x >> 6);
+        block = xfer.bp + page * 32 + bt[(xfer.y >> 3) & 3][(xfer.x >> 3) & 7];
+        block_base = (block * 256u) & (GS_VRAM_SIZE - 1);
+
+        for (j = 0; j < run; j++)
+        {
+            unsigned int x = xfer.x + j;
+            unsigned int a = (block_base +
+                              (unsigned int)columnTable32[xfer.y & 7][x & 7] * 4u) &
+                             (GS_VRAM_SIZE - 1);
+            unsigned int v = *(const unsigned int*)&data[i + j * 4];
+            unsigned int* dst = (unsigned int*)&gsVram[a];
+
+            if (*dst != v)
+            {
+                *dst = v;
+                touch(a);
+                xfer.changed = 1;
+            }
+        }
+
+        i += (int)(run * 4u);
+        xfer.x += run;
+
+        if (xfer.x >= xfer.sx + xfer.w)
+        {
+            xfer.x = xfer.sx;
+
+            if (++xfer.y >= xfer.sy + xfer.h)
+            {
+                xfer.active = 0;
+                gsXferDone(xfer.bp, xfer.bw, xfer.psm, xfer.sx, xfer.sy,
+                           xfer.w, xfer.h, xfer.changed);
+            }
+        }
+    }
+}
+
 /* host -> local data (IMAGE mode GIF data), qwc quadwords */
 void gsMemTransferData(const unsigned char* data, int qwc)
 {
@@ -589,11 +648,8 @@ void gsMemTransferData(const unsigned char* data, int qwc)
     {
     case GS_PSMCT32:
     case GS_PSMZ32:
-        for (i = 0; (i + 4 <= bytes) && xfer.active; i += 4)
-        {
-            xfer.changed |= mem_write(xfer.psm, xfer.bp, xfer.bw, xfer.x, xfer.y, *(const unsigned int*)&data[i]);
-            advance();
-        }
+        transfer32Run(data, bytes,
+                      (xfer.psm == GS_PSMZ32) ? blockTable32Z : blockTable32);
         break;
     case GS_PSMCT24:
     case GS_PSMZ24:
