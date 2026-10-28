@@ -10,6 +10,7 @@
 #include <string.h>
 
 #include "gs_internal.h"
+#include "../../include/pc_game_profile.h"
 
 unsigned char gsVram[GS_VRAM_SIZE];
 unsigned int gsPageGen[GS_PAGES];
@@ -542,9 +543,16 @@ void gsMemTransferData(const unsigned char* data, int qwc)
 {
     int bytes = qwc * 16;
     int i;
+    int profile_texture_upload = pcGameProfileTextureUploadActive();
+    double profile_t0 = profile_texture_upload ? pcGameProfileNowMs() : 0.0;
 
     if (!xfer.active)
     {
+        if (profile_texture_upload)
+        {
+            pcGameProfileRecordTextureTransfer(pcGameProfileNowMs() - profile_t0,
+                                               (qwc > 0) ? (unsigned int)qwc : 0);
+        }
         return;
     }
 
@@ -599,6 +607,11 @@ void gsMemTransferData(const unsigned char* data, int qwc)
             }
         }
         break;
+    }
+    if (profile_texture_upload)
+    {
+        pcGameProfileRecordTextureTransfer(pcGameProfileNowMs() - profile_t0,
+                                           (qwc > 0) ? (unsigned int)qwc : 0);
     }
 }
 
