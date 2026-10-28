@@ -47,6 +47,15 @@ static struct
     unsigned int frame_chunks[4], sum_chunks[4], max_chunks[4];
 } cnk_profile;
 
+/* Indexed by scope and raw PS2 CNK chunk type (ucType is an 8-bit value). */
+static struct
+{
+    double frame_vlist_ms[4][256], sum_vlist_ms[4][256], max_vlist_ms[4][256];
+    double frame_plist_ms[4][256], sum_plist_ms[4][256], max_plist_ms[4][256];
+    unsigned int frame_vlist_calls[4][256], sum_vlist_calls[4][256];
+    unsigned int frame_plist_calls[4][256], sum_plist_calls[4][256];
+} cnk_type_profile;
+
 int pcGameProfileEnabled(void)
 {
     static int enabled = -1;
@@ -81,9 +90,31 @@ void pcGameProfileRecordCnk(int scope, double vlist_ms, double plist_ms,
     cnk_profile.frame_chunks[scope] += plist_chunks;
 }
 
+void pcGameProfileRecordCnkType(int scope, unsigned int type, int plist, double ms)
+{
+    if (!game_profile.active || scope < PC_GAME_PROFILE_SCOPE_ROOM ||
+        scope > PC_GAME_PROFILE_SCOPE_MISC || type > 255)
+        return;
+    if (ms < 0.0)
+        ms = 0.0;
+
+    if (plist)
+    {
+        cnk_type_profile.frame_plist_ms[scope][type] += ms;
+        cnk_type_profile.frame_plist_calls[scope][type]++;
+    }
+    else
+    {
+        cnk_type_profile.frame_vlist_ms[scope][type] += ms;
+        cnk_type_profile.frame_vlist_calls[scope][type]++;
+    }
+}
+
 static void pcGameProfileBegin(void)
 {
     int i;
+    unsigned int type;
+
     for (i = 0; i < GP_COUNT; i++)
         game_profile.frame[i] = 0.0;
     for (i = 0; i < 4; i++)
@@ -92,6 +123,13 @@ static void pcGameProfileBegin(void)
         cnk_profile.frame_plist[i] = 0.0;
         cnk_profile.frame_models[i] = 0;
         cnk_profile.frame_chunks[i] = 0;
+        for (type = 0; type < 256; type++)
+        {
+            cnk_type_profile.frame_vlist_ms[i][type] = 0.0;
+            cnk_type_profile.frame_plist_ms[i][type] = 0.0;
+            cnk_type_profile.frame_vlist_calls[i][type] = 0;
+            cnk_type_profile.frame_plist_calls[i][type] = 0;
+        }
     }
     pcGameProfileScope = PC_GAME_PROFILE_SCOPE_NONE;
     game_profile.active = 1;
@@ -103,9 +141,47 @@ static void pcGameProfileAdd(int slot, double ms)
         game_profile.frame[slot] += (ms >= 0.0) ? ms : 0.0;
 }
 
+static void pcGameProfileLogCnkTypes(int scope, const char* label, double frames)
+{
+    int used[256];
+    int rank, type, best_type;
+    double best_ms;
+
+    for (type = 0; type < 256; type++)
+        used[type] = 0;
+
+    for (rank = 0; rank < 6; rank++)
+    {
+        best_type = -1;
+        best_ms = 0.0;
+        for (type = 0; type < 256; type++)
+        {
+            double value = cnk_type_profile.sum_vlist_ms[scope][type] +
+                           cnk_type_profile.sum_plist_ms[scope][type];
+            if (!used[type] && value > best_ms)
+            {
+                best_ms = value;
+                best_type = type;
+            }
+        }
+        if (best_type < 0)
+            break;
+
+        used[best_type] = 1;
+        pcLog("PROFILE CNK type %s=%d avg ms %.3f (vlist %.3f, plist %.3f) calls/frame %.2f/%.2f max-frame ms %.3f/%.3f",
+              label, best_type, best_ms / frames,
+              cnk_type_profile.sum_vlist_ms[scope][best_type] / frames,
+              cnk_type_profile.sum_plist_ms[scope][best_type] / frames,
+              (double)cnk_type_profile.sum_vlist_calls[scope][best_type] / frames,
+              (double)cnk_type_profile.sum_plist_calls[scope][best_type] / frames,
+              cnk_type_profile.max_vlist_ms[scope][best_type],
+              cnk_type_profile.max_plist_ms[scope][best_type]);
+    }
+}
+
 static void pcGameProfileEnd(int loop_ct, double total_ms)
 {
-    unsigned int i;
+    unsigned int i, type;
     double covered;
 
     game_profile.active = 0;
@@ -134,6 +210,17 @@ static void pcGameProfileEnd(int loop_ct, double total_ms)
         cnk_profile.sum_plist[i] += cnk_profile.frame_plist[i];
         cnk_profile.sum_models[i] += cnk_profile.frame_models[i];
         cnk_profile.sum_chunks[i] += cnk_profile.frame_chunks[i];
+        for (type = 0; type < 256; type++)
+        {
+            cnk_type_profile.sum_vlist_ms[i][type] += cnk_type_profile.frame_vlist_ms[i][type];
+            cnk_type_profile.sum_plist_ms[i][type] += cnk_type_profile.frame_plist_ms[i][type];
+            cnk_type_profile.sum_vlist_calls[i][type] += cnk_type_profile.frame_vlist_calls[i][type];
+            cnk_type_profile.sum_plist_calls[i][type] += cnk_type_profile.frame_plist_calls[i][type];
+            if (cnk_type_profile.frame_vlist_ms[i][type] > cnk_type_profile.max_vlist_ms[i][type])
+                cnk_type_profile.max_vlist_ms[i][type] = cnk_type_profile.frame_vlist_ms[i][type];
+            if (cnk_type_profile.frame_plist_ms[i][type] > cnk_type_profile.max_plist_ms[i][type])
+                cnk_type_profile.max_plist_ms[i][type] = cnk_type_profile.frame_plist_ms[i][type];
+        }
         if (cnk_profile.frame_vlist[i] > cnk_profile.max_vlist[i])
             cnk_profile.max_vlist[i] = cnk_profile.frame_vlist[i];
         if (cnk_profile.frame_plist[i] > cnk_profile.max_plist[i])
@@ -214,6 +301,9 @@ static void pcGameProfileEnd(int loop_ct, double total_ms)
               cnk_profile.sum_chunks[PC_GAME_PROFILE_SCOPE_ENEMY] / game_profile.count,
               cnk_profile.max_chunks[PC_GAME_PROFILE_SCOPE_ENEMY]);
 
+        pcGameProfileLogCnkTypes(PC_GAME_PROFILE_SCOPE_ROOM, "room", n);
+        pcGameProfileLogCnkTypes(PC_GAME_PROFILE_SCOPE_ENEMY, "enemy", n);
+
         for (i = 0; i < GP_COUNT; i++)
         {
             game_profile.sum[i] = 0.0;
@@ -225,6 +315,15 @@ static void pcGameProfileEnd(int loop_ct, double total_ms)
             cnk_profile.sum_plist[i] = cnk_profile.max_plist[i] = 0.0;
             cnk_profile.sum_models[i] = cnk_profile.max_models[i] = 0;
             cnk_profile.sum_chunks[i] = cnk_profile.max_chunks[i] = 0;
+            for (type = 0; type < 256; type++)
+            {
+                cnk_type_profile.sum_vlist_ms[i][type] = 0.0;
+                cnk_type_profile.max_vlist_ms[i][type] = 0.0;
+                cnk_type_profile.sum_plist_ms[i][type] = 0.0;
+                cnk_type_profile.max_plist_ms[i][type] = 0.0;
+                cnk_type_profile.sum_vlist_calls[i][type] = 0;
+                cnk_type_profile.sum_plist_calls[i][type] = 0;
+            }
         }
         game_profile.count = 0;
         game_profile.worst_total = 0.0;

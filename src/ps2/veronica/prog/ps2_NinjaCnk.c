@@ -693,6 +693,9 @@ int njCnkDrawModelLocal(NJS_CNK_MODEL* pModel)
     double profile_vlist_ms = 0.0;
     double profile_plist_ms = 0.0;
     double profile_t0 = 0.0;
+    double profile_chunk_t0 = 0.0;
+    unsigned int profile_vlist_type = 0;
+    unsigned int profile_plist_type = 0;
     unsigned int profile_plist_chunks = 0;
     int profile_cnk = profile_scope != PC_GAME_PROFILE_SCOPE_NONE;
 #endif
@@ -773,7 +776,10 @@ int njCnkDrawModelLocal(NJS_CNK_MODEL* pModel)
     {
 #ifdef TARGET_PC
         if (profile_cnk)
+        {
             profile_t0 = pcGameProfileNowMs();
+            profile_vlist_type = pCnk->ucType;
+        }
 #endif
         if (pCnk->ucType == 51)
         {
@@ -783,7 +789,10 @@ int njCnkDrawModelLocal(NJS_CNK_MODEL* pModel)
         pCnkFuncTbl[pCnk->ucType](pCnk);
 #ifdef TARGET_PC
         if (profile_cnk)
+        {
             profile_vlist_ms = pcGameProfileNowMs() - profile_t0;
+            pcGameProfileRecordCnkType(profile_scope, profile_vlist_type, 0, profile_vlist_ms);
+        }
 #endif
     }
     
@@ -813,10 +822,21 @@ int njCnkDrawModelLocal(NJS_CNK_MODEL* pModel)
     {
         while (pCnk->ucType != 0xFF) 
         {
+#ifdef TARGET_PC
+            if (profile_cnk)
+            {
+                profile_plist_type = pCnk->ucType;
+                profile_chunk_t0 = pcGameProfileNowMs();
+            }
+#endif
             pCnk = pCnkFuncTbl[pCnk->ucType](pCnk);
 #ifdef TARGET_PC
             if (profile_cnk)
+            {
                 profile_plist_chunks++;
+                pcGameProfileRecordCnkType(profile_scope, profile_plist_type, 1,
+                                             pcGameProfileNowMs() - profile_chunk_t0);
+            }
 #endif
         }
     }
