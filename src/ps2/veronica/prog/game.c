@@ -19,6 +19,7 @@
 #ifdef TARGET_PC
 #include "../../../../pc/src/pc_os.h"
 #include "../../../../pc/include/pc_platform.h"
+#include "../../../../pc/include/pc_game_profile.h"
 
 enum
 {
@@ -37,7 +38,16 @@ static struct
     int active;
 } game_profile;
 
-static int pcGameProfileEnabled(void)
+static int game_profile_scope;
+static struct
+{
+    double frame_vlist[4], sum_vlist[4], max_vlist[4];
+    double frame_plist[4], sum_plist[4], max_plist[4];
+    unsigned int frame_models[4], sum_models[4], max_models[4];
+    unsigned int frame_chunks[4], sum_chunks[4], max_chunks[4];
+} cnk_profile;
+
+int pcGameProfileEnabled(void)
 {
     static int enabled = -1;
 
@@ -47,9 +57,33 @@ static int pcGameProfileEnabled(void)
     return enabled;
 }
 
-static double pcGameProfileNowMs(void)
+double pcGameProfileNowMs(void)
 {
     return pcOsTime() * 1000.0;
+}
+
+void pcGameProfileSetScope(int scope)
+{
+    game_profile_scope = (scope >= PC_GAME_PROFILE_SCOPE_NONE &&
+                          scope <= PC_GAME_PROFILE_SCOPE_MISC) ? scope : PC_GAME_PROFILE_SCOPE_NONE;
+}
+
+int pcGameProfileGetScope(void)
+{
+    return game_profile_scope;
+}
+
+void pcGameProfileRecordCnk(int scope, double vlist_ms, double plist_ms,
+                            unsigned int model_calls, unsigned int plist_chunks)
+{
+    if (!game_profile.active || scope < PC_GAME_PROFILE_SCOPE_ROOM ||
+        scope > PC_GAME_PROFILE_SCOPE_MISC)
+        return;
+
+    cnk_profile.frame_vlist[scope] += (vlist_ms >= 0.0) ? vlist_ms : 0.0;
+    cnk_profile.frame_plist[scope] += (plist_ms >= 0.0) ? plist_ms : 0.0;
+    cnk_profile.frame_models[scope] += model_calls;
+    cnk_profile.frame_chunks[scope] += plist_chunks;
 }
 
 static void pcGameProfileBegin(void)
@@ -57,6 +91,14 @@ static void pcGameProfileBegin(void)
     int i;
     for (i = 0; i < GP_COUNT; i++)
         game_profile.frame[i] = 0.0;
+    for (i = 0; i < 4; i++)
+    {
+        cnk_profile.frame_vlist[i] = 0.0;
+        cnk_profile.frame_plist[i] = 0.0;
+        cnk_profile.frame_models[i] = 0;
+        cnk_profile.frame_chunks[i] = 0;
+    }
+    game_profile_scope = PC_GAME_PROFILE_SCOPE_NONE;
     game_profile.active = 1;
 }
 
@@ -89,6 +131,22 @@ static void pcGameProfileEnd(int loop_ct, double total_ms)
         game_profile.sum[i] += value;
         if (value > game_profile.max[i])
             game_profile.max[i] = value;
+    }
+
+    for (i = PC_GAME_PROFILE_SCOPE_ROOM; i <= PC_GAME_PROFILE_SCOPE_MISC; i++)
+    {
+        cnk_profile.sum_vlist[i] += cnk_profile.frame_vlist[i];
+        cnk_profile.sum_plist[i] += cnk_profile.frame_plist[i];
+        cnk_profile.sum_models[i] += cnk_profile.frame_models[i];
+        cnk_profile.sum_chunks[i] += cnk_profile.frame_chunks[i];
+        if (cnk_profile.frame_vlist[i] > cnk_profile.max_vlist[i])
+            cnk_profile.max_vlist[i] = cnk_profile.frame_vlist[i];
+        if (cnk_profile.frame_plist[i] > cnk_profile.max_plist[i])
+            cnk_profile.max_plist[i] = cnk_profile.frame_plist[i];
+        if (cnk_profile.frame_models[i] > cnk_profile.max_models[i])
+            cnk_profile.max_models[i] = cnk_profile.frame_models[i];
+        if (cnk_profile.frame_chunks[i] > cnk_profile.max_chunks[i])
+            cnk_profile.max_chunks[i] = cnk_profile.frame_chunks[i];
     }
 
     if (total_ms > game_profile.worst_total)
@@ -141,10 +199,37 @@ static void pcGameProfileEnd(int loop_ct, double total_ms)
               game_profile.worst[GP_DRAW_MODEL], game_profile.worst[GP_MIRROR],
               game_profile.worst[GP_OVERLAYS], game_profile.worst[GP_OTHER]);
 
+        pcLog("PROFILE CNK room avg/max ms: vlist %.2f/%.2f plist %.2f/%.2f | models/frame %u/%u plist-chunks/frame %u/%u",
+              cnk_profile.sum_vlist[PC_GAME_PROFILE_SCOPE_ROOM] / n,
+              cnk_profile.max_vlist[PC_GAME_PROFILE_SCOPE_ROOM],
+              cnk_profile.sum_plist[PC_GAME_PROFILE_SCOPE_ROOM] / n,
+              cnk_profile.max_plist[PC_GAME_PROFILE_SCOPE_ROOM],
+              cnk_profile.sum_models[PC_GAME_PROFILE_SCOPE_ROOM] / game_profile.count,
+              cnk_profile.max_models[PC_GAME_PROFILE_SCOPE_ROOM],
+              cnk_profile.sum_chunks[PC_GAME_PROFILE_SCOPE_ROOM] / game_profile.count,
+              cnk_profile.max_chunks[PC_GAME_PROFILE_SCOPE_ROOM]);
+
+        pcLog("PROFILE CNK enemy avg/max ms: vlist %.2f/%.2f plist %.2f/%.2f | models/frame %u/%u plist-chunks/frame %u/%u",
+              cnk_profile.sum_vlist[PC_GAME_PROFILE_SCOPE_ENEMY] / n,
+              cnk_profile.max_vlist[PC_GAME_PROFILE_SCOPE_ENEMY],
+              cnk_profile.sum_plist[PC_GAME_PROFILE_SCOPE_ENEMY] / n,
+              cnk_profile.max_plist[PC_GAME_PROFILE_SCOPE_ENEMY],
+              cnk_profile.sum_models[PC_GAME_PROFILE_SCOPE_ENEMY] / game_profile.count,
+              cnk_profile.max_models[PC_GAME_PROFILE_SCOPE_ENEMY],
+              cnk_profile.sum_chunks[PC_GAME_PROFILE_SCOPE_ENEMY] / game_profile.count,
+              cnk_profile.max_chunks[PC_GAME_PROFILE_SCOPE_ENEMY]);
+
         for (i = 0; i < GP_COUNT; i++)
         {
             game_profile.sum[i] = 0.0;
             game_profile.max[i] = 0.0;
+        }
+        for (i = 0; i < 4; i++)
+        {
+            cnk_profile.sum_vlist[i] = cnk_profile.max_vlist[i] = 0.0;
+            cnk_profile.sum_plist[i] = cnk_profile.max_plist[i] = 0.0;
+            cnk_profile.sum_models[i] = cnk_profile.max_models[i] = 0;
+            cnk_profile.sum_chunks[i] = cnk_profile.max_chunks[i] = 0;
         }
         game_profile.count = 0;
         game_profile.worst_total = 0.0;
@@ -154,8 +239,14 @@ static void pcGameProfileEnd(int loop_ct, double total_ms)
 #define PC_PROFILE_CALL(enabled, slot, call) \
     do { if (enabled) { double _profile_t0 = pcGameProfileNowMs(); call; \
          pcGameProfileAdd((slot), pcGameProfileNowMs() - _profile_t0); } else { call; } } while (0)
+#define PC_PROFILE_SCOPE_CALL(enabled, scope, slot, call) \
+    do { if (enabled) { int _old_scope = pcGameProfileGetScope(); \
+         double _profile_t0 = pcGameProfileNowMs(); \
+         pcGameProfileSetScope(scope); call; pcGameProfileSetScope(_old_scope); \
+         pcGameProfileAdd((slot), pcGameProfileNowMs() - _profile_t0); } else { call; } } while (0)
 #else
 #define PC_PROFILE_CALL(enabled, slot, call) do { call; } while (0)
+#define PC_PROFILE_SCOPE_CALL(enabled, scope, slot, call) do { call; } while (0)
 #endif
 
 // 100% matching! 
