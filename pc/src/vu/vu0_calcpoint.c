@@ -199,6 +199,80 @@ static void pcVu0CalcPointOne(const float* in, uint8_t* out)
  * Four vertices are evaluated side-by-side with SSE2. The final vertex is
  * executed by the original microcode so all the live VU state is left intact.
  * Set RECVX_VU0_BATCH=0 to compare against the old per-vertex route. */
+
+/* Clip an indexed triangle strip using the same EE VU0 operation sequence as
+ * njCnkCsUvh/Uvn, but keep the loop in one native C function. This removes the
+ * per-vertex PcGpr/asm2c dispatch overhead while preserving the VU registers,
+ * ACC, MAC flags and 24-bit clip-history side effects used by the old path. */
+static void pcVu0StripClipTransform(const uint8_t* position)
+{
+    VuVec r_;
+    int k_;
+
+    memcpy(&pcVu0.vf[4], position, sizeof(VuVec));
+
+    for (k_ = 0; k_ < 4; k_)
+    {
+        r_.f[k_] = vu_f(pcVu0.vf[24].f[k_] * pcVu0.vf[4].f[0]);
+    }
+    pcVu0.acc = r_;
+    vu_set_mac(&pcVu0, &r_, 15);
+
+    for (k_ = 0; k_ < 4; k_)
+    {
+        r_.f[k_] = vu_f(pcVu0.acc.f[k_] + pcVu0.vf[25].f[k_] * pcVu0.vf[4].f[1]);
+    }
+    pcVu0.acc = r_;
+    vu_set_mac(&pcVu0, &r_, 15);
+
+    for (k_ = 0; k_ < 4; k_)
+    {
+        r_.f[k_] = vu_f(pcVu0.acc.f[k_] + pcVu0.vf[26].f[k_] * pcVu0.vf[4].f[2]);
+    }
+    pcVu0.acc = r_;
+    vu_set_mac(&pcVu0, &r_, 15);
+
+    for (k_ = 0; k_ < 4; k_)
+    {
+        r_.f[k_] = vu_f(pcVu0.acc.f[k_] + pcVu0.vf[27].f[k_] * pcVu0.vf[0].f[3]);
+    }
+    memcpy(&pcVu0.vf[5], &r_, sizeof(VuVec));
+    vu_set_mac(&pcVu0, &r_, 15);
+}
+
+uint32_t pcVu0StripClip(const unsigned short* idx, int n, const void* vbuf)
+{
+    const uint8_t* const vb = (const uint8_t*)vbuf;
+    uint32_t coflag = 0x3F;
+    int k;
+
+    if (n <= 0)
+    {
+        return 0;
+    }
+
+    pcVu0StripClipTransform(vb + ((uint32_t)idx[0] << 6) + 32);
+
+    for (k = 1; k < n; k++)
+    {
+        const uint8_t* const position = vb + ((uint32_t)idx[k * 3] << 6) + 32;
+
+        /* A zero AND is already sufficient to accept the strip, exactly like
+         * the branch around the rest of the original EE clipping loop. */
+        if (coflag == 0)
+        {
+            return 0;
+        }
+
+        vu_clip(&pcVu0, &pcVu0.vf[5], pcVu0.vf[5].f[3]);
+        pcVu0StripClipTransform(position);
+        coflag &= pcVu0.clip;
+    }
+
+    vu_clip(&pcVu0, &pcVu0.vf[5], pcVu0.vf[5].f[3]);
+    return coflag & pcVu0.clip;
+}
+
 int pcVu0CalcPointBatchEnabled(void)
 {
     static int enabled = -1;
