@@ -2772,51 +2772,7 @@ CHUNK_HEAD* njCnkCsUvn(CHUNK_HEAD* pCnk)
                 ulpP[5] = GIF_REGLIST(SCE_GS_ST, SCE_GS_RGBAQ, SCE_GS_XYZF2);
 
 #ifdef TARGET_PC
-                {
-                    PcGpr g_a0 = { 0 };
-                    PcGpr g_op0 = { 0 };
-                    PcGpr g_op1 = { 0 };
-                    PcGpr g_op2 = { 0 };
-                    PcGpr g_op3 = { 0 };
-                    PcGpr g_t0 = { 0 };
-                    PcGpr g_t1 = { 0 };
-                    PcGpr g_zero = { 0 };
-                    uint64_t lo_ = 0; int fcc_ = 0;
-                    g_op0.d[0] = A2C_SX32((uint32_t)(uintptr_t)(coflag));
-                    g_op1.d[0] = A2C_SX32((uint32_t)(uintptr_t)(uspCnk));
-                    g_op2.d[0] = A2C_SX32((uint32_t)(uintptr_t)(usMax));
-                    g_op3.d[0] = A2C_SX32((uint32_t)(uintptr_t)(pNaCnkVerBufTop));
-                    g_op0.d[0] = A2C_SX32(g_zero.w[0] + (uint32_t)((int32_t)(0x3F)));
-                    g_t0.d[0] = (uint64_t)*(uint16_t*)A2C_PTR(((uint32_t)(g_op1.w[0] + (0))));
-                    g_a0.d[0] = A2C_SX32(g_op1.w[0] + (uint32_t)((int32_t)(6)));
-                    g_t0.d[0] = A2C_SX32(g_t0.w[0] << (6));
-                    g_op2.d[0] = A2C_SX32(g_op2.w[0] + (uint32_t)((int32_t)(-1)));
-                    g_t0.d[0] = A2C_SX32(g_op3.w[0] + (uint32_t)(g_t0.w[0]));
-                    memcpy(&pcVu0.vf[4], A2C_PTR(((uint32_t)(g_t0.w[0] + (0x20)))), 16);
-                    { VuVec r_ = pcVu0.vf[0]; r_.f[0] = vu_f(pcVu0.vf[24].f[0] * pcVu0.vf[4].f[0]); r_.f[1] = vu_f(pcVu0.vf[24].f[1] * pcVu0.vf[4].f[0]); r_.f[2] = vu_f(pcVu0.vf[24].f[2] * pcVu0.vf[4].f[0]); r_.f[3] = vu_f(pcVu0.vf[24].f[3] * pcVu0.vf[4].f[0]); pcVu0.acc.f[0] = r_.f[0]; pcVu0.acc.f[1] = r_.f[1]; pcVu0.acc.f[2] = r_.f[2]; pcVu0.acc.f[3] = r_.f[3]; vu_set_mac(&pcVu0, &r_, 15); }
-                    { VuVec r_ = pcVu0.vf[0]; r_.f[0] = vu_f(pcVu0.acc.f[0] + pcVu0.vf[25].f[0] * pcVu0.vf[4].f[1]); r_.f[1] = vu_f(pcVu0.acc.f[1] + pcVu0.vf[25].f[1] * pcVu0.vf[4].f[1]); r_.f[2] = vu_f(pcVu0.acc.f[2] + pcVu0.vf[25].f[2] * pcVu0.vf[4].f[1]); r_.f[3] = vu_f(pcVu0.acc.f[3] + pcVu0.vf[25].f[3] * pcVu0.vf[4].f[1]); pcVu0.acc.f[0] = r_.f[0]; pcVu0.acc.f[1] = r_.f[1]; pcVu0.acc.f[2] = r_.f[2]; pcVu0.acc.f[3] = r_.f[3]; vu_set_mac(&pcVu0, &r_, 15); }
-                    { VuVec r_ = pcVu0.vf[0]; r_.f[0] = vu_f(pcVu0.acc.f[0] + pcVu0.vf[26].f[0] * pcVu0.vf[4].f[2]); r_.f[1] = vu_f(pcVu0.acc.f[1] + pcVu0.vf[26].f[1] * pcVu0.vf[4].f[2]); r_.f[2] = vu_f(pcVu0.acc.f[2] + pcVu0.vf[26].f[2] * pcVu0.vf[4].f[2]); r_.f[3] = vu_f(pcVu0.acc.f[3] + pcVu0.vf[26].f[3] * pcVu0.vf[4].f[2]); pcVu0.acc.f[0] = r_.f[0]; pcVu0.acc.f[1] = r_.f[1]; pcVu0.acc.f[2] = r_.f[2]; pcVu0.acc.f[3] = r_.f[3]; vu_set_mac(&pcVu0, &r_, 15); }
-                    { VuVec r_ = pcVu0.vf[0]; r_.f[0] = vu_f(pcVu0.acc.f[0] + pcVu0.vf[27].f[0] * pcVu0.vf[0].f[3]); r_.f[1] = vu_f(pcVu0.acc.f[1] + pcVu0.vf[27].f[1] * pcVu0.vf[0].f[3]); r_.f[2] = vu_f(pcVu0.acc.f[2] + pcVu0.vf[27].f[2] * pcVu0.vf[0].f[3]); r_.f[3] = vu_f(pcVu0.acc.f[3] + pcVu0.vf[27].f[3] * pcVu0.vf[0].f[3]); pcVu0.vf[5].f[0] = r_.f[0]; pcVu0.vf[5].f[1] = r_.f[1]; pcVu0.vf[5].f[2] = r_.f[2]; pcVu0.vf[5].f[3] = r_.f[3]; vu_set_mac(&pcVu0, &r_, 15); }
-                    NinjaCnk_a8_l_002D2AB8:;
-                    g_t0.d[0] = (uint64_t)*(uint16_t*)A2C_PTR(((uint32_t)(g_a0.w[0] + (0))));
-                    g_a0.d[0] = A2C_SX32(g_a0.w[0] + (uint32_t)((int32_t)(6)));
-                    g_op2.d[0] = A2C_SX32(g_op2.w[0] + (uint32_t)((int32_t)(-1)));
-                    g_t0.d[0] = A2C_SX32(g_t0.w[0] << (6));
-                    { int c_ = (g_op0.d[0] == 0); g_t0.d[0] = A2C_SX32(g_op3.w[0] + (uint32_t)(g_t0.w[0])); if (c_) { *(uint32_t*)&(coflag) = g_op0.w[0]; goto label; } }
-                    memcpy(&pcVu0.vf[4], A2C_PTR(((uint32_t)(g_t0.w[0] + (0x20)))), 16);
-                    vu_clip(&pcVu0, &pcVu0.vf[5], pcVu0.vf[5].f[3]);
-                    { VuVec r_ = pcVu0.vf[0]; r_.f[0] = vu_f(pcVu0.vf[24].f[0] * pcVu0.vf[4].f[0]); r_.f[1] = vu_f(pcVu0.vf[24].f[1] * pcVu0.vf[4].f[0]); r_.f[2] = vu_f(pcVu0.vf[24].f[2] * pcVu0.vf[4].f[0]); r_.f[3] = vu_f(pcVu0.vf[24].f[3] * pcVu0.vf[4].f[0]); pcVu0.acc.f[0] = r_.f[0]; pcVu0.acc.f[1] = r_.f[1]; pcVu0.acc.f[2] = r_.f[2]; pcVu0.acc.f[3] = r_.f[3]; vu_set_mac(&pcVu0, &r_, 15); }
-                    { VuVec r_ = pcVu0.vf[0]; r_.f[0] = vu_f(pcVu0.acc.f[0] + pcVu0.vf[25].f[0] * pcVu0.vf[4].f[1]); r_.f[1] = vu_f(pcVu0.acc.f[1] + pcVu0.vf[25].f[1] * pcVu0.vf[4].f[1]); r_.f[2] = vu_f(pcVu0.acc.f[2] + pcVu0.vf[25].f[2] * pcVu0.vf[4].f[1]); r_.f[3] = vu_f(pcVu0.acc.f[3] + pcVu0.vf[25].f[3] * pcVu0.vf[4].f[1]); pcVu0.acc.f[0] = r_.f[0]; pcVu0.acc.f[1] = r_.f[1]; pcVu0.acc.f[2] = r_.f[2]; pcVu0.acc.f[3] = r_.f[3]; vu_set_mac(&pcVu0, &r_, 15); }
-                    { VuVec r_ = pcVu0.vf[0]; r_.f[0] = vu_f(pcVu0.acc.f[0] + pcVu0.vf[26].f[0] * pcVu0.vf[4].f[2]); r_.f[1] = vu_f(pcVu0.acc.f[1] + pcVu0.vf[26].f[1] * pcVu0.vf[4].f[2]); r_.f[2] = vu_f(pcVu0.acc.f[2] + pcVu0.vf[26].f[2] * pcVu0.vf[4].f[2]); r_.f[3] = vu_f(pcVu0.acc.f[3] + pcVu0.vf[26].f[3] * pcVu0.vf[4].f[2]); pcVu0.acc.f[0] = r_.f[0]; pcVu0.acc.f[1] = r_.f[1]; pcVu0.acc.f[2] = r_.f[2]; pcVu0.acc.f[3] = r_.f[3]; vu_set_mac(&pcVu0, &r_, 15); }
-                    { VuVec r_ = pcVu0.vf[0]; r_.f[0] = vu_f(pcVu0.acc.f[0] + pcVu0.vf[27].f[0] * pcVu0.vf[0].f[3]); r_.f[1] = vu_f(pcVu0.acc.f[1] + pcVu0.vf[27].f[1] * pcVu0.vf[0].f[3]); r_.f[2] = vu_f(pcVu0.acc.f[2] + pcVu0.vf[27].f[2] * pcVu0.vf[0].f[3]); r_.f[3] = vu_f(pcVu0.acc.f[3] + pcVu0.vf[27].f[3] * pcVu0.vf[0].f[3]); pcVu0.vf[5].f[0] = r_.f[0]; pcVu0.vf[5].f[1] = r_.f[1]; pcVu0.vf[5].f[2] = r_.f[2]; pcVu0.vf[5].f[3] = r_.f[3]; vu_set_mac(&pcVu0, &r_, 15); }
-                    g_t1.d[0] = A2C_SX32(a2c_cfc2(18));
-                    { int c_ = (g_op2.d[0] != 0); g_op0.d[0] = (g_op0.d[0] & g_t1.d[0]); if (c_) goto NinjaCnk_a8_l_002D2AB8; }
-                    vu_clip(&pcVu0, &pcVu0.vf[5], pcVu0.vf[5].f[3]);
-                    g_t1.d[0] = A2C_SX32(a2c_cfc2(18));
-                    g_op0.d[0] = (g_op0.d[0] & g_t1.d[0]);
-                    *(uint32_t*)&(coflag) = g_op0.w[0];
-                    (void)g_zero; (void)lo_; (void)fcc_;
-                }
+                coflag = pcVu0StripClip(uspCnk, (int)usMax, pNaCnkVerBufTop);
 #else
                 asm volatile
                 ("
