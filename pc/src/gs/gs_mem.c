@@ -15,6 +15,12 @@
 unsigned char gsVram[GS_VRAM_SIZE];
 unsigned int gsPageGen[GS_PAGES];
 
+/* Page generations invalidate cached textures; one bump per touched page per IMAGE
+ * packet is sufficient, rather than incrementing the same counter for every pixel. */
+static unsigned int pageTouchEpoch[GS_PAGES];
+static unsigned int currentPageTouchEpoch;
+static int coalescePageTouches;
+
 static const unsigned char blockTable32[4][8] = {
     {  0,  1,  4,  5, 16, 17, 20, 21 },
     {  2,  3,  6,  7, 18, 19, 22, 23 },
@@ -235,7 +241,20 @@ int gsBlockNumber(int psm, unsigned int bp, unsigned int bw, unsigned int x, uns
 
 static void touch(unsigned int byte_addr)
 {
-    gsPageGen[(byte_addr >> 13) & (GS_PAGES - 1)]++;
+    unsigned int page = (byte_addr >> 13) & (GS_PAGES - 1);
+
+    if (coalescePageTouches)
+    {
+        if (pageTouchEpoch[page] != currentPageTouchEpoch)
+        {
+            pageTouchEpoch[page] = currentPageTouchEpoch;
+            gsPageGen[page]++;
+        }
+    }
+    else
+    {
+        gsPageGen[page]++;
+    }
 }
 
 unsigned int gsMemRead(int psm, unsigned int bp, unsigned int bw, unsigned int x, unsigned int y)
@@ -556,6 +575,16 @@ void gsMemTransferData(const unsigned char* data, int qwc)
         return;
     }
 
+    /* gsPageGen is a cache invalidation token, not a write count. During one IMAGE
+     * packet, bump each affected 8 KB page only once even if thousands of pixels change. */
+    currentPageTouchEpoch++;
+    if (currentPageTouchEpoch == 0)
+    {
+        memset(pageTouchEpoch, 0, sizeof(pageTouchEpoch));
+        currentPageTouchEpoch = 1;
+    }
+    coalescePageTouches = 1;
+
     switch (xfer.psm)
     {
     case GS_PSMCT32:
@@ -608,6 +637,7 @@ void gsMemTransferData(const unsigned char* data, int qwc)
         }
         break;
     }
+    coalescePageTouches = 0;
     if (profile_texture_upload)
     {
         pcGameProfileRecordTextureTransfer(pcGameProfileNowMs() - profile_t0,
