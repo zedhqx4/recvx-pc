@@ -3,29 +3,6 @@
 #include "../../../ps2/veronica/prog/ps2_loadtim2.h"
 #include "../../../ps2/veronica/prog/main.h"
 
-#ifdef TARGET_PC
-#include "pc_platform.h"
-
-/* Experimental PC-only uncapped mode, read once so the INI file isn't reopened per frame. */
-static int pc_uncapped_enabled(void)
-{
-    static int loaded;
-    static int enabled;
-
-    if (!loaded)
-    {
-        enabled = pcIniGetInt("uncapped", 0) != 0;
-        loaded = 1;
-
-        if (enabled)
-        {
-            pcLog("Uncapped mode enabled (recvx.ini: uncapped=1)");
-        }
-    }
-
-    return enabled;
-}
-#endif
 
 PS2_NJ_SAVE Ps2_nj_save_current;
 
@@ -103,31 +80,19 @@ void Ps2SwapDBuff()
 
     EorFunc(); 
     
+    while (Ps2_vcount < 2) 
+    { 
 #ifdef TARGET_PC
-    if (!pc_uncapped_enabled())
-    {
-#endif
-        while (Ps2_vcount < 2) 
-        { 
-#ifdef TARGET_PC
-            pcKernelBusyWait();
+        pcKernelBusyWait();
 #else
-            asm("nop");
+        asm("nop");
 #endif
 #ifdef TARGET_PC
 
 #else
-            asm("nop");
+        asm("nop");
 #endif
-        } 
-#ifdef TARGET_PC
-    }
-    else
-    {
-        /* Keep the real 59.94 Hz kernel clock alive, but don't wait for two VBLANKs. */
-        pcKernelPoll();
-    }
-#endif
+    } 
     
     PS2_swap(); 
     
