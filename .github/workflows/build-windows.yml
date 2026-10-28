@@ -8,6 +8,7 @@ on:
       - graphics-fixes
       - SDL3
       - performance-sdl3
+      - experiment/gs-block-upload
       - c3853984-baseline
       - merge-c3853984-into-graphics-fixes
     paths-ignore:
