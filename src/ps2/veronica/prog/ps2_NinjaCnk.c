@@ -9,6 +9,9 @@
 #include "../../../ps2/veronica/prog/ps2_NaTextureFunction.h"
 #include "../../../ps2/veronica/prog/ps2_NaView.h"
 #include "../../../ps2/veronica/prog/ps2_Vu1Strip.h"
+#ifdef TARGET_PC
+#include "../../../../pc/include/pc_game_profile.h"
+#endif
 
 static VU1_STRIP_BUF* pNaCnkVerBufTop;
 static int iNaCnkVerBufMax;
@@ -680,6 +683,14 @@ int njCnkDrawModelLocal(NJS_CNK_MODEL* pModel)
     CHUNK_HEAD* pCnk;           
     unsigned int modelclipflag; 
     float temp, temp2; // not from the debugging symbols
+#ifdef TARGET_PC
+    int profile_scope = pcGameProfileGetScope();
+    double profile_vlist_ms = 0.0;
+    double profile_plist_ms = 0.0;
+    double profile_t0 = 0.0;
+    unsigned int profile_plist_chunks = 0;
+    int profile_cnk = profile_scope != PC_GAME_PROFILE_SCOPE_NONE;
+#endif
 
     modelclipflag = 0;
     
@@ -755,18 +766,30 @@ int njCnkDrawModelLocal(NJS_CNK_MODEL* pModel)
     
     if (pCnk != NULL)
     {
+#ifdef TARGET_PC
+        if (profile_cnk)
+            profile_t0 = pcGameProfileNowMs();
+#endif
         if (pCnk->ucType == 51)
         {
             modelclipflag = 1;
         }
         
         pCnkFuncTbl[pCnk->ucType](pCnk);
+#ifdef TARGET_PC
+        if (profile_cnk)
+            profile_vlist_ms = pcGameProfileNowMs() - profile_t0;
+#endif
     }
     
     njPopMatrixEx();
     
     if ((modelclipflag != 0) && (Vu0ClipFlag != 0)) 
     {
+#ifdef TARGET_PC
+        if (profile_cnk)
+            pcGameProfileRecordCnk(profile_scope, profile_vlist_ms, 0.0, 1, 0);
+#endif
         return 1;  
     } 
     
@@ -777,14 +800,31 @@ int njCnkDrawModelLocal(NJS_CNK_MODEL* pModel)
     
     pCnk = (CHUNK_HEAD*)pModel->plist;
     
+#ifdef TARGET_PC
+    if (profile_cnk && pCnk != NULL)
+        profile_t0 = pcGameProfileNowMs();
+#endif
     if (pCnk != NULL) 
     {
         while (pCnk->ucType != 0xFF) 
         {
             pCnk = pCnkFuncTbl[pCnk->ucType](pCnk);
+#ifdef TARGET_PC
+            if (profile_cnk)
+                profile_plist_chunks++;
+#endif
         }
     }
     
+#ifdef TARGET_PC
+    if (profile_cnk)
+    {
+        if (profile_plist_chunks != 0)
+            profile_plist_ms = pcGameProfileNowMs() - profile_t0;
+        pcGameProfileRecordCnk(profile_scope, profile_vlist_ms, profile_plist_ms,
+                               1, profile_plist_chunks);
+    }
+#endif
     return 1;
 }
 
