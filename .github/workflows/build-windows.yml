@@ -10,6 +10,7 @@ on:
       - performance-sdl3
       - experiment/gs-block-upload
       - experiment/texture-cache-index
+      - experiment/texture-cache-gl-state
       - c3853984-baseline
       - merge-c3853984-into-graphics-fixes
     paths-ignore:
@@ -57,6 +58,29 @@ jobs:
           if ($LASTEXITCODE -ne 0) {
             exit $LASTEXITCODE
           }
+
+      - name: Verify experimental build files before startup test
+        shell: pwsh
+        run: |
+          $dir = Join-Path $env:GITHUB_WORKSPACE 'build_pc'
+          $required = @('recvx.exe', 'recvx-config.exe', 'SDL3.dll', 'libusb-1.0.dll')
+          foreach ($name in $required) {
+            $file = Join-Path $dir $name
+            if (-not (Test-Path $file)) {
+              throw "Expected build artifact not found: $file"
+            }
+          }
+
+      - name: Upload experimental Windows build
+        uses: actions/upload-artifact@v4
+        with:
+          name: recvx-pc-windows-texture-cache-gl-state
+          path: |
+            build_pc/recvx.exe
+            build_pc/recvx-config.exe
+            build_pc/SDL3.dll
+            build_pc/libusb-1.0.dll
+          if-no-files-found: error
 
       - name: Smoke-test executable startup
         shell: pwsh
@@ -113,13 +137,3 @@ jobs:
 
           Get-ChildItem $dir -File
 
-      - name: Upload Windows build
-        uses: actions/upload-artifact@v4
-        with:
-          name: recvx-pc-windows
-          path: |
-            build_pc/recvx.exe
-            build_pc/recvx-config.exe
-            build_pc/SDL3.dll
-            build_pc/libusb-1.0.dll
-          if-no-files-found: error
