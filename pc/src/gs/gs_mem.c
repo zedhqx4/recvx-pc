@@ -565,6 +565,56 @@ static void transfer32Run(const unsigned char* data, int bytes, const unsigned c
 {
     int i = 0;
 
+    /* Complete aligned 8x8 blocks can be assembled in GS swizzled order and
+     * compared/copied as one 256-byte unit. Partial rows and misaligned
+     * rectangles continue through the per-pixel fast path below. */
+    while (xfer.active &&
+           xfer.x == xfer.sx &&
+           (xfer.sx & 7u) == 0 &&
+           (xfer.w & 7u) == 0 &&
+           (xfer.y & 7u) == 0 &&
+           xfer.sy + xfer.h - xfer.y >= 8u &&
+           (unsigned int)(bytes - i) >= xfer.w * 32u)
+    {
+        unsigned int row_bytes = xfer.w * 32u;
+        unsigned int bx, yy, xx;
+
+        for (bx = 0; bx < xfer.w; bx += 8u)
+        {
+            unsigned int block[64];
+            unsigned int a = addr32(xfer.bp, xfer.bw, xfer.sx + bx, xfer.y, bt);
+
+            for (yy = 0; yy < 8u; yy++)
+            {
+                for (xx = 0; xx < 8u; xx++)
+                {
+                    unsigned int v;
+                    unsigned int src_offset = (yy * xfer.w + bx + xx) * 4u;
+
+                    memcpy(&v, &data[i + src_offset], sizeof(v));
+                    block[columnTable32[yy][xx]] = v;
+                }
+            }
+
+            if (memcmp(&gsVram[a], block, sizeof(block)) != 0)
+            {
+                memcpy(&gsVram[a], block, sizeof(block));
+                touch(a);
+                xfer.changed = 1;
+            }
+        }
+
+        i += (int)row_bytes;
+        xfer.y += 8u;
+
+        if (xfer.y >= xfer.sy + xfer.h)
+        {
+            xfer.active = 0;
+            gsXferDone(xfer.bp, xfer.bw, xfer.psm, xfer.sx, xfer.sy,
+                       xfer.w, xfer.h, xfer.changed);
+        }
+    }
+
     while ((i + 4 <= bytes) && xfer.active)
     {
         unsigned int run = 8u - (xfer.x & 7u);
