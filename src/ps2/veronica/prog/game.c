@@ -590,9 +590,9 @@ void bhAllDrawModel()
     njSetMatrix(0, cam.mtx);
     if ((rom->mdl.objP != 0) && (sys->pt_flg & 0x20)) {
         if (sys->gm_flg & 0x80) {
-            PC_PROFILE_CALL(profile, GP_MODEL_ROOM, njCnkEasyDrawObject(rom->mdl.objP));
+            PC_PROFILE_SCOPE_CALL(profile, PC_GAME_PROFILE_SCOPE_ROOM, GP_MODEL_ROOM, njCnkEasyDrawObject(rom->mdl.objP));
         } else {
-            PC_PROFILE_CALL(profile, GP_MODEL_ROOM, njCnkEasyMultiDrawObject(rom->mdl.objP));
+            PC_PROFILE_SCOPE_CALL(profile, PC_GAME_PROFILE_SCOPE_ROOM, GP_MODEL_ROOM, njCnkEasyMultiDrawObject(rom->mdl.objP));
         }
     }
     njControl3D(0x2400);
@@ -614,7 +614,7 @@ void bhAllDrawModel()
     njControl3D(0);
     bhSetHalfLight();
     if (sys->pt_flg & 2) {
-        PC_PROFILE_CALL(profile, GP_MODEL_ENEMY, bhDrawEnemy());
+        PC_PROFILE_SCOPE_CALL(profile, PC_GAME_PROFILE_SCOPE_ENEMY, GP_MODEL_ENEMY, bhDrawEnemy());
     }
     njControl3D(0);
     if (((sys->pt_flg & 1) && !(plp->stflg & 0x01000000)) || ((plp->stflg & 0x01000000) && (pl_sleep_cnt != 0))) {
