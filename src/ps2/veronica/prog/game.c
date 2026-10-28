@@ -98,7 +98,7 @@ static void pcGameProfileBegin(void)
         cnk_profile.frame_models[i] = 0;
         cnk_profile.frame_chunks[i] = 0;
     }
-    game_profile_scope = PC_GAME_PROFILE_SCOPE_NONE;
+    pcGameProfileScope = PC_GAME_PROFILE_SCOPE_NONE;
     game_profile.active = 1;
 }
 
