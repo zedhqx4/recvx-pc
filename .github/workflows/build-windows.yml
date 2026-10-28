@@ -7,6 +7,7 @@ on:
       - pc-port
       - graphics-fixes
       - SDL3
+      - performance-sdl3
       - c3853984-baseline
       - merge-c3853984-into-graphics-fixes
     paths-ignore:
