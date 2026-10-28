@@ -574,7 +574,7 @@ static void transfer32Run(const unsigned char* data, int bytes, const unsigned c
            (xfer.w & 7u) == 0 &&
            (xfer.y & 7u) == 0 &&
            xfer.sy + xfer.h - xfer.y >= 8u &&
-           (unsigned int)(bytes - i) >= xfer.w * 32u)
+           bytes - i >= (int)(xfer.w * 32u))
     {
         unsigned int row_bytes = xfer.w * 32u;
         unsigned int bx, yy, xx;
