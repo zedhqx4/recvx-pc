@@ -2007,6 +2007,8 @@ void gsRendererDraw(const GsDrawState* st, const GsVertex* v, int nverts)
     int atst = GSF(st->test, 1, 3);
     GLenum mode;
     int n = 0, i;
+    int indexed_texture = 0;
+    GLuint palette_texture = 0;
     int perf_timing = gs_perf_timing_enabled();
     double perf_total_start = perf_timing ? pcOsTime() : 0.0;
     double perf_phase_start = perf_total_start;
@@ -2261,7 +2263,7 @@ void gsRendererDraw(const GsDrawState* st, const GsVertex* v, int nverts)
         {
             int hd = 0;
             GLuint gt = get_texture(st->tex0, st->texa, st->texclut, tw, th, texture_extent(st, v, nverts, th, 1),
-                                    texture_extent(st, v, nverts, tw, 0), &hd);
+                                    texture_extent(st, v, nverts, tw, 0), &hd, &indexed_texture, &palette_texture);
 
             pcGsBindTexture(GL_TEXTURE_2D, gt);
             glUniform1i(U.texrt, 0);
@@ -2274,6 +2276,14 @@ void gsRendererDraw(const GsDrawState* st, const GsVertex* v, int nverts)
             }
         }
 
+        if (indexed_texture && (palette_texture != 0))
+        {
+            pcGsActiveTexture(GL_TEXTURE1);
+            pcGsBindTexture(GL_TEXTURE_2D, palette_texture);
+            pcGsActiveTexture(GL_TEXTURE0);
+        }
+        glUniform1i(U.indexed, indexed_texture);
+        glUniform1i(U.palette, 1);
         glUniform2f(U.texsize, (float)tw, (float)th);
         glUniform1i(U.tfx, GSF(st->tex0, 35, 2));
         glUniform1i(U.tcc, GSF(st->tex0, 34, 1));
