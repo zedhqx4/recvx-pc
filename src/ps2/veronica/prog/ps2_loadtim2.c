@@ -410,6 +410,25 @@ int Clut_Load_Func(TIM2_PICTUREHEADER* ph, unsigned long clut_addr)
     return 0;
 }
 
+#ifdef TARGET_PC
+/* Reapply palette and texture metadata for a cached native indexed texture, without
+ * transferring its image plane through the shared GS VRAM address. */
+int Send_Tim2_dataExClutOnly(void* tim2_top_adr, unsigned long send_image_adr, unsigned long send_clut_adr)
+{
+    TIM2_PICTUREHEADER* picture;
+
+    picture = (((unsigned char*)tim2_top_adr)[5] != 0) ?
+        (TIM2_PICTUREHEADER*)((int)tim2_top_adr + 128) :
+        (TIM2_PICTUREHEADER*)((int)tim2_top_adr + 16);
+
+    if ((picture->ClutType != 0) && (Clut_Load_Func(picture, send_clut_adr) < 0))
+        return -1;
+
+    Set_GsTex(picture, send_image_adr, send_clut_adr);
+    return 0;
+}
+#endif
+
 // 100% matching!
 int P32_Image_Load(TIM2_PICTUREHEADER* ph, unsigned long image_addr) 
 {
