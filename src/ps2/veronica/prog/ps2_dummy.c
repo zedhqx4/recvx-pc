@@ -2505,7 +2505,7 @@ int Ps2TexLoad(NJS_TEXMEMLIST* addr)
     int asset_cache_hit = 0;
     int image_upload_skipped = 0;
     double clut_only_ms = 0.0;
-    unsigned long long asset_cache_tex0 = 0;
+    uint64_t asset_cache_tex0 = 0;
 #endif
 
     cache_flag = 1;

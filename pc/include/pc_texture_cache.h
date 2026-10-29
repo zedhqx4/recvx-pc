@@ -1,9 +1,11 @@
 /* Opt-in PC texture reuse for static indexed TIM2 assets, keyed by TIM2 Gindex. */
 #pragma once
 
+#include <stdint.h>
+
 #ifdef TARGET_PC
 int pcGsTextureAssetCacheEnabled(void);
-int pcGsTextureAssetCacheContains(unsigned int asset_id, unsigned long long tex0, int width, int height);
+int pcGsTextureAssetCacheContains(unsigned int asset_id, uint64_t tex0, int width, int height);
 void pcGsSetTextureAssetIdentity(unsigned int asset_id, int valid);
 void pcGsResetTextureAssetCache(void);
 #endif

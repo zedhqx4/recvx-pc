@@ -981,7 +981,7 @@ static int texture_cache_find_asset(unsigned int asset_id, u64 key0, int w, int 
 }
 
 
-int pcGsTextureAssetCacheContains(unsigned int asset_id, unsigned long long tex0, int width, int height)
+int pcGsTextureAssetCacheContains(unsigned int asset_id, uint64_t tex0, int width, int height)
 {
     unsigned long long key0;
     unsigned long long cpsm_key;
