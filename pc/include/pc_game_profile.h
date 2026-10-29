@@ -25,6 +25,8 @@ void pcGameProfileRecordTextureLoad(double total_ms, double send_ms, unsigned in
 /* Diagnostic-only phase timings; all are subsets of their containing functions. */
 void pcGameProfileRecordTextureLoadDetail(double post_send_setup_ms, double final_loadimage_ms);
 void pcGameProfileRecordTextureSendDetail(double clut_ms, double image_ms, double set_tex_ms, double other_ms);
+/* Time spent flushing queued GS primitives before a texture transfer starts. */
+void pcGameProfileRecordTextureFlush(double ms, int had_pending_primitives);
 /* Diagnostic-only identity and reuse counters for every Ps2TexLoad request. */
 void pcGameProfileRecordTextureRequest(
     const void* texmemlist, const void* surface,

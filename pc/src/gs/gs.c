@@ -9,6 +9,7 @@
 
 #include "gs_internal.h"
 #include "../../include/pc_platform.h"
+#include "../../include/pc_game_profile.h"
 #include "../pc_os.h"
 
 GsRegs gsRegs;
@@ -330,7 +331,19 @@ void gsWriteReg(int reg, u64 value)
     case 0x52: gsRegs.trxreg = value; break;
     case 0x53:
         gsRegs.trxdir = value;
-        gsFlushPrims();
+#ifdef TARGET_PC
+        if (pcGameProfileTextureUploadActive())
+        {
+            int had_pending_primitives = out_valid && (out_count > 0);
+            double flush_t0 = pcGameProfileNowMs();
+            gsFlushPrims();
+            pcGameProfileRecordTextureFlush(pcGameProfileNowMs() - flush_t0, had_pending_primitives);
+        }
+        else
+#endif
+        {
+            gsFlushPrims();
+        }
         gsMemStartTransfer(&gsRegs);
         break;
     default:
