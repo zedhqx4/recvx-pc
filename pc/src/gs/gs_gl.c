@@ -563,6 +563,7 @@ typedef struct {
 typedef struct {
     int used;
     unsigned int zbp;
+    unsigned int psm;       /* GS ZBUF.PSM: preserve native depth precision */
     int w, h;
     GLuint tex;
 } DepthBuffer;
@@ -711,18 +712,34 @@ static RenderTarget* get_rt(unsigned int fbp, unsigned int fbw)
     /* start from whatever GS memory holds there (normally cleared) */
     rt_load_from_vram(rt);
 
-    pcLog("gs: render target FBP %u (%ux%u)", fbp, rt->w, rt->h);
-
-    return rt;
-}
-
-static DepthBuffer* get_db(unsigned int zbp, int w, int h)
+    pcstatic DepthBuffer* get_db(unsigned int zbp, int psm, int w, int h)
 {
     int i;
+    GLint internal_format;
+    GLenum type;
+
+    /* Match the GS depth-buffer precision instead of quantizing every Z format to D24.
+     * In particular, Z32 must not lose eight bits before depth comparisons. */
+    if (psm == 0)
+    {
+        internal_format = GL_DEPTH_COMPONENT32;
+        type = GL_UNSIGNED_INT;
+    }
+    else if (psm == 1)
+    {
+        internal_format = GL_DEPTH_COMPONENT24;
+        type = GL_UNSIGNED_INT;
+    }
+    else
+    {
+        internal_format = GL_DEPTH_COMPONENT16;
+        type = GL_UNSIGNED_SHORT;
+    }
 
     for (i = 0; i < MAX_DB; i++)
     {
-        if (dbs[i].used && (dbs[i].zbp == zbp) && (dbs[i].w == w) && (dbs[i].h == h))
+        if (dbs[i].used && (dbs[i].zbp == zbp) && (dbs[i].psm == psm) &&
+            (dbs[i].w == w) && (dbs[i].h == h))
         {
             return &dbs[i];
         }
@@ -734,17 +751,18 @@ static DepthBuffer* get_db(unsigned int zbp, int w, int h)
         {
             dbs[i].used = 1;
             dbs[i].zbp = zbp;
+            dbs[i].psm = psm;
             dbs[i].w = w;
             dbs[i].h = h;
-            dbs[i].tex = make_texture(gs_scale_x(w), gs_scale_y(h), GL_DEPTH_COMPONENT24, GL_DEPTH_COMPONENT,
-                                      GL_UNSIGNED_INT, GL_NEAREST);
+            dbs[i].tex = make_texture(gs_scale_x(w), gs_scale_y(h), internal_format, GL_DEPTH_COMPONENT,
+                                      type, GL_NEAREST);
             return &dbs[i];
         }
     }
 
+    /* Keep the existing bounded fallback if all depth-buffer slots are already occupied. */
     return &dbs[0];
 }
-
 /* ------------------------------------------------------------------------------------------- */
 /* texture cache (textures decoded from GS memory) */
 
@@ -2473,7 +2491,7 @@ void gsRendererDraw(const GsDrawState* st, const GsVertex* v, int nverts)
     /* depth */
     if (use_depth)
     {
-        DepthBuffer* db = get_db(GSF(st->zbuf, 0, 9), rt->w, rt->h);
+        DepthBuffer* db = get_db(GSF(st->zbuf, 0, 9), GSF(st->zbuf, 24, 4), rt->w, rt->h);
 
         if (rt->depth_attached != db->tex)
         {
