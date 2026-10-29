@@ -15,6 +15,20 @@ GsRegs gsRegs;
 int gsDumpFrame;
 static int kicks;
 
+/* Expensive renderer diagnostics are opt-in to keep normal runs and releases quiet. */
+int gsTextureDiagnosticsEnabled(void)
+{
+    static int enabled = -1;
+
+    if (enabled < 0)
+    {
+        const char* value = getenv("RECVX_GS_TEX_DIAG");
+        enabled = (value != NULL && value[0] == '1' && value[1] == '\0') ? 1 : 0;
+    }
+
+    return enabled;
+}
+
 /* ------------------------------------------------------------------------------------------- */
 /* vertex queue and kicks */
 
@@ -646,6 +660,12 @@ static void clut_load(u64 tex0)
     unsigned int cld = GSF(tex0, 61, 3);
     int entries = clut_entries(psm);
     int i, load;
+    static int diagnostics = -1;
+
+    if (diagnostics < 0)
+    {
+        diagnostics = gsTextureDiagnosticsEnabled();
+    }
 
     if (entries == 0)
     {
@@ -667,14 +687,17 @@ static void clut_load(u64 tex0)
         return;
     }
 
-    frameClutLoads++;
+    if (diagnostics)
+    {
+        frameClutLoads++;
+    }
 
     /* primitives already queued use the old palette */
     {
         int had_pending_prims = out_valid && (out_count > 0);
-        double flush_start = had_pending_prims ? pcOsTime() : 0.0;
+        double flush_start = (diagnostics && had_pending_prims) ? pcOsTime() : 0.0;
 
-        if (had_pending_prims)
+        if (diagnostics && had_pending_prims)
         {
             frameClutPendingFlushes++;
             frameClutFlushedVertices += (unsigned int)out_count;
@@ -682,7 +705,7 @@ static void clut_load(u64 tex0)
 
         gsFlushPrims();
 
-        if (had_pending_prims)
+        if (diagnostics && had_pending_prims)
         {
             frameClutFlushDrawCalls++;
             frameClutFlushDrawSeconds += pcOsTime() - flush_start;
