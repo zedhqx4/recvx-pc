@@ -2166,7 +2166,7 @@ static int gs_z_precision_diag_enabled(void)
     if (enabled < 0)
     {
         const char* value = getenv("RECVX_Z_PRECISION_DIAG");
-        enabled = (value != NULL && value[0] == '1' && value[1] == '\\0') ? 1 : 0;
+        enabled = (value != NULL && value[0] == '1' && value[1] == '\0') ? 1 : 0;
     }
 
     return enabled;
