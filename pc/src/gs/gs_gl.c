@@ -1166,9 +1166,12 @@ static GLuint get_texture(u64 tex0, u64 texa, u64 texclut, int w, int h, int row
     unsigned int psm = GSF(tex0, 20, 6);
     unsigned int tbp = GSF(tex0, 0, 14);
     unsigned int tbw = GSF(tex0, 14, 6);
-    u64 key0 = tex0 & 0x0000001FFFFFFFFFULL & ~(0x3ULL << 35) & ~(1ULL << 34);   /* TBP..TH, drop TCC/TFX and CLUT fields */
+    int is_indexed = indexed_psm(psm);
+    u64 index_key0 = tex0 & 0x0000001FFFFFFFFFULL & ~(0x3ULL << 35) & ~(1ULL << 34);
+    u64 key0 = index_key0;   /* TBP..TH, drop TCC/TFX and CLUT fields */
     u64 cpsm_key = ((u64)GSF(tex0, 51, 4) << 37);
-    u64 key1 = ((psm == GS_PSMCT24) || (gsPsmBits(psm) == 16) || (GSF(tex0, 51, 4) >= 2)) ? texa : 0;
+    u64 key1 = is_indexed ? texa :
+               (((psm == GS_PSMCT24) || (gsPsmBits(psm) == 16) || (GSF(tex0, 51, 4) >= 2)) ? texa : 0);
     u64 key2 = gsClutHash(tex0);   /* palette contents (0-entry hash for direct color) */
     int pw, ph, i, slot = -1, oldest = 0, cached_slot;
     int diagnostics;
@@ -1245,6 +1248,9 @@ static GLuint get_texture(u64 tex0, u64 texa, u64 texclut, int w, int h, int row
         t = &texcache[cached_slot];
         t->last_use = frame_counter;
         *hd = t->hd;
+        *indexed = t->indexed;
+        *palette_texture = t->indexed ?
+            get_palette_texture(tex0, texa, indexed_palette_entries(psm), diagnostics) : 0;
         return t->tex;
     }
 
@@ -1292,11 +1298,13 @@ static GLuint get_texture(u64 tex0, u64 texa, u64 texclut, int w, int h, int row
         t = &texcache[coverage_slot];
         t->last_use = frame_counter;
         *hd = t->hd;
+        *indexed = t->indexed;
+        *palette_texture = t->indexed ?
+            get_palette_texture(tex0, texa, indexed_palette_entries(psm), diagnostics) : 0;
 
         if (diagnostics)
         {
             texFrameStats.hits++;
-            texFrameStats.coverage_hits++;
         }
 
         return t->tex;
@@ -1312,7 +1320,7 @@ static GLuint get_texture(u64 tex0, u64 texa, u64 texclut, int w, int h, int row
         slot = oldest;
         texture_cache_remove(slot);
 
-        if (!texcache[slot].hd)
+        if (!texcache[slot].hd && !texcache[slot].indexed)
         {
             pcGsDeleteTextures(1, &texcache[slot].tex);
             tex_cached--;
@@ -1335,6 +1343,8 @@ static GLuint get_texture(u64 tex0, u64 texa, u64 texclut, int w, int h, int row
     t->gen = gen;
     t->last_use = frame_counter;
     t->hd = 0;
+    t->indexed = 0;
+    t->index_slot = -1;
     texture_cache_insert(slot);
 
     {
@@ -1354,12 +1364,44 @@ static GLuint get_texture(u64 tex0, u64 texa, u64 texclut, int w, int h, int row
         {
             t->tex = r;
             t->hd = 1;
+            t->indexed = 0;
+            t->index_slot = -1;
             *hd = 1;
+            *indexed = 0;
+            *palette_texture = 0;
             return r;
         }
     }
 
     *hd = 0;
+
+    if (is_indexed)
+    {
+        int atlas_slot = get_indexed_atlas_slot(index_key0, gen, tex0, w, h, diagnostics,
+                                                &create_elapsed, &decode_elapsed, &upload_elapsed);
+        if (atlas_slot >= 0)
+        {
+            t->tex = indexed_atlases[atlas_slot].tex;
+            t->indexed = 1;
+            t->index_slot = atlas_slot;
+            indexed_atlases[atlas_slot].last_use = frame_counter;
+            *indexed = 1;
+            *palette_texture = get_palette_texture(tex0, texa, indexed_palette_entries(psm), diagnostics);
+
+            if (diagnostics)
+            {
+                pcLog("gs texture miss frame %u: TEX0=%08x:%08x TBP=%u PSM=%02x CLUT=%u size=%dx%d sample=%dx%d decoded-index=%dx%d create=%.2fms decode=%.2fms upload=%.2fms",
+                      frame_counter + 1, (unsigned int)(tex0 >> 32), (unsigned int)tex0,
+                      tbp, psm, GSF(tex0, 37, 14), w, h, requested_cols, requested_rows, w, h,
+                      create_elapsed * 1000.0, decode_elapsed * 1000.0, upload_elapsed * 1000.0);
+            }
+
+            return t->tex;
+        }
+    }
+
+    *indexed = 0;
+    *palette_texture = 0;
     {
         double t0 = diagnostics ? pcOsTime() : 0.0;
         t->tex = make_texture(w, h, GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE, GL_NEAREST);
