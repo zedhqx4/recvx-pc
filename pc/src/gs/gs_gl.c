@@ -724,7 +724,7 @@ static int gs_force_depth32f_enabled(void)
     if (enabled < 0)
     {
         const char* value = getenv("RECVX_GS_DEPTH32F");
-        enabled = (value != NULL && value[0] == '1' && value[1] == '\\0') ? 1 : 0;
+        enabled = (value != NULL && value[0] == '1' && value[1] == '\0') ? 1 : 0;
     }
 
     return enabled;
