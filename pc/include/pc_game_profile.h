@@ -22,5 +22,6 @@ void pcGameProfileRecordCnkType(int scope, unsigned int type, int plist, double 
 void pcGameProfileSetTextureUploadScope(int active);
 int pcGameProfileTextureUploadActive(void);
 void pcGameProfileRecordTextureLoad(double total_ms, double send_ms, unsigned int send_calls);
+void pcGameProfileRecordTextureCache(int source_hit, int image_skipped, double clut_only_ms);
 void pcGameProfileRecordTextureTransfer(double ms, unsigned int qwc);
 #endif
