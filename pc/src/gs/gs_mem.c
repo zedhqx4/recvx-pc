@@ -174,7 +174,6 @@ void gsMemInit(void)
     }
 
     memset(gsVram, 0, sizeof(gsVram));
-    memset(gsPageGen, 0, sizeof(gsPageGen));
     gsClutInvalidateCache();
 }
 
