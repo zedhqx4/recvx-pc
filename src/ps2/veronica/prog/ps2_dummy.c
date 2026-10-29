@@ -2505,6 +2505,7 @@ int Ps2TexLoad(NJS_TEXMEMLIST* addr)
     int source_cache_hit = 0;
     int image_upload_skipped = 0;
     double clut_only_ms = 0.0;
+    unsigned long long source_cache_tex0 = 0;
 #endif
 
     cache_flag = 1;
@@ -2518,13 +2519,38 @@ int Ps2TexLoad(NJS_TEXMEMLIST* addr)
 
     timp = (TIM2_PICTUREHEADER_EX*)addr->texinfo.texsurface.pSurface;
 
+    /* Resolve texture layout before deciding whether image data can be reused. */
+    tbw = timp->GsTex0.TBW;
+    tw = Ps2BitCount(timp->ImageWidth);
+    th = Ps2BitCount(timp->ImageHeight);
+
+    switch (timp->ImageType)
+    {
+    default:
+        psm = SCE_GS_PSMCT32;
+        break;
+    case 4:
+        psm = SCE_GS_PSMT4;
+        break;
+    case 5:
+        psm = SCE_GS_PSMT8;
+        break;
+    }
+
 #ifdef TARGET_PC
     source_cache_eligible = pcGsTextureSourceCacheEnabled() &&
                             (timp->TpFlag == 0) && (timp->ClutType != 0) &&
                             (PS2_Render_tex_sub_flag == 0) &&
                             !((timp->PictFormat >= 5) && (timp->PictFormat <= 8)) &&
                             ((timp->ImageType == 4) || (timp->ImageType == 5));
-    source_cache_hit = source_cache_eligible && pcGsTextureSourceCacheContains(timp);
+    if (source_cache_eligible && tw < 31 && th < 31)
+    {
+        source_cache_tex0 = SCE_GS_SET_TEX0_1(190 * 64, tbw, psm, tw, th, 1,
+                                             SCE_GS_MODULATE, 254 * 64,
+                                             SCE_GS_PSMCT32, 0, 0, 2);
+        source_cache_hit = pcGsTextureSourceCacheContains(
+            timp, source_cache_tex0, (int)(1U << tw), (int)(1U << th));
+    }
 #endif
 
     if (Ps2_current_texbreak != 0) 
@@ -2608,24 +2634,6 @@ label:
 
     *p++ = 0;
     *p++ = SCE_GS_TEXFLUSH;
-
-    tbw = timp->GsTex0.TBW;
-    
-    tw = Ps2BitCount(timp->ImageWidth);
-    th = Ps2BitCount(timp->ImageHeight);
-
-    switch (timp->ImageType) 
-    {
-    default:
-        psm = SCE_GS_PSMCT32;
-        break;
-    case 4:
-        psm = SCE_GS_PSMT4;
-        break;
-    case 5:
-        psm = SCE_GS_PSMT8;
-        break;
-    }
 
     temp = 190;
 
