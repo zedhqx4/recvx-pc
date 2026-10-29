@@ -767,7 +767,7 @@ static int texcache_hash_heads[TEX_HASH_BUCKETS];
 
 /* Per-present interval diagnostics: only emitted for texture misses or heavy CLUT flushing. */
 static struct {
-    unsigned int hits, misses, decoded, texels;
+    unsigned int hits, misses, coverage_hits, decoded, texels;
     double decode_seconds, create_seconds, upload_seconds, replacement_seconds;
 } texFrameStats;
 
@@ -933,7 +933,8 @@ static GLuint get_texture(u64 tex0, u64 texa, u64 texclut, int w, int h, int row
     int diagnostics;
     double create_elapsed = 0.0, decode_elapsed = 0.0, upload_elapsed = 0.0;
     unsigned int page_lo, page_hi, clut_page, stride;
-    unsigned long long gen;
+    unsigned long long gen, coverage_area = ~0ULL;
+    int coverage_slot = -1;
     CachedTex* t;
 
     diagnostics = gsTextureDiagnosticsEnabled();
@@ -992,14 +993,14 @@ static GLuint get_texture(u64 tex0, u64 texa, u64 texclut, int w, int h, int row
         return t->tex;
     }
 
-    if (diagnostics)
-    {
-        texFrameStats.misses++;
-    }
-
-    /* Only a miss needs the existing free-slot / least-recently-used scan. */
+    /* The renderer decodes only the rectangle a draw can sample, but every cache object
+     * represents the full logical texture. Reuse an already-decoded superset when its
+     * source pages and palette still match; this avoids duplicate GL texture allocation
+     * for the same TEX0 sampled through smaller rectangles. */
     for (i = 0; i < MAX_TEX; i++)
     {
+        unsigned long long area;
+
         t = &texcache[i];
 
         if (!t->used && (slot < 0))
@@ -1011,6 +1012,44 @@ static GLuint get_texture(u64 tex0, u64 texa, u64 texclut, int w, int h, int row
         {
             oldest = i;
         }
+
+        if (t->used && (t->key0 == key0) && (t->key1 == key1) && (t->key2 == key2) &&
+            (t->w == w) && (t->h == h) && (t->page_lo == page_lo) &&
+            (t->rows >= rows) && (t->cols >= cols))
+        {
+            unsigned long long cached_gen =
+                gen_sum_rect(page_lo, stride, (t->rows + ph - 1) / ph, (t->cols + pw - 1) / pw);
+
+            if (cached_gen == t->gen)
+            {
+                area = (unsigned long long)t->rows * (unsigned long long)t->cols;
+                if (area < coverage_area)
+                {
+                    coverage_area = area;
+                    coverage_slot = i;
+                }
+            }
+        }
+    }
+
+    if (coverage_slot >= 0)
+    {
+        t = &texcache[coverage_slot];
+        t->last_use = frame_counter;
+        *hd = t->hd;
+
+        if (diagnostics)
+        {
+            texFrameStats.hits++;
+            texFrameStats.coverage_hits++;
+        }
+
+        return t->tex;
+    }
+
+    if (diagnostics)
+    {
+        texFrameStats.misses++;
     }
 
     if (slot < 0)
@@ -2097,8 +2136,9 @@ void gsRendererPresent(unsigned int dispfb_fbp, unsigned int dispfb_fbw)
     gsTakeClutFrameStats(&clut_loads, &clut_flushes, &clut_vertices, &clut_draw_calls, &clut_draw_seconds);
     if (diagnostics && (texFrameStats.misses > 0 || clut_flushes >= 4 || clut_loads >= 32 || clut_draw_seconds >= 0.0005))
     {
-        pcLog("gs first-use frame %u: tex hit=%u miss=%u decoded=%u texels=%u decode=%.2fms create=%.2fms upload=%.2fms replacement=%.2fms; CLUT loads=%u pending flushes=%u verts=%u flush draws=%u flush draw time=%.2fms",
-              frame_counter, texFrameStats.hits, texFrameStats.misses, texFrameStats.decoded, texFrameStats.texels,
+        pcLog("gs first-use frame %u: tex hit=%u miss=%u coverage=%u decoded=%u texels=%u decode=%.2fms create=%.2fms upload=%.2fms replacement=%.2fms; CLUT loads=%u pending flushes=%u verts=%u flush draws=%u flush draw time=%.2fms",
+              frame_counter, texFrameStats.hits, texFrameStats.misses, texFrameStats.coverage_hits,
+              texFrameStats.decoded, texFrameStats.texels,
               texFrameStats.decode_seconds * 1000.0, texFrameStats.create_seconds * 1000.0,
               texFrameStats.upload_seconds * 1000.0, texFrameStats.replacement_seconds * 1000.0,
               clut_loads, clut_flushes, clut_vertices, clut_draw_calls, clut_draw_seconds * 1000.0);
