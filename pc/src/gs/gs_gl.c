@@ -762,6 +762,12 @@ static unsigned int* decode_buf;
 
 static int texcache_hash_heads[TEX_HASH_BUCKETS];
 
+/* Per-present interval diagnostics: only emitted for texture misses or heavy CLUT flushing. */
+static struct {
+    unsigned int hits, misses, decoded, texels;
+    double decode_seconds, create_seconds, upload_seconds, replacement_seconds;
+} texFrameStats;
+
 static unsigned int texture_cache_hash(u64 gen, u64 key0, u64 key1, u64 key2,
                                        int w, int h, int rows, int cols)
 {
@@ -970,11 +976,14 @@ static GLuint get_texture(u64 tex0, u64 texa, u64 texclut, int w, int h, int row
     cached_slot = texture_cache_find(gen, key0, key1, key2, w, h, rows, cols);
     if (cached_slot >= 0)
     {
+        texFrameStats.hits++;
         t = &texcache[cached_slot];
         t->last_use = frame_counter;
         *hd = t->hd;
         return t->tex;
     }
+
+    texFrameStats.misses++;
 
     /* Only a miss needs the existing free-slot / least-recently-used scan. */
     for (i = 0; i < MAX_TEX; i++)
@@ -1026,8 +1035,11 @@ static GLuint get_texture(u64 tex0, u64 texa, u64 texclut, int w, int h, int row
         extern GLuint gsReplaceLookup(u64 tex0, u64 texa);
         GLuint r;
 
+        double replacement_t0 = pcOsTime();
+
         pcGsInvalidateTextureBindings();
         r = gsReplaceLookup(tex0, texa);
+        texFrameStats.replacement_seconds += pcOsTime() - replacement_t0;
 
         if (r != 0)
         {
@@ -1039,13 +1051,33 @@ static GLuint get_texture(u64 tex0, u64 texa, u64 texclut, int w, int h, int row
     }
 
     *hd = 0;
-    t->tex = make_texture(w, h, GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE, GL_NEAREST);
+    {
+        double t0 = pcOsTime();
+        t->tex = make_texture(w, h, GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE, GL_NEAREST);
+        texFrameStats.create_seconds += pcOsTime() - t0;
+    }
     tex_cached++;
     tex_cached_bytes += (double)w * h * 4;
 
-    { double t0 = pcOsTime(); gsDecodeTexture(tex0, texa, texclut, cols, rows, decode_buf); stats.tex_decodes++; stats.tex_texels += cols * rows; stats.t_decode += pcOsTime() - t0; }
-    glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
-    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, cols, rows, GL_RGBA, GL_UNSIGNED_BYTE, decode_buf);
+    {
+        double t0 = pcOsTime();
+        gsDecodeTexture(tex0, texa, texclut, cols, rows, decode_buf);
+        {
+            double elapsed = pcOsTime() - t0;
+            stats.tex_decodes++;
+            stats.tex_texels += cols * rows;
+            stats.t_decode += elapsed;
+            texFrameStats.decoded++;
+            texFrameStats.texels += (unsigned int)(cols * rows);
+            texFrameStats.decode_seconds += elapsed;
+        }
+    }
+    {
+        double t0 = pcOsTime();
+        glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, cols, rows, GL_RGBA, GL_UNSIGNED_BYTE, decode_buf);
+        texFrameStats.upload_seconds += pcOsTime() - t0;
+    }
 
     return t->tex;
 }
@@ -2019,9 +2051,22 @@ void gsRendererPresent(unsigned int dispfb_fbp, unsigned int dispfb_fbw)
     float tw, th;
     int i;
 
+    unsigned int clut_loads, clut_flushes, clut_vertices;
+
     gsRendererFlush();
     frame_counter++;
     stats.frames++;
+
+    gsTakeClutFrameStats(&clut_loads, &clut_flushes, &clut_vertices);
+    if (texFrameStats.misses > 0 || clut_flushes >= 4 || clut_loads >= 32)
+    {
+        pcLog("gs first-use frame %u: tex hit=%u miss=%u decoded=%u texels=%u decode=%.2fms create=%.2fms upload=%.2fms replacement=%.2fms; CLUT loads=%u pending flushes=%u verts=%u",
+              frame_counter, texFrameStats.hits, texFrameStats.misses, texFrameStats.decoded, texFrameStats.texels,
+              texFrameStats.decode_seconds * 1000.0, texFrameStats.create_seconds * 1000.0,
+              texFrameStats.upload_seconds * 1000.0, texFrameStats.replacement_seconds * 1000.0,
+              clut_loads, clut_flushes, clut_vertices);
+    }
+    memset(&texFrameStats, 0, sizeof(texFrameStats));
 
     /* debug: RECVX_GSDUMP=<frame> logs every draw of that frame (and the next one) */
     {

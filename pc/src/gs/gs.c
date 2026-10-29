@@ -60,6 +60,22 @@ static void current_state(GsDrawState* st)
     st->texclut = gsRegs.texclut;
 }
 
+static unsigned int frameClutLoads;
+static unsigned int frameClutPendingFlushes;
+static unsigned int frameClutFlushedVertices;
+
+/* Called once per presented frame by the renderer's compact diagnostic. */
+void gsTakeClutFrameStats(unsigned int* loads, unsigned int* flushes, unsigned int* vertices)
+{
+    if (loads != NULL) *loads = frameClutLoads;
+    if (flushes != NULL) *flushes = frameClutPendingFlushes;
+    if (vertices != NULL) *vertices = frameClutFlushedVertices;
+
+    frameClutLoads = 0;
+    frameClutPendingFlushes = 0;
+    frameClutFlushedVertices = 0;
+}
+
 void gsFlushPrims(void)
 {
     if (out_valid && (out_count > 0))
@@ -643,7 +659,14 @@ static void clut_load(u64 tex0)
         return;
     }
 
+    frameClutLoads++;
+
     /* primitives already queued use the old palette */
+    if (out_valid && (out_count > 0))
+    {
+        frameClutPendingFlushes++;
+        frameClutFlushedVertices += (unsigned int)out_count;
+    }
     gsFlushPrims();
 
     for (i = 0; i < entries; i++)
