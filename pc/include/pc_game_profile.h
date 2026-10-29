@@ -22,5 +22,15 @@ void pcGameProfileRecordCnkType(int scope, unsigned int type, int plist, double 
 void pcGameProfileSetTextureUploadScope(int active);
 int pcGameProfileTextureUploadActive(void);
 void pcGameProfileRecordTextureLoad(double total_ms, double send_ms, unsigned int send_calls);
+/* Diagnostic-only identity and reuse counters for every Ps2TexLoad request. */
+void pcGameProfileRecordTextureRequest(
+    const void* texmemlist, const void* surface,
+    unsigned int memlist_gindex, unsigned int tim2_gindex,
+    unsigned int bank, unsigned int width, unsigned int height,
+    unsigned int image_type, unsigned int pict_format,
+    unsigned int clut_type, unsigned int clut_colors, unsigned int tp_flag,
+    int last_surface_hit, int tp_cache_skip, int cache_break,
+    unsigned int cache_flag, unsigned int send_calls, int scope,
+    double load_ms, double send_ms);
 void pcGameProfileRecordTextureTransfer(double ms, unsigned int qwc);
 #endif

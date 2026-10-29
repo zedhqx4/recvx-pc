@@ -20,6 +20,8 @@
 #include "../../../../pc/src/pc_os.h"
 #include "../../../../pc/include/pc_platform.h"
 #include "../../../../pc/include/pc_game_profile.h"
+#include <stdint.h>
+#include <string.h>
 
 enum
 {
@@ -69,6 +71,304 @@ static struct
     double frame_gs_qwc, sum_gs_qwc, max_gs_qwc;
 } texture_profile;
 static int texture_upload_scope;
+
+/* Track repeated requests by TIM2 source identity without changing texture behavior. */
+#define PC_TEXTURE_DIAG_RESOURCE_CAPACITY 1024
+#define PC_TEXTURE_DIAG_TOP_COUNT 8
+
+typedef struct PcTextureDiagResource
+{
+    const void* surface;
+    const void* first_texmemlist;
+    unsigned int memlist_gindex, tim2_gindex;
+    unsigned int width, height, image_type, pict_format;
+    unsigned int clut_type, clut_colors, tp_flag;
+    unsigned int first_bank, last_bank, bank_changes, last_seen_frame;
+    unsigned int requests, repeat_requests, consecutive_requests;
+    unsigned int sends, repeat_sends, last_cache_hits, tp_skips, cache_breaks;
+    unsigned int alias_requests;
+    unsigned int scope_requests[4], scope_repeats[4], scope_sends[4];
+    double load_ms, send_ms;
+} PcTextureDiagResource;
+
+static PcTextureDiagResource texture_diag_resources[PC_TEXTURE_DIAG_RESOURCE_CAPACITY];
+static unsigned int texture_diag_used_count, texture_diag_frame_serial;
+static const void* texture_diag_last_surface;
+static unsigned int texture_diag_last_gindex;
+
+static struct
+{
+    double frame_requests, sum_requests;
+    double frame_unique_surfaces, sum_unique_surfaces;
+    double frame_repeat_requests, sum_repeat_requests;
+    double frame_consecutive, sum_consecutive;
+    double frame_sends, sum_sends;
+    double frame_first_seen_sends, sum_first_seen_sends;
+    double frame_repeat_sends, sum_repeat_sends;
+    double frame_last_cache_hits, sum_last_cache_hits;
+    double frame_tp_skips, sum_tp_skips;
+    double frame_cache_breaks, sum_cache_breaks;
+    double frame_noncached_no_sends, sum_noncached_no_sends;
+    double frame_alias_requests, sum_alias_requests;
+    double frame_untracked_requests, sum_untracked_requests;
+    double frame_scope_requests[4], sum_scope_requests[4];
+    double frame_scope_repeats[4], sum_scope_repeats[4];
+    double frame_scope_sends[4], sum_scope_sends[4];
+} texture_reuse_profile;
+
+static PcTextureDiagResource* pcGameProfileFindTextureResource(
+    const void* texmemlist, const void* surface,
+    unsigned int memlist_gindex, unsigned int tim2_gindex,
+    unsigned int bank, unsigned int width, unsigned int height,
+    unsigned int image_type, unsigned int pict_format,
+    unsigned int clut_type, unsigned int clut_colors, unsigned int tp_flag)
+{
+    uintptr_t hash_value;
+    unsigned int slot, probe;
+    PcTextureDiagResource* resource;
+
+    if (surface == NULL)
+        return NULL;
+
+    hash_value = ((uintptr_t)surface >> 4) ^
+                 ((uintptr_t)tim2_gindex * (uintptr_t)0x9e3779b1u);
+    hash_value ^= hash_value >> 13;
+    slot = (unsigned int)hash_value & (PC_TEXTURE_DIAG_RESOURCE_CAPACITY - 1);
+
+    for (probe = 0; probe < PC_TEXTURE_DIAG_RESOURCE_CAPACITY; probe++)
+    {
+        resource = &texture_diag_resources[slot];
+        if (resource->surface == surface && resource->tim2_gindex == tim2_gindex)
+            return resource;
+
+        if (resource->surface == NULL)
+        {
+            memset(resource, 0, sizeof(*resource));
+            resource->surface = surface;
+            resource->first_texmemlist = texmemlist;
+            resource->memlist_gindex = memlist_gindex;
+            resource->tim2_gindex = tim2_gindex;
+            resource->width = width;
+            resource->height = height;
+            resource->image_type = image_type;
+            resource->pict_format = pict_format;
+            resource->clut_type = clut_type;
+            resource->clut_colors = clut_colors;
+            resource->tp_flag = tp_flag;
+            resource->first_bank = bank;
+            resource->last_bank = bank;
+            texture_diag_used_count++;
+            return resource;
+        }
+        slot = (slot + 1) & (PC_TEXTURE_DIAG_RESOURCE_CAPACITY - 1);
+    }
+    return NULL;
+}
+
+void pcGameProfileRecordTextureRequest(
+    const void* texmemlist, const void* surface,
+    unsigned int memlist_gindex, unsigned int tim2_gindex,
+    unsigned int bank, unsigned int width, unsigned int height,
+    unsigned int image_type, unsigned int pict_format,
+    unsigned int clut_type, unsigned int clut_colors, unsigned int tp_flag,
+    int last_surface_hit, int tp_cache_skip, int cache_break,
+    unsigned int cache_flag, unsigned int send_calls, int scope,
+    double load_ms, double send_ms)
+{
+    PcTextureDiagResource* resource;
+    int new_in_frame, consecutive;
+
+    if (!game_profile.active || surface == NULL)
+        return;
+
+    if (scope < PC_GAME_PROFILE_SCOPE_NONE || scope > PC_GAME_PROFILE_SCOPE_MISC)
+        scope = PC_GAME_PROFILE_SCOPE_NONE;
+
+    texture_reuse_profile.frame_requests += 1.0;
+    texture_reuse_profile.frame_scope_requests[scope] += 1.0;
+    consecutive = texture_diag_last_surface == surface && texture_diag_last_gindex == tim2_gindex;
+    if (consecutive)
+        texture_reuse_profile.frame_consecutive += 1.0;
+    if (last_surface_hit)
+        texture_reuse_profile.frame_last_cache_hits += 1.0;
+    if (tp_cache_skip)
+        texture_reuse_profile.frame_tp_skips += 1.0;
+    if (cache_break)
+        texture_reuse_profile.frame_cache_breaks += 1.0;
+    if (send_calls == 0 && cache_flag != 0)
+        texture_reuse_profile.frame_noncached_no_sends += 1.0;
+    if (send_calls != 0)
+    {
+        texture_reuse_profile.frame_sends += send_calls;
+        texture_reuse_profile.frame_scope_sends[scope] += send_calls;
+    }
+
+    resource = pcGameProfileFindTextureResource(
+        texmemlist, surface, memlist_gindex, tim2_gindex, bank,
+        width, height, image_type, pict_format, clut_type, clut_colors, tp_flag);
+
+    if (resource == NULL)
+    {
+        texture_reuse_profile.frame_untracked_requests += 1.0;
+        texture_diag_last_surface = surface;
+        texture_diag_last_gindex = tim2_gindex;
+        return;
+    }
+
+    new_in_frame = resource->last_seen_frame != texture_diag_frame_serial;
+    if (new_in_frame)
+    {
+        texture_reuse_profile.frame_unique_surfaces += 1.0;
+        if (send_calls != 0)
+            texture_reuse_profile.frame_first_seen_sends += send_calls;
+    }
+    else
+    {
+        texture_reuse_profile.frame_repeat_requests += 1.0;
+        texture_reuse_profile.frame_scope_repeats[scope] += 1.0;
+        resource->repeat_requests++;
+        if (send_calls != 0)
+        {
+            texture_reuse_profile.frame_repeat_sends += send_calls;
+            resource->repeat_sends += send_calls;
+        }
+    }
+
+    if (consecutive)
+        resource->consecutive_requests++;
+    if (resource->first_texmemlist != texmemlist || resource->memlist_gindex != memlist_gindex)
+    {
+        texture_reuse_profile.frame_alias_requests += 1.0;
+        resource->alias_requests++;
+    }
+    if (bank != resource->last_bank)
+        resource->bank_changes++;
+    resource->last_bank = bank;
+
+    resource->requests++;
+    resource->scope_requests[scope]++;
+    if (!new_in_frame)
+        resource->scope_repeats[scope]++;
+    if (send_calls != 0)
+    {
+        resource->sends += send_calls;
+        resource->scope_sends[scope] += send_calls;
+        resource->send_ms += send_ms >= 0.0 ? send_ms : 0.0;
+    }
+    if (last_surface_hit)
+        resource->last_cache_hits++;
+    if (tp_cache_skip)
+        resource->tp_skips++;
+    if (cache_break)
+        resource->cache_breaks++;
+    resource->load_ms += load_ms >= 0.0 ? load_ms : 0.0;
+    resource->last_seen_frame = texture_diag_frame_serial;
+    texture_diag_last_surface = surface;
+    texture_diag_last_gindex = tim2_gindex;
+}
+
+static void pcGameProfileLogTextureReuse(double frames)
+{
+    unsigned char used[PC_TEXTURE_DIAG_RESOURCE_CAPACITY];
+    unsigned int i, rank;
+    int best;
+    double best_ms;
+
+    memset(used, 0, sizeof(used));
+
+    pcLog("PROFILE TEX reuse avg/frame: requests %.1f unique-sources %.1f repeated-source-requests %.1f consecutive %.1f Send_Tim2 %.1f first-source-sends %.1f repeat-source-sends %.1f last-cache-hit %.1f TP-skip %.1f cache-break %.1f noncached-no-send %.1f alias-entry-requests %.1f untracked %.2f tracked-resources %u/%u",
+          texture_reuse_profile.sum_requests / frames,
+          texture_reuse_profile.sum_unique_surfaces / frames,
+          texture_reuse_profile.sum_repeat_requests / frames,
+          texture_reuse_profile.sum_consecutive / frames,
+          texture_reuse_profile.sum_sends / frames,
+          texture_reuse_profile.sum_first_seen_sends / frames,
+          texture_reuse_profile.sum_repeat_sends / frames,
+          texture_reuse_profile.sum_last_cache_hits / frames,
+          texture_reuse_profile.sum_tp_skips / frames,
+          texture_reuse_profile.sum_cache_breaks / frames,
+          texture_reuse_profile.sum_noncached_no_sends / frames,
+          texture_reuse_profile.sum_alias_requests / frames,
+          texture_reuse_profile.sum_untracked_requests / frames,
+          texture_diag_used_count, PC_TEXTURE_DIAG_RESOURCE_CAPACITY);
+
+    pcLog("PROFILE TEX reuse scopes avg/frame: none req/repeat/send %.1f/%.1f/%.1f room %.1f/%.1f/%.1f enemy %.1f/%.1f/%.1f misc %.1f/%.1f/%.1f",
+          texture_reuse_profile.sum_scope_requests[0] / frames,
+          texture_reuse_profile.sum_scope_repeats[0] / frames,
+          texture_reuse_profile.sum_scope_sends[0] / frames,
+          texture_reuse_profile.sum_scope_requests[PC_GAME_PROFILE_SCOPE_ROOM] / frames,
+          texture_reuse_profile.sum_scope_repeats[PC_GAME_PROFILE_SCOPE_ROOM] / frames,
+          texture_reuse_profile.sum_scope_sends[PC_GAME_PROFILE_SCOPE_ROOM] / frames,
+          texture_reuse_profile.sum_scope_requests[PC_GAME_PROFILE_SCOPE_ENEMY] / frames,
+          texture_reuse_profile.sum_scope_repeats[PC_GAME_PROFILE_SCOPE_ENEMY] / frames,
+          texture_reuse_profile.sum_scope_sends[PC_GAME_PROFILE_SCOPE_ENEMY] / frames,
+          texture_reuse_profile.sum_scope_requests[PC_GAME_PROFILE_SCOPE_MISC] / frames,
+          texture_reuse_profile.sum_scope_repeats[PC_GAME_PROFILE_SCOPE_MISC] / frames,
+          texture_reuse_profile.sum_scope_sends[PC_GAME_PROFILE_SCOPE_MISC] / frames);
+
+    /* Rank hot TIM2 sources by accumulated Ps2TexLoad time; show repeat and upload counts. */
+    for (rank = 0; rank < PC_TEXTURE_DIAG_TOP_COUNT; rank++)
+    {
+        best = -1;
+        best_ms = 0.0;
+        for (i = 0; i < PC_TEXTURE_DIAG_RESOURCE_CAPACITY; i++)
+        {
+            PcTextureDiagResource* resource = &texture_diag_resources[i];
+            if (resource->surface != NULL && !used[i] && resource->load_ms > best_ms)
+            {
+                best_ms = resource->load_ms;
+                best = (int)i;
+            }
+        }
+        if (best < 0)
+            break;
+
+        used[best] = 1;
+        {
+            PcTextureDiagResource* resource = &texture_diag_resources[best];
+            pcLog("PROFILE TEX hot #%u TIM2=%08x list=%08x surface=%p size=%ux%u type=%u fmt=%u CLUT=%u/%u bank=%u->%u calls/frame=%.2f repeat/frame=%.2f consecutive/frame=%.2f sends/frame=%.2f repeat-sends/frame=%.2f last-hit/frame=%.2f room-calls/frame=%.2f enemy-calls/frame=%.2f load-ms/frame=%.3f send-ms/frame=%.3f alias-use/frame=%.2f bank-changes=%u",
+                  rank + 1, resource->tim2_gindex, resource->memlist_gindex,
+                  resource->surface, resource->width, resource->height,
+                  resource->image_type, resource->pict_format,
+                  resource->clut_type, resource->clut_colors,
+                  resource->first_bank, resource->last_bank,
+                  (double)resource->requests / frames,
+                  (double)resource->repeat_requests / frames,
+                  (double)resource->consecutive_requests / frames,
+                  (double)resource->sends / frames,
+                  (double)resource->repeat_sends / frames,
+                  (double)resource->last_cache_hits / frames,
+                  (double)resource->scope_requests[PC_GAME_PROFILE_SCOPE_ROOM] / frames,
+                  (double)resource->scope_requests[PC_GAME_PROFILE_SCOPE_ENEMY] / frames,
+                  resource->load_ms / frames, resource->send_ms / frames,
+                  (double)resource->alias_requests / frames, resource->bank_changes);
+        }
+    }
+}
+
+static void pcGameProfileResetTextureReuseWindow(void)
+{
+    memset(texture_diag_resources, 0, sizeof(texture_diag_resources));
+    texture_diag_used_count = 0;
+    texture_diag_last_surface = NULL;
+    texture_diag_last_gindex = 0;
+    texture_reuse_profile.sum_requests = 0.0;
+    texture_reuse_profile.sum_unique_surfaces = 0.0;
+    texture_reuse_profile.sum_repeat_requests = 0.0;
+    texture_reuse_profile.sum_consecutive = 0.0;
+    texture_reuse_profile.sum_sends = 0.0;
+    texture_reuse_profile.sum_first_seen_sends = 0.0;
+    texture_reuse_profile.sum_repeat_sends = 0.0;
+    texture_reuse_profile.sum_last_cache_hits = 0.0;
+    texture_reuse_profile.sum_tp_skips = 0.0;
+    texture_reuse_profile.sum_cache_breaks = 0.0;
+    texture_reuse_profile.sum_noncached_no_sends = 0.0;
+    texture_reuse_profile.sum_alias_requests = 0.0;
+    texture_reuse_profile.sum_untracked_requests = 0.0;
+    memset(texture_reuse_profile.sum_scope_requests, 0, sizeof(texture_reuse_profile.sum_scope_requests));
+    memset(texture_reuse_profile.sum_scope_repeats, 0, sizeof(texture_reuse_profile.sum_scope_repeats));
+    memset(texture_reuse_profile.sum_scope_sends, 0, sizeof(texture_reuse_profile.sum_scope_sends));
+}
 
 int pcGameProfileEnabled(void)
 {
@@ -170,6 +470,28 @@ static void pcGameProfileBegin(void)
     texture_profile.frame_no_send_calls = 0.0;
     texture_profile.frame_gs_calls = 0.0;
     texture_profile.frame_gs_qwc = 0.0;
+
+    texture_reuse_profile.frame_requests = 0.0;
+    texture_reuse_profile.frame_unique_surfaces = 0.0;
+    texture_reuse_profile.frame_repeat_requests = 0.0;
+    texture_reuse_profile.frame_consecutive = 0.0;
+    texture_reuse_profile.frame_sends = 0.0;
+    texture_reuse_profile.frame_first_seen_sends = 0.0;
+    texture_reuse_profile.frame_repeat_sends = 0.0;
+    texture_reuse_profile.frame_last_cache_hits = 0.0;
+    texture_reuse_profile.frame_tp_skips = 0.0;
+    texture_reuse_profile.frame_cache_breaks = 0.0;
+    texture_reuse_profile.frame_noncached_no_sends = 0.0;
+    texture_reuse_profile.frame_alias_requests = 0.0;
+    texture_reuse_profile.frame_untracked_requests = 0.0;
+    memset(texture_reuse_profile.frame_scope_requests, 0, sizeof(texture_reuse_profile.frame_scope_requests));
+    memset(texture_reuse_profile.frame_scope_repeats, 0, sizeof(texture_reuse_profile.frame_scope_repeats));
+    memset(texture_reuse_profile.frame_scope_sends, 0, sizeof(texture_reuse_profile.frame_scope_sends));
+    texture_diag_frame_serial++;
+    if (texture_diag_frame_serial == 0)
+        texture_diag_frame_serial = 1;
+    texture_diag_last_surface = NULL;
+    texture_diag_last_gindex = 0;
     texture_upload_scope = 0;
 
     for (i = 0; i < GP_COUNT; i++)
@@ -270,6 +592,26 @@ static void pcGameProfileEnd(int loop_ct, double total_ms)
     texture_profile.sum_no_send_calls += texture_profile.frame_no_send_calls;
     texture_profile.sum_gs_calls += texture_profile.frame_gs_calls;
     texture_profile.sum_gs_qwc += texture_profile.frame_gs_qwc;
+
+    texture_reuse_profile.sum_requests += texture_reuse_profile.frame_requests;
+    texture_reuse_profile.sum_unique_surfaces += texture_reuse_profile.frame_unique_surfaces;
+    texture_reuse_profile.sum_repeat_requests += texture_reuse_profile.frame_repeat_requests;
+    texture_reuse_profile.sum_consecutive += texture_reuse_profile.frame_consecutive;
+    texture_reuse_profile.sum_sends += texture_reuse_profile.frame_sends;
+    texture_reuse_profile.sum_first_seen_sends += texture_reuse_profile.frame_first_seen_sends;
+    texture_reuse_profile.sum_repeat_sends += texture_reuse_profile.frame_repeat_sends;
+    texture_reuse_profile.sum_last_cache_hits += texture_reuse_profile.frame_last_cache_hits;
+    texture_reuse_profile.sum_tp_skips += texture_reuse_profile.frame_tp_skips;
+    texture_reuse_profile.sum_cache_breaks += texture_reuse_profile.frame_cache_breaks;
+    texture_reuse_profile.sum_noncached_no_sends += texture_reuse_profile.frame_noncached_no_sends;
+    texture_reuse_profile.sum_alias_requests += texture_reuse_profile.frame_alias_requests;
+    texture_reuse_profile.sum_untracked_requests += texture_reuse_profile.frame_untracked_requests;
+    for (i = 0; i < 4; i++)
+    {
+        texture_reuse_profile.sum_scope_requests[i] += texture_reuse_profile.frame_scope_requests[i];
+        texture_reuse_profile.sum_scope_repeats[i] += texture_reuse_profile.frame_scope_repeats[i];
+        texture_reuse_profile.sum_scope_sends[i] += texture_reuse_profile.frame_scope_sends[i];
+    }
     if (texture_profile.frame_load_ms > texture_profile.max_load_ms)
         texture_profile.max_load_ms = texture_profile.frame_load_ms;
     if (texture_profile.frame_send_ms > texture_profile.max_send_ms)
@@ -395,6 +737,8 @@ static void pcGameProfileEnd(int loop_ct, double total_ms)
               texture_profile.sum_gs_calls / n, texture_profile.max_gs_calls,
               texture_profile.sum_gs_qwc / n, texture_profile.max_gs_qwc);
 
+        pcGameProfileLogTextureReuse(n);
+
         pcGameProfileLogCnkTypes(PC_GAME_PROFILE_SCOPE_ROOM, "room", n);
         pcGameProfileLogCnkTypes(PC_GAME_PROFILE_SCOPE_ENEMY, "enemy", n);
 
@@ -427,6 +771,7 @@ static void pcGameProfileEnd(int loop_ct, double total_ms)
         texture_profile.sum_no_send_calls = texture_profile.max_no_send_calls = 0.0;
         texture_profile.sum_gs_calls = texture_profile.max_gs_calls = 0.0;
         texture_profile.sum_gs_qwc = texture_profile.max_gs_qwc = 0.0;
+        pcGameProfileResetTextureReuseWindow();
         game_profile.count = 0;
         game_profile.worst_total = 0.0;
     }

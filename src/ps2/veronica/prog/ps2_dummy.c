@@ -2494,7 +2494,18 @@ int Ps2TexLoad(NJS_TEXMEMLIST* addr)
     double profile_texload_t0 = profile_texture ? pcGameProfileNowMs() : 0.0;
     double profile_send_t0 = 0.0;
     double profile_send_ms = 0.0;
+    double profile_load_ms = 0.0;
     unsigned int profile_send_calls = 0;
+    const void* profile_surface = NULL;
+    unsigned int profile_memlist_gindex = 0;
+    unsigned int profile_tim2_gindex = 0;
+    unsigned int profile_bank = 0;
+    unsigned int profile_width = 0, profile_height = 0;
+    unsigned int profile_image_type = 0, profile_pict_format = 0;
+    unsigned int profile_clut_type = 0, profile_clut_colors = 0, profile_tp_flag = 0;
+    int profile_last_surface_hit = 0;
+    int profile_tp_cache_skip = 0;
+    int profile_cache_break = 0;
 #endif
 
     cache_flag = 1;
@@ -2507,6 +2518,27 @@ int Ps2TexLoad(NJS_TEXMEMLIST* addr)
     Ps2_now_tex = addr;
 
     timp = (TIM2_PICTUREHEADER_EX*)addr->texinfo.texsurface.pSurface;
+
+#ifdef TARGET_PC
+    if (profile_texture)
+    {
+        profile_surface = timp;
+        profile_memlist_gindex = addr->globalIndex;
+        profile_tim2_gindex = timp->Gindex;
+        profile_bank = addr->bank;
+        profile_width = timp->ImageWidth;
+        profile_height = timp->ImageHeight;
+        profile_image_type = timp->ImageType;
+        profile_pict_format = timp->PictFormat;
+        profile_clut_type = timp->ClutType;
+        profile_clut_colors = timp->ClutColors;
+        profile_tp_flag = timp->TpFlag;
+        profile_cache_break = (Ps2_current_texbreak != 0);
+        profile_last_surface_hit = !profile_cache_break && (timp == Ps2_tex_cache_buff[0]);
+        profile_tp_cache_skip = !profile_cache_break && !profile_last_surface_hit &&
+                                 (Ps2_tex_load_tp_cancel == 0) && (timp->TpFlag != 0);
+    }
+#endif
 
     if (Ps2_current_texbreak != 0) 
     {
@@ -2640,8 +2672,15 @@ label:
 #ifdef TARGET_PC
     if (profile_texture)
     {
-        pcGameProfileRecordTextureLoad(pcGameProfileNowMs() - profile_texload_t0,
-                                       profile_send_ms, profile_send_calls);
+        profile_load_ms = pcGameProfileNowMs() - profile_texload_t0;
+        pcGameProfileRecordTextureLoad(profile_load_ms, profile_send_ms, profile_send_calls);
+        pcGameProfileRecordTextureRequest(
+            addr, profile_surface, profile_memlist_gindex, profile_tim2_gindex,
+            profile_bank, profile_width, profile_height, profile_image_type,
+            profile_pict_format, profile_clut_type, profile_clut_colors, profile_tp_flag,
+            profile_last_surface_hit, profile_tp_cache_skip, profile_cache_break,
+            cache_flag, profile_send_calls, pcGameProfileScope,
+            profile_load_ms, profile_send_ms);
     }
 #endif
     return cache_flag;
