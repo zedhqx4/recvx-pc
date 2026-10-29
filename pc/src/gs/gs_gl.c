@@ -717,6 +717,19 @@ static RenderTarget* get_rt(unsigned int fbp, unsigned int fbw)
     return rt;
 }
 
+static int gs_force_depth32f_enabled(void)
+{
+    static int enabled = -1;
+
+    if (enabled < 0)
+    {
+        const char* value = getenv("RECVX_GS_DEPTH32F");
+        enabled = (value != NULL && value[0] == '1' && value[1] == '\\0') ? 1 : 0;
+    }
+
+    return enabled;
+}
+
 static DepthBuffer* get_db(unsigned int zbp, int psm, int w, int h)
 {
     int i;
@@ -741,6 +754,13 @@ static DepthBuffer* get_db(unsigned int zbp, int psm, int w, int h)
         type = GL_UNSIGNED_SHORT;
     }
 
+    /* A/B diagnostic: test depth-buffer quantization without changing GS Z or ZTST. */
+    if (gs_force_depth32f_enabled())
+    {
+        internal_format = GL_DEPTH_COMPONENT32F;
+        type = GL_FLOAT;
+    }
+
     for (i = 0; i < MAX_DB; i++)
     {
         if (dbs[i].used && (dbs[i].zbp == zbp) && (dbs[i].psm == psm) &&
@@ -761,6 +781,8 @@ static DepthBuffer* get_db(unsigned int zbp, int psm, int w, int h)
             dbs[i].h = h;
             dbs[i].tex = make_texture(gs_scale_x(w), gs_scale_y(h), internal_format, GL_DEPTH_COMPONENT,
                                       type, GL_NEAREST);
+            if (gs_force_depth32f_enabled())
+                pcLog("gs: depth test override: ZBP=%u PSM=%u -> GL_DEPTH_COMPONENT32F", zbp, psm);
             return &dbs[i];
         }
     }
