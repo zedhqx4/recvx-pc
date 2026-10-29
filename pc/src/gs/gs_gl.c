@@ -1048,6 +1048,8 @@ static int get_indexed_atlas_slot(u64 key0, u64 gen, u64 tex0, int w, int h, int
                                   double* create_elapsed, double* decode_elapsed, double* upload_elapsed)
 {
     int i, slot = -1, oldest = 0;
+    unsigned int same_key_different_content = 0;
+    unsigned long long previous_gen = 0;
     CachedIndexedAtlas* t;
 
     *create_elapsed = 0.0;
@@ -1068,15 +1070,33 @@ static int get_indexed_atlas_slot(u64 key0, u64 gen, u64 tex0, int w, int h, int
             oldest = i;
         }
 
-        if (t->used && (t->key0 == key0) && (t->gen == gen) && (t->w == w) && (t->h == h))
+        if (t->used && (t->key0 == key0) && (t->w == w) && (t->h == h))
         {
-            t->last_use = frame_counter;
-            if (diagnostics) texFrameStats.atlas_hits++;
-            return i;
+            if (t->gen == gen)
+            {
+                t->last_use = frame_counter;
+                if (diagnostics) texFrameStats.atlas_hits++;
+                return i;
+            }
+
+            same_key_different_content++;
+            if (previous_gen == 0)
+            {
+                previous_gen = t->gen;
+            }
         }
     }
 
-    if (diagnostics) texFrameStats.atlas_misses++;
+    if (diagnostics)
+    {
+        texFrameStats.atlas_misses++;
+        if (same_key_different_content > 0)
+        {
+            pcLog("gs indexed atlas changed: key=%010llx size=%dx%d previous-gen=%016llx current-gen=%016llx cached-versions=%u",
+                  (unsigned long long)key0, w, h, previous_gen, (unsigned long long)gen,
+                  same_key_different_content);
+        }
+    }
 
     if (index_buf == NULL)
     {
@@ -1393,9 +1413,10 @@ static GLuint get_texture(u64 tex0, u64 texa, u64 texclut, int w, int h, int row
 
             if (diagnostics)
             {
-                pcLog("gs texture miss frame %u: TEX0=%08x:%08x TBP=%u PSM=%02x CLUT=%u size=%dx%d sample=%dx%d decoded-index=%dx%d create=%.2fms decode=%.2fms upload=%.2fms",
+                pcLog("gs texture miss frame %u: TEX0=%08x:%08x TBP=%u PSM=%02x CLUT=%u index-key=%010llx gen=%016llx size=%dx%d sample=%dx%d decoded-index=%dx%d create=%.2fms decode=%.2fms upload=%.2fms",
                       frame_counter + 1, (unsigned int)(tex0 >> 32), (unsigned int)tex0,
-                      tbp, psm, GSF(tex0, 37, 14), w, h, requested_cols, requested_rows, w, h,
+                      tbp, psm, GSF(tex0, 37, 14), (unsigned long long)index_key0, (unsigned long long)gen,
+                      w, h, requested_cols, requested_rows, w, h,
                       create_elapsed * 1000.0, decode_elapsed * 1000.0, upload_elapsed * 1000.0);
             }
 
