@@ -712,7 +712,12 @@ static RenderTarget* get_rt(unsigned int fbp, unsigned int fbw)
     /* start from whatever GS memory holds there (normally cleared) */
     rt_load_from_vram(rt);
 
-    pcstatic DepthBuffer* get_db(unsigned int zbp, int psm, int w, int h)
+    pcLog("gs: render target FBP %u (%ux%u)", fbp, rt->w, rt->h);
+
+    return rt;
+}
+
+static DepthBuffer* get_db(unsigned int zbp, int psm, int w, int h)
 {
     int i;
     GLint internal_format;
