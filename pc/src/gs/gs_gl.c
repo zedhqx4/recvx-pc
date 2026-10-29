@@ -2285,7 +2285,6 @@ void gsRendererDraw(const GsDrawState* st, const GsVertex* v, int nverts)
             pcGsBindTexture(GL_TEXTURE_2D, palette_texture);
             pcGsActiveTexture(GL_TEXTURE0);
         }
-        glUniform1i(U.indexed, indexed_texture);
         glUniform1i(U.palette, 1);
         glUniform2f(U.texsize, (float)tw, (float)th);
         glUniform1i(U.tfx, GSF(st->tex0, 35, 2));
@@ -2294,6 +2293,10 @@ void gsRendererDraw(const GsDrawState* st, const GsVertex* v, int nverts)
         glUniform4i(U.region, GSF(st->clamp, 4, 10), GSF(st->clamp, 14, 10), GSF(st->clamp, 24, 10), GSF(st->clamp, 34, 10));
         glUniform1i(U.linear, linear);
     }
+
+    /* Do not let render-target, movie, untextured, or direct-color draws inherit
+     * indexed lookup mode from a previous draw. */
+    glUniform1i(U.indexed, indexed_texture);
 
     pcGsBindVertexArray(vao);
     pcGsBindBuffer(GL_ARRAY_BUFFER, vbo);
