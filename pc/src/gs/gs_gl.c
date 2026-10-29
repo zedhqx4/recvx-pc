@@ -15,6 +15,7 @@
 #include "gs_internal.h"
 #include "gl_funcs.h"
 #include "../../include/pc_platform.h"
+#include "../../include/pc_texture_cache.h"
 
 /* Defined by gs.c; renderer timing is disabled unless RECVX_GS_TEX_DIAG=1. */
 extern int gsTextureDiagnosticsEnabled(void);
@@ -750,6 +751,7 @@ static DepthBuffer* get_db(unsigned int zbp, int w, int h)
 typedef struct {
     int used;
     u64 key0, key1, key2;
+    const void *source_identity;
     int w, h;
     int rows, cols;      /* part decoded: the draws it serves never sample outside it */
     unsigned int page_lo, page_hi, clut_page;
@@ -760,6 +762,7 @@ typedef struct {
     int index_slot;       /* owning entry in indexed_atlases when indexed */
     unsigned int last_use;
     int hash_next;
+    int source_hash_next;
 } CachedTex;
 
 #define MAX_TEX 2048
@@ -799,12 +802,82 @@ static CachedPaletteTex palette_texcache[MAX_PALETTE_TEX];
 
 static int texcache_hash_heads[TEX_HASH_BUCKETS];
 
+#define SOURCE_HASH_BUCKETS 2048
+static int texture_source_hash_heads[SOURCE_HASH_BUCKETS];
+
 /* Per-present interval diagnostics: only emitted for texture misses or heavy CLUT flushing. */
 static struct {
     unsigned int hits, misses, atlas_hits, atlas_misses, palette_hits, palette_misses, decoded, texels;
     double decode_seconds, create_seconds, upload_seconds, replacement_seconds;
     double palette_create_seconds, palette_upload_seconds;
+    unsigned int source_hits;
 } texFrameStats;
+
+static unsigned int texture_source_hash(const void *source)
+{
+    uintptr_t value = (uintptr_t)source;
+    value ^= value >> 11;
+    value *= (uintptr_t)0x9e3779b1U;
+    value ^= value >> 13;
+    return (unsigned int)value & (SOURCE_HASH_BUCKETS - 1);
+}
+
+static void texture_cache_source_remove(int slot)
+{
+    CachedTex *t = &texcache[slot];
+    unsigned int bucket;
+    int *link;
+
+    if (t->source_identity == NULL)
+    {
+        t->source_hash_next = -1;
+        return;
+    }
+
+    bucket = texture_source_hash(t->source_identity);
+    link = &texture_source_hash_heads[bucket];
+    while (*link >= 0)
+    {
+        if (*link == slot)
+        {
+            *link = t->source_hash_next;
+            break;
+        }
+        link = &texcache[*link].source_hash_next;
+    }
+
+    t->source_identity = NULL;
+    t->source_hash_next = -1;
+}
+
+static void texture_cache_source_insert(int slot)
+{
+    CachedTex *t = &texcache[slot];
+    unsigned int bucket;
+
+    t->source_hash_next = -1;
+    if (t->source_identity == NULL)
+        return;
+
+    bucket = texture_source_hash(t->source_identity);
+    t->source_hash_next = texture_source_hash_heads[bucket];
+    texture_source_hash_heads[bucket] = slot;
+}
+
+int pcGsTextureSourceCacheEnabled(void)
+{
+    static int enabled = -1;
+
+    if (enabled < 0)
+    {
+        const char *value = getenv("RECVX_PS2_TEX_CACHE");
+        enabled = (value != NULL && value[0] == '1' && value[1] == '\0') ? 1 : 0;
+        if (enabled)
+            pcLog("gs: static indexed TIM2 source cache enabled (RECVX_PS2_TEX_CACHE=1)");
+    }
+
+    return enabled;
+}
 
 static unsigned int texture_cache_hash(u64 gen, u64 key0, u64 key1, u64 key2,
                                        int w, int h, int rows, int cols)
@@ -846,6 +919,54 @@ static int texture_cache_find(u64 gen, u64 key0, u64 key1, u64 key2,
     return -1;
 }
 
+static int texture_cache_find_source(const void *source, u64 key0, int w, int h, int rows, int cols)
+{
+    unsigned int bucket;
+    int i;
+
+    if (source == NULL)
+        return -1;
+
+    bucket = texture_source_hash(source);
+    for (i = texture_source_hash_heads[bucket]; i >= 0; i = texcache[i].source_hash_next)
+    {
+        CachedTex *t = &texcache[i];
+        if (t->used && (t->source_identity == source) && t->indexed && !t->hd &&
+            (t->key0 == key0) && (t->w == w) && (t->h == h) &&
+            (t->rows == rows) && (t->cols == cols) &&
+            (t->index_slot >= 0) && (t->index_slot < MAX_INDEXED_ATLASES) &&
+            indexed_atlases[t->index_slot].used && indexed_atlases[t->index_slot].tex == t->tex)
+        {
+            return i;
+        }
+    }
+
+    return -1;
+}
+
+int pcGsTextureSourceCacheContains(const void *source)
+{
+    unsigned int bucket;
+    int i;
+
+    if (source == NULL || !pcGsTextureSourceCacheEnabled())
+        return 0;
+
+    bucket = texture_source_hash(source);
+    for (i = texture_source_hash_heads[bucket]; i >= 0; i = texcache[i].source_hash_next)
+    {
+        CachedTex *t = &texcache[i];
+        if (t->used && (t->source_identity == source) && t->indexed && !t->hd && t->tex != 0 &&
+            t->index_slot >= 0 && t->index_slot < MAX_INDEXED_ATLASES &&
+            indexed_atlases[t->index_slot].used && indexed_atlases[t->index_slot].tex == t->tex)
+        {
+            return 1;
+        }
+    }
+
+    return 0;
+}
+
 static void texture_cache_remove(int slot)
 {
     CachedTex* t = &texcache[slot];
@@ -855,6 +976,7 @@ static void texture_cache_remove(int slot)
     if (!t->used)
         return;
 
+    texture_cache_source_remove(slot);
     bucket = texture_cache_hash(t->gen, t->key0, t->key1, t->key2,
                                 t->w, t->h, t->rows, t->cols);
     link = &texcache_hash_heads[bucket];
@@ -883,6 +1005,7 @@ static void texture_cache_insert(int slot)
 
     t->hash_next = texcache_hash_heads[bucket];
     texcache_hash_heads[bucket] = slot;
+    texture_cache_source_insert(slot);
 }
 
 static void texture_cache_init(void)
@@ -891,12 +1014,23 @@ static void texture_cache_init(void)
 
     for (i = 0; i < TEX_HASH_BUCKETS; i++)
         texcache_hash_heads[i] = -1;
+    for (i = 0; i < SOURCE_HASH_BUCKETS; i++)
+        texture_source_hash_heads[i] = -1;
 
     for (i = 0; i < MAX_TEX; i++)
     {
         texcache[i].hash_next = -1;
+        texcache[i].source_hash_next = -1;
+        texcache[i].source_identity = NULL;
         texcache[i].index_slot = -1;
     }
+}
+
+void pcGsResetTextureSourceCache(void)
+{
+    int i;
+    for (i = 0; i < MAX_TEX; i++)
+        texture_cache_source_remove(i);
 }
 
 static void psm_page_size(int psm, int* pw, int* ph)
@@ -1176,7 +1310,8 @@ static int get_indexed_atlas_slot(u64 key0, u64 gen, u64 tex0, int w, int h, int
     return slot;
 }
 
-static GLuint get_texture(u64 tex0, u64 texa, u64 texclut, int w, int h, int rows, int cols,
+static GLuint get_texture(const void *source_identity, u64 tex0, u64 texa, u64 texclut,
+                          int w, int h, int rows, int cols,
                           int* hd, int* indexed, GLuint* palette_texture)
 {
     unsigned int psm = GSF(tex0, 20, 6);
@@ -1251,8 +1386,23 @@ static GLuint get_texture(u64 tex0, u64 texa, u64 texclut, int w, int h, int row
 
     page_hi = page_lo + ((rows + ph - 1) / ph - 1) * stride + (w + pw - 1) / pw;
     clut_page = GSF(tex0, 37, 14) >> 5;
-    gen = gen_sum_rect(page_lo, stride, (rows + ph - 1) / ph, (cols + pw - 1) / pw);
 
+    cached_slot = pcGsTextureSourceCacheEnabled() ?
+        texture_cache_find_source(source_identity, key0, w, h, rows, cols) : -1;
+    if (cached_slot >= 0)
+    {
+        t = &texcache[cached_slot];
+        t->last_use = frame_counter;
+        indexed_atlases[t->index_slot].last_use = frame_counter;
+        *hd = t->hd;
+        *indexed = 1;
+        *palette_texture = get_palette_texture(tex0, texa, indexed_palette_entries(psm), key2, diagnostics);
+        if (diagnostics)
+            texFrameStats.source_hits++;
+        return t->tex;
+    }
+
+    gen = gen_sum_rect(page_lo, stride, (rows + ph - 1) / ph, (cols + pw - 1) / pw);
     cached_slot = texture_cache_find(gen, key0, key1, key2, w, h, rows, cols);
     if (cached_slot >= 0)
     {
@@ -1364,6 +1514,8 @@ static GLuint get_texture(u64 tex0, u64 texa, u64 texclut, int w, int h, int row
     t->page_hi = page_hi;
     t->clut_page = clut_page;
     t->gen = gen;
+    t->source_identity = (pcGsTextureSourceCacheEnabled() && is_indexed) ? source_identity : NULL;
+    t->source_hash_next = -1;
     t->last_use = frame_counter;
     t->hd = 0;
     t->indexed = 0;
@@ -1385,6 +1537,7 @@ static GLuint get_texture(u64 tex0, u64 texa, u64 texclut, int w, int h, int row
 
         if (r != 0)
         {
+            texture_cache_source_remove(slot);
             t->tex = r;
             t->hd = 1;
             t->indexed = 0;
@@ -2286,7 +2439,8 @@ void gsRendererDraw(const GsDrawState* st, const GsVertex* v, int nverts)
         else
         {
             int hd = 0;
-            GLuint gt = get_texture(st->tex0, st->texa, st->texclut, tw, th, texture_extent(st, v, nverts, th, 1),
+            GLuint gt = get_texture(st->texture_source, st->tex0, st->texa, st->texclut,
+                                     tw, th, texture_extent(st, v, nverts, th, 1),
                                     texture_extent(st, v, nverts, tw, 0), &hd, &indexed_texture, &palette_texture);
 
             pcGsBindTexture(GL_TEXTURE_2D, gt);
@@ -2472,8 +2626,8 @@ void gsRendererPresent(unsigned int dispfb_fbp, unsigned int dispfb_fbw)
     gsTakeClutFrameStats(&clut_loads, &clut_flushes, &clut_vertices, &clut_draw_calls, &clut_draw_seconds);
     if (diagnostics && (texFrameStats.misses > 0 || clut_flushes >= 4 || clut_loads >= 32 || clut_draw_seconds >= 0.0005))
     {
-        pcLog("gs first-use frame %u: tex hit=%u miss=%u atlas hit=%u atlas miss=%u palette hit=%u palette miss=%u decoded=%u texels=%u decode=%.2fms create=%.2fms upload=%.2fms palette create=%.2fms palette upload=%.2fms replacement=%.2fms; CLUT loads=%u pending flushes=%u verts=%u flush draws=%u flush draw time=%.2fms",
-              frame_counter, texFrameStats.hits, texFrameStats.misses,
+        pcLog("gs first-use frame %u: tex hit=%u miss=%u native source hits=%u atlas hit=%u atlas miss=%u palette hit=%u palette miss=%u decoded=%u texels=%u decode=%.2fms create=%.2fms upload=%.2fms palette create=%.2fms palette upload=%.2fms replacement=%.2fms; CLUT loads=%u pending flushes=%u verts=%u flush draws=%u flush draw time=%.2fms",
+              frame_counter, texFrameStats.hits, texFrameStats.misses, texFrameStats.source_hits,
               texFrameStats.atlas_hits, texFrameStats.atlas_misses, texFrameStats.palette_hits, texFrameStats.palette_misses,
               texFrameStats.decoded, texFrameStats.texels,
               texFrameStats.decode_seconds * 1000.0, texFrameStats.create_seconds * 1000.0,
