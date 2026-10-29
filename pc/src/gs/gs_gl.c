@@ -784,8 +784,9 @@ static CachedIndexedAtlas indexed_atlases[MAX_INDEXED_ATLASES];
 typedef struct {
     int used;
     int entries;
-    unsigned long long hash;
-    unsigned int colors[256];
+    unsigned long long hash;   /* raw CLUT content hash from gsClutHash */
+    u64 texa_key;
+    unsigned int cpsm;
     GLuint tex;
     unsigned int last_use;
 } CachedPaletteTex;
@@ -972,21 +973,12 @@ static int indexed_palette_entries(unsigned int psm)
 
 /* Separate CLUT textures let several palettes share one source index atlas. Cache by the
  * expanded colors actually consumed by the shader, including alpha semantics from TEXA. */
-static GLuint get_palette_texture(u64 tex0, u64 texa, int entries, int diagnostics)
+static GLuint get_palette_texture(u64 tex0, u64 texa, int entries, u64 palette_hash, int diagnostics)
 {
     unsigned int colors[256];
-    unsigned long long hash = 14695981039346656037ULL;
+    unsigned int cpsm = GSF(tex0, 51, 4);
     int i, slot = -1, oldest = 0;
     CachedPaletteTex* t;
-
-    memset(colors, 0, sizeof(colors));
-    gsReadClut32(tex0, texa, entries, colors);
-
-    hash = (hash ^ (unsigned int)entries) * 1099511628211ULL;
-    for (i = 0; i < entries; i++)
-    {
-        hash = (hash ^ colors[i]) * 1099511628211ULL;
-    }
 
     for (i = 0; i < MAX_PALETTE_TEX; i++)
     {
@@ -1002,8 +994,8 @@ static GLuint get_palette_texture(u64 tex0, u64 texa, int entries, int diagnosti
             oldest = i;
         }
 
-        if (t->used && (t->entries == entries) && (t->hash == hash) &&
-            (memcmp(t->colors, colors, (size_t)entries * sizeof(colors[0])) == 0))
+        if (t->used && (t->entries == entries) && (t->hash == palette_hash) &&
+            (t->texa_key == texa) && (t->cpsm == cpsm))
         {
             t->last_use = frame_counter;
             if (diagnostics) texFrameStats.palette_hits++;
@@ -1021,11 +1013,15 @@ static GLuint get_palette_texture(u64 tex0, u64 texa, int entries, int diagnosti
         tex_cached_bytes -= (double)palette_texcache[slot].entries * 4.0;
     }
 
+    memset(colors, 0, sizeof(colors));
+    gsReadClut32(tex0, texa, entries, colors);
+
     t = &palette_texcache[slot];
     t->used = 1;
     t->entries = entries;
-    t->hash = hash;
-    memcpy(t->colors, colors, sizeof(t->colors));
+    t->hash = palette_hash;
+    t->texa_key = texa;
+    t->cpsm = cpsm;
     t->last_use = frame_counter;
 
     {
@@ -1253,7 +1249,7 @@ static GLuint get_texture(u64 tex0, u64 texa, u64 texclut, int w, int h, int row
         *hd = t->hd;
         *indexed = t->indexed;
         *palette_texture = t->indexed ?
-            get_palette_texture(tex0, texa, indexed_palette_entries(psm), diagnostics) : 0;
+            get_palette_texture(tex0, texa, indexed_palette_entries(psm), key2, diagnostics) : 0;
         return t->tex;
     }
 
@@ -1307,7 +1303,7 @@ static GLuint get_texture(u64 tex0, u64 texa, u64 texclut, int w, int h, int row
         *hd = t->hd;
         *indexed = t->indexed;
         *palette_texture = t->indexed ?
-            get_palette_texture(tex0, texa, indexed_palette_entries(psm), diagnostics) : 0;
+            get_palette_texture(tex0, texa, indexed_palette_entries(psm), key2, diagnostics) : 0;
 
         if (diagnostics)
         {
@@ -1393,7 +1389,7 @@ static GLuint get_texture(u64 tex0, u64 texa, u64 texclut, int w, int h, int row
             t->index_slot = atlas_slot;
             indexed_atlases[atlas_slot].last_use = frame_counter;
             *indexed = 1;
-            *palette_texture = get_palette_texture(tex0, texa, indexed_palette_entries(psm), diagnostics);
+            *palette_texture = get_palette_texture(tex0, texa, indexed_palette_entries(psm), key2, diagnostics);
 
             if (diagnostics)
             {
