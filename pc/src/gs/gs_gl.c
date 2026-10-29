@@ -847,7 +847,7 @@ static void texture_cache_asset_remove(int slot)
             {
                 *link = alias->next;
                 alias->used = 0;
-                alias->asset_id = NULL;
+                alias->asset_id = 0;
                 alias->texture_slot = -1;
                 alias->next = -1;
             }
@@ -2674,7 +2674,7 @@ void gsRendererPresent(unsigned int dispfb_fbp, unsigned int dispfb_fbw)
     gsTakeClutFrameStats(&clut_loads, &clut_flushes, &clut_vertices, &clut_draw_calls, &clut_draw_seconds);
     if (diagnostics && (texFrameStats.misses > 0 || clut_flushes >= 4 || clut_loads >= 32 || clut_draw_seconds >= 0.0005))
     {
-        pcLog("gs first-use frame %u: tex hit=%u miss=%u native source hits=%u atlas hit=%u atlas miss=%u palette hit=%u palette miss=%u decoded=%u texels=%u decode=%.2fms create=%.2fms upload=%.2fms palette create=%.2fms palette upload=%.2fms replacement=%.2fms; CLUT loads=%u pending flushes=%u verts=%u flush draws=%u flush draw time=%.2fms",
+        pcLog("gs first-use frame %u: tex hit=%u miss=%u native asset hits=%u atlas hit=%u atlas miss=%u palette hit=%u palette miss=%u decoded=%u texels=%u decode=%.2fms create=%.2fms upload=%.2fms palette create=%.2fms palette upload=%.2fms replacement=%.2fms; CLUT loads=%u pending flushes=%u verts=%u flush draws=%u flush draw time=%.2fms",
               frame_counter, texFrameStats.hits, texFrameStats.misses, texFrameStats.asset_hits,
               texFrameStats.atlas_hits, texFrameStats.atlas_misses, texFrameStats.palette_hits, texFrameStats.palette_misses,
               texFrameStats.decoded, texFrameStats.texels,
