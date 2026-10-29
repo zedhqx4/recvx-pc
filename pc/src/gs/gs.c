@@ -9,6 +9,7 @@
 
 #include "gs_internal.h"
 #include "../../include/pc_platform.h"
+#include "../pc_os.h"
 
 GsRegs gsRegs;
 int gsDumpFrame;
@@ -63,17 +64,24 @@ static void current_state(GsDrawState* st)
 static unsigned int frameClutLoads;
 static unsigned int frameClutPendingFlushes;
 static unsigned int frameClutFlushedVertices;
+static unsigned int frameClutFlushDrawCalls;
+static double frameClutFlushDrawSeconds;
 
 /* Called once per presented frame by the renderer's compact diagnostic. */
-void gsTakeClutFrameStats(unsigned int* loads, unsigned int* flushes, unsigned int* vertices)
+void gsTakeClutFrameStats(unsigned int* loads, unsigned int* flushes, unsigned int* vertices,
+                         unsigned int* draw_calls, double* draw_seconds)
 {
     if (loads != NULL) *loads = frameClutLoads;
     if (flushes != NULL) *flushes = frameClutPendingFlushes;
     if (vertices != NULL) *vertices = frameClutFlushedVertices;
+    if (draw_calls != NULL) *draw_calls = frameClutFlushDrawCalls;
+    if (draw_seconds != NULL) *draw_seconds = frameClutFlushDrawSeconds;
 
     frameClutLoads = 0;
     frameClutPendingFlushes = 0;
     frameClutFlushedVertices = 0;
+    frameClutFlushDrawCalls = 0;
+    frameClutFlushDrawSeconds = 0.0;
 }
 
 void gsFlushPrims(void)
@@ -662,12 +670,24 @@ static void clut_load(u64 tex0)
     frameClutLoads++;
 
     /* primitives already queued use the old palette */
-    if (out_valid && (out_count > 0))
     {
-        frameClutPendingFlushes++;
-        frameClutFlushedVertices += (unsigned int)out_count;
+        int had_pending_prims = out_valid && (out_count > 0);
+        double flush_start = had_pending_prims ? pcOsTime() : 0.0;
+
+        if (had_pending_prims)
+        {
+            frameClutPendingFlushes++;
+            frameClutFlushedVertices += (unsigned int)out_count;
+        }
+
+        gsFlushPrims();
+
+        if (had_pending_prims)
+        {
+            frameClutFlushDrawCalls++;
+            frameClutFlushDrawSeconds += pcOsTime() - flush_start;
+        }
     }
-    gsFlushPrims();
 
     for (i = 0; i < entries; i++)
     {
