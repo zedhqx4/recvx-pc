@@ -906,9 +906,13 @@ int pcGsTextureAssetCacheEnabled(void)
     if (enabled < 0)
     {
         const char *value = getenv("RECVX_PS2_TEX_CACHE");
-        enabled = (value != NULL && value[0] == '1' && value[1] == '\0') ? 1 : 0;
+        /* The static indexed TIM2 cache is enabled by default.
+         * Set RECVX_PS2_TEX_CACHE=0 only to disable it for diagnostics. */
+        enabled = (value != NULL && value[0] == '0' && value[1] == '\0') ? 0 : 1;
         if (enabled)
-            pcLog("gs: static indexed TIM2 asset cache enabled (RECVX_PS2_TEX_CACHE=1)");
+            pcLog("gs: static indexed TIM2 asset cache enabled (default)");
+        else
+            pcLog("gs: static indexed TIM2 asset cache disabled (RECVX_PS2_TEX_CACHE=0)");
     }
 
     return enabled;
