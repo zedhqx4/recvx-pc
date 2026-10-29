@@ -14,7 +14,9 @@
 
 GsRegs gsRegs;
 static unsigned int gsTextureAssetId[2];
+static uint64_t gsTextureAssetContentHash[2];
 static int gsTextureAssetValid[2];
+static uint64_t gsTextureBindingGeneration;
 int gsDumpFrame;
 static int kicks;
 
@@ -32,10 +34,16 @@ int gsTextureDiagnosticsEnabled(void)
     return enabled;
 }
 
-void pcGsSetTextureAssetIdentity(unsigned int asset_id, int valid)
+void pcGsSetTextureAssetIdentity(unsigned int asset_id, int valid, uint64_t content_hash)
 {
     gsTextureAssetId[0] = asset_id;
+    gsTextureAssetContentHash[0] = valid ? content_hash : 0;
     gsTextureAssetValid[0] = valid != 0;
+}
+
+uint64_t pcGsGetTextureBindingGeneration(void)
+{
+    return gsTextureBindingGeneration;
 }
 
 /* ------------------------------------------------------------------------------------------- */
@@ -83,6 +91,7 @@ static void current_state(GsDrawState* st)
     st->colclamp = gsRegs.colclamp;
     st->texclut = gsRegs.texclut;
     st->texture_asset_id = gsTextureAssetId[c];
+    st->texture_asset_content_hash = gsTextureAssetContentHash[c];
     st->texture_asset_valid = gsTextureAssetValid[c];
 }
 
@@ -283,6 +292,13 @@ static void clut_load(u64 tex0);
 
 void gsWriteReg(int reg, u64 value)
 {
+    /* A repeated material bind is reusable only if no texture/CLUT/context state changed. */
+    if ((reg == 0x00) || (reg == 0x06) || (reg == 0x07) || (reg == 0x08) || (reg == 0x09) ||
+        (reg == 0x14) || (reg == 0x15) || (reg == 0x16) || (reg == 0x17) ||
+        (reg == 0x1a) || (reg == 0x1b) || (reg == 0x1c) || (reg == 0x3b) ||
+        (reg == 0x3f) || (reg == 0x47) || (reg == 0x48))
+        gsTextureBindingGeneration++;
+
     switch (reg)
     {
     case 0x00: gsRegs.prim = value; vq_count = 0; break;
@@ -291,8 +307,8 @@ void gsWriteReg(int reg, u64 value)
     case 0x03: gsRegs.uv = value; break;
     case 0x04: latch_vertex(value, 1, 1); break;
     case 0x05: latch_vertex(value, 0, 1); break;
-    case 0x06: gsRegs.tex0[0] = value; gsTextureAssetId[0] = 0; gsTextureAssetValid[0] = 0; clut_load(value); break;
-    case 0x07: gsRegs.tex0[1] = value; gsTextureAssetId[1] = 0; gsTextureAssetValid[1] = 0; clut_load(value); break;
+    case 0x06: gsRegs.tex0[0] = value; gsTextureAssetId[0] = 0; gsTextureAssetContentHash[0] = 0; gsTextureAssetValid[0] = 0; clut_load(value); break;
+    case 0x07: gsRegs.tex0[1] = value; gsTextureAssetId[1] = 0; gsTextureAssetContentHash[1] = 0; gsTextureAssetValid[1] = 0; clut_load(value); break;
     case 0x08: gsRegs.clamp[0] = value; break;
     case 0x09: gsRegs.clamp[1] = value; break;
     case 0x0a: gsRegs.fog = value; break;
@@ -308,6 +324,7 @@ void gsWriteReg(int reg, u64 value)
 
         /* TEX2 changes the active texture interpretation: don't carry an older TIM2 source hint. */
         gsTextureAssetId[c] = 0;
+        gsTextureAssetContentHash[c] = 0;
         gsTextureAssetValid[c] = 0;
         gsRegs.tex2[c] = value;
         gsRegs.tex0[c] = (gsRegs.tex0[c] & ~mask) | (value & mask);

@@ -805,6 +805,7 @@ static int texcache_hash_heads[TEX_HASH_BUCKETS];
 typedef struct {
     int used;
     unsigned int asset_id;
+    uint64_t content_hash;
     int texture_slot;
     int next;
 } CachedAssetAlias;
@@ -848,6 +849,7 @@ static void texture_cache_asset_remove(int slot)
                 *link = alias->next;
                 alias->used = 0;
                 alias->asset_id = 0;
+                alias->content_hash = 0;
                 alias->texture_slot = -1;
                 alias->next = -1;
             }
@@ -859,7 +861,7 @@ static void texture_cache_asset_remove(int slot)
     }
 }
 
-static void texture_cache_asset_insert(unsigned int asset_id, int texture_slot)
+static void texture_cache_asset_insert(unsigned int asset_id, uint64_t content_hash, int texture_slot)
 {
     unsigned int bucket;
     int alias_slot;
@@ -873,7 +875,7 @@ static void texture_cache_asset_insert(unsigned int asset_id, int texture_slot)
          alias_slot = texture_asset_aliases[alias_slot].next)
     {
         CachedAssetAlias *alias = &texture_asset_aliases[alias_slot];
-        if (alias->used && alias->asset_id == asset_id && alias->texture_slot == texture_slot)
+        if (alias->used && alias->asset_id == asset_id && alias->content_hash == content_hash && alias->texture_slot == texture_slot)
             return;
     }
 
@@ -890,6 +892,7 @@ static void texture_cache_asset_insert(unsigned int asset_id, int texture_slot)
     texture_asset_next_free = (unsigned int)(alias_slot + 1) % MAX_ASSET_ALIASES;
     texture_asset_aliases[alias_slot].used = 1;
     texture_asset_aliases[alias_slot].asset_id = asset_id;
+    texture_asset_aliases[alias_slot].content_hash = content_hash;
     texture_asset_aliases[alias_slot].texture_slot = texture_slot;
     texture_asset_aliases[alias_slot].next = texture_asset_hash_heads[bucket];
     texture_asset_hash_heads[bucket] = alias_slot;
@@ -951,7 +954,7 @@ static int texture_cache_find(u64 gen, u64 key0, u64 key1, u64 key2,
     return -1;
 }
 
-static int texture_cache_find_asset(unsigned int asset_id, u64 key0, int w, int h, int rows, int cols)
+static int texture_cache_find_asset(unsigned int asset_id, uint64_t content_hash, u64 key0, int w, int h, int rows, int cols)
 {
     unsigned int bucket;
     int alias_slot;
@@ -963,7 +966,7 @@ static int texture_cache_find_asset(unsigned int asset_id, u64 key0, int w, int 
         CachedAssetAlias *alias = &texture_asset_aliases[alias_slot];
         CachedTex *t;
 
-        if (!alias->used || alias->asset_id != asset_id ||
+        if (!alias->used || alias->asset_id != asset_id || alias->content_hash != content_hash ||
             alias->texture_slot < 0 || alias->texture_slot >= MAX_TEX)
             continue;
 
@@ -981,7 +984,7 @@ static int texture_cache_find_asset(unsigned int asset_id, u64 key0, int w, int 
 }
 
 
-int pcGsTextureAssetCacheContains(unsigned int asset_id, uint64_t tex0, int width, int height)
+int pcGsTextureAssetCacheContains(unsigned int asset_id, uint64_t content_hash, uint64_t tex0, int width, int height)
 {
     unsigned long long key0;
     unsigned long long cpsm_key;
@@ -989,12 +992,12 @@ int pcGsTextureAssetCacheContains(unsigned int asset_id, uint64_t tex0, int widt
     if (!pcGsTextureAssetCacheEnabled() || width <= 0 || height <= 0)
         return 0;
 
-    /* Query the loaded-asset table by Gindex, then verify the native texture layout. */
+    /* Query by Gindex + source image hash, then verify the native texture layout. */
     key0 = tex0 & 0x0000001FFFFFFFFFULL & ~(0x3ULL << 35) & ~(1ULL << 34);
     cpsm_key = ((unsigned long long)GSF(tex0, 51, 4) << 37);
     key0 |= cpsm_key;
 
-    return texture_cache_find_asset(asset_id, key0, width, height, height, width) >= 0;
+    return texture_cache_find_asset(asset_id, content_hash, key0, width, height, height, width) >= 0;
 }
 
 
@@ -1056,6 +1059,7 @@ static void texture_cache_init(void)
     {
         texture_asset_aliases[i].used = 0;
         texture_asset_aliases[i].asset_id = 0;
+        texture_asset_aliases[i].content_hash = 0;
         texture_asset_aliases[i].texture_slot = -1;
         texture_asset_aliases[i].next = -1;
     }
@@ -1071,6 +1075,7 @@ void pcGsResetTextureAssetCache(void)
     {
         texture_asset_aliases[i].used = 0;
         texture_asset_aliases[i].asset_id = 0;
+        texture_asset_aliases[i].content_hash = 0;
         texture_asset_aliases[i].texture_slot = -1;
         texture_asset_aliases[i].next = -1;
     }
@@ -1354,7 +1359,7 @@ static int get_indexed_atlas_slot(u64 key0, u64 gen, u64 tex0, int w, int h, int
     return slot;
 }
 
-static GLuint get_texture(unsigned int asset_id, int asset_id_valid, u64 tex0, u64 texa, u64 texclut,
+static GLuint get_texture(unsigned int asset_id, int asset_id_valid, uint64_t content_hash, u64 tex0, u64 texa, u64 texclut,
                           int w, int h, int rows, int cols,
                           int* hd, int* indexed, GLuint* palette_texture)
 {
@@ -1432,7 +1437,7 @@ static GLuint get_texture(unsigned int asset_id, int asset_id_valid, u64 tex0, u
     clut_page = GSF(tex0, 37, 14) >> 5;
 
     cached_slot = (pcGsTextureAssetCacheEnabled() && asset_id_valid) ?
-        texture_cache_find_asset(asset_id, key0, w, h, rows, cols) : -1;
+        texture_cache_find_asset(asset_id, content_hash, key0, w, h, rows, cols) : -1;
     if (cached_slot >= 0)
     {
         t = &texcache[cached_slot];
@@ -1451,7 +1456,7 @@ static GLuint get_texture(unsigned int asset_id, int asset_id_valid, u64 tex0, u
     if (cached_slot >= 0)
     {
         if (is_indexed && asset_id_valid)
-            texture_cache_asset_insert(asset_id, cached_slot);
+            texture_cache_asset_insert(asset_id, content_hash, cached_slot);
         if (diagnostics)
         {
             texFrameStats.hits++;
@@ -1511,7 +1516,7 @@ static GLuint get_texture(unsigned int asset_id, int asset_id_valid, u64 tex0, u
     if (coverage_slot >= 0)
     {
         if (is_indexed && asset_id_valid)
-            texture_cache_asset_insert(asset_id, coverage_slot);
+            texture_cache_asset_insert(asset_id, content_hash, coverage_slot);
         t = &texcache[coverage_slot];
         t->last_use = frame_counter;
         if (t->indexed && (t->index_slot >= 0) && (t->index_slot < MAX_INDEXED_ATLASES))
@@ -1568,7 +1573,7 @@ static GLuint get_texture(unsigned int asset_id, int asset_id_valid, u64 tex0, u
     t->index_slot = -1;
     texture_cache_insert(slot);
     if (is_indexed && asset_id_valid)
-        texture_cache_asset_insert(asset_id, slot);
+        texture_cache_asset_insert(asset_id, content_hash, slot);
 
     {
         extern GLuint gsReplaceLookup(u64 tex0, u64 texa);
@@ -2487,7 +2492,8 @@ void gsRendererDraw(const GsDrawState* st, const GsVertex* v, int nverts)
         else
         {
             int hd = 0;
-            GLuint gt = get_texture(st->texture_asset_id, st->texture_asset_valid, st->tex0, st->texa, st->texclut,
+            GLuint gt = get_texture(st->texture_asset_id, st->texture_asset_valid, st->texture_asset_content_hash,
+                                     st->tex0, st->texa, st->texclut,
                                      tw, th, texture_extent(st, v, nverts, th, 1),
                                     texture_extent(st, v, nverts, tw, 0), &hd, &indexed_texture, &palette_texture);
 

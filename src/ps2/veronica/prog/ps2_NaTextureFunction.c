@@ -217,6 +217,9 @@ Sint32	njLoadTexture(NJS_TEXLIST *texlist)
     tex_num = texlist->nbTexture;
     
     addr = Ps2_tex_info;
+#ifdef TARGET_PC
+    Ps2PcTextureSourceCacheReset();
+#endif
     
     ring_check();
     

@@ -52,6 +52,7 @@ typedef struct {
     u64 tex0, tex1, clamp, alpha, test, fba, frame, zbuf, scissor;
     u64 texa, fogcol, pabe, dthe, colclamp, texclut;
     unsigned int texture_asset_id; /* TIM2 Gindex */
+    uint64_t texture_asset_content_hash; /* source index-plane content */
     int texture_asset_valid;
 } GsDrawState;
 
