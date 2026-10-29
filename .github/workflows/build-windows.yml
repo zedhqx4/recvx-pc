@@ -8,6 +8,7 @@ on:
       - graphics-fixes
       - c3853984-baseline
       - merge-c3853984-into-graphics-fixes
+      - experiment/cnk-white-geometry
     paths-ignore:
       - '**.md'
       - 'docs/**'
