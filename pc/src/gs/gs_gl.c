@@ -1109,7 +1109,7 @@ static GLuint get_texture(u64 tex0, u64 texa, u64 texclut, int w, int h, int row
     if (diagnostics)
     {
         pcLog("gs texture miss frame %u: TEX0=%08x:%08x TBP=%u PSM=%02x CLUT=%u size=%dx%d sample=%dx%d create=%.2fms decode=%.2fms upload=%.2fms",
-              frame_counter, (unsigned int)(tex0 >> 32), (unsigned int)tex0,
+              frame_counter + 1, (unsigned int)(tex0 >> 32), (unsigned int)tex0,
               tbp, psm, GSF(tex0, 37, 14), w, h, cols, rows,
               create_elapsed * 1000.0, decode_elapsed * 1000.0, upload_elapsed * 1000.0);
     }
