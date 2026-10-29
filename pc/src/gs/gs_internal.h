@@ -51,6 +51,7 @@ typedef struct {
     int iip, tme, fge, abe, aa1, fst, ctxt, fix;
     u64 tex0, tex1, clamp, alpha, test, fba, frame, zbuf, scissor;
     u64 texa, fogcol, pabe, dthe, colclamp, texclut;
+    const void *texture_source; /* stable TIM2 source for the opt-in PC texture cache */
 } GsDrawState;
 
 /* gs_mem.c */
