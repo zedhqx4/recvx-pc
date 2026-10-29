@@ -926,12 +926,7 @@ CHUNK_HEAD* njCnkCtTid(CHUNK_HEAD* pCnk)
         printf("'Texture Flip' Exist in 'CNK-DATA' !!\n");
     }
 
-    njSetTextureNumSys(pCnk->usSize & 0xFFF);
-
-    if (!(pCnk->usSize & 0x2000)) 
-    {
-        njTextureFilterMode((pCnk->usSize / 16384) & 0x3);
-    }
+    /* CNK white-geometry benchmark: intentionally skip texture selection/filtering. */
     
     return &pCnk[1];
 }
@@ -2033,8 +2028,8 @@ CHUNK_HEAD* njCnkCsUvh(CHUNK_HEAD* pCnk)
     unsigned long vu1func_tag;                                                                                                                 
     unsigned long* p; // not from DWARF 
 
-    ulType  = SCE_GIF_PRIM(SCE_GS_PRIM_TRISTRIP, 0, /* textured */ SCE_GS_TRUE, /* fog */ SCE_GS_TRUE, 0, 0, 0, 0, 0);
-    ulType2 = SCE_GIF_PRIM(SCE_GS_PRIM_TRIFAN,   0, /* textured */ SCE_GS_TRUE, /* fog */ SCE_GS_TRUE, 0, 0, 0, 0, 0);
+    ulType  = SCE_GIF_PRIM(SCE_GS_PRIM_TRISTRIP, 0, /* textured */ 0, /* fog */ SCE_GS_TRUE, 0, 0, 0, 0, 0);
+    ulType2 = SCE_GIF_PRIM(SCE_GS_PRIM_TRIFAN,   0, /* textured */ 0, /* fog */ SCE_GS_TRUE, 0, 0, 0, 0, 0);
     
     if (ulNaCnkFlagConstAttr != 0) 
     { 
@@ -2591,8 +2586,8 @@ CHUNK_HEAD* njCnkCsUvn(CHUNK_HEAD* pCnk)
     unsigned long vu1func_tag;                                                                                                                 
     unsigned long* p; // not from DWARF 
 
-    ulType  = SCE_GIF_PRIM(SCE_GS_PRIM_TRISTRIP, 0, /* textured */ SCE_GS_TRUE, /* fog */ SCE_GS_TRUE, 0, 0, 0, 0, 0);
-    ulType2 = SCE_GIF_PRIM(SCE_GS_PRIM_TRIFAN,   0, /* textured */ SCE_GS_TRUE, /* fog */ SCE_GS_TRUE, 0, 0, 0, 0, 0);
+    ulType  = SCE_GIF_PRIM(SCE_GS_PRIM_TRISTRIP, 0, /* textured */ 0, /* fog */ SCE_GS_TRUE, 0, 0, 0, 0, 0);
+    ulType2 = SCE_GIF_PRIM(SCE_GS_PRIM_TRIFAN,   0, /* textured */ 0, /* fog */ SCE_GS_TRUE, 0, 0, 0, 0, 0);
     
     if (ulNaCnkFlagConstAttr != 0) 
     { 
