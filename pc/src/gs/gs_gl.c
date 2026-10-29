@@ -1937,7 +1937,8 @@ void gsFlushLocalToLocal(unsigned int bp, unsigned int bw, unsigned int psm, uns
 
             if ((psm == GS_PSMCT32) && (rt->psm == GS_PSMCT32) &&
                 (bw != 0) && (bw == rt->fbw) &&
-                (rt->w == (int)(bw * 64u)) && ((bp & 31u) == 0))
+                (rt->w == (int)(bw * 64u)) && ((bp & 31u) == 0) &&
+                ((unsigned long long)x + (unsigned long long)w <= (unsigned long long)bw * 64ULL))
             {
                 int page_delta = (int)rt->fbp - (int)(bp / 32u);
 
