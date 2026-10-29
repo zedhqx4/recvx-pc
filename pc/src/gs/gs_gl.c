@@ -2051,20 +2051,21 @@ void gsRendererPresent(unsigned int dispfb_fbp, unsigned int dispfb_fbw)
     float tw, th;
     int i;
 
-    unsigned int clut_loads, clut_flushes, clut_vertices;
+    unsigned int clut_loads, clut_flushes, clut_vertices, clut_draw_calls;
+    double clut_draw_seconds;
 
     gsRendererFlush();
     frame_counter++;
     stats.frames++;
 
-    gsTakeClutFrameStats(&clut_loads, &clut_flushes, &clut_vertices);
-    if (texFrameStats.misses > 0 || clut_flushes >= 4 || clut_loads >= 32)
+    gsTakeClutFrameStats(&clut_loads, &clut_flushes, &clut_vertices, &clut_draw_calls, &clut_draw_seconds);
+    if (texFrameStats.misses > 0 || clut_flushes >= 4 || clut_loads >= 32 || clut_draw_seconds >= 0.0005)
     {
-        pcLog("gs first-use frame %u: tex hit=%u miss=%u decoded=%u texels=%u decode=%.2fms create=%.2fms upload=%.2fms replacement=%.2fms; CLUT loads=%u pending flushes=%u verts=%u",
+        pcLog("gs first-use frame %u: tex hit=%u miss=%u decoded=%u texels=%u decode=%.2fms create=%.2fms upload=%.2fms replacement=%.2fms; CLUT loads=%u pending flushes=%u verts=%u flush draws=%u flush draw time=%.2fms",
               frame_counter, texFrameStats.hits, texFrameStats.misses, texFrameStats.decoded, texFrameStats.texels,
               texFrameStats.decode_seconds * 1000.0, texFrameStats.create_seconds * 1000.0,
               texFrameStats.upload_seconds * 1000.0, texFrameStats.replacement_seconds * 1000.0,
-              clut_loads, clut_flushes, clut_vertices);
+              clut_loads, clut_flushes, clut_vertices, clut_draw_calls, clut_draw_seconds * 1000.0);
     }
     memset(&texFrameStats, 0, sizeof(texFrameStats));
 
