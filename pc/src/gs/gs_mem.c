@@ -174,6 +174,8 @@ void gsMemInit(void)
     }
 
     memset(gsVram, 0, sizeof(gsVram));
+    memset(gsPageGen, 0, sizeof(gsPageGen));
+    gsClutInvalidateCache();
 }
 
 /* ---- address functions: return a byte (or nibble for 4-bit) offset into gsVram ---- */
@@ -505,6 +507,12 @@ static void advance(void)
 void gsMemStartTransfer(const GsRegs* r)
 {
     unsigned int dir = r->trxdir & 3;
+
+    if ((dir == 0) || (dir == 2))
+    {
+        /* Host/local and local/local transfers may change a cached palette source. */
+        gsClutInvalidateCache();
+    }
 
     xfer.dir = dir;
 

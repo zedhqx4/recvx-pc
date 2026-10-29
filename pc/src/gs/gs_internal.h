@@ -58,6 +58,8 @@ extern unsigned char gsVram[GS_VRAM_SIZE];
 extern unsigned int gsPageGen[GS_PAGES];
 
 void gsMemInit(void);
+/* Invalidate PC-side CLUT-shadow shortcuts when GS memory is modified. */
+void gsClutInvalidateCache(void);
 unsigned int gsMemRead(int psm, unsigned int bp, unsigned int bw, unsigned int x, unsigned int y);
 void gsMemWrite(int psm, unsigned int bp, unsigned int bw, unsigned int x, unsigned int y, unsigned int v);
 int  gsPsmBits(int psm);
@@ -70,7 +72,8 @@ void gsMemReadImage(const GsRegs* r, unsigned char* out);
 void gsWriteReg(int reg, u64 value);
 void gsGifTransfer(const void* data, int qwc);
 void gsDmaChain(const void* tag);
-void gsTakeClutFrameStats(unsigned int* loads, unsigned int* flushes, unsigned int* vertices,
+void gsTakeClutFrameStats(unsigned int* loads, unsigned int* cache_skips,
+                         unsigned int* flushes, unsigned int* vertices,
                          unsigned int* draw_calls, double* draw_seconds);
 
 /* gs_gl.c (renderer) */

@@ -77,22 +77,26 @@ static void current_state(GsDrawState* st)
 }
 
 static unsigned int frameClutLoads;
+static unsigned int frameClutCacheSkips;
 static unsigned int frameClutPendingFlushes;
 static unsigned int frameClutFlushedVertices;
 static unsigned int frameClutFlushDrawCalls;
 static double frameClutFlushDrawSeconds;
 
 /* Called once per presented frame by the renderer's compact diagnostic. */
-void gsTakeClutFrameStats(unsigned int* loads, unsigned int* flushes, unsigned int* vertices,
+void gsTakeClutFrameStats(unsigned int* loads, unsigned int* cache_skips,
+                         unsigned int* flushes, unsigned int* vertices,
                          unsigned int* draw_calls, double* draw_seconds)
 {
     if (loads != NULL) *loads = frameClutLoads;
+    if (cache_skips != NULL) *cache_skips = frameClutCacheSkips;
     if (flushes != NULL) *flushes = frameClutPendingFlushes;
     if (vertices != NULL) *vertices = frameClutFlushedVertices;
     if (draw_calls != NULL) *draw_calls = frameClutFlushDrawCalls;
     if (draw_seconds != NULL) *draw_seconds = frameClutFlushDrawSeconds;
 
     frameClutLoads = 0;
+    frameClutCacheSkips = 0;
     frameClutPendingFlushes = 0;
     frameClutFlushedVertices = 0;
     frameClutFlushDrawCalls = 0;
@@ -663,6 +667,145 @@ static int clut_entries(unsigned int psm)
     return 0;
 }
 
+/* Experimental PC-only shortcut, disabled unless RECVX_GS_CLUT_CACHE=1.
+ * Reuse the current CLUT shadow only if the source pages are unchanged and no
+ * primitives are queued that must be drawn before the palette could be replaced. */
+#define GS_CLUT_CACHE_MAX_PAGES 16
+
+static struct
+{
+    int valid;
+    u64 key;
+    u64 texclut;
+    unsigned int page_count;
+    unsigned int pages[GS_CLUT_CACHE_MAX_PAGES];
+    unsigned int generations[GS_CLUT_CACHE_MAX_PAGES];
+} clut_load_cache;
+
+static int gsClutCacheEnabled(void)
+{
+    static int enabled = -1;
+
+    if (enabled < 0)
+    {
+        const char* value = getenv("RECVX_GS_CLUT_CACHE");
+        enabled = (value != NULL && value[0] == '1' && value[1] == '\0') ? 1 : 0;
+    }
+
+    return enabled;
+}
+
+void gsClutInvalidateCache(void)
+{
+    clut_load_cache.valid = 0;
+    clut_load_cache.page_count = 0;
+}
+
+static u64 clut_source_key(u64 tex0)
+{
+    const u64 mask = (0x3FULL << 20) | (0x3FFFULL << 37) |
+                     (0xFULL << 51) | (1ULL << 55) | (31ULL << 56);
+
+    return tex0 & mask;
+}
+
+static int clut_source_pages_match(void)
+{
+    unsigned int i;
+
+    if (clut_load_cache.page_count == 0)
+        return 0;
+
+    for (i = 0; i < clut_load_cache.page_count; i++)
+    {
+        unsigned int page = clut_load_cache.pages[i];
+        if (gsPageGen[page] != clut_load_cache.generations[i])
+            return 0;
+    }
+
+    return 1;
+}
+
+/* Snapshot only 32-bit CLUT storage formats that this emulator can map by GS block. */
+static int clut_source_snapshot(u64 tex0, int entries)
+{
+    unsigned int cbp = GSF(tex0, 37, 14);
+    unsigned int cpsm = GSF(tex0, 51, 4);
+    unsigned int csm = GSF(tex0, 55, 1);
+    unsigned int bw = 1;
+    unsigned int count = 0;
+    int i;
+
+    if ((cpsm != 0) && (cpsm != 1))
+        return 0;
+
+    if (csm != 0)
+    {
+        bw = GSF(gsRegs.texclut, 0, 6);
+        if (bw == 0)
+            return 0;
+    }
+
+    for (i = 0; i < entries; i++)
+    {
+        unsigned int x, y, page;
+        int block;
+
+        if (csm == 0)
+        {
+            if (entries == 256)
+            {
+                unsigned int j = ((unsigned int)i & 0xE7) |
+                                 (((unsigned int)i & 0x08) << 1) |
+                                 (((unsigned int)i & 0x10) >> 1);
+                x = j & 15;
+                y = j >> 4;
+            }
+            else
+            {
+                x = (unsigned int)i & 7;
+                y = (unsigned int)i >> 3;
+            }
+        }
+        else
+        {
+            x = GSF(gsRegs.texclut, 6, 6) * 16 + (unsigned int)i;
+            y = GSF(gsRegs.texclut, 12, 10);
+        }
+
+        block = gsBlockNumber(GS_PSMCT32, cbp, bw, x, y);
+        if (block < 0)
+            return 0;
+
+        page = ((unsigned int)block >> 5) & (GS_PAGES - 1);
+
+        {
+            unsigned int j;
+            for (j = 0; j < count; j++)
+            {
+                if (clut_load_cache.pages[j] == page)
+                    break;
+            }
+
+            if (j == count)
+            {
+                if (count >= GS_CLUT_CACHE_MAX_PAGES)
+                    return 0;
+                clut_load_cache.pages[count++] = page;
+            }
+        }
+    }
+
+    if (count == 0)
+        return 0;
+
+    clut_load_cache.page_count = count;
+    for (i = 0; i < (int)count; i++)
+        clut_load_cache.generations[i] = gsPageGen[clut_load_cache.pages[i]];
+
+    return 1;
+}
+
 static void clut_load(u64 tex0)
 {
     unsigned int psm = GSF(tex0, 20, 6);
@@ -697,6 +840,17 @@ static void clut_load(u64 tex0)
 
     if (!load)
     {
+        return;
+    }
+
+    if (gsClutCacheEnabled() && clut_load_cache.valid &&
+        (clut_load_cache.key == clut_source_key(tex0)) &&
+        ((csm == 0) || (clut_load_cache.texclut == gsRegs.texclut)) &&
+        !(out_valid && (out_count > 0)) &&
+        clut_source_pages_match())
+    {
+        if (diagnostics)
+            frameClutCacheSkips++;
         return;
     }
 
@@ -764,6 +918,17 @@ static void clut_load(u64 tex0)
         {
             clut_buf[e & 511] = (unsigned short)gsMemRead((cpsm == 10) ? GS_PSMCT16S : GS_PSMCT16, cbp, bw, x, y);
         }
+    }
+
+    if (gsClutCacheEnabled())
+    {
+        clut_load_cache.valid = 0;
+        clut_load_cache.key = clut_source_key(tex0);
+        clut_load_cache.texclut = csm ? gsRegs.texclut : 0;
+        if (clut_source_snapshot(tex0, entries))
+            clut_load_cache.valid = 1;
+        else
+            clut_load_cache.page_count = 0;
     }
 }
 

@@ -1818,6 +1818,8 @@ void gsRendererInit(void)
     }
 
     pcLog("gs: renderer ready (internal resolution %dx%d for 640x480 logical output)", gs_scale_x(640), gs_scale_y(480));
+    if (gsClutCacheEnabled())
+        pcLog("gs: unchanged CLUT reload cache enabled (RECVX_GS_CLUT_CACHE=1)");
 }
 
 void gsRendererFlush(void)
@@ -2471,24 +2473,24 @@ void gsRendererPresent(unsigned int dispfb_fbp, unsigned int dispfb_fbw)
     int i;
     int diagnostics = gsTextureDiagnosticsEnabled();
 
-    unsigned int clut_loads, clut_flushes, clut_vertices, clut_draw_calls;
+    unsigned int clut_loads, clut_cache_skips, clut_flushes, clut_vertices, clut_draw_calls;
     double clut_draw_seconds;
 
     gsRendererFlush();
     frame_counter++;
     stats.frames++;
 
-    gsTakeClutFrameStats(&clut_loads, &clut_flushes, &clut_vertices, &clut_draw_calls, &clut_draw_seconds);
-    if (diagnostics && (texFrameStats.misses > 0 || clut_flushes >= 4 || clut_loads >= 32 || clut_draw_seconds >= 0.0005))
+    gsTakeClutFrameStats(&clut_loads, &clut_cache_skips, &clut_flushes, &clut_vertices, &clut_draw_calls, &clut_draw_seconds);
+    if (diagnostics && (texFrameStats.misses > 0 || clut_flushes >= 4 || clut_loads >= 32 || clut_cache_skips > 0 || clut_draw_seconds >= 0.0005))
     {
-        pcLog("gs first-use frame %u: tex hit=%u miss=%u atlas hit=%u atlas miss=%u palette hit=%u palette miss=%u decoded=%u texels=%u decode=%.2fms create=%.2fms upload=%.2fms palette create=%.2fms palette upload=%.2fms replacement=%.2fms; CLUT loads=%u pending flushes=%u verts=%u flush draws=%u flush draw time=%.2fms",
+        pcLog("gs first-use frame %u: tex hit=%u miss=%u atlas hit=%u atlas miss=%u palette hit=%u palette miss=%u decoded=%u texels=%u decode=%.2fms create=%.2fms upload=%.2fms palette create=%.2fms palette upload=%.2fms replacement=%.2fms; CLUT loads=%u cache skips=%u pending flushes=%u verts=%u flush draws=%u flush draw time=%.2fms",
               frame_counter, texFrameStats.hits, texFrameStats.misses,
               texFrameStats.atlas_hits, texFrameStats.atlas_misses, texFrameStats.palette_hits, texFrameStats.palette_misses,
               texFrameStats.decoded, texFrameStats.texels,
               texFrameStats.decode_seconds * 1000.0, texFrameStats.create_seconds * 1000.0,
               texFrameStats.upload_seconds * 1000.0, texFrameStats.palette_create_seconds * 1000.0,
               texFrameStats.palette_upload_seconds * 1000.0, texFrameStats.replacement_seconds * 1000.0,
-              clut_loads, clut_flushes, clut_vertices, clut_draw_calls, clut_draw_seconds * 1000.0);
+              clut_loads, clut_cache_skips, clut_flushes, clut_vertices, clut_draw_calls, clut_draw_seconds * 1000.0);
     }
     memset(&texFrameStats, 0, sizeof(texFrameStats));
 
