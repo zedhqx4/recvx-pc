@@ -1908,8 +1908,9 @@ void gsFlushLocalToLocal(unsigned int bp, unsigned int bw, unsigned int psm, uns
         if (rt->used && rt_overlaps(rt, bp, bw, psm, y, h))
         {
             unsigned int* buf;
-            int px, py, rows;
-            double t0;
+            int px, py, rows, drawn_h;
+            double t0, stage_t, blit_seconds = 0.0, read_pixels_seconds = 0.0;
+            double vram_write_seconds = 0.0, total_seconds;
 
             rt_sync(rt);
 
@@ -1920,7 +1921,8 @@ void gsFlushLocalToLocal(unsigned int bp, unsigned int bw, unsigned int psm, uns
             }
 
             t0 = pcOsTime();
-            rows = (rt->drawn_h > 0) ? rt->drawn_h : rt->h;
+            drawn_h = rt->drawn_h;
+            rows = (drawn_h > 0) ? drawn_h : rt->h;
 
             if ((down_w != rt->w) || (down_h != rt->h))
             {
@@ -1939,17 +1941,22 @@ void gsFlushLocalToLocal(unsigned int bp, unsigned int bw, unsigned int psm, uns
             }
 
             /* one sample per PS2 pixel, as before, but picked on the GPU */
+            stage_t = pcOsTime();
             pcGsDisable(GL_SCISSOR_TEST);
             pcGsBindFramebuffer(GL_READ_FRAMEBUFFER, rt->fbo);
             pcGsBindFramebuffer(GL_DRAW_FRAMEBUFFER, down_fbo);
             glBlitFramebuffer(0, 0, gs_scale_x(rt->w), gs_scale_y(rows), 0, 0, rt->w, rows, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+            blit_seconds = pcOsTime() - stage_t;
 
-            buf = malloc(rt->w * rows * 4);
+            buf = malloc((size_t)rt->w * (size_t)rows * sizeof(*buf));
             pcGsBindFramebuffer(GL_FRAMEBUFFER, down_fbo);
             glPixelStorei(GL_PACK_ALIGNMENT, 4);
+            stage_t = pcOsTime();
             glReadPixels(0, 0, rt->w, rows, GL_RGBA, GL_UNSIGNED_BYTE, buf);
+            read_pixels_seconds = pcOsTime() - stage_t;
             pcGsBindFramebuffer(GL_FRAMEBUFFER, rt->fbo);
 
+            stage_t = pcOsTime();
             for (py = 0; py < rows; py++)
             {
                 for (px = 0; px < rt->w; px++)
@@ -1960,13 +1967,29 @@ void gsFlushLocalToLocal(unsigned int bp, unsigned int bw, unsigned int psm, uns
                     gsMemWrite(GS_PSMCT32, rt->fbp * 32, rt->fbw, px, py, (c & 0xFFFFFF) | (a << 24));
                 }
             }
+            vram_write_seconds = pcOsTime() - stage_t;
 
             free(buf);
+            total_seconds = pcOsTime() - t0;
+
             rt->vram_dirty = 0;
             rt->rendered = 0;
             rt->drawn_h = 0;
+
+            if (gsTextureDiagnosticsEnabled() &&
+                (total_seconds >= 0.0005 || (unsigned long long)rt->w * (unsigned long long)rows >= 4096ULL))
+            {
+                pcLog("gs RT readback: req BP=%u BW=%u PSM=0x%x XY=%u,%u size=%ux%u | RT FBP=%u FBW=%u size=%dx%d drawn_h=%d rows=%d scale=%dx%d bytes=%u | blit/setup %.2fms glReadPixels %.2fms GS-write %.2fms total %.2fms",
+                      bp, bw, psm, x, y, w, h,
+                      rt->fbp, rt->fbw, rt->w, rt->h, drawn_h, rows,
+                      gs_scale_x(rt->w), gs_scale_y(rows),
+                      (unsigned int)((size_t)rt->w * (size_t)rows * sizeof(*buf)),
+                      blit_seconds * 1000.0, read_pixels_seconds * 1000.0,
+                      vram_write_seconds * 1000.0, total_seconds * 1000.0);
+            }
+
             stats.rt_reads++;
-            stats.t_read += pcOsTime() - t0;
+            stats.t_read += total_seconds;
         }
     }
 

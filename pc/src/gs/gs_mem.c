@@ -11,6 +11,9 @@
 
 #include "gs_internal.h"
 #include "../../include/pc_game_profile.h"
+#include "../../include/pc_platform.h"
+
+extern int gsTextureDiagnosticsEnabled(void);
 
 unsigned char gsVram[GS_VRAM_SIZE];
 unsigned int gsPageGen[GS_PAGES];
@@ -538,6 +541,13 @@ void gsMemStartTransfer(const GsRegs* r)
         unsigned int h = (unsigned int)(r->trxreg >> 32) & 0xFFF;
         unsigned int x, y;
 
+        if (gsTextureDiagnosticsEnabled() &&
+            (unsigned long long)w * (unsigned long long)h >= 4096ULL)
+        {
+            pcLog("gs local->local copy: src BP=%u BW=%u PSM=0x%x XY=%u,%u dst BP=%u BW=%u PSM=0x%x XY=%u,%u size=%ux%u",
+                  sbp, sbw, spsm, ssx, ssy, dbp, dbw, dpsm, dsx, dsy, w, h);
+        }
+
         gsFlushLocalToLocal(sbp, sbw, spsm, ssx, ssy, w, h);
 
         for (y = 0; y < h; y++)
@@ -763,6 +773,13 @@ void gsMemReadImage(const GsRegs* r, unsigned char* out)
     unsigned int h = (unsigned int)(r->trxreg >> 32) & 0xFFF;
     unsigned int x, y;
     int bits = gsPsmBits(spsm);
+
+    if (gsTextureDiagnosticsEnabled() &&
+        (unsigned long long)w * (unsigned long long)h >= 4096ULL)
+    {
+        pcLog("gs local->host read: src BP=%u BW=%u PSM=0x%x XY=%u,%u size=%ux%u",
+              sbp, sbw, spsm, ssx, ssy, w, h);
+    }
 
     gsFlushLocalToLocal(sbp, sbw, spsm, ssx, ssy, w, h);
 
