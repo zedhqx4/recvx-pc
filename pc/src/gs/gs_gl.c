@@ -931,6 +931,7 @@ static GLuint get_texture(u64 tex0, u64 texa, u64 texclut, int w, int h, int row
     u64 key2 = gsClutHash(tex0);   /* palette contents (0-entry hash for direct color) */
     int pw, ph, i, slot = -1, oldest = 0, cached_slot;
     int diagnostics;
+    double create_elapsed = 0.0, decode_elapsed = 0.0, upload_elapsed = 0.0;
     unsigned int page_lo, page_hi, clut_page, stride;
     unsigned long long gen;
     CachedTex* t;
@@ -1070,7 +1071,8 @@ static GLuint get_texture(u64 tex0, u64 texa, u64 texclut, int w, int h, int row
         t->tex = make_texture(w, h, GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE, GL_NEAREST);
         if (diagnostics)
         {
-            texFrameStats.create_seconds += pcOsTime() - t0;
+            create_elapsed = pcOsTime() - t0;
+            texFrameStats.create_seconds += create_elapsed;
         }
     }
     tex_cached++;
@@ -1084,6 +1086,7 @@ static GLuint get_texture(u64 tex0, u64 texa, u64 texclut, int w, int h, int row
             stats.tex_decodes++;
             stats.tex_texels += cols * rows;
             stats.t_decode += elapsed;
+            decode_elapsed = elapsed;
             if (diagnostics)
             {
                 texFrameStats.decoded++;
@@ -1098,8 +1101,17 @@ static GLuint get_texture(u64 tex0, u64 texa, u64 texclut, int w, int h, int row
         glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, cols, rows, GL_RGBA, GL_UNSIGNED_BYTE, decode_buf);
         if (diagnostics)
         {
-            texFrameStats.upload_seconds += pcOsTime() - t0;
+            upload_elapsed = pcOsTime() - t0;
+            texFrameStats.upload_seconds += upload_elapsed;
         }
+    }
+
+    if (diagnostics)
+    {
+        pcLog("gs texture miss frame %u: TEX0=%08x:%08x TBP=%u PSM=%02x CLUT=%u size=%dx%d sample=%dx%d create=%.2fms decode=%.2fms upload=%.2fms",
+              frame_counter, (unsigned int)(tex0 >> 32), (unsigned int)tex0,
+              tbp, psm, GSF(tex0, 37, 14), w, h, cols, rows,
+              create_elapsed * 1000.0, decode_elapsed * 1000.0, upload_elapsed * 1000.0);
     }
 
     return t->tex;
