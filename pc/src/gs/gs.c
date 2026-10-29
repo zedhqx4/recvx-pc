@@ -622,7 +622,6 @@ static void clut_load(u64 tex0)
     unsigned int cld = GSF(tex0, 61, 3);
     int entries = clut_entries(psm);
     int i, load;
-    unsigned short next_clut[512];
 
     if (entries == 0)
     {
@@ -644,12 +643,8 @@ static void clut_load(u64 tex0)
         return;
     }
 
-    /*
-     * Build the next CLUT first. Most repeated loads may select palette data
-     * that is identical to what is already active; those do not need to flush
-     * queued primitives because the palette visible to them will not change.
-     */
-    memcpy(next_clut, clut_buf, sizeof(next_clut));
+    /* primitives already queued use the old palette */
+    gsFlushPrims();
 
     for (i = 0; i < entries; i++)
     {
@@ -683,23 +678,14 @@ static void clut_load(u64 tex0)
             unsigned int c = gsMemRead(GS_PSMCT32, cbp, bw, x, y);
 
             e &= 255;
-            next_clut[e] = (unsigned short)c;
-            next_clut[e + 256] = (unsigned short)(c >> 16);
+            clut_buf[e] = (unsigned short)c;
+            clut_buf[e + 256] = (unsigned short)(c >> 16);
         }
         else
         {
-            next_clut[e & 511] = (unsigned short)gsMemRead((cpsm == 10) ? GS_PSMCT16S : GS_PSMCT16, cbp, bw, x, y);
+            clut_buf[e & 511] = (unsigned short)gsMemRead((cpsm == 10) ? GS_PSMCT16S : GS_PSMCT16, cbp, bw, x, y);
         }
     }
-
-    if (memcmp(next_clut, clut_buf, sizeof(clut_buf)) == 0)
-    {
-        return;
-    }
-
-    /* Queued primitives must consume the old CLUT if its contents are changing. */
-    gsFlushPrims();
-    memcpy(clut_buf, next_clut, sizeof(clut_buf));
 }
 
 static void read_clut(u64 tex0, u64 texa, int entries, unsigned int* clut)

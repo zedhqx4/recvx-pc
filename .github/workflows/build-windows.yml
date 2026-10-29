@@ -75,7 +75,7 @@ jobs:
       - name: Upload experimental Windows build
         uses: actions/upload-artifact@v4
         with:
-          name: recvx-pc-windows-clut-identical-skip
+          name: recvx-pc-windows-clut-flush-order-test
           path: |
             build_pc/recvx.exe
             build_pc/recvx-config.exe
