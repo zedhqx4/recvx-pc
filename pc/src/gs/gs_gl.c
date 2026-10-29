@@ -957,7 +957,211 @@ static unsigned long long gen_sum_rect(unsigned int page_lo, unsigned int stride
     return s;
 }
 
-static GLuint get_texture(u64 tex0, u64 texa, u64 texclut, int w, int h, int rows, int cols, int* hd)
+static int indexed_psm(unsigned int psm)
+{
+    return (psm == GS_PSMT8) || (psm == GS_PSMT4) ||
+           (psm == GS_PSMT8H) || (psm == GS_PSMT4HL) || (psm == GS_PSMT4HH);
+}
+
+static int indexed_palette_entries(unsigned int psm)
+{
+    if ((psm == GS_PSMT8) || (psm == GS_PSMT8H)) return 256;
+    if ((psm == GS_PSMT4) || (psm == GS_PSMT4HL) || (psm == GS_PSMT4HH)) return 16;
+    return 0;
+}
+
+/* Separate CLUT textures let several palettes share one source index atlas. Cache by the
+ * expanded colors actually consumed by the shader, including alpha semantics from TEXA. */
+static GLuint get_palette_texture(u64 tex0, u64 texa, int entries, int diagnostics)
+{
+    unsigned int colors[256];
+    unsigned long long hash = 14695981039346656037ULL;
+    int i, slot = -1, oldest = 0;
+    CachedPaletteTex* t;
+
+    memset(colors, 0, sizeof(colors));
+    gsReadClut32(tex0, texa, entries, colors);
+
+    hash = (hash ^ (unsigned int)entries) * 1099511628211ULL;
+    for (i = 0; i < entries; i++)
+    {
+        hash = (hash ^ colors[i]) * 1099511628211ULL;
+    }
+
+    for (i = 0; i < MAX_PALETTE_TEX; i++)
+    {
+        t = &palette_texcache[i];
+
+        if (!t->used && (slot < 0))
+        {
+            slot = i;
+        }
+
+        if (t->last_use < palette_texcache[oldest].last_use)
+        {
+            oldest = i;
+        }
+
+        if (t->used && (t->entries == entries) && (t->hash == hash) &&
+            (memcmp(t->colors, colors, (size_t)entries * sizeof(colors[0])) == 0))
+        {
+            t->last_use = frame_counter;
+            if (diagnostics) texFrameStats.palette_hits++;
+            return t->tex;
+        }
+    }
+
+    if (diagnostics) texFrameStats.palette_misses++;
+
+    if (slot < 0)
+    {
+        slot = oldest;
+        pcGsDeleteTextures(1, &palette_texcache[slot].tex);
+        tex_cached--;
+        tex_cached_bytes -= (double)palette_texcache[slot].entries * 4.0;
+    }
+
+    t = &palette_texcache[slot];
+    t->used = 1;
+    t->entries = entries;
+    t->hash = hash;
+    memcpy(t->colors, colors, sizeof(t->colors));
+    t->last_use = frame_counter;
+
+    {
+        double t0 = diagnostics ? pcOsTime() : 0.0;
+        t->tex = make_texture(entries, 1, GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE, GL_NEAREST);
+        if (diagnostics) texFrameStats.palette_create_seconds += pcOsTime() - t0;
+    }
+
+    {
+        double t0 = diagnostics ? pcOsTime() : 0.0;
+        glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, entries, 1, GL_RGBA, GL_UNSIGNED_BYTE, colors);
+        if (diagnostics) texFrameStats.palette_upload_seconds += pcOsTime() - t0;
+    }
+
+    tex_cached++;
+    tex_cached_bytes += (double)entries * 4.0;
+    return t->tex;
+}
+
+/* Cache the raw index plane without a CLUT. Palette variants then bind a small lookup texture
+ * instead of decoding and uploading another full RGBA atlas. */
+static int get_indexed_atlas_slot(u64 key0, u64 gen, u64 tex0, int w, int h, int diagnostics,
+                                  double* create_elapsed, double* decode_elapsed, double* upload_elapsed)
+{
+    int i, slot = -1, oldest = 0;
+    CachedIndexedAtlas* t;
+
+    *create_elapsed = 0.0;
+    *decode_elapsed = 0.0;
+    *upload_elapsed = 0.0;
+
+    for (i = 0; i < MAX_INDEXED_ATLASES; i++)
+    {
+        t = &indexed_atlases[i];
+
+        if (!t->used && (slot < 0))
+        {
+            slot = i;
+        }
+
+        if (t->last_use < indexed_atlases[oldest].last_use)
+        {
+            oldest = i;
+        }
+
+        if (t->used && (t->key0 == key0) && (t->gen == gen) && (t->w == w) && (t->h == h))
+        {
+            t->last_use = frame_counter;
+            if (diagnostics) texFrameStats.atlas_hits++;
+            return i;
+        }
+    }
+
+    if (diagnostics) texFrameStats.atlas_misses++;
+
+    if (index_buf == NULL)
+    {
+        return -1;
+    }
+
+    if (slot < 0)
+    {
+        slot = oldest;
+
+        /* The owning atlas is being evicted; remove any palette aliases before deleting it. */
+        for (i = 0; i < MAX_TEX; i++)
+        {
+            if (texcache[i].used && texcache[i].indexed && (texcache[i].index_slot == slot))
+            {
+                texture_cache_remove(i);
+                texcache[i].used = 0;
+                texcache[i].tex = 0;
+                texcache[i].indexed = 0;
+                texcache[i].index_slot = -1;
+                texcache[i].hash_next = -1;
+            }
+        }
+
+        pcGsDeleteTextures(1, &indexed_atlases[slot].tex);
+        tex_cached--;
+        tex_cached_bytes -= (double)indexed_atlases[slot].w * indexed_atlases[slot].h;
+    }
+
+    t = &indexed_atlases[slot];
+    memset(t, 0, sizeof(*t));
+    t->used = 1;
+    t->key0 = key0;
+    t->gen = gen;
+    t->w = w;
+    t->h = h;
+    t->last_use = frame_counter;
+
+    {
+        double t0 = diagnostics ? pcOsTime() : 0.0;
+        t->tex = make_texture(w, h, GL_R8, GL_RED, GL_UNSIGNED_BYTE, GL_NEAREST);
+        if (diagnostics) *create_elapsed = pcOsTime() - t0;
+        if (diagnostics) texFrameStats.create_seconds += *create_elapsed;
+    }
+
+    {
+        double t0 = pcOsTime();
+        gsDecodeIndices(tex0, w, h, index_buf);
+        *decode_elapsed = pcOsTime() - t0;
+
+        stats.tex_decodes++;
+        stats.tex_texels += (unsigned int)(w * h);
+        stats.t_decode += *decode_elapsed;
+
+        if (diagnostics)
+        {
+            texFrameStats.decoded++;
+            texFrameStats.texels += (unsigned int)(w * h);
+            texFrameStats.decode_seconds += *decode_elapsed;
+        }
+    }
+
+    {
+        double t0 = diagnostics ? pcOsTime() : 0.0;
+        glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, w, h, GL_RED, GL_UNSIGNED_BYTE, index_buf);
+        glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+        if (diagnostics)
+        {
+            *upload_elapsed = pcOsTime() - t0;
+            texFrameStats.upload_seconds += *upload_elapsed;
+        }
+    }
+
+    tex_cached++;
+    tex_cached_bytes += (double)w * h;
+    return slot;
+}
+
+static GLuint get_texture(u64 tex0, u64 texa, u64 texclut, int w, int h, int rows, int cols,
+                          int* hd, int* indexed, GLuint* palette_texture)
 {
     unsigned int psm = GSF(tex0, 20, 6);
     unsigned int tbp = GSF(tex0, 0, 14);
