@@ -292,12 +292,29 @@ static void clut_load(u64 tex0);
 
 void gsWriteReg(int reg, u64 value)
 {
-    /* A repeated material bind is reusable only if no texture/CLUT/context state changed. */
-    if ((reg == 0x00) || (reg == 0x06) || (reg == 0x07) || (reg == 0x08) || (reg == 0x09) ||
-        (reg == 0x14) || (reg == 0x15) || (reg == 0x16) || (reg == 0x17) ||
-        (reg == 0x1a) || (reg == 0x1b) || (reg == 0x1c) || (reg == 0x3b) ||
-        (reg == 0x3f) || (reg == 0x47) || (reg == 0x48))
+    /* Primitive writes are frequent; invalidate only if their effective GS context changes. */
+    if (reg == 0x00)
+    {
+        if (gsRegs.prmodecont && (GSF(gsRegs.prim, 9, 1) != GSF(value, 9, 1)))
+            gsTextureBindingGeneration++;
+    }
+    else if (reg == 0x1a)
+    {
+        if (gsRegs.prmodecont != value)
+            gsTextureBindingGeneration++;
+    }
+    else if (reg == 0x1b)
+    {
+        if (!gsRegs.prmodecont && (GSF(gsRegs.prmode, 9, 1) != GSF(value, 9, 1)))
+            gsTextureBindingGeneration++;
+    }
+    else if ((reg == 0x06) || (reg == 0x07) || (reg == 0x08) || (reg == 0x09) ||
+             (reg == 0x14) || (reg == 0x15) || (reg == 0x16) || (reg == 0x17) ||
+             (reg == 0x1c) || (reg == 0x3b) || (reg == 0x3f) ||
+             (reg == 0x47) || (reg == 0x48))
+    {
         gsTextureBindingGeneration++;
+    }
 
     switch (reg)
     {
