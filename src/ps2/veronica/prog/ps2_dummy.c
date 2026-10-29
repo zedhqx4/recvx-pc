@@ -1,6 +1,8 @@
 #ifdef TARGET_PC
 #include <stdio.h>
 #include "../../../../pc/include/pc_game_profile.h"
+#include "../../../../pc/include/pc_texture_cache.h"
+extern int Send_Tim2_dataExClutOnly(void* tim2_top_adr, unsigned long send_image_adr, unsigned long send_clut_adr);
 #endif
 #include "../../../ps2/veronica/prog/ps2_dummy.h"
 #include "../../../ps2/veronica/prog/ps2_loadtim2.h"
@@ -2455,6 +2457,10 @@ void Ps2InitTexCache()
     } 
     
     Ps2_tex_cache_num = 4;
+#ifdef TARGET_PC
+    pcGsResetTextureSourceCache();
+    pcGsSetTextureSourceIdentity(NULL);
+#endif
 }
 
 // 100% matching!
@@ -2495,6 +2501,10 @@ int Ps2TexLoad(NJS_TEXMEMLIST* addr)
     double profile_send_t0 = 0.0;
     double profile_send_ms = 0.0;
     unsigned int profile_send_calls = 0;
+    int source_cache_eligible = 0;
+    int source_cache_hit = 0;
+    int image_upload_skipped = 0;
+    double clut_only_ms = 0.0;
 #endif
 
     cache_flag = 1;
@@ -2507,6 +2517,15 @@ int Ps2TexLoad(NJS_TEXMEMLIST* addr)
     Ps2_now_tex = addr;
 
     timp = (TIM2_PICTUREHEADER_EX*)addr->texinfo.texsurface.pSurface;
+
+#ifdef TARGET_PC
+    source_cache_eligible = pcGsTextureSourceCacheEnabled() &&
+                            (timp->TpFlag == 0) && (timp->ClutType != 0) &&
+                            (PS2_Render_tex_sub_flag == 0) &&
+                            !((timp->PictFormat >= 5) && (timp->PictFormat <= 8)) &&
+                            ((timp->ImageType == 4) || (timp->ImageType == 5));
+    source_cache_hit = source_cache_eligible && pcGsTextureSourceCacheContains(timp);
+#endif
 
     if (Ps2_current_texbreak != 0) 
     {
@@ -2538,20 +2557,41 @@ label:
         if ((PS2_Render_tex_sub_flag == 0) || ((timp->PictFormat >= 5) && (timp->PictFormat <= 8)) || ((timp->ImageType == 4) || (timp->ImageType == 5)))
         {
 #ifdef TARGET_PC
-            if (profile_texture)
+            int clut_only_ok = 0;
+            if (source_cache_hit)
             {
-                profile_send_t0 = pcGameProfileNowMs();
-                pcGameProfileSetTextureUploadScope(1);
+                double clut_only_start = profile_texture ? pcGameProfileNowMs() : 0.0;
+
+                if (profile_texture)
+                    pcGameProfileSetTextureUploadScope(1);
+                clut_only_ok = (Send_Tim2_dataExClutOnly(Ps2_tex_cache_buff[0], 190 * 64, 254 * 64) == 0);
+                if (profile_texture)
+                {
+                    pcGameProfileSetTextureUploadScope(0);
+                    clut_only_ms += pcGameProfileNowMs() - clut_only_start;
+                }
+
+                if (clut_only_ok)
+                    image_upload_skipped = 1;
             }
-#endif
+
+            if (!clut_only_ok)
+            {
+                if (profile_texture)
+                {
+                    profile_send_t0 = pcGameProfileNowMs();
+                    pcGameProfileSetTextureUploadScope(1);
+                }
+                Send_Tim2_dataEx(Ps2_tex_cache_buff[0], 190 * 64, 254 * 64);
+                if (profile_texture)
+                {
+                    pcGameProfileSetTextureUploadScope(0);
+                    profile_send_ms += pcGameProfileNowMs() - profile_send_t0;
+                    profile_send_calls++;
+                }
+            }
+#else
             Send_Tim2_dataEx(Ps2_tex_cache_buff[0], 190 * 64, 254 * 64);
-#ifdef TARGET_PC
-            if (profile_texture)
-            {
-                pcGameProfileSetTextureUploadScope(0);
-                profile_send_ms += pcGameProfileNowMs() - profile_send_t0;
-                profile_send_calls++;
-            }
 #endif
         }
     }
@@ -2638,10 +2678,12 @@ label:
     loadImage((void*)0xF0000000);
 
 #ifdef TARGET_PC
+    pcGsSetTextureSourceIdentity(source_cache_eligible ? timp : NULL);
     if (profile_texture)
     {
         pcGameProfileRecordTextureLoad(pcGameProfileNowMs() - profile_texload_t0,
                                        profile_send_ms, profile_send_calls);
+        pcGameProfileRecordTextureCache(source_cache_hit, image_upload_skipped, clut_only_ms);
     }
 #endif
     return cache_flag;
