@@ -384,6 +384,8 @@ static const char* fs_src =
     "noperspective in float vFog;\n"
     "flat in vec4 vClamp;\n"
     "uniform sampler2D uTex;\n"
+    "uniform sampler2D uPalette;\n"
+    "uniform int uIndexed;\n"
     "uniform int uTme, uFst, uTfx, uTcc, uIip;\n"
     "uniform int uWireframe;\n"
     "uniform vec3 uTexa;\n"                    /* TA0, TA1, AEM */
@@ -408,6 +410,10 @@ static const char* fs_src =
     "    ivec2 sz = ivec2(uTexSize);\n"
     "    c.x = wrapc(c.x, sz.x, uWrap.x, uRegion.x, uRegion.y);\n"
     "    c.y = wrapc(c.y, sz.y, uWrap.y, uRegion.z, uRegion.w);\n"
+    "    if (uIndexed != 0) {\n"
+    "        int index = int(floor(texelFetch(uTex, c, 0).r * 255.0 + 0.5));\n"
+    "        return texelFetch(uPalette, ivec2(index, 0), 0);\n"
+    "    }\n"
     "    return texelFetch(uTex, c, 0);\n"
     "}\n"
     "vec4 sampleTex(vec2 uv) {\n"
@@ -476,7 +482,7 @@ static GLuint vao, vbo;
 
 static struct {
     GLint target, tme, fst, tfx, tcc, iip, texrt, texsize, rtsize, wrap, region, linear;
-    GLint ate, atst, aref, atinv, fge, fogcol, tex, texa, hd, wireframe;
+    GLint ate, atst, aref, atinv, fge, fogcol, tex, palette, indexed, texa, hd, wireframe;
 } U;
 
 static GLuint compile(GLenum type, const char* src)
@@ -750,6 +756,8 @@ typedef struct {
     unsigned long long gen;
     GLuint tex;
     int hd;              /* tex is an HD replacement (owned by gs_replace.c) */
+    int indexed;          /* tex is a palette-independent GL_R8 index atlas */
+    int index_slot;       /* owning entry in indexed_atlases when indexed */
     unsigned int last_use;
     int hash_next;
 } CachedTex;
@@ -758,6 +766,31 @@ typedef struct {
 
 static CachedTex texcache[MAX_TEX];
 static unsigned int* decode_buf;
+static unsigned char* index_buf;
+
+#define MAX_INDEXED_ATLASES 128
+typedef struct {
+    int used;
+    u64 key0;
+    int w, h;
+    unsigned long long gen;
+    GLuint tex;
+    unsigned int last_use;
+} CachedIndexedAtlas;
+
+static CachedIndexedAtlas indexed_atlases[MAX_INDEXED_ATLASES];
+
+#define MAX_PALETTE_TEX 256
+typedef struct {
+    int used;
+    int entries;
+    unsigned long long hash;
+    unsigned int colors[256];
+    GLuint tex;
+    unsigned int last_use;
+} CachedPaletteTex;
+
+static CachedPaletteTex palette_texcache[MAX_PALETTE_TEX];
 
 /* A hit should not scan all 2048 cached textures. Use bucket chains for exact-key
  * lookup; keep the existing LRU scan only on cache misses/evictions. */
@@ -767,8 +800,9 @@ static int texcache_hash_heads[TEX_HASH_BUCKETS];
 
 /* Per-present interval diagnostics: only emitted for texture misses or heavy CLUT flushing. */
 static struct {
-    unsigned int hits, misses, coverage_hits, decoded, texels;
+    unsigned int hits, misses, atlas_hits, atlas_misses, palette_hits, palette_misses, decoded, texels;
     double decode_seconds, create_seconds, upload_seconds, replacement_seconds;
+    double palette_create_seconds, palette_upload_seconds;
 } texFrameStats;
 
 static unsigned int texture_cache_hash(u64 gen, u64 key0, u64 key1, u64 key2,
@@ -858,7 +892,10 @@ static void texture_cache_init(void)
         texcache_hash_heads[i] = -1;
 
     for (i = 0; i < MAX_TEX; i++)
+    {
         texcache[i].hash_next = -1;
+        texcache[i].index_slot = -1;
+    }
 }
 
 static void psm_page_size(int psm, int* pw, int* ph)
@@ -1470,6 +1507,7 @@ void gsRendererInit(void)
     }
 
     decode_buf = malloc(1024 * 1024 * 4);
+    index_buf = malloc(1024 * 1024);
 
     prog = link(vs_src, fs_src);
     present_prog = link(present_vs, present_fs);
@@ -1478,7 +1516,8 @@ void gsRendererInit(void)
     UL(target, "uTarget"); UL(tme, "uTme"); UL(fst, "uFst"); UL(tfx, "uTfx"); UL(tcc, "uTcc"); UL(iip, "uIip");
     UL(texrt, "uTexRT"); UL(texsize, "uTexSize"); UL(rtsize, "uRTSize"); UL(wrap, "uWrap"); UL(region, "uRegion");
     UL(linear, "uLinear"); UL(ate, "uAte"); UL(atst, "uAtst"); UL(aref, "uAref"); UL(atinv, "uAtestInvert");
-    UL(fge, "uFge"); UL(fogcol, "uFogCol"); UL(tex, "uTex"); UL(texa, "uTexa"); UL(hd, "uHD");
+    UL(fge, "uFge"); UL(fogcol, "uFogCol"); UL(tex, "uTex"); UL(palette, "uPalette"); UL(indexed, "uIndexed");
+    UL(texa, "uTexa"); UL(hd, "uHD");
     UL(wireframe, "uWireframe");
 #undef UL
 
@@ -2150,11 +2189,13 @@ void gsRendererPresent(unsigned int dispfb_fbp, unsigned int dispfb_fbw)
     gsTakeClutFrameStats(&clut_loads, &clut_flushes, &clut_vertices, &clut_draw_calls, &clut_draw_seconds);
     if (diagnostics && (texFrameStats.misses > 0 || clut_flushes >= 4 || clut_loads >= 32 || clut_draw_seconds >= 0.0005))
     {
-        pcLog("gs first-use frame %u: tex hit=%u miss=%u coverage=%u decoded=%u texels=%u decode=%.2fms create=%.2fms upload=%.2fms replacement=%.2fms; CLUT loads=%u pending flushes=%u verts=%u flush draws=%u flush draw time=%.2fms",
-              frame_counter, texFrameStats.hits, texFrameStats.misses, texFrameStats.coverage_hits,
+        pcLog("gs first-use frame %u: tex hit=%u miss=%u atlas hit=%u atlas miss=%u palette hit=%u palette miss=%u decoded=%u texels=%u decode=%.2fms create=%.2fms upload=%.2fms palette create=%.2fms palette upload=%.2fms replacement=%.2fms; CLUT loads=%u pending flushes=%u verts=%u flush draws=%u flush draw time=%.2fms",
+              frame_counter, texFrameStats.hits, texFrameStats.misses,
+              texFrameStats.atlas_hits, texFrameStats.atlas_misses, texFrameStats.palette_hits, texFrameStats.palette_misses,
               texFrameStats.decoded, texFrameStats.texels,
               texFrameStats.decode_seconds * 1000.0, texFrameStats.create_seconds * 1000.0,
-              texFrameStats.upload_seconds * 1000.0, texFrameStats.replacement_seconds * 1000.0,
+              texFrameStats.upload_seconds * 1000.0, texFrameStats.palette_create_seconds * 1000.0,
+              texFrameStats.palette_upload_seconds * 1000.0, texFrameStats.replacement_seconds * 1000.0,
               clut_loads, clut_flushes, clut_vertices, clut_draw_calls, clut_draw_seconds * 1000.0);
     }
     memset(&texFrameStats, 0, sizeof(texFrameStats));
