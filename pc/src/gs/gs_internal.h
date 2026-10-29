@@ -60,6 +60,7 @@ extern unsigned int gsPageGen[GS_PAGES];
 void gsMemInit(void);
 /* Invalidate PC-side CLUT-shadow shortcuts when GS memory is modified. */
 void gsClutInvalidateCache(void);
+int gsClutCacheIsEnabled(void);
 unsigned int gsMemRead(int psm, unsigned int bp, unsigned int bw, unsigned int x, unsigned int y);
 void gsMemWrite(int psm, unsigned int bp, unsigned int bw, unsigned int x, unsigned int y, unsigned int v);
 int  gsPsmBits(int psm);

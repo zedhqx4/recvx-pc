@@ -695,6 +695,11 @@ static int gsClutCacheEnabled(void)
     return enabled;
 }
 
+int gsClutCacheIsEnabled(void)
+{
+    return gsClutCacheEnabled();
+}
+
 void gsClutInvalidateCache(void)
 {
     clut_load_cache.valid = 0;

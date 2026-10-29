@@ -1818,7 +1818,7 @@ void gsRendererInit(void)
     }
 
     pcLog("gs: renderer ready (internal resolution %dx%d for 640x480 logical output)", gs_scale_x(640), gs_scale_y(480));
-    if (gsClutCacheEnabled())
+    if (gsClutCacheIsEnabled())
         pcLog("gs: unchanged CLUT reload cache enabled (RECVX_GS_CLUT_CACHE=1)");
 }
 
