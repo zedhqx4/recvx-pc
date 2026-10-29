@@ -1,9 +1,9 @@
-/* Opt-in PC texture reuse for static indexed TIM2 images. */
+/* Opt-in PC texture reuse for static indexed TIM2 assets, keyed by TIM2 Gindex. */
 #pragma once
 
 #ifdef TARGET_PC
-int pcGsTextureSourceCacheEnabled(void);
-int pcGsTextureSourceCacheContains(const void *source, unsigned long long tex0, int width, int height);
-void pcGsSetTextureSourceIdentity(const void *source);
-void pcGsResetTextureSourceCache(void);
+int pcGsTextureAssetCacheEnabled(void);
+int pcGsTextureAssetCacheContains(unsigned int asset_id, unsigned long long tex0, int width, int height);
+void pcGsSetTextureAssetIdentity(unsigned int asset_id, int valid);
+void pcGsResetTextureAssetCache(void);
 #endif

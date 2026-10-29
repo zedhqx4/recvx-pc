@@ -2458,8 +2458,8 @@ void Ps2InitTexCache()
     
     Ps2_tex_cache_num = 4;
 #ifdef TARGET_PC
-    pcGsResetTextureSourceCache();
-    pcGsSetTextureSourceIdentity(NULL);
+    pcGsResetTextureAssetCache();
+    pcGsSetTextureAssetIdentity(0, 0);
 #endif
 }
 
@@ -2501,11 +2501,11 @@ int Ps2TexLoad(NJS_TEXMEMLIST* addr)
     double profile_send_t0 = 0.0;
     double profile_send_ms = 0.0;
     unsigned int profile_send_calls = 0;
-    int source_cache_eligible = 0;
-    int source_cache_hit = 0;
+    int asset_cache_eligible = 0;
+    int asset_cache_hit = 0;
     int image_upload_skipped = 0;
     double clut_only_ms = 0.0;
-    unsigned long long source_cache_tex0 = 0;
+    unsigned long long asset_cache_tex0 = 0;
 #endif
 
     cache_flag = 1;
@@ -2538,18 +2538,18 @@ int Ps2TexLoad(NJS_TEXMEMLIST* addr)
     }
 
 #ifdef TARGET_PC
-    source_cache_eligible = pcGsTextureSourceCacheEnabled() &&
+    asset_cache_eligible = pcGsTextureAssetCacheEnabled() &&
                             (timp->TpFlag == 0) && (timp->ClutType != 0) &&
                             (PS2_Render_tex_sub_flag == 0) &&
                             !((timp->PictFormat >= 5) && (timp->PictFormat <= 8)) &&
                             ((timp->ImageType == 4) || (timp->ImageType == 5));
-    if (source_cache_eligible && tw < 31 && th < 31)
+    if (asset_cache_eligible && tw < 31 && th < 31)
     {
-        source_cache_tex0 = SCE_GS_SET_TEX0_1(190 * 64, tbw, psm, tw, th, 1,
+        asset_cache_tex0 = SCE_GS_SET_TEX0_1(190 * 64, tbw, psm, tw, th, 1,
                                              SCE_GS_MODULATE, 254 * 64,
                                              SCE_GS_PSMCT32, 0, 0, 2);
-        source_cache_hit = pcGsTextureSourceCacheContains(
-            timp, source_cache_tex0, (int)(1U << tw), (int)(1U << th));
+        asset_cache_hit = pcGsTextureAssetCacheContains(
+            timp->Gindex, asset_cache_tex0, (int)(1U << tw), (int)(1U << th));
     }
 #endif
 
@@ -2584,7 +2584,7 @@ label:
         {
 #ifdef TARGET_PC
             int clut_only_ok = 0;
-            if (source_cache_hit)
+            if (asset_cache_hit)
             {
                 double clut_only_start = profile_texture ? pcGameProfileNowMs() : 0.0;
 
@@ -2686,12 +2686,12 @@ label:
     loadImage((void*)0xF0000000);
 
 #ifdef TARGET_PC
-    pcGsSetTextureSourceIdentity(source_cache_eligible ? timp : NULL);
+    pcGsSetTextureAssetIdentity(timp->Gindex, asset_cache_eligible);
     if (profile_texture)
     {
         pcGameProfileRecordTextureLoad(pcGameProfileNowMs() - profile_texload_t0,
                                        profile_send_ms, profile_send_calls);
-        pcGameProfileRecordTextureCache(source_cache_hit, image_upload_skipped, clut_only_ms);
+        pcGameProfileRecordTextureCache(asset_cache_hit, image_upload_skipped, clut_only_ms);
     }
 #endif
     return cache_flag;

@@ -13,7 +13,8 @@
 #include "../pc_os.h"
 
 GsRegs gsRegs;
-static const void *gsTextureSourceIdentity[2];
+static unsigned int gsTextureAssetId[2];
+static int gsTextureAssetValid[2];
 int gsDumpFrame;
 static int kicks;
 
@@ -31,9 +32,10 @@ int gsTextureDiagnosticsEnabled(void)
     return enabled;
 }
 
-void pcGsSetTextureSourceIdentity(const void *source)
+void pcGsSetTextureAssetIdentity(unsigned int asset_id, int valid)
 {
-    gsTextureSourceIdentity[0] = source;
+    gsTextureAssetId[0] = asset_id;
+    gsTextureAssetValid[0] = valid != 0;
 }
 
 /* ------------------------------------------------------------------------------------------- */
@@ -80,7 +82,8 @@ static void current_state(GsDrawState* st)
     st->dthe = gsRegs.dthe;
     st->colclamp = gsRegs.colclamp;
     st->texclut = gsRegs.texclut;
-    st->texture_source = gsTextureSourceIdentity[c];
+    st->texture_asset_id = gsTextureAssetId[c];
+    st->texture_asset_valid = gsTextureAssetValid[c];
 }
 
 static unsigned int frameClutLoads;
@@ -288,8 +291,8 @@ void gsWriteReg(int reg, u64 value)
     case 0x03: gsRegs.uv = value; break;
     case 0x04: latch_vertex(value, 1, 1); break;
     case 0x05: latch_vertex(value, 0, 1); break;
-    case 0x06: gsRegs.tex0[0] = value; gsTextureSourceIdentity[0] = NULL; clut_load(value); break;
-    case 0x07: gsRegs.tex0[1] = value; gsTextureSourceIdentity[1] = NULL; clut_load(value); break;
+    case 0x06: gsRegs.tex0[0] = value; gsTextureAssetId[0] = 0; gsTextureAssetValid[0] = 0; clut_load(value); break;
+    case 0x07: gsRegs.tex0[1] = value; gsTextureAssetId[1] = 0; gsTextureAssetValid[1] = 0; clut_load(value); break;
     case 0x08: gsRegs.clamp[0] = value; break;
     case 0x09: gsRegs.clamp[1] = value; break;
     case 0x0a: gsRegs.fog = value; break;
@@ -304,7 +307,8 @@ void gsWriteReg(int reg, u64 value)
         u64 mask = (0x3FULL << 20) | (0xFFFFFFFULL << 37);
 
         /* TEX2 changes the active texture interpretation: don't carry an older TIM2 source hint. */
-        gsTextureSourceIdentity[c] = NULL;
+        gsTextureAssetId[c] = 0;
+        gsTextureAssetValid[c] = 0;
         gsRegs.tex2[c] = value;
         gsRegs.tex0[c] = (gsRegs.tex0[c] & ~mask) | (value & mask);
         clut_load(gsRegs.tex0[c] | (value & (7ULL << 61)));
