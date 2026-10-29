@@ -1223,10 +1223,9 @@ static GLuint get_texture(u64 tex0, u64 texa, u64 texclut, int w, int h, int row
         }
     }
 
-    /* Indexed PS2 textures are commonly used as atlases: draws sample different UV
-     * rectangles from the same TEX0/CLUT. Cache and decode the complete atlas once so
-     * those rectangles share one RGBA texture instead of creating one GL object per
-     * sampled extent. Each distinct palette still receives its own decoded RGBA entry. */
+    /* Indexed PS2 textures are commonly used as atlases. Decode their full index plane once;
+     * the CLUT is uploaded separately and applied in the shader, so palette variants share
+     * the same atlas storage without merging their colors. */
     if ((psm == GS_PSMT8) || (psm == GS_PSMT4) ||
         (psm == GS_PSMT8H) || (psm == GS_PSMT4HL) || (psm == GS_PSMT4HH))
     {
@@ -1247,6 +1246,10 @@ static GLuint get_texture(u64 tex0, u64 texa, u64 texclut, int w, int h, int row
         }
         t = &texcache[cached_slot];
         t->last_use = frame_counter;
+        if (t->indexed && (t->index_slot >= 0) && (t->index_slot < MAX_INDEXED_ATLASES))
+        {
+            indexed_atlases[t->index_slot].last_use = frame_counter;
+        }
         *hd = t->hd;
         *indexed = t->indexed;
         *palette_texture = t->indexed ?
@@ -1297,6 +1300,10 @@ static GLuint get_texture(u64 tex0, u64 texa, u64 texclut, int w, int h, int row
     {
         t = &texcache[coverage_slot];
         t->last_use = frame_counter;
+        if (t->indexed && (t->index_slot >= 0) && (t->index_slot < MAX_INDEXED_ATLASES))
+        {
+            indexed_atlases[t->index_slot].last_use = frame_counter;
+        }
         *hd = t->hd;
         *indexed = t->indexed;
         *palette_texture = t->indexed ?
