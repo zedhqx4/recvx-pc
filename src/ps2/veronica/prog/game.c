@@ -67,6 +67,9 @@ static struct
     double frame_no_send_calls, sum_no_send_calls, max_no_send_calls;
     double frame_gs_calls, sum_gs_calls, max_gs_calls;
     double frame_gs_qwc, sum_gs_qwc, max_gs_qwc;
+    double frame_source_hits, sum_source_hits, max_source_hits;
+    double frame_image_skips, sum_image_skips, max_image_skips;
+    double frame_clut_only_ms, sum_clut_only_ms, max_clut_only_ms;
 } texture_profile;
 static int texture_upload_scope;
 
@@ -147,6 +150,18 @@ void pcGameProfileRecordTextureLoad(double total_ms, double send_ms, unsigned in
         texture_profile.frame_no_send_calls += 1.0;
 }
 
+void pcGameProfileRecordTextureCache(int source_hit, int image_skipped, double clut_only_ms)
+{
+    if (!game_profile.active)
+        return;
+
+    if (source_hit)
+        texture_profile.frame_source_hits += 1.0;
+    if (image_skipped)
+        texture_profile.frame_image_skips += 1.0;
+    texture_profile.frame_clut_only_ms += (clut_only_ms >= 0.0) ? clut_only_ms : 0.0;
+}
+
 void pcGameProfileRecordTextureTransfer(double ms, unsigned int qwc)
 {
     if (!pcGameProfileTextureUploadActive())
@@ -170,6 +185,9 @@ static void pcGameProfileBegin(void)
     texture_profile.frame_no_send_calls = 0.0;
     texture_profile.frame_gs_calls = 0.0;
     texture_profile.frame_gs_qwc = 0.0;
+    texture_profile.frame_source_hits = 0.0;
+    texture_profile.frame_image_skips = 0.0;
+    texture_profile.frame_clut_only_ms = 0.0;
     texture_upload_scope = 0;
 
     for (i = 0; i < GP_COUNT; i++)
@@ -270,6 +288,9 @@ static void pcGameProfileEnd(int loop_ct, double total_ms)
     texture_profile.sum_no_send_calls += texture_profile.frame_no_send_calls;
     texture_profile.sum_gs_calls += texture_profile.frame_gs_calls;
     texture_profile.sum_gs_qwc += texture_profile.frame_gs_qwc;
+    texture_profile.sum_source_hits += texture_profile.frame_source_hits;
+    texture_profile.sum_image_skips += texture_profile.frame_image_skips;
+    texture_profile.sum_clut_only_ms += texture_profile.frame_clut_only_ms;
     if (texture_profile.frame_load_ms > texture_profile.max_load_ms)
         texture_profile.max_load_ms = texture_profile.frame_load_ms;
     if (texture_profile.frame_send_ms > texture_profile.max_send_ms)
@@ -286,6 +307,12 @@ static void pcGameProfileEnd(int loop_ct, double total_ms)
         texture_profile.max_gs_calls = texture_profile.frame_gs_calls;
     if (texture_profile.frame_gs_qwc > texture_profile.max_gs_qwc)
         texture_profile.max_gs_qwc = texture_profile.frame_gs_qwc;
+    if (texture_profile.frame_source_hits > texture_profile.max_source_hits)
+        texture_profile.max_source_hits = texture_profile.frame_source_hits;
+    if (texture_profile.frame_image_skips > texture_profile.max_image_skips)
+        texture_profile.max_image_skips = texture_profile.frame_image_skips;
+    if (texture_profile.frame_clut_only_ms > texture_profile.max_clut_only_ms)
+        texture_profile.max_clut_only_ms = texture_profile.frame_clut_only_ms;
 
     for (i = PC_GAME_PROFILE_SCOPE_ROOM; i <= PC_GAME_PROFILE_SCOPE_MISC; i++)
     {
@@ -390,6 +417,10 @@ static void pcGameProfileEnd(int loop_ct, double total_ms)
               texture_profile.sum_send_ms / n, texture_profile.max_send_ms,
               texture_profile.sum_send_calls / n, texture_profile.max_send_calls,
               texture_profile.sum_no_send_calls / n);
+        pcLog("PROFILE TEX source-cache avg/max per frame: cached sources %.2f/%.2f image uploads skipped %.2f/%.2f CLUT-only time %.3f/%.3f ms",
+              texture_profile.sum_source_hits / n, texture_profile.max_source_hits,
+              texture_profile.sum_image_skips / n, texture_profile.max_image_skips,
+              texture_profile.sum_clut_only_ms / n, texture_profile.max_clut_only_ms);
         pcLog("PROFILE TEX GS IMAGE upload avg/max ms %.2f/%.2f calls/frame %.2f/%.2f QWC/frame %.0f/%.0f",
               texture_profile.sum_gs_ms / n, texture_profile.max_gs_ms,
               texture_profile.sum_gs_calls / n, texture_profile.max_gs_calls,
@@ -427,6 +458,9 @@ static void pcGameProfileEnd(int loop_ct, double total_ms)
         texture_profile.sum_no_send_calls = texture_profile.max_no_send_calls = 0.0;
         texture_profile.sum_gs_calls = texture_profile.max_gs_calls = 0.0;
         texture_profile.sum_gs_qwc = texture_profile.max_gs_qwc = 0.0;
+        texture_profile.sum_source_hits = texture_profile.max_source_hits = 0.0;
+        texture_profile.sum_image_skips = texture_profile.max_image_skips = 0.0;
+        texture_profile.sum_clut_only_ms = texture_profile.max_clut_only_ms = 0.0;
         game_profile.count = 0;
         game_profile.worst_total = 0.0;
     }
