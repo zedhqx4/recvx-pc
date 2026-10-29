@@ -303,6 +303,8 @@ void gsWriteReg(int reg, u64 value)
         int c = reg - 0x16;
         u64 mask = (0x3FULL << 20) | (0xFFFFFFFULL << 37);
 
+        /* TEX2 changes the active texture interpretation: don't carry an older TIM2 source hint. */
+        gsTextureSourceIdentity[c] = NULL;
         gsRegs.tex2[c] = value;
         gsRegs.tex0[c] = (gsRegs.tex0[c] & ~mask) | (value & mask);
         clut_load(gsRegs.tex0[c] | (value & (7ULL << 61)));
