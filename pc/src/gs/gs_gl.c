@@ -931,6 +931,7 @@ static GLuint get_texture(u64 tex0, u64 texa, u64 texclut, int w, int h, int row
     u64 key2 = gsClutHash(tex0);   /* palette contents (0-entry hash for direct color) */
     int pw, ph, i, slot = -1, oldest = 0, cached_slot;
     int diagnostics;
+    int requested_rows, requested_cols;
     double create_elapsed = 0.0, decode_elapsed = 0.0, upload_elapsed = 0.0;
     unsigned int page_lo, page_hi, clut_page, stride;
     unsigned long long gen, coverage_area = ~0ULL;
@@ -938,6 +939,8 @@ static GLuint get_texture(u64 tex0, u64 texa, u64 texclut, int w, int h, int row
     CachedTex* t;
 
     diagnostics = gsTextureDiagnosticsEnabled();
+    requested_rows = rows;
+    requested_cols = cols;
     key0 |= cpsm_key;
     psm_page_size(psm, &pw, &ph);
     stride = (tbw * 64 + pw - 1) / pw;
@@ -974,6 +977,17 @@ static GLuint get_texture(u64 tex0, u64 texa, u64 texclut, int w, int h, int row
         {
             cols = w;
         }
+    }
+
+    /* Indexed PS2 textures are commonly used as atlases: draws sample different UV
+     * rectangles from the same TEX0/CLUT. Cache and decode the complete atlas once so
+     * those rectangles share one RGBA texture instead of creating one GL object per
+     * sampled extent. Each distinct palette still receives its own decoded RGBA entry. */
+    if ((psm == GS_PSMT8) || (psm == GS_PSMT4) ||
+        (psm == GS_PSMT8H) || (psm == GS_PSMT4HL) || (psm == GS_PSMT4HH))
+    {
+        rows = h;
+        cols = w;
     }
 
     page_hi = page_lo + ((rows + ph - 1) / ph - 1) * stride + (w + pw - 1) / pw;
@@ -1147,9 +1161,9 @@ static GLuint get_texture(u64 tex0, u64 texa, u64 texclut, int w, int h, int row
 
     if (diagnostics)
     {
-        pcLog("gs texture miss frame %u: TEX0=%08x:%08x TBP=%u PSM=%02x CLUT=%u size=%dx%d sample=%dx%d create=%.2fms decode=%.2fms upload=%.2fms",
+        pcLog("gs texture miss frame %u: TEX0=%08x:%08x TBP=%u PSM=%02x CLUT=%u size=%dx%d sample=%dx%d decoded=%dx%d create=%.2fms decode=%.2fms upload=%.2fms",
               frame_counter + 1, (unsigned int)(tex0 >> 32), (unsigned int)tex0,
-              tbp, psm, GSF(tex0, 37, 14), w, h, cols, rows,
+              tbp, psm, GSF(tex0, 37, 14), w, h, requested_cols, requested_rows, cols, rows,
               create_elapsed * 1000.0, decode_elapsed * 1000.0, upload_elapsed * 1000.0);
     }
 
