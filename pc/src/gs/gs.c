@@ -9,9 +9,11 @@
 
 #include "gs_internal.h"
 #include "../../include/pc_platform.h"
+#include "../../include/pc_texture_cache.h"
 #include "../pc_os.h"
 
 GsRegs gsRegs;
+static const void *gsTextureSourceIdentity[2];
 int gsDumpFrame;
 static int kicks;
 
@@ -27,6 +29,11 @@ int gsTextureDiagnosticsEnabled(void)
     }
 
     return enabled;
+}
+
+void pcGsSetTextureSourceIdentity(const void *source)
+{
+    gsTextureSourceIdentity[0] = source;
 }
 
 /* ------------------------------------------------------------------------------------------- */
@@ -73,6 +80,7 @@ static void current_state(GsDrawState* st)
     st->dthe = gsRegs.dthe;
     st->colclamp = gsRegs.colclamp;
     st->texclut = gsRegs.texclut;
+    st->texture_source = gsTextureSourceIdentity[c];
 }
 
 static unsigned int frameClutLoads;
@@ -280,8 +288,8 @@ void gsWriteReg(int reg, u64 value)
     case 0x03: gsRegs.uv = value; break;
     case 0x04: latch_vertex(value, 1, 1); break;
     case 0x05: latch_vertex(value, 0, 1); break;
-    case 0x06: gsRegs.tex0[0] = value; clut_load(value); break;
-    case 0x07: gsRegs.tex0[1] = value; clut_load(value); break;
+    case 0x06: gsRegs.tex0[0] = value; gsTextureSourceIdentity[0] = NULL; clut_load(value); break;
+    case 0x07: gsRegs.tex0[1] = value; gsTextureSourceIdentity[1] = NULL; clut_load(value); break;
     case 0x08: gsRegs.clamp[0] = value; break;
     case 0x09: gsRegs.clamp[1] = value; break;
     case 0x0a: gsRegs.fog = value; break;
