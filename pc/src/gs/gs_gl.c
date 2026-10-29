@@ -16,6 +16,9 @@
 #include "gl_funcs.h"
 #include "../../include/pc_platform.h"
 
+/* Defined by gs.c; renderer timing is disabled unless RECVX_GS_TEX_DIAG=1. */
+extern int gsTextureDiagnosticsEnabled(void);
+
 int pcGsScale = 3;
 float pcGsScaleX = 3.0f;
 float pcGsScaleY = 3.0f;
@@ -927,10 +930,12 @@ static GLuint get_texture(u64 tex0, u64 texa, u64 texclut, int w, int h, int row
     u64 key1 = ((psm == GS_PSMCT24) || (gsPsmBits(psm) == 16) || (GSF(tex0, 51, 4) >= 2)) ? texa : 0;
     u64 key2 = gsClutHash(tex0);   /* palette contents (0-entry hash for direct color) */
     int pw, ph, i, slot = -1, oldest = 0, cached_slot;
+    int diagnostics;
     unsigned int page_lo, page_hi, clut_page, stride;
     unsigned long long gen;
     CachedTex* t;
 
+    diagnostics = gsTextureDiagnosticsEnabled();
     key0 |= cpsm_key;
     psm_page_size(psm, &pw, &ph);
     stride = (tbw * 64 + pw - 1) / pw;
@@ -976,14 +981,20 @@ static GLuint get_texture(u64 tex0, u64 texa, u64 texclut, int w, int h, int row
     cached_slot = texture_cache_find(gen, key0, key1, key2, w, h, rows, cols);
     if (cached_slot >= 0)
     {
-        texFrameStats.hits++;
+        if (diagnostics)
+        {
+            texFrameStats.hits++;
+        }
         t = &texcache[cached_slot];
         t->last_use = frame_counter;
         *hd = t->hd;
         return t->tex;
     }
 
-    texFrameStats.misses++;
+    if (diagnostics)
+    {
+        texFrameStats.misses++;
+    }
 
     /* Only a miss needs the existing free-slot / least-recently-used scan. */
     for (i = 0; i < MAX_TEX; i++)
@@ -1035,11 +1046,14 @@ static GLuint get_texture(u64 tex0, u64 texa, u64 texclut, int w, int h, int row
         extern GLuint gsReplaceLookup(u64 tex0, u64 texa);
         GLuint r;
 
-        double replacement_t0 = pcOsTime();
+        double replacement_t0 = diagnostics ? pcOsTime() : 0.0;
 
         pcGsInvalidateTextureBindings();
         r = gsReplaceLookup(tex0, texa);
-        texFrameStats.replacement_seconds += pcOsTime() - replacement_t0;
+        if (diagnostics)
+        {
+            texFrameStats.replacement_seconds += pcOsTime() - replacement_t0;
+        }
 
         if (r != 0)
         {
@@ -1052,9 +1066,12 @@ static GLuint get_texture(u64 tex0, u64 texa, u64 texclut, int w, int h, int row
 
     *hd = 0;
     {
-        double t0 = pcOsTime();
+        double t0 = diagnostics ? pcOsTime() : 0.0;
         t->tex = make_texture(w, h, GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE, GL_NEAREST);
-        texFrameStats.create_seconds += pcOsTime() - t0;
+        if (diagnostics)
+        {
+            texFrameStats.create_seconds += pcOsTime() - t0;
+        }
     }
     tex_cached++;
     tex_cached_bytes += (double)w * h * 4;
@@ -1067,16 +1084,22 @@ static GLuint get_texture(u64 tex0, u64 texa, u64 texclut, int w, int h, int row
             stats.tex_decodes++;
             stats.tex_texels += cols * rows;
             stats.t_decode += elapsed;
-            texFrameStats.decoded++;
-            texFrameStats.texels += (unsigned int)(cols * rows);
-            texFrameStats.decode_seconds += elapsed;
+            if (diagnostics)
+            {
+                texFrameStats.decoded++;
+                texFrameStats.texels += (unsigned int)(cols * rows);
+                texFrameStats.decode_seconds += elapsed;
+            }
         }
     }
     {
-        double t0 = pcOsTime();
+        double t0 = diagnostics ? pcOsTime() : 0.0;
         glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
         glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, cols, rows, GL_RGBA, GL_UNSIGNED_BYTE, decode_buf);
-        texFrameStats.upload_seconds += pcOsTime() - t0;
+        if (diagnostics)
+        {
+            texFrameStats.upload_seconds += pcOsTime() - t0;
+        }
     }
 
     return t->tex;
@@ -2050,6 +2073,7 @@ void gsRendererPresent(unsigned int dispfb_fbp, unsigned int dispfb_fbw)
     GlVertex q[6];
     float tw, th;
     int i;
+    int diagnostics = gsTextureDiagnosticsEnabled();
 
     unsigned int clut_loads, clut_flushes, clut_vertices, clut_draw_calls;
     double clut_draw_seconds;
@@ -2059,7 +2083,7 @@ void gsRendererPresent(unsigned int dispfb_fbp, unsigned int dispfb_fbw)
     stats.frames++;
 
     gsTakeClutFrameStats(&clut_loads, &clut_flushes, &clut_vertices, &clut_draw_calls, &clut_draw_seconds);
-    if (texFrameStats.misses > 0 || clut_flushes >= 4 || clut_loads >= 32 || clut_draw_seconds >= 0.0005)
+    if (diagnostics && (texFrameStats.misses > 0 || clut_flushes >= 4 || clut_loads >= 32 || clut_draw_seconds >= 0.0005))
     {
         pcLog("gs first-use frame %u: tex hit=%u miss=%u decoded=%u texels=%u decode=%.2fms create=%.2fms upload=%.2fms replacement=%.2fms; CLUT loads=%u pending flushes=%u verts=%u flush draws=%u flush draw time=%.2fms",
               frame_counter, texFrameStats.hits, texFrameStats.misses, texFrameStats.decoded, texFrameStats.texels,
