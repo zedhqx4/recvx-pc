@@ -70,7 +70,8 @@ void gsMemReadImage(const GsRegs* r, unsigned char* out);
 void gsWriteReg(int reg, u64 value);
 void gsGifTransfer(const void* data, int qwc);
 void gsDmaChain(const void* tag);
-void gsTakeClutFrameStats(unsigned int* loads, unsigned int* flushes, unsigned int* vertices);
+void gsTakeClutFrameStats(unsigned int* loads, unsigned int* flushes, unsigned int* vertices,
+                         unsigned int* draw_calls, double* draw_seconds);
 
 /* gs_gl.c (renderer) */
 void gsRendererInit(void);
