@@ -981,33 +981,21 @@ static int texture_cache_find_source(const void *source, u64 key0, int w, int h,
     return -1;
 }
 
-int pcGsTextureSourceCacheContains(const void *source)
+int pcGsTextureSourceCacheContains(const void *source, unsigned long long tex0, int width, int height)
 {
-    unsigned int bucket;
-    int alias_slot;
+    unsigned long long key0;
+    unsigned long long cpsm_key;
 
-    if (source == NULL || !pcGsTextureSourceCacheEnabled())
+    if (source == NULL || !pcGsTextureSourceCacheEnabled() || width <= 0 || height <= 0)
         return 0;
 
-    bucket = texture_source_hash(source);
-    for (alias_slot = texture_source_hash_heads[bucket]; alias_slot >= 0;
-         alias_slot = texture_source_aliases[alias_slot].next)
-    {
-        CachedSourceAlias *alias = &texture_source_aliases[alias_slot];
-        CachedTex *t;
+    /* Match the same image-layout fields used by get_texture(). A surface pointer alone
+     * is not enough: one TIM2 surface may be referenced with a different texture layout. */
+    key0 = tex0 & 0x0000001FFFFFFFFFULL & ~(0x3ULL << 35) & ~(1ULL << 34);
+    cpsm_key = ((unsigned long long)GSF(tex0, 51, 4) << 37);
+    key0 |= cpsm_key;
 
-        if (!alias->used || alias->source != source ||
-            alias->texture_slot < 0 || alias->texture_slot >= MAX_TEX)
-            continue;
-
-        t = &texcache[alias->texture_slot];
-        if (t->used && t->indexed && !t->hd && t->tex != 0 &&
-            t->index_slot >= 0 && t->index_slot < MAX_INDEXED_ATLASES &&
-            indexed_atlases[t->index_slot].used && indexed_atlases[t->index_slot].tex == t->tex)
-            return 1;
-    }
-
-    return 0;
+    return texture_cache_find_source(source, key0, width, height, height, width) >= 0;
 }
 
 static void texture_cache_remove(int slot)
