@@ -803,6 +803,22 @@ u64 gsClutHash(u64 tex0)
     return h;
 }
 
+void gsDecodeIndices(u64 tex0, int w, int h, unsigned char* indices)
+{
+    unsigned int tbp = GSF(tex0, 0, 14);
+    unsigned int tbw = GSF(tex0, 14, 6);
+    unsigned int psm = GSF(tex0, 20, 6);
+    int x, y;
+
+    for (y = 0; y < h; y++)
+    {
+        for (x = 0; x < w; x++)
+        {
+            indices[y * w + x] = (unsigned char)gsMemRead(psm, tbp, tbw, (unsigned int)x, (unsigned int)y);
+        }
+    }
+}
+
 void gsDecodeTexture(u64 tex0, u64 texa, u64 texclut, int w, int h, unsigned int* rgba)
 {
     unsigned int tbp = GSF(tex0, 0, 14);
