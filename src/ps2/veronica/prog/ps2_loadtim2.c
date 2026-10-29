@@ -2,6 +2,10 @@
 #include "../../../ps2/veronica/prog/ps2_dummy.h"
 #include "../../../ps2/veronica/prog/ps2_pxlconv.h"
 
+#ifdef TARGET_PC
+#include "../../../../pc/include/pc_game_profile.h"
+#endif
+
 //#include <string.h>
 
 unsigned char clear_buff[1024];
@@ -343,8 +347,16 @@ int Send_1024_Clut_data(void* clt_adr, unsigned long send_clut_adr)
 int Send_Tim2_dataEx(void* tim2_top_adr, unsigned long send_image_adr, unsigned long send_clut_adr)
 {
     TIM2_PICTUREHEADER* pPhead;
+#ifdef TARGET_PC
+    int profile_send = pcGameProfileTextureUploadActive();
+    double profile_send_t0 = profile_send ? pcGameProfileNowMs() : 0.0;
+    double profile_phase_t0 = 0.0;
+    double profile_clut_ms = 0.0;
+    double profile_image_ms = 0.0;
+    double profile_settex_ms = 0.0;
+#endif
 
-    if (((unsigned char*)tim2_top_adr)[5] != 0) 
+    if (((unsigned char*)tim2_top_adr)[5] != 0)
     {
         pPhead = (TIM2_PICTUREHEADER*)((int)tim2_top_adr + 128);
     }
@@ -352,26 +364,89 @@ int Send_Tim2_dataEx(void* tim2_top_adr, unsigned long send_image_adr, unsigned 
     {
         pPhead = (TIM2_PICTUREHEADER*)((int)tim2_top_adr + 16);
     }
-    
-    if ((pPhead->ClutType != 0) && (Clut_Load_Func(pPhead, send_clut_adr) < 0)) 
+
+#ifdef TARGET_PC
+    if (profile_send && (pPhead->ClutType != 0))
+        profile_phase_t0 = pcGameProfileNowMs();
+#endif
+    if ((pPhead->ClutType != 0) && (Clut_Load_Func(pPhead, send_clut_adr) < 0))
     {
+#ifdef TARGET_PC
+        if (profile_send)
+        {
+            double now = pcGameProfileNowMs();
+            profile_clut_ms = now - profile_phase_t0;
+            pcGameProfileRecordTextureSendDetail(profile_clut_ms, 0.0, 0.0,
+                                                   (now - profile_send_t0) - profile_clut_ms);
+        }
+#endif
         printf("Can't Load Clut\n");
-        
         return -1;
     }
-    else if (((pPhead->ImageWidth < 1024) && (pPhead->ImageHeight < 1024)) && ((pPhead->ImageWidth > 128) && (pPhead->ImageHeight > 128)) && ((pPhead->ImageType == 4) || (pPhead->ImageType == 5))) 
+#ifdef TARGET_PC
+    if (profile_send && (pPhead->ClutType != 0))
+        profile_clut_ms = pcGameProfileNowMs() - profile_phase_t0;
+#endif
+
+    if (((pPhead->ImageWidth < 1024) && (pPhead->ImageHeight < 1024)) &&
+        ((pPhead->ImageWidth > 128) && (pPhead->ImageHeight > 128)) &&
+        ((pPhead->ImageType == 4) || (pPhead->ImageType == 5)))
     {
+#ifdef TARGET_PC
+        if (profile_send)
+            profile_phase_t0 = pcGameProfileNowMs();
+#endif
         P32_Image_Load(pPhead, send_image_adr);
-        
+#ifdef TARGET_PC
+        if (profile_send)
+        {
+            profile_image_ms = pcGameProfileNowMs() - profile_phase_t0;
+            profile_phase_t0 = pcGameProfileNowMs();
+        }
+#endif
+
         Set_GsTex(pPhead, send_image_adr, send_clut_adr);
-        
+#ifdef TARGET_PC
+        if (profile_send)
+        {
+            double now = pcGameProfileNowMs();
+            double other_ms;
+            profile_settex_ms = now - profile_phase_t0;
+            other_ms = (now - profile_send_t0) - profile_clut_ms - profile_image_ms - profile_settex_ms;
+            if (other_ms < 0.0) other_ms = 0.0;
+            pcGameProfileRecordTextureSendDetail(profile_clut_ms, profile_image_ms,
+                                                   profile_settex_ms, other_ms);
+        }
+#endif
         return 1;
     }
-    
+
+#ifdef TARGET_PC
+    if (profile_send)
+        profile_phase_t0 = pcGameProfileNowMs();
+#endif
     Tim2_Image_Load(pPhead, send_image_adr);
-    
+#ifdef TARGET_PC
+    if (profile_send)
+    {
+        profile_image_ms = pcGameProfileNowMs() - profile_phase_t0;
+        profile_phase_t0 = pcGameProfileNowMs();
+    }
+#endif
+
     Set_GsTex(pPhead, send_image_adr, send_clut_adr);
-    
+#ifdef TARGET_PC
+    if (profile_send)
+    {
+        double now = pcGameProfileNowMs();
+        double other_ms;
+        profile_settex_ms = now - profile_phase_t0;
+        other_ms = (now - profile_send_t0) - profile_clut_ms - profile_image_ms - profile_settex_ms;
+        if (other_ms < 0.0) other_ms = 0.0;
+        pcGameProfileRecordTextureSendDetail(profile_clut_ms, profile_image_ms,
+                                               profile_settex_ms, other_ms);
+    }
+#endif
     return 2;
 }
 

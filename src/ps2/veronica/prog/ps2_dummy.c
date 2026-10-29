@@ -2495,6 +2495,10 @@ int Ps2TexLoad(NJS_TEXMEMLIST* addr)
     double profile_send_t0 = 0.0;
     double profile_send_ms = 0.0;
     double profile_load_ms = 0.0;
+    double profile_post_send_t0 = 0.0;
+    double profile_post_send_ms = 0.0;
+    double profile_final_loadimage_t0 = 0.0;
+    double profile_final_loadimage_ms = 0.0;
     unsigned int profile_send_calls = 0;
     const void* profile_surface = NULL;
     unsigned int profile_memlist_gindex = 0;
@@ -2588,6 +2592,10 @@ label:
         }
     }
 
+#ifdef TARGET_PC
+    if (profile_texture)
+        profile_post_send_t0 = pcGameProfileNowMs();
+#endif
     p = (unsigned long*)WORKBASE;
 
     D2_SyncTag();
@@ -2667,13 +2675,22 @@ label:
     *p++ = Ps2_gs_save.TEST = SCE_GS_SET_TEST_1(1, SCE_GS_ALPHA_GREATER, 0, SCE_GS_AFAIL_KEEP, 0, 0, 1, SCE_GS_DEPTH_GEQUAL);
     *p++ = SCE_GS_TEST_1;
 
+#ifdef TARGET_PC
+    if (profile_texture)
+    {
+        profile_post_send_ms = pcGameProfileNowMs() - profile_post_send_t0;
+        profile_final_loadimage_t0 = pcGameProfileNowMs();
+    }
+#endif
     loadImage((void*)0xF0000000);
 
 #ifdef TARGET_PC
     if (profile_texture)
     {
+        profile_final_loadimage_ms = pcGameProfileNowMs() - profile_final_loadimage_t0;
         profile_load_ms = pcGameProfileNowMs() - profile_texload_t0;
         pcGameProfileRecordTextureLoad(profile_load_ms, profile_send_ms, profile_send_calls);
+        pcGameProfileRecordTextureLoadDetail(profile_post_send_ms, profile_final_loadimage_ms);
         pcGameProfileRecordTextureRequest(
             addr, profile_surface, profile_memlist_gindex, profile_tim2_gindex,
             profile_bank, profile_width, profile_height, profile_image_type,

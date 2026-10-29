@@ -69,6 +69,12 @@ static struct
     double frame_no_send_calls, sum_no_send_calls, max_no_send_calls;
     double frame_gs_calls, sum_gs_calls, max_gs_calls;
     double frame_gs_qwc, sum_gs_qwc, max_gs_qwc;
+    double frame_load_postsend_ms, sum_load_postsend_ms, max_load_postsend_ms;
+    double frame_load_final_ms, sum_load_final_ms, max_load_final_ms;
+    double frame_send_clut_ms, sum_send_clut_ms, max_send_clut_ms;
+    double frame_send_image_ms, sum_send_image_ms, max_send_image_ms;
+    double frame_send_settex_ms, sum_send_settex_ms, max_send_settex_ms;
+    double frame_send_other_ms, sum_send_other_ms, max_send_other_ms;
 } texture_profile;
 static int texture_upload_scope;
 
@@ -447,6 +453,26 @@ void pcGameProfileRecordTextureLoad(double total_ms, double send_ms, unsigned in
         texture_profile.frame_no_send_calls += 1.0;
 }
 
+void pcGameProfileRecordTextureLoadDetail(double post_send_setup_ms, double final_loadimage_ms)
+{
+    if (!game_profile.active)
+        return;
+
+    texture_profile.frame_load_postsend_ms += post_send_setup_ms >= 0.0 ? post_send_setup_ms : 0.0;
+    texture_profile.frame_load_final_ms += final_loadimage_ms >= 0.0 ? final_loadimage_ms : 0.0;
+}
+
+void pcGameProfileRecordTextureSendDetail(double clut_ms, double image_ms, double set_tex_ms, double other_ms)
+{
+    if (!game_profile.active || !texture_upload_scope)
+        return;
+
+    texture_profile.frame_send_clut_ms += clut_ms >= 0.0 ? clut_ms : 0.0;
+    texture_profile.frame_send_image_ms += image_ms >= 0.0 ? image_ms : 0.0;
+    texture_profile.frame_send_settex_ms += set_tex_ms >= 0.0 ? set_tex_ms : 0.0;
+    texture_profile.frame_send_other_ms += other_ms >= 0.0 ? other_ms : 0.0;
+}
+
 void pcGameProfileRecordTextureTransfer(double ms, unsigned int qwc)
 {
     if (!pcGameProfileTextureUploadActive())
@@ -470,6 +496,12 @@ static void pcGameProfileBegin(void)
     texture_profile.frame_no_send_calls = 0.0;
     texture_profile.frame_gs_calls = 0.0;
     texture_profile.frame_gs_qwc = 0.0;
+    texture_profile.frame_load_postsend_ms = 0.0;
+    texture_profile.frame_load_final_ms = 0.0;
+    texture_profile.frame_send_clut_ms = 0.0;
+    texture_profile.frame_send_image_ms = 0.0;
+    texture_profile.frame_send_settex_ms = 0.0;
+    texture_profile.frame_send_other_ms = 0.0;
 
     texture_reuse_profile.frame_requests = 0.0;
     texture_reuse_profile.frame_unique_surfaces = 0.0;
@@ -592,6 +624,12 @@ static void pcGameProfileEnd(int loop_ct, double total_ms)
     texture_profile.sum_no_send_calls += texture_profile.frame_no_send_calls;
     texture_profile.sum_gs_calls += texture_profile.frame_gs_calls;
     texture_profile.sum_gs_qwc += texture_profile.frame_gs_qwc;
+    texture_profile.sum_load_postsend_ms += texture_profile.frame_load_postsend_ms;
+    texture_profile.sum_load_final_ms += texture_profile.frame_load_final_ms;
+    texture_profile.sum_send_clut_ms += texture_profile.frame_send_clut_ms;
+    texture_profile.sum_send_image_ms += texture_profile.frame_send_image_ms;
+    texture_profile.sum_send_settex_ms += texture_profile.frame_send_settex_ms;
+    texture_profile.sum_send_other_ms += texture_profile.frame_send_other_ms;
 
     texture_reuse_profile.sum_requests += texture_reuse_profile.frame_requests;
     texture_reuse_profile.sum_unique_surfaces += texture_reuse_profile.frame_unique_surfaces;
@@ -628,6 +666,18 @@ static void pcGameProfileEnd(int loop_ct, double total_ms)
         texture_profile.max_gs_calls = texture_profile.frame_gs_calls;
     if (texture_profile.frame_gs_qwc > texture_profile.max_gs_qwc)
         texture_profile.max_gs_qwc = texture_profile.frame_gs_qwc;
+    if (texture_profile.frame_load_postsend_ms > texture_profile.max_load_postsend_ms)
+        texture_profile.max_load_postsend_ms = texture_profile.frame_load_postsend_ms;
+    if (texture_profile.frame_load_final_ms > texture_profile.max_load_final_ms)
+        texture_profile.max_load_final_ms = texture_profile.frame_load_final_ms;
+    if (texture_profile.frame_send_clut_ms > texture_profile.max_send_clut_ms)
+        texture_profile.max_send_clut_ms = texture_profile.frame_send_clut_ms;
+    if (texture_profile.frame_send_image_ms > texture_profile.max_send_image_ms)
+        texture_profile.max_send_image_ms = texture_profile.frame_send_image_ms;
+    if (texture_profile.frame_send_settex_ms > texture_profile.max_send_settex_ms)
+        texture_profile.max_send_settex_ms = texture_profile.frame_send_settex_ms;
+    if (texture_profile.frame_send_other_ms > texture_profile.max_send_other_ms)
+        texture_profile.max_send_other_ms = texture_profile.frame_send_other_ms;
 
     for (i = PC_GAME_PROFILE_SCOPE_ROOM; i <= PC_GAME_PROFILE_SCOPE_MISC; i++)
     {
@@ -732,6 +782,14 @@ static void pcGameProfileEnd(int loop_ct, double total_ms)
               texture_profile.sum_send_ms / n, texture_profile.max_send_ms,
               texture_profile.sum_send_calls / n, texture_profile.max_send_calls,
               texture_profile.sum_no_send_calls / n);
+        pcLog("PROFILE TEX Ps2TexLoad detail avg/max ms/frame: post-send setup %.2f/%.2f final loadImage %.2f/%.2f",
+              texture_profile.sum_load_postsend_ms / n, texture_profile.max_load_postsend_ms,
+              texture_profile.sum_load_final_ms / n, texture_profile.max_load_final_ms);
+        pcLog("PROFILE TEX Send_Tim2_dataEx detail avg/max ms/frame: CLUT %.2f/%.2f image %.2f/%.2f Set_GsTex %.2f/%.2f other %.2f/%.2f (GS IMAGE upload is nested)",
+              texture_profile.sum_send_clut_ms / n, texture_profile.max_send_clut_ms,
+              texture_profile.sum_send_image_ms / n, texture_profile.max_send_image_ms,
+              texture_profile.sum_send_settex_ms / n, texture_profile.max_send_settex_ms,
+              texture_profile.sum_send_other_ms / n, texture_profile.max_send_other_ms);
         pcLog("PROFILE TEX GS IMAGE upload avg/max ms %.2f/%.2f calls/frame %.2f/%.2f QWC/frame %.0f/%.0f",
               texture_profile.sum_gs_ms / n, texture_profile.max_gs_ms,
               texture_profile.sum_gs_calls / n, texture_profile.max_gs_calls,
@@ -766,6 +824,12 @@ static void pcGameProfileEnd(int loop_ct, double total_ms)
         texture_profile.sum_load_ms = texture_profile.max_load_ms = 0.0;
         texture_profile.sum_send_ms = texture_profile.max_send_ms = 0.0;
         texture_profile.sum_gs_ms = texture_profile.max_gs_ms = 0.0;
+        texture_profile.sum_load_postsend_ms = texture_profile.max_load_postsend_ms = 0.0;
+        texture_profile.sum_load_final_ms = texture_profile.max_load_final_ms = 0.0;
+        texture_profile.sum_send_clut_ms = texture_profile.max_send_clut_ms = 0.0;
+        texture_profile.sum_send_image_ms = texture_profile.max_send_image_ms = 0.0;
+        texture_profile.sum_send_settex_ms = texture_profile.max_send_settex_ms = 0.0;
+        texture_profile.sum_send_other_ms = texture_profile.max_send_other_ms = 0.0;
         texture_profile.sum_load_calls = texture_profile.max_load_calls = 0.0;
         texture_profile.sum_send_calls = texture_profile.max_send_calls = 0.0;
         texture_profile.sum_no_send_calls = texture_profile.max_no_send_calls = 0.0;

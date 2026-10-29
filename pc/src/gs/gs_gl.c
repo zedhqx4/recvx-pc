@@ -586,8 +586,9 @@ int pcGsToggleUiWireframe(void)
 /* per-interval statistics for the periodic log */
 static struct {
     unsigned int frames, draws, verts, rt_loads, rt_reads, tex_decodes, tex_texels;
+    unsigned int tex_lookup_calls;
     double t_load, t_read, t_decode;
-    double t_pre, t_geom, t_setup, t_upload, t_submit, t_draw;
+    double t_pre, t_geom, t_setup, t_tex_lookup, t_upload, t_submit, t_draw;
 } stats;
 static int tex_cached;                     /* textures in the cache, decoded from GS memory */
 static double tex_cached_bytes;            /* their size */
@@ -620,6 +621,8 @@ void pcGsLogStats(void)
         pcLog("gs CPU/present: pre %.2f ms, geometry %.2f ms, GL setup %.2f ms, buffer upload %.2f ms, draw/restore %.2f ms, total gs draw CPU %.2f ms",
               stats.t_pre * 1000 / f, stats.t_geom * 1000 / f, stats.t_setup * 1000 / f,
               stats.t_upload * 1000 / f, stats.t_submit * 1000 / f, stats.t_draw * 1000 / f);
+        pcLog("gs CPU detail (lookup is a subset of GL setup): get_texture %.2f ms/frame, calls/frame %.1f",
+              stats.t_tex_lookup * 1000 / f, (double)stats.tex_lookup_calls / f);
     }
     memset(&stats, 0, sizeof(stats));
 }
@@ -2286,8 +2289,14 @@ void gsRendererDraw(const GsDrawState* st, const GsVertex* v, int nverts)
         else
         {
             int hd = 0;
+            double texture_lookup_t0 = perf_timing ? pcOsTime() : 0.0;
             GLuint gt = get_texture(st->tex0, st->texa, st->texclut, tw, th, texture_extent(st, v, nverts, th, 1),
                                     texture_extent(st, v, nverts, tw, 0), &hd, &indexed_texture, &palette_texture);
+            if (perf_timing)
+            {
+                stats.t_tex_lookup += pcOsTime() - texture_lookup_t0;
+                stats.tex_lookup_calls++;
+            }
 
             pcGsBindTexture(GL_TEXTURE_2D, gt);
             glUniform1i(U.texrt, 0);
