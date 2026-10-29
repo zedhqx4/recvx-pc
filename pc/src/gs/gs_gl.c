@@ -1910,6 +1910,8 @@ void gsFlushLocalToLocal(unsigned int bp, unsigned int bw, unsigned int psm, uns
             unsigned int* buf;
             int px, py, rows;
             double t0;
+            int read_x0, read_y0, read_x1, read_y1, read_w, read_h;
+            int exact_mapping = 0, full_sync;
 
             rt_sync(rt);
 
@@ -1921,6 +1923,72 @@ void gsFlushLocalToLocal(unsigned int bp, unsigned int bw, unsigned int psm, uns
 
             t0 = pcOsTime();
             rows = (rt->drawn_h > 0) ? rt->drawn_h : rt->h;
+
+            /* Fast path: for aligned PSMCT32 transfers with the same framebuffer pitch,
+             * map the requested GS rectangle into render-target coordinates. This avoids
+             * reading back pixels which the current GS transfer will not consume.
+             *
+             * The generic full-render-target path remains below for all layouts where that
+             * address mapping cannot be proven safe. */
+            read_x0 = 0;
+            read_y0 = 0;
+            read_x1 = rt->w;
+            read_y1 = rows;
+
+            if ((psm == GS_PSMCT32) && (rt->psm == GS_PSMCT32) &&
+                (bw != 0) && (bw == rt->fbw) &&
+                (rt->w == (int)(bw * 64u)) && ((bp & 31u) == 0) &&
+                ((unsigned long long)x + (unsigned long long)w <= (unsigned long long)bw * 64ULL))
+            {
+                int page_delta = (int)rt->fbp - (int)(bp / 32u);
+
+                if ((page_delta % (int)bw) == 0)
+                {
+                    int rt_source_y = (page_delta / (int)bw) * 32;
+                    int req_x0 = (int)x;
+                    int req_x1 = (int)(x + w);
+                    int req_y0 = (int)y;
+                    int req_y1 = (int)(y + h);
+                    int clip_y0 = (req_y0 > rt_source_y) ? req_y0 : rt_source_y;
+                    int clip_y1 = (req_y1 < rt_source_y + rows) ? req_y1 : rt_source_y + rows;
+
+                    read_x0 = (req_x0 > 0) ? req_x0 : 0;
+                    read_x1 = (req_x1 < rt->w) ? req_x1 : rt->w;
+                    read_y0 = clip_y0 - rt_source_y;
+                    read_y1 = clip_y1 - rt_source_y;
+
+                    if ((read_x0 >= read_x1) || (clip_y0 >= clip_y1))
+                    {
+                        /* Page-level overlap does not guarantee that this exact rectangle
+                         * consumes any pixels from this render target. */
+                        continue;
+                    }
+
+                    exact_mapping = 1;
+                }
+            }
+
+            if (!exact_mapping)
+            {
+                read_x0 = 0;
+                read_y0 = 0;
+                read_x1 = rt->w;
+                read_y1 = rows;
+            }
+
+            read_w = read_x1 - read_x0;
+            read_h = read_y1 - read_y0;
+            if ((read_w <= 0) || (read_h <= 0))
+            {
+                continue;
+            }
+
+            buf = (unsigned int*)malloc((size_t)read_w * (size_t)read_h * sizeof(*buf));
+            if (buf == NULL)
+            {
+                pcLog("gs: could not allocate %d x %d pixels for render-target readback", read_w, read_h);
+                continue;
+            }
 
             if ((down_w != rt->w) || (down_h != rt->h))
             {
@@ -1938,23 +2006,25 @@ void gsFlushLocalToLocal(unsigned int bp, unsigned int bw, unsigned int psm, uns
                 down_h = rt->h;
             }
 
-            /* one sample per PS2 pixel, as before, but picked on the GPU */
+            /* Downsample only the source rectangle that the proven-safe transfer consumes. */
             pcGsDisable(GL_SCISSOR_TEST);
             pcGsBindFramebuffer(GL_READ_FRAMEBUFFER, rt->fbo);
             pcGsBindFramebuffer(GL_DRAW_FRAMEBUFFER, down_fbo);
-            glBlitFramebuffer(0, 0, gs_scale_x(rt->w), gs_scale_y(rows), 0, 0, rt->w, rows, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+            glBlitFramebuffer(gs_scale_x(read_x0), gs_scale_y(read_y0),
+                              gs_scale_x(read_x1), gs_scale_y(read_y1),
+                              read_x0, read_y0, read_x1, read_y1,
+                              GL_COLOR_BUFFER_BIT, GL_NEAREST);
 
-            buf = malloc(rt->w * rows * 4);
             pcGsBindFramebuffer(GL_FRAMEBUFFER, down_fbo);
             glPixelStorei(GL_PACK_ALIGNMENT, 4);
-            glReadPixels(0, 0, rt->w, rows, GL_RGBA, GL_UNSIGNED_BYTE, buf);
+            glReadPixels(read_x0, read_y0, read_w, read_h, GL_RGBA, GL_UNSIGNED_BYTE, buf);
             pcGsBindFramebuffer(GL_FRAMEBUFFER, rt->fbo);
 
-            for (py = 0; py < rows; py++)
+            for (py = read_y0; py < read_y1; py++)
             {
-                for (px = 0; px < rt->w; px++)
+                for (px = read_x0; px < read_x1; px++)
                 {
-                    unsigned int c = buf[py * rt->w + px];
+                    unsigned int c = buf[(py - read_y0) * read_w + (px - read_x0)];
                     unsigned int a = ((c >> 24) * 128 + 127) / 255;
 
                     gsMemWrite(GS_PSMCT32, rt->fbp * 32, rt->fbw, px, py, (c & 0xFFFFFF) | (a << 24));
@@ -1962,17 +2032,23 @@ void gsFlushLocalToLocal(unsigned int bp, unsigned int bw, unsigned int psm, uns
             }
 
             free(buf);
+
+            full_sync = (read_x0 == 0) && (read_x1 >= rt->w) &&
+                        (read_y0 == 0) && (read_y1 >= rows);
             rt->vram_dirty = 0;
-            rt->rendered = 0;
-            rt->drawn_h = 0;
+
+            /* A partial readback cannot claim that every pixel in this RT matches GS memory. */
+            if (full_sync)
+            {
+                rt->rendered = 0;
+                rt->drawn_h = 0;
+            }
+
             stats.rt_reads++;
             stats.t_read += pcOsTime() - t0;
         }
     }
-
-    (void)x; (void)w;
 }
-
 /* ------------------------------------------------------------------------------------------- */
 
 void gsRendererInit(void)
