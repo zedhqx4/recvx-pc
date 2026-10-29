@@ -104,10 +104,24 @@ static int pc_tim2_source_hashes(TIM2_PICTUREHEADER_EX* tim, uint64_t* image_has
     return 1;
 }
 
+extern void* Ps2_tex_cache_buff[4];
+extern unsigned int Ps2_tex_cache_beflag[4];
+
 void Ps2PcTextureSourceCacheReset(void)
 {
+    unsigned int i;
+
     memset(pc_tim2_fingerprints, 0, sizeof(pc_tim2_fingerprints));
     memset(&pc_ps2_texture_bind_cache, 0, sizeof(pc_ps2_texture_bind_cache));
+
+    /* Registration may reuse a source address for different bytes. The legacy pointer cache
+     * must not report that new source as already transferred. */
+    for (i = 0; i < 4; i++)
+    {
+        Ps2_tex_cache_buff[i] = NULL;
+        Ps2_tex_cache_beflag[i] = 0;
+    }
+    Ps2_current_texbreak = 1;
 }
 #endif
 // the three vars below were originally defined as unsigned int in ps2_NaFog.c, and redeclared as unsigned long here
