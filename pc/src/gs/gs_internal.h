@@ -24,6 +24,14 @@ typedef uint64_t u64;
 /* field extraction */
 #define GSF(v, shift, bits) ((unsigned int)(((v) >> (shift)) & ((1ULL << (bits)) - 1)))
 
+/* Immutable, compact copy of the GS pages sampled by one texture. The lookup maps
+ * physical GS page numbers to consecutive 8 KiB pages in data. */
+typedef struct {
+    unsigned short page_slot[GS_PAGES];
+    unsigned int page_count;
+    unsigned char* data;
+} GsMemSnapshot;
+
 typedef struct {
     u64 prim, prmode, prmodecont, rgbaq, st, uv, fog;
     u64 tex0[2], tex1[2], tex2[2], clamp[2], xyoffset[2], scissor[2], alpha[2], test[2], fba[2], frame[2], zbuf[2];
@@ -62,6 +70,10 @@ extern unsigned int gsPageGen[GS_PAGES];
 
 void gsMemInit(void);
 unsigned int gsMemRead(int psm, unsigned int bp, unsigned int bw, unsigned int x, unsigned int y);
+int gsMemSnapshotTexture(u64 tex0, int w, int h, GsMemSnapshot* snapshot);
+unsigned int gsMemReadSnapshot(const GsMemSnapshot* snapshot, int psm, unsigned int bp, unsigned int bw,
+                               unsigned int x, unsigned int y);
+void gsMemReleaseSnapshot(GsMemSnapshot* snapshot);
 void gsMemWrite(int psm, unsigned int bp, unsigned int bw, unsigned int x, unsigned int y, unsigned int v);
 int  gsPsmBits(int psm);
 int  gsBlockNumber(int psm, unsigned int bp, unsigned int bw, unsigned int x, unsigned int y);
