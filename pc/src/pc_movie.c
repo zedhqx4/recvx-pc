@@ -17,6 +17,7 @@
 #include "../../include/ps2/veronica/prog/main.h"
 
 #include "pc_platform.h"
+#include "pc_os.h"
 
 extern unsigned int Ps2_vcount;
 
@@ -55,6 +56,8 @@ static int image_cap = 512 * 512 * 4;
 #define HD_SCALE 4                  /* upscaled movies are 4x the originals */
 static int hd;                      /* playing an upscaled movie */
 static int hd_w, hd_h;              /* its frame size */
+static unsigned int movie_uploads, movie_draws;
+static double upload_log_time, draw_log_time;
 
 void initAll()
 {
@@ -138,6 +141,8 @@ void pcMovieStart(const char* name)
 
     playing = 1;
     image_new = 0;
+    movie_uploads = movie_draws = 0;
+    upload_log_time = draw_log_time = pcOsTime();
 }
 
 void readMpeg()
@@ -217,6 +222,14 @@ void setImageTag(unsigned int* tags, void* unused)
     {
         gsRendererFlush();   /* the previous frame's sprite may still be queued */
         pcGsMovieFrame(MOVIE_TBP, image + 16, hd_w, hd_h, HD_SCALE);
+        movie_uploads++;
+
+        if (pcOsTime() - upload_log_time >= 1.0)
+        {
+            upload_log_time = pcOsTime();
+            pcLog("movie: frame upload mode=HD size=%dx%d uploads=%u", hd_w, hd_h, movie_uploads);
+        }
+
         return;
     }
 
@@ -236,6 +249,13 @@ void setImageTag(unsigned int* tags, void* unused)
     ((u_long*)image)[0] = SCE_GIF_SET_TAG(qwc, SCE_GS_TRUE, SCE_GS_FALSE, 0, SCE_GIF_IMAGE, 0);
     ((u_long*)image)[1] = 0;
     gsGifTransfer(image, 1 + qwc);
+    movie_uploads++;
+
+    if (pcOsTime() - upload_log_time >= 1.0)
+    {
+        upload_log_time = pcOsTime();
+        pcLog("movie: frame upload mode=GS size=%dx%d uploads=%u qwc=%d", image_w, image_h, movie_uploads, qwc);
+    }
 }
 
 /* the original's sprite: decoded image (TBP 14208) stretched to the movie's display rectangle */
@@ -248,6 +268,15 @@ void vbrank_draw()
     if (!playing || (image_w == 0))
     {
         return;
+    }
+
+    movie_draws++;
+
+    if (pcOsTime() - draw_log_time >= 1.0)
+    {
+        draw_log_time = pcOsTime();
+        pcLog("movie: sprite draw mode=%s size=%dx%d draws=%u uploads=%u",
+              hd ? "HD" : "GS", image_w, image_h, movie_draws, movie_uploads);
     }
 
     u = (image_w - 1) * 16;
