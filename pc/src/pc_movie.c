@@ -4,8 +4,9 @@
  * below like the PS2 IPU player: initAll() when a movie starts, readMpeg() until a frame is
  * ready, setImageTag() to upload it to GS memory and vbrank_draw() to put it on screen, and
  * termAll() at the end. Frames come from MV_*.MPG (made by pc/tools/convert_movies.py) in the
- * extracted data folder, decoded by pc_mpeg.c; they are uploaded and drawn with the same GS
- * packets as on the PS2. Without converted movies (e.g. playing from the ISO) a movie reports
+ * extracted data folder, decoded by pc_mpeg.c; their sprite is still drawn with GS packets,
+ * while the renderer samples the decoded frame from a dedicated OpenGL texture. Without converted
+ * movies (e.g. playing from the ISO) a movie reports
  * PREP -> PLAYING -> PLAYEND at once so the game moves on.
  *
  * Upscaled movies (MOVIE_HD/MV_*.MPG, made by recvx-config.exe's "Upscale movies") are used when
@@ -35,7 +36,6 @@ VoBuf voBuf;
 
 /* GS memory the PS2 player decodes into (TBP 14208, TBW 5 = 320 pixels, CT32) */
 #define MOVIE_TBP 14208
-#define MOVIE_TBW 5
 
 int pcMpegOpen(const char* path);
 void pcMpegClose(void);
@@ -215,9 +215,6 @@ void termAll()
 /* upload the current frame where the PS2 player put it */
 void setImageTag(unsigned int* tags, void* unused)
 {
-    u_long gif[12];
-    int qwc;
-
     (void)tags;
     (void)unused;
 
@@ -228,53 +225,30 @@ void setImageTag(unsigned int* tags, void* unused)
 
     image_new = 0;
 
+    /* HD movies already use this direct path because their frames cannot fit in GS VRAM.
+     * The original movie sprite is still submitted through the GS; only its redundant pixel
+     * upload to GS VRAM is skipped. The renderer samples these same decoded pixels from movie_tex.
+     * Keeping the transfer out also prevents animated movie frames from invalidating GS VRAM
+     * texture-cache pages every frame. */
+    gsRendererFlush();   /* the previous frame's sprite may still be queued */
+
     if (hd)
     {
-        gsRendererFlush();   /* the previous frame's sprite may still be queued */
         pcGsMovieFrame(MOVIE_TBP, image + 16, hd_w, hd_h, HD_SCALE);
-        movie_gl_active = 1;
-        movie_uploads++;
-
-        if (pcOsTime() - upload_log_time >= 1.0)
-        {
-            upload_log_time = pcOsTime();
-            pcLog("movie: frame upload mode=HD size=%dx%d uploads=%u", hd_w, hd_h, movie_uploads);
-        }
-
-        return;
+    }
+    else
+    {
+        pcGsMovieFrame(MOVIE_TBP, image + 16, image_w, image_h, 1);
     }
 
-    gif[0] = SCE_GIF_SET_TAG(4, SCE_GS_TRUE, SCE_GS_FALSE, 0, SCE_GIF_PACKED, 1);
-    gif[1] = SCE_GIF_PACKED_AD;
-    gif[2] = SCE_GS_SET_BITBLTBUF(0, 0, 0, MOVIE_TBP, MOVIE_TBW, SCE_GS_PSMCT32);
-    gif[3] = SCE_GS_BITBLTBUF;
-    gif[4] = SCE_GS_SET_TRXPOS(0, 0, 0, 0, 0);
-    gif[5] = SCE_GS_TRXPOS;
-    gif[6] = SCE_GS_SET_TRXREG(image_w, image_h);
-    gif[7] = SCE_GS_TRXREG;
-    gif[8] = SCE_GS_SET_TRXDIR(0);
-    gif[9] = SCE_GS_TRXDIR;
-    gsGifTransfer(gif, 5);
-
-    qwc = (image_w * image_h * 4) / 16;
-    ((u_long*)image)[0] = SCE_GIF_SET_TAG(qwc, SCE_GS_TRUE, SCE_GS_FALSE, 0, SCE_GIF_IMAGE, 0);
-    ((u_long*)image)[1] = 0;
-    gsGifTransfer(image, 1 + qwc);
-
-    /* The GIF upload changes the GS page generations on every frame. The normal texture-cache
-     * key includes those generations, so caching this animated TBP would allocate one 512x512
-     * GL texture per frame until the cache reaches MAX_TEX. Keep the GS VRAM write for correct
-     * emulated state, but mirror the pixels into the dedicated movie texture and let gs_gl.c
-     * sample that texture for the movie sprite, just as it does for upscaled movies. */
-    gsRendererFlush();   /* do not update the texture while the previous sprite is still queued */
-    pcGsMovieFrame(MOVIE_TBP, image + 16, image_w, image_h, 1);
     movie_gl_active = 1;
     movie_uploads++;
 
     if (pcOsTime() - upload_log_time >= 1.0)
     {
         upload_log_time = pcOsTime();
-        pcLog("movie: frame upload mode=GS+GL size=%dx%d uploads=%u qwc=%d", image_w, image_h, movie_uploads, qwc);
+        pcLog("movie: frame upload mode=%s size=%dx%d uploads=%u",
+              hd ? "HD" : "GL-only (GS sprite)", hd ? hd_w : image_w, hd ? hd_h : image_h, movie_uploads);
     }
 }
 
