@@ -638,9 +638,9 @@ static GLuint get_texture(u64 tex0, u64 texa, u64 texclut, int w, int h, int row
 }
 
 /* ------------------------------------------------------------------------------------------- */
-/* upscaled movies (pc_movie.c): while one plays, textures at its TBP sample this frame instead
- * of GS memory, like an HD texture. The frame sits at the top left of a texture that stands for
- * the whole 512x512 texture area the PS2 player uses, at <scale> times its size. */
+/* movies (pc_movie.c): while one plays, the sprite's TBP samples this frame instead of GS memory.
+ * Original movies use scale 1; upscaled movies use scale 4. The frame sits at the top left of a
+ * texture that stands for the whole 512x512 texture area the PS2 sprite uses. */
 
 static GLuint movie_tex;
 static unsigned int movie_tbp;
