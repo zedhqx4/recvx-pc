@@ -578,6 +578,19 @@ static int dump_frame;
 static unsigned int dump_draw_index;
 static int ui_wireframe;
 
+static int gs_dump_3d_only_enabled(void)
+{
+    static int enabled = -1;
+
+    if (enabled < 0)
+    {
+        const char* value = getenv("RECVX_GSDUMP_3D");
+        enabled = (value != NULL && value[0] == '1' && value[1] == '\0') ? 1 : 0;
+    }
+
+    return enabled;
+}
+
 int pcGsToggleUiWireframe(void)
 {
     ui_wireframe = !ui_wireframe;
@@ -2530,27 +2543,35 @@ void gsRendererDraw(const GsDrawState* st, const GsVertex* v, int nverts)
             if (v[i].z > z1) z1 = v[i].z;
         }
 
-        dump_draw_index++;
-        pcLog("draw fb[%u] %u/%u psm %u msk %08x type %d n %d iip %d tme %d fst %d abe %d fge %d | tex0 %016llx tex1 %llx clamp %llx"
-              " | alpha %010llx test %05llx zbuf %llx sc %016llx texa %llx | x %.1f..%.1f y %.1f..%.1f z %u..%u c0 %02x%02x%02x%02x q %g st %g,%g",
-              dump_draw_index, fbp, fbw, fpsm, fbmsk, st->type, nverts, st->iip, st->tme, st->fst, st->abe, st->fge,
-              st->tex0, st->tex1, st->clamp, st->alpha, st->test, st->zbuf, st->scissor, st->texa,
-              x0, x1, y0, y1, z0, z1, v[0].r, v[0].g, v[0].b, v[0].a, v[0].q, v[0].s, v[0].t);
-
-        /* Print exact vertex positions for the dump frame so overlapping geometry can be compared. */
-        for (i = 0; i < nverts; i++)
+        /* Optional filter to skip screen-space masks/overlays when looking for 3D decal geometry. */
+        if (!gs_dump_3d_only_enabled() ||
+            (st->tme && !st->fst && (st->type >= 3) && (st->type <= 5) &&
+             !((z0 == 0xFFFE) && (z1 == 0xFFFE))))
         {
-            if (nverts <= 96 || i < 48 || i >= nverts - 48)
+            dump_draw_index++;
+            pcLog("draw fb[%u] %u/%u psm %u msk %08x type %d n %d iip %d tme %d fst %d abe %d fge %d | tex0 %016llx tex1 %llx clamp %llx"
+                  " | alpha %010llx test %05llx zbuf %llx sc %016llx texa %llx | x %.1f..%.1f y %.1f..%.1f z %u..%u c0 %02x%02x%02x%02x q %g st %g,%g",
+                  dump_draw_index, fbp, fbw, fpsm, fbmsk, st->type, nverts, st->iip, st->tme, st->fst, st->abe, st->fge,
+                  st->tex0, st->tex1, st->clamp, st->alpha, st->test, st->zbuf, st->scissor, st->texa,
+                  x0, x1, y0, y1, z0, z1, v[0].r, v[0].g, v[0].b, v[0].a, v[0].q, v[0].s, v[0].t);
+    
+            /* Print exact vertex positions for the dump frame so overlapping geometry can be compared. */
+            for (i = 0; i < nverts; i++)
             {
-                float z = v[i].z * zs;
-                pcLog("drawv fb[%u] v=%d/%d xy=(%.4f,%.4f) rawZ=%08x normZ=%.9g clipZ=%.9g",
-                      dump_draw_index, i, nverts, v[i].x, v[i].y, v[i].z, z, z * 2.0f - 1.0f);
+                if (nverts <= 96 || i < 48 || i >= nverts - 48)
+                {
+                    float z = v[i].z * zs;
+                    pcLog("drawv fb[%u] v=%d/%d xy=(%.4f,%.4f) rawZ=%08x normZ=%.9g clipZ=%.9g",
+                          dump_draw_index, i, nverts, v[i].x, v[i].y, v[i].z, z, z * 2.0f - 1.0f);
+                }
+                else if (i == 48)
+                {
+                    pcLog("drawv fb[%u]: omitted %d middle vertices (showing first/last 48)",
+                          dump_draw_index, nverts - 96);
+                }
             }
-            else if (i == 48)
-            {
-                pcLog("drawv fb[%u]: omitted %d middle vertices (showing first/last 48)",
-                      dump_draw_index, nverts - 96);
-            }
+        }
+    
         }
     }
 
