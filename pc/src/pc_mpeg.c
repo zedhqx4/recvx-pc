@@ -231,8 +231,8 @@ int pcMpegUpdate(unsigned char* rgba, int max_bytes, int* w, int* h)
         if ((int)now != decoder_report_second)
         {
             decoder_report_second = (int)now;
-            pcLog("movie: decoder hold t=%.2f s, last PTS %.3f, decoded %u frames, audio %.2f s queued",
-                  now, video_time, video_frames, audio_fed);
+            pcLog("movie: decoder hold t=%.2f s, last PTS %.3f, decoded %u frames / %u decode calls, audio %.2f s queued",
+                  now, video_time, video_frames, video_decode_calls, audio_fed);
         }
 
         return 0;
@@ -262,8 +262,8 @@ int pcMpegUpdate(unsigned char* rgba, int max_bytes, int* w, int* h)
     if ((int)now != decoder_report_second)
     {
         decoder_report_second = (int)now;
-        pcLog("movie: decoder t=%.2f s PTS=%.3f fps=%.3f frames=%u (+%d this call) hash=%08x audio=%.2f s queued_samples=%d",
-              now, video_time, plm_get_framerate(plm), video_frames, decoded_this_call,
+        pcLog("movie: decoder t=%.2f s PTS=%.3f fps=%.3f frames=%u decode_calls=%u (+%d frames this call) hash=%08x audio=%.2f s queued_samples=%d",
+              now, video_time, plm_get_framerate(plm), video_frames, video_decode_calls, decoded_this_call,
               frame_sample_hash(rgba, (size_t)frame->width * frame->height * 4),
               audio_fed, (voice >= 0) ? pcAudioQueuedSamples(voice) : 0);
     }
