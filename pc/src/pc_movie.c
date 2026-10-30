@@ -2,7 +2,7 @@
  *
  * The game drives movies through the Sofdec wrapper (ps2_sfd_mw.c), which calls the functions
  * below like the PS2 IPU player: initAll() when a movie starts, readMpeg() until a frame is
- * ready, setImageTag() to upload it to GS memory and vbrank_draw() to put it on screen, and
+ * ready, setImageTag() to update its dedicated texture and vbrank_draw() to submit the GS sprite, and
  * termAll() at the end. Frames come from MV_*.MPG (made by pc/tools/convert_movies.py) in the
  * extracted data folder, decoded by pc_mpeg.c; their sprite is still drawn with GS packets,
  * while the renderer samples the decoded frame from a dedicated OpenGL texture. Without converted
@@ -34,7 +34,7 @@ VoBuf voBuf;
 #define MOVIE_STATE_PLAYING 2
 #define MOVIE_STATE_END     3
 
-/* GS memory the PS2 player decodes into (TBP 14208, TBW 5 = 320 pixels, CT32) */
+/* GS texture identifier used by the movie sprite (TBP 14208) */
 #define MOVIE_TBP 14208
 
 int pcMpegOpen(const char* path);
@@ -212,7 +212,7 @@ void termAll()
     hd = 0;
 }
 
-/* upload the current frame where the PS2 player put it */
+/* update the renderer's dedicated copy of the current frame */
 void setImageTag(unsigned int* tags, void* unused)
 {
     (void)tags;
