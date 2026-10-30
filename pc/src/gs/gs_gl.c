@@ -2352,8 +2352,8 @@ void gsRendererDraw(const GsDrawState* st, const GsVertex* v, int nverts)
     int use_depth = (ztst != 1) || !zmsk;
     int decal_depth_priority = gs_decal_depth_priority_enabled() && use_depth &&
                                (ztst == 2) && (GSF(st->zbuf, 24, 4) == 10) &&
-                               st->tme && !st->fst && (st->abe || GSF(st->test, 0, 1)) &&
-                               (st->type >= 3) && (st->type <= 5) && zmsk;
+                               st->tme && !st->fst && st->abe &&
+                               (st->type >= 3) && (st->type <= 5);
     float zs = z_scale(st->zbuf);
     int afail = GSF(st->test, 12, 2);
     int ate = GSF(st->test, 0, 1);
@@ -2676,7 +2676,7 @@ void gsRendererDraw(const GsDrawState* st, const GsVertex* v, int nverts)
         static int logged = 0;
         if (!logged)
         {
-            pcLog("gs: coplanar decal priority active (Z16S, GEQUAL, textured blended/alpha-tested 3D, ZMSK): polygon offset +1 depth unit");
+            pcLog("gs: coplanar decal priority active (Z16S, GEQUAL, blended textured 3D): polygon offset +1 depth unit");
             logged = 1;
         }
 
