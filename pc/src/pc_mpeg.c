@@ -26,7 +26,7 @@ static double video_time;       /* time of the newest decoded frame, from the fi
 static double base_time;
 static int ended;
 static double audio_fed;        /* seconds of sound queued for the open movie */
-static unsigned int video_frames, video_decode_calls;
+static unsigned int video_frames, video_decode_calls, video_waits;
 static int decoder_report_second = -1;
 
 /* Small, deterministic sample of the decoded pixels; enough to tell whether frames keep changing
@@ -78,6 +78,7 @@ int pcMpegOpen(const char* path)
     audio_fed = 0;
     video_frames = 0;
     video_decode_calls = 0;
+    video_waits = 0;
     decoder_report_second = -1;
 
     /* each movie starts at full volume, as with a new Sofdec player on the PS2; the game only
@@ -203,9 +204,17 @@ int pcMpegUpdate(unsigned char* rgba, int max_bytes, int* w, int* h)
 
         if (f == NULL)
         {
+            /* pl_mpeg can return NULL when the current packet does not yet contain a complete
+             * picture. Only plm_has_ended() distinguishes that from a real end of the stream. */
+            if (!plm_has_ended(plm))
+            {
+                video_waits++;
+                break;
+            }
+
             ended = 1;
-            pcLog("movie: video decoder EOF at %.3f s (last PTS %.3f, decoded %u frames)",
-                  now, video_time, video_frames);
+            pcLog("movie: video decoder EOF at %.3f s (last PTS %.3f, decoded %u frames, %u waits)",
+                  now, video_time, video_frames, video_waits);
 
             if (frame == NULL)
             {
@@ -231,8 +240,8 @@ int pcMpegUpdate(unsigned char* rgba, int max_bytes, int* w, int* h)
         if ((int)now != decoder_report_second)
         {
             decoder_report_second = (int)now;
-            pcLog("movie: decoder hold t=%.2f s, last PTS %.3f, decoded %u frames / %u decode calls, audio %.2f s queued",
-                  now, video_time, video_frames, video_decode_calls, audio_fed);
+            pcLog("movie: decoder hold t=%.2f s, last PTS %.3f, decoded %u frames / %u decode calls / %u waits, audio %.2f s queued",
+                  now, video_time, video_frames, video_decode_calls, video_waits, audio_fed);
         }
 
         return 0;
@@ -262,8 +271,8 @@ int pcMpegUpdate(unsigned char* rgba, int max_bytes, int* w, int* h)
     if ((int)now != decoder_report_second)
     {
         decoder_report_second = (int)now;
-        pcLog("movie: decoder t=%.2f s PTS=%.3f fps=%.3f frames=%u decode_calls=%u (+%d frames this call) hash=%08x audio=%.2f s queued_samples=%d",
-              now, video_time, plm_get_framerate(plm), video_frames, video_decode_calls, decoded_this_call,
+        pcLog("movie: decoder t=%.2f s PTS=%.3f fps=%.3f frames=%u decode_calls=%u waits=%u (+%d frames this call) hash=%08x audio=%.2f s queued_samples=%d",
+              now, video_time, plm_get_framerate(plm), video_frames, video_decode_calls, video_waits, decoded_this_call,
               frame_sample_hash(rgba, (size_t)frame->width * frame->height * 4),
               audio_fed, (voice >= 0) ? pcAudioQueuedSamples(voice) : 0);
     }
