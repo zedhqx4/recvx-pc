@@ -366,6 +366,9 @@ Sint32	njLoadTexture(NJS_TEXLIST *texlist)
             }
         }
 
+        /* Restore the texture that was active before the registration-time warmup. */
+        if (saved_now_tex != NULL)
+            Ps2TexLoad(saved_now_tex);
         Ps2_now_tex = saved_now_tex;
         Ps2_current_texbreak = 1;
         pcGsSetTextureAssetIdentity(0, 0, 0);
