@@ -2147,19 +2147,6 @@ static float z_scale(u64 zbuf)
 /* A decal/overlay should win ties against its coplanar surface, but still be
  * occluded by geometry that is genuinely in front of it.  One polygon-offset
  * unit is one resolvable step in the current GS depth attachment. */
-static int gs_decal_depth_priority_enabled(void)
-{
-    static int enabled = -1;
-
-    if (enabled < 0)
-    {
-        const char* value = getenv("RECVX_GS_DECAL_BIAS");
-        enabled = (value == NULL || value[0] != '0') ? 1 : 0;
-    }
-
-    return enabled;
-}
-
 static GLenum blend_factor(int c, int src_side)
 {
     (void)src_side;
@@ -2351,8 +2338,10 @@ void gsRendererDraw(const GsDrawState* st, const GsVertex* v, int nverts)
     int ztst = GSF(st->test, 17, 2);
     int zmsk = GSF(st->zbuf, 32, 1);
     int use_depth = (ztst != 1) || !zmsk;
-    int decal_depth_priority = gs_decal_depth_priority_enabled() && use_depth &&
-                               (ztst == 2) && (GSF(st->zbuf, 24, 4) == 10) &&
+    /* Fixed renderer behavior: give blended textured 3D decals a bounded,
+     * draw-order depth priority without exposing a runtime toggle. */
+    int decal_depth_priority = use_depth && (ztst == 2) &&
+                               (GSF(st->zbuf, 24, 4) == 10) &&
                                st->tme && !st->fst && st->abe &&
                                (st->type >= 3) && (st->type <= 5);
     float zs = z_scale(st->zbuf);
