@@ -56,11 +56,19 @@ static int image_cap = 512 * 512 * 4;
 #define HD_SCALE 4                  /* upscaled movies are 4x the originals */
 static int hd;                      /* playing an upscaled movie */
 static int hd_w, hd_h;              /* its frame size */
+static int movie_gl_active;         /* a dedicated GL texture mirrors the movie's GS texture */
 static unsigned int movie_uploads, movie_draws;
 static double upload_log_time, draw_log_time;
 
 void initAll()
 {
+    if (movie_gl_active)
+    {
+        gsRendererFlush();
+        pcGsMovieFrame(0, NULL, 0, 0, 0);
+        movie_gl_active = 0;
+    }
+
     rmi.iMovieState = MOVIE_STATE_PREP;
     rmi.iMovieFrame = Ps2_vcount;
     playing = 0;
@@ -194,12 +202,14 @@ void termAll()
         playing = 0;
     }
 
-    if (hd)
+    if (movie_gl_active)
     {
         gsRendererFlush();
         pcGsMovieFrame(0, NULL, 0, 0, 0);
-        hd = 0;
+        movie_gl_active = 0;
     }
+
+    hd = 0;
 }
 
 /* upload the current frame where the PS2 player put it */
@@ -222,6 +232,7 @@ void setImageTag(unsigned int* tags, void* unused)
     {
         gsRendererFlush();   /* the previous frame's sprite may still be queued */
         pcGsMovieFrame(MOVIE_TBP, image + 16, hd_w, hd_h, HD_SCALE);
+        movie_gl_active = 1;
         movie_uploads++;
 
         if (pcOsTime() - upload_log_time >= 1.0)
@@ -249,12 +260,21 @@ void setImageTag(unsigned int* tags, void* unused)
     ((u_long*)image)[0] = SCE_GIF_SET_TAG(qwc, SCE_GS_TRUE, SCE_GS_FALSE, 0, SCE_GIF_IMAGE, 0);
     ((u_long*)image)[1] = 0;
     gsGifTransfer(image, 1 + qwc);
+
+    /* The GIF upload changes the GS page generations on every frame. The normal texture-cache
+     * key includes those generations, so caching this animated TBP would allocate one 512x512
+     * GL texture per frame until the cache reaches MAX_TEX. Keep the GS VRAM write for correct
+     * emulated state, but mirror the pixels into the dedicated movie texture and let gs_gl.c
+     * sample that texture for the movie sprite, just as it does for upscaled movies. */
+    gsRendererFlush();   /* do not update the texture while the previous sprite is still queued */
+    pcGsMovieFrame(MOVIE_TBP, image + 16, image_w, image_h, 1);
+    movie_gl_active = 1;
     movie_uploads++;
 
     if (pcOsTime() - upload_log_time >= 1.0)
     {
         upload_log_time = pcOsTime();
-        pcLog("movie: frame upload mode=GS size=%dx%d uploads=%u qwc=%d", image_w, image_h, movie_uploads, qwc);
+        pcLog("movie: frame upload mode=GS+GL size=%dx%d uploads=%u qwc=%d", image_w, image_h, movie_uploads, qwc);
     }
 }
 
