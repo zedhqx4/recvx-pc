@@ -2,10 +2,10 @@
  *
  * The game drives movies through the Sofdec wrapper (ps2_sfd_mw.c), which calls the functions
  * below like the PS2 IPU player: initAll() when a movie starts, readMpeg() until a frame is
- * ready, setImageTag() to upload it to GS memory and vbrank_draw() to put it on screen, and
+ * ready, setImageTag() to update its frame texture and vbrank_draw() to put it on screen, and
  * termAll() at the end. Frames come from MV_*.MPG (made by pc/tools/convert_movies.py) in the
- * extracted data folder, decoded by pc_mpeg.c; they are uploaded and drawn with the same GS
- * packets as on the PS2. Without converted movies (e.g. playing from the ISO) a movie reports
+ * extracted data folder and are decoded by pc_mpeg.c; the sprite is submitted with GS packets,
+ * while the renderer samples the decoded frame from a dedicated OpenGL texture. Without converted movies (e.g. playing from the ISO) a movie reports
  * PREP -> PLAYING -> PLAYEND at once so the game moves on.
  *
  * Upscaled movies (MOVIE_HD/MV_*.MPG, made by recvx-config.exe's "Upscale movies") are used when
@@ -32,7 +32,7 @@ VoBuf voBuf;
 #define MOVIE_STATE_PLAYING 2
 #define MOVIE_STATE_END     3
 
-/* GS memory the PS2 player decodes into (TBP 14208, TBW 5 = 320 pixels, CT32) */
+/* GS texture identifier used by the movie sprite (TBP 14208) */
 #define MOVIE_TBP 14208
 #define MOVIE_TBW 5
 
@@ -55,9 +55,17 @@ static int image_cap = 512 * 512 * 4;
 #define HD_SCALE 4                  /* upscaled movies are 4x the originals */
 static int hd;                      /* playing an upscaled movie */
 static int hd_w, hd_h;              /* its frame size */
+static int movie_gl_active;         /* the dedicated GL texture currently holds a movie frame */
 
 void initAll()
 {
+    if (movie_gl_active)
+    {
+        gsRendererFlush();
+        pcGsMovieFrame(0, NULL, 0, 0, 0);
+        movie_gl_active = 0;
+    }
+
     rmi.iMovieState = MOVIE_STATE_PREP;
     rmi.iMovieFrame = Ps2_vcount;
     playing = 0;
@@ -189,20 +197,19 @@ void termAll()
         playing = 0;
     }
 
-    if (hd)
+    if (movie_gl_active)
     {
         gsRendererFlush();
         pcGsMovieFrame(0, NULL, 0, 0, 0);
-        hd = 0;
+        movie_gl_active = 0;
     }
+
+    hd = 0;
 }
 
-/* upload the current frame where the PS2 player put it */
+/* update the renderer's dedicated copy of the current frame */
 void setImageTag(unsigned int* tags, void* unused)
 {
-    u_long gif[12];
-    int qwc;
-
     (void)tags;
     (void)unused;
 
@@ -213,29 +220,20 @@ void setImageTag(unsigned int* tags, void* unused)
 
     image_new = 0;
 
+    /* The sprite remains a GS draw, but both original and HD frames are sampled from this
+     * dedicated texture. Avoid the per-frame GIF IMAGE transfer into GS VRAM. */
+    gsRendererFlush();   /* the previous frame's sprite may still be queued */
+
     if (hd)
     {
-        gsRendererFlush();   /* the previous frame's sprite may still be queued */
         pcGsMovieFrame(MOVIE_TBP, image + 16, hd_w, hd_h, HD_SCALE);
-        return;
+    }
+    else
+    {
+        pcGsMovieFrame(MOVIE_TBP, image + 16, image_w, image_h, 1);
     }
 
-    gif[0] = SCE_GIF_SET_TAG(4, SCE_GS_TRUE, SCE_GS_FALSE, 0, SCE_GIF_PACKED, 1);
-    gif[1] = SCE_GIF_PACKED_AD;
-    gif[2] = SCE_GS_SET_BITBLTBUF(0, 0, 0, MOVIE_TBP, MOVIE_TBW, SCE_GS_PSMCT32);
-    gif[3] = SCE_GS_BITBLTBUF;
-    gif[4] = SCE_GS_SET_TRXPOS(0, 0, 0, 0, 0);
-    gif[5] = SCE_GS_TRXPOS;
-    gif[6] = SCE_GS_SET_TRXREG(image_w, image_h);
-    gif[7] = SCE_GS_TRXREG;
-    gif[8] = SCE_GS_SET_TRXDIR(0);
-    gif[9] = SCE_GS_TRXDIR;
-    gsGifTransfer(gif, 5);
-
-    qwc = (image_w * image_h * 4) / 16;
-    ((u_long*)image)[0] = SCE_GIF_SET_TAG(qwc, SCE_GS_TRUE, SCE_GS_FALSE, 0, SCE_GIF_IMAGE, 0);
-    ((u_long*)image)[1] = 0;
-    gsGifTransfer(image, 1 + qwc);
+    movie_gl_active = 1;
 }
 
 /* the original's sprite: decoded image (TBP 14208) stretched to the movie's display rectangle */

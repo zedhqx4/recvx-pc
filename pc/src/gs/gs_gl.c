@@ -1712,9 +1712,9 @@ static GLuint get_texture(unsigned int asset_id, int asset_id_valid, uint64_t co
 }
 
 /* ------------------------------------------------------------------------------------------- */
-/* upscaled movies (pc_movie.c): while one plays, textures at its TBP sample this frame instead
- * of GS memory, like an HD texture. The frame sits at the top left of a texture that stands for
- * the whole 512x512 texture area the PS2 player uses, at <scale> times its size. */
+/* movies (pc_movie.c): while one plays, the sprite's TBP samples this frame instead of GS memory.
+ * Original movies use scale 1; upscaled movies use scale 4. The frame sits at the top left of a
+ * texture that stands for the whole 512x512 texture area the PS2 sprite uses. */
 
 static GLuint movie_tex;
 static unsigned int movie_tbp;
@@ -1736,7 +1736,8 @@ void pcGsMovieFrame(unsigned int tbp, const unsigned char* rgba, int w, int h, i
         }
 
         movie_size = 512 * scale;
-        movie_tex = make_texture(movie_size, movie_size, GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE, GL_LINEAR);
+        movie_tex = make_texture(movie_size, movie_size, GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE,
+                                 (scale > 1) ? GL_LINEAR : GL_NEAREST);
     }
 
     pcGsBindTexture(GL_TEXTURE_2D, movie_tex);
