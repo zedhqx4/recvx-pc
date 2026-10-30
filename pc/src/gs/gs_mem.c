@@ -290,7 +290,154 @@ unsigned int gsMemRead(int psm, unsigned int bp, unsigned int bw, unsigned int x
         return gsVram[addr32(bp, bw, x, y, blockTable32) + 3] >> 4;
     }
 
+
     return 0;
+}
+
+/* Copy only the GS pages touched by a texture into immutable storage. Requests are created
+ * on the GS/game thread, so this copy cannot race the normal GIF transfer path. */
+int gsMemSnapshotTexture(u64 tex0, int w, int h, GsMemSnapshot* snapshot)
+{
+    unsigned int bp = GSF(tex0, 0, 14);
+    unsigned int bw = GSF(tex0, 14, 6);
+    unsigned int psm = GSF(tex0, 20, 6);
+    unsigned int bits = (unsigned int)gsPsmBits((int)psm);
+    unsigned int page_w, page_h, stride, page_cols, page_rows;
+    unsigned int y, x;
+
+    if ((snapshot == NULL) || (w <= 0) || (h <= 0))
+        return 0;
+
+    memset(snapshot, 0, sizeof(*snapshot));
+    memset(snapshot->page_slot, 0xFF, sizeof(snapshot->page_slot));
+
+    switch (bits)
+    {
+    case 32: page_w = 64;  page_h = 32;  break;
+    case 16: page_w = 64;  page_h = 64;  break;
+    case 8:  page_w = 128; page_h = 64;  break;
+    default: page_w = 128; page_h = 128; break;
+    }
+
+    stride = (bw * 64u + page_w - 1u) / page_w;
+    if (stride == 0)
+        stride = 1;
+
+    page_cols = ((unsigned int)w + page_w - 1u) / page_w;
+    page_rows = ((unsigned int)h + page_h - 1u) / page_h;
+
+    if ((page_cols == 0) || (page_rows == 0) ||
+        ((unsigned long long)page_cols * page_rows > GS_PAGES))
+        return 0;
+
+    snapshot->data = (unsigned char*)malloc((size_t)page_cols * page_rows * 8192u);
+    if (snapshot->data == NULL)
+        return 0;
+
+    for (y = 0; y < page_rows; y++)
+    {
+        for (x = 0; x < page_cols; x++)
+        {
+            unsigned int page = ((bp >> 5) + y * stride + x) & (GS_PAGES - 1);
+            unsigned int slot = snapshot->page_slot[page];
+
+            if (slot == 0xFFFFu)
+            {
+                slot = snapshot->page_count++;
+                snapshot->page_slot[page] = (unsigned short)slot;
+                memcpy(snapshot->data + (size_t)slot * 8192u,
+                       gsVram + (size_t)page * 8192u, 8192u);
+            }
+        }
+    }
+
+    return snapshot->page_count != 0;
+}
+
+static const unsigned char* snapshot_address(const GsMemSnapshot* snapshot, unsigned int address)
+{
+    unsigned int page = (address >> 13) & (GS_PAGES - 1);
+    unsigned int slot;
+
+    if ((snapshot == NULL) || (snapshot->data == NULL))
+        return NULL;
+
+    slot = snapshot->page_slot[page];
+    if (slot == 0xFFFFu)
+        return NULL;
+
+    return snapshot->data + (size_t)slot * 8192u + (address & 8191u);
+}
+
+/* Worker-only read path. It uses the page copy above and never touches live GS VRAM. */
+unsigned int gsMemReadSnapshot(const GsMemSnapshot* snapshot, int psm, unsigned int bp, unsigned int bw,
+                               unsigned int x, unsigned int y)
+{
+    unsigned int a, value;
+    const unsigned char* p;
+
+    switch (psm)
+    {
+    case GS_PSMCT32:
+    case GS_PSMCT24:
+        p = snapshot_address(snapshot, addr32(bp, bw, x, y, blockTable32));
+        if (p == NULL) return 0;
+        memcpy(&value, p, sizeof(value));
+        return value;
+    case GS_PSMZ32:
+    case GS_PSMZ24:
+        p = snapshot_address(snapshot, addr32(bp, bw, x, y, blockTable32Z));
+        if (p == NULL) return 0;
+        memcpy(&value, p, sizeof(value));
+        return value;
+    case GS_PSMCT16:
+        p = snapshot_address(snapshot, addr16(bp, bw, x, y, blockTable16));
+        if (p == NULL) return 0;
+        memcpy(&value, p, sizeof(unsigned short));
+        return value & 0xFFFFu;
+    case GS_PSMCT16S:
+        p = snapshot_address(snapshot, addr16(bp, bw, x, y, blockTable16S));
+        if (p == NULL) return 0;
+        memcpy(&value, p, sizeof(unsigned short));
+        return value & 0xFFFFu;
+    case GS_PSMZ16:
+        p = snapshot_address(snapshot, addr16(bp, bw, x, y, blockTable16Z));
+        if (p == NULL) return 0;
+        memcpy(&value, p, sizeof(unsigned short));
+        return value & 0xFFFFu;
+    case GS_PSMZ16S:
+        p = snapshot_address(snapshot, addr16(bp, bw, x, y, blockTable16SZ));
+        if (p == NULL) return 0;
+        memcpy(&value, p, sizeof(unsigned short));
+        return value & 0xFFFFu;
+    case GS_PSMT8:
+        p = snapshot_address(snapshot, addr8(bp, bw, x, y));
+        return (p != NULL) ? *p : 0;
+    case GS_PSMT4:
+        a = addr4(bp, bw, x, y);
+        p = snapshot_address(snapshot, a >> 1);
+        return (p != NULL) ? ((*p >> ((a & 1) * 4)) & 15u) : 0;
+    case GS_PSMT8H:
+        p = snapshot_address(snapshot, addr32(bp, bw, x, y, blockTable32) + 3);
+        return (p != NULL) ? *p : 0;
+    case GS_PSMT4HL:
+        p = snapshot_address(snapshot, addr32(bp, bw, x, y, blockTable32) + 3);
+        return (p != NULL) ? (*p & 15u) : 0;
+    case GS_PSMT4HH:
+        p = snapshot_address(snapshot, addr32(bp, bw, x, y, blockTable32) + 3);
+        return (p != NULL) ? (*p >> 4) : 0;
+    }
+
+    return 0;
+}
+
+void gsMemReleaseSnapshot(GsMemSnapshot* snapshot)
+{
+    if (snapshot == NULL)
+        return;
+
+    free(snapshot->data);
+    memset(snapshot, 0, sizeof(*snapshot));
 }
 
 /* Writes one pixel; returns nonzero if GS memory changed (the page generation and render
