@@ -36,6 +36,7 @@ VoBuf voBuf;
 
 /* GS texture identifier used by the movie sprite (TBP 14208) */
 #define MOVIE_TBP 14208
+#define MOVIE_TBW 5
 
 int pcMpegOpen(const char* path);
 void pcMpegClose(void);
