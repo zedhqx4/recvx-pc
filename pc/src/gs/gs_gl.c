@@ -1720,6 +1720,8 @@ static GLuint get_texture(unsigned int asset_id, int asset_id_valid, uint64_t co
 #define GS_PRELOAD_MAX_JOBS 48
 #define GS_PRELOAD_MAX_BYTES (32u * 1024u * 1024u)
 
+static void gs_texture_preload_pump_uploads(size_t max_bytes);
+
 typedef struct GsTexturePreloadJob {
     struct GsTexturePreloadJob* queue_next;
     struct GsTexturePreloadJob* done_next;
