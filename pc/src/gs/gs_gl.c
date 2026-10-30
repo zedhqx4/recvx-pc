@@ -621,7 +621,8 @@ void pcGsMovieFrame(unsigned int tbp, const unsigned char* rgba, int w, int h, i
         }
 
         movie_size = 512 * scale;
-        movie_tex = make_texture(movie_size, movie_size, GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE, GL_LINEAR);
+        movie_tex = make_texture(movie_size, movie_size, GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE,
+                                 (scale > 1) ? GL_LINEAR : GL_NEAREST);
     }
 
     glBindTexture(GL_TEXTURE_2D, movie_tex);
