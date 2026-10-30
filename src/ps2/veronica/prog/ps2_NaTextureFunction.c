@@ -334,12 +334,45 @@ Sint32	njLoadTexture(NJS_TEXLIST *texlist)
     }
     
     ring_check();
-    
+
+#ifdef TARGET_PC
+    /* Room/model registration is earlier than the first draw. Warm the native indexed TIM2
+     * assets here, while their source surfaces are resident and the renderer can decode them
+     * concurrently with the rest of room setup. Ps2TexLoad is reused so the GS transfer,
+     * CLUT banking and format conversions stay identical to the normal path. */
+    if (pcGsTextureAssetCacheEnabled())
+    {
+        NJS_TEXMEMLIST* saved_now_tex = Ps2_now_tex;
+
+        for (j = 0; j < (int)tex_num; j++)
+        {
+            NJS_TEXMEMLIST* preload = (NJS_TEXMEMLIST*)texlist->textures[j].texaddr;
+            TIM2_PICTUREHEADER_EX* tim;
+
+            if ((preload == NULL) || (preload->texinfo.texsurface.pSurface == NULL))
+                continue;
+
+            tim = (TIM2_PICTUREHEADER_EX*)preload->texinfo.texsurface.pSurface;
+            if ((tim->TpFlag == 0) && (tim->ClutType != 0) &&
+                (PS2_Render_tex_sub_flag == 0) &&
+                !((tim->PictFormat >= 5) && (tim->PictFormat <= 8)) &&
+                ((tim->ImageType == 4) || (tim->ImageType == 5)))
+            {
+                Ps2TexLoad(preload);
+            }
+        }
+
+        Ps2_now_tex = saved_now_tex;
+        Ps2_current_texbreak = 1;
+        pcGsSetTextureAssetIdentity(0, 0, 0);
+    }
+#endif
+
     return 1;
 }
 
-// 100% matching! 
-Sint32	njSetTexture(NJS_TEXLIST *texlist)
+/* 100% matching! */
+Sint32 njSetTexture(NJS_TEXLIST *texlist)
 {
     if (texlist != NULL) 
     {
