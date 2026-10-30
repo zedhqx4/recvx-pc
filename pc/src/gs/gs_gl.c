@@ -575,21 +575,7 @@ static RenderTarget rts[MAX_RT];
 static DepthBuffer dbs[MAX_DB];
 static unsigned int frame_counter;
 static int dump_frame;
-static unsigned int dump_draw_index;
 static int ui_wireframe;
-
-static int gs_dump_3d_only_enabled(void)
-{
-    static int enabled = -1;
-
-    if (enabled < 0)
-    {
-        const char* value = getenv("RECVX_GSDUMP_3D");
-        enabled = (value != NULL && value[0] == '1' && value[1] == '\0') ? 1 : 0;
-    }
-
-    return enabled;
-}
 
 int pcGsToggleUiWireframe(void)
 {
@@ -731,19 +717,6 @@ static RenderTarget* get_rt(unsigned int fbp, unsigned int fbw)
     return rt;
 }
 
-static int gs_force_depth32f_enabled(void)
-{
-    static int enabled = -1;
-
-    if (enabled < 0)
-    {
-        const char* value = getenv("RECVX_GS_DEPTH32F");
-        enabled = (value != NULL && value[0] == '1' && value[1] == '\0') ? 1 : 0;
-    }
-
-    return enabled;
-}
-
 static DepthBuffer* get_db(unsigned int zbp, int psm, int w, int h)
 {
     int i;
@@ -768,13 +741,6 @@ static DepthBuffer* get_db(unsigned int zbp, int psm, int w, int h)
         type = GL_UNSIGNED_SHORT;
     }
 
-    /* A/B diagnostic: test depth-buffer quantization without changing GS Z or ZTST. */
-    if (gs_force_depth32f_enabled())
-    {
-        internal_format = GL_DEPTH_COMPONENT32F;
-        type = GL_FLOAT;
-    }
-
     for (i = 0; i < MAX_DB; i++)
     {
         if (dbs[i].used && (dbs[i].zbp == zbp) && (dbs[i].psm == psm) &&
@@ -795,8 +761,6 @@ static DepthBuffer* get_db(unsigned int zbp, int psm, int w, int h)
             dbs[i].h = h;
             dbs[i].tex = make_texture(gs_scale_x(w), gs_scale_y(h), internal_format, GL_DEPTH_COMPONENT,
                                       type, GL_NEAREST);
-            if (gs_force_depth32f_enabled())
-                pcLog("gs: depth test override: ZBP=%u PSM=%u -> GL_DEPTH_COMPONENT32F", zbp, psm);
             return &dbs[i];
         }
     }
@@ -2179,142 +2143,20 @@ static float z_scale(u64 zbuf)
     }
 }
 
-/* Opt-in diagnostic for one-unit Z precision; no render state is changed. */
-#define GS_Z_PRECISION_DIAG_GROUPS 32
-
-typedef struct {
-    int used;
-    unsigned int fbp, fbw, zbp, psm;
-    unsigned int draws, vertices;
-    unsigned int min_z, max_z;
-    uint64_t same_float, same_clip;
-    unsigned int first_same_float, first_same_clip;
-} GsZPrecisionDiagGroup;
-
-static GsZPrecisionDiagGroup gsZPrecisionDiag[GS_Z_PRECISION_DIAG_GROUPS];
-static unsigned int gsZPrecisionDiagFrames;
-static unsigned int gsZPrecisionDiagOverflowDraws;
-
-static int gs_z_precision_diag_enabled(void)
+/* A decal/overlay should win ties against its coplanar surface, but still be
+ * occluded by geometry that is genuinely in front of it.  One polygon-offset
+ * unit is one resolvable step in the current GS depth attachment. */
+static int gs_decal_depth_priority_enabled(void)
 {
     static int enabled = -1;
 
     if (enabled < 0)
     {
-        const char* value = getenv("RECVX_Z_PRECISION_DIAG");
-        enabled = (value != NULL && value[0] == '1' && value[1] == '\0') ? 1 : 0;
+        const char* value = getenv("RECVX_GS_DECAL_BIAS");
+        enabled = (value == NULL || value[0] != '0') ? 1 : 0;
     }
 
     return enabled;
-}
-
-static const char* gs_z_precision_psm_name(unsigned int psm)
-{
-    switch (psm)
-    {
-    case 0: return "Z32";
-    case 1: return "Z24";
-    case 2: return "Z16";
-    case 10: return "Z16S";
-    default: return "unknown";
-    }
-}
-
-static GsZPrecisionDiagGroup* gs_z_precision_diag_group(unsigned int fbp, unsigned int fbw,
-                                                         unsigned int zbp, unsigned int psm)
-{
-    int i;
-    GsZPrecisionDiagGroup* free_group = NULL;
-
-    for (i = 0; i < GS_Z_PRECISION_DIAG_GROUPS; i++)
-    {
-        GsZPrecisionDiagGroup* g = &gsZPrecisionDiag[i];
-
-        if (g->used && g->fbp == fbp && g->fbw == fbw && g->zbp == zbp && g->psm == psm)
-            return g;
-        if (!g->used && free_group == NULL)
-            free_group = g;
-    }
-
-    if (free_group == NULL)
-    {
-        gsZPrecisionDiagOverflowDraws++;
-        return NULL;
-    }
-
-    memset(free_group, 0, sizeof(*free_group));
-    free_group->used = 1;
-    free_group->fbp = fbp;
-    free_group->fbw = fbw;
-    free_group->zbp = zbp;
-    free_group->psm = psm;
-    free_group->min_z = 0xFFFFFFFFu;
-    return free_group;
-}
-
-static void gs_z_precision_diag_draw(unsigned int fbp, unsigned int fbw, unsigned int zbp,
-                                     unsigned int psm, const GsVertex* v, int nverts, float zs)
-{
-    GsZPrecisionDiagGroup* g = gs_z_precision_diag_group(fbp, fbw, zbp, psm);
-    int i;
-
-    if (g == NULL)
-        return;
-
-    g->draws++;
-    g->vertices += (unsigned int)nverts;
-
-    for (i = 0; i < nverts; i++)
-    {
-        unsigned int raw_z = v[i].z;
-        float z0 = v[i].z * zs;
-        float z1 = (float)((uint64_t)v[i].z + 1ULL) * zs;
-        float clip0 = z0 * 2.0f - 1.0f;
-        float clip1 = z1 * 2.0f - 1.0f;
-
-        if (raw_z < g->min_z) g->min_z = raw_z;
-        if (raw_z > g->max_z) g->max_z = raw_z;
-
-        if (z0 == z1)
-        {
-            if (g->same_float == 0)
-                g->first_same_float = raw_z;
-            g->same_float++;
-        }
-        if (clip0 == clip1)
-        {
-            if (g->same_clip == 0)
-                g->first_same_clip = raw_z;
-            g->same_clip++;
-        }
-    }
-}
-
-static void gs_z_precision_diag_report(void)
-{
-    unsigned int i;
-    unsigned int first_frame = gsZPrecisionDiagFrames - 119;
-
-    for (i = 0; i < GS_Z_PRECISION_DIAG_GROUPS; i++)
-    {
-        const GsZPrecisionDiagGroup* g = &gsZPrecisionDiag[i];
-
-        if (!g->used)
-            continue;
-
-        pcLog("gs zdiag frames %u-%u FBP=%u FBW=%u ZBP=%u ZBUF.PSM=%u(%s): draws=%u verts=%u rawZ=%08x..%08x; Z/Z+1 same-float=%llu first=%08x; same-clipZ=%llu first=%08x",
-              first_frame, gsZPrecisionDiagFrames, g->fbp, g->fbw, g->zbp, g->psm,
-              gs_z_precision_psm_name(g->psm), g->draws, g->vertices, g->min_z, g->max_z,
-              (unsigned long long)g->same_float, g->first_same_float,
-              (unsigned long long)g->same_clip, g->first_same_clip);
-    }
-
-    if (gsZPrecisionDiagOverflowDraws != 0)
-        pcLog("gs zdiag: skipped %u draws because more than %u FBP/FBW/ZBP/PSM groups were seen",
-              gsZPrecisionDiagOverflowDraws, GS_Z_PRECISION_DIAG_GROUPS);
-
-    memset(gsZPrecisionDiag, 0, sizeof(gsZPrecisionDiag));
-    gsZPrecisionDiagOverflowDraws = 0;
 }
 
 static GLenum blend_factor(int c, int src_side)
@@ -2508,7 +2350,10 @@ void gsRendererDraw(const GsDrawState* st, const GsVertex* v, int nverts)
     int ztst = GSF(st->test, 17, 2);
     int zmsk = GSF(st->zbuf, 32, 1);
     int use_depth = (ztst != 1) || !zmsk;
-    unsigned int zpsm = GSF(st->zbuf, 24, 4);
+    int decal_depth_priority = gs_decal_depth_priority_enabled() && use_depth &&
+                               (ztst == 2) && (GSF(st->zbuf, 24, 4) == 10) &&
+                               st->tme && !st->fst && (st->abe || GSF(st->test, 0, 1)) &&
+                               (st->type >= 3) && (st->type <= 5) && zmsk;
     float zs = z_scale(st->zbuf);
     int afail = GSF(st->test, 12, 2);
     int ate = GSF(st->test, 0, 1);
@@ -2525,9 +2370,6 @@ void gsRendererDraw(const GsDrawState* st, const GsVertex* v, int nverts)
     stats.draws++;
     stats.verts += nverts;
 
-    if (gs_z_precision_diag_enabled())
-        gs_z_precision_diag_draw(fbp, fbw, GSF(st->zbuf, 0, 9), zpsm, v, nverts, zs);
-
     if (dump_frame)
     {
         float x0 = 1e9f, x1 = -1e9f, y0 = 1e9f, y1 = -1e9f;
@@ -2543,34 +2385,11 @@ void gsRendererDraw(const GsDrawState* st, const GsVertex* v, int nverts)
             if (v[i].z > z1) z1 = v[i].z;
         }
 
-        /* Optional filter to skip screen-space masks/overlays when looking for 3D decal geometry. */
-        if (!gs_dump_3d_only_enabled() ||
-            (st->tme && !st->fst && (st->type >= 3) && (st->type <= 5) &&
-             !((z0 == 0xFFFE) && (z1 == 0xFFFE))))
-        {
-            dump_draw_index++;
-            pcLog("draw fb[%u] %u/%u psm %u msk %08x type %d n %d iip %d tme %d fst %d abe %d fge %d | tex0 %016llx tex1 %llx clamp %llx"
-                  " | alpha %010llx test %05llx zbuf %llx sc %016llx texa %llx | x %.1f..%.1f y %.1f..%.1f z %u..%u c0 %02x%02x%02x%02x q %g st %g,%g",
-                  dump_draw_index, fbp, fbw, fpsm, fbmsk, st->type, nverts, st->iip, st->tme, st->fst, st->abe, st->fge,
-                  st->tex0, st->tex1, st->clamp, st->alpha, st->test, st->zbuf, st->scissor, st->texa,
-                  x0, x1, y0, y1, z0, z1, v[0].r, v[0].g, v[0].b, v[0].a, v[0].q, v[0].s, v[0].t);
-    
-            /* Print exact vertex positions for the dump frame so overlapping geometry can be compared. */
-            for (i = 0; i < nverts; i++)
-            {
-                if (nverts <= 96 || i < 48 || i >= nverts - 48)
-                {
-                    float z = v[i].z * zs;
-                    pcLog("drawv fb[%u] v=%d/%d xy=(%.4f,%.4f) rawZ=%08x normZ=%.9g clipZ=%.9g",
-                          dump_draw_index, i, nverts, v[i].x, v[i].y, v[i].z, z, z * 2.0f - 1.0f);
-                }
-                else if (i == 48)
-                {
-                    pcLog("drawv fb[%u]: omitted %d middle vertices (showing first/last 48)",
-                          dump_draw_index, nverts - 96);
-                }
-            }
-        }
+        pcLog("draw fb %u/%u psm %u msk %08x type %d n %d iip %d tme %d fst %d abe %d fge %d | tex0 %016llx tex1 %llx clamp %llx"
+              " | alpha %010llx test %05llx zbuf %llx sc %016llx texa %llx | x %.1f..%.1f y %.1f..%.1f z %u..%u c0 %02x%02x%02x%02x q %g st %g,%g",
+              fbp, fbw, fpsm, fbmsk, st->type, nverts, st->iip, st->tme, st->fst, st->abe, st->fge,
+              st->tex0, st->tex1, st->clamp, st->alpha, st->test, st->zbuf, st->scissor, st->texa,
+              x0, x1, y0, y1, z0, z1, v[0].r, v[0].g, v[0].b, v[0].a, v[0].q, v[0].s, v[0].t);
     }
 
     if (rt->vram_dirty)
@@ -2697,7 +2516,7 @@ void gsRendererDraw(const GsDrawState* st, const GsVertex* v, int nverts)
     /* depth */
     if (use_depth)
     {
-        DepthBuffer* db = get_db(GSF(st->zbuf, 0, 9), zpsm, rt->w, rt->h);
+        DepthBuffer* db = get_db(GSF(st->zbuf, 0, 9), GSF(st->zbuf, 24, 4), rt->w, rt->h);
 
         if (rt->depth_attached != db->tex)
         {
@@ -2852,6 +2671,19 @@ void gsRendererDraw(const GsDrawState* st, const GsVertex* v, int nverts)
 
     glUniform1i(U.wireframe, 0);
 
+    if (decal_depth_priority)
+    {
+        static int logged = 0;
+        if (!logged)
+        {
+            pcLog("gs: coplanar decal priority active (Z16S, GEQUAL, textured blended/alpha-tested 3D, ZMSK): polygon offset +1 depth unit");
+            logged = 1;
+        }
+
+        glPolygonOffset(0.0f, 1.0f);
+        pcGsEnable(GL_POLYGON_OFFSET_FILL);
+    }
+
     if (ate && (afail != 0) && (atst != 1))
     {
         /* alpha test with a fail action: pass 1 normal, pass 2 the failing pixels with the
@@ -2880,6 +2712,9 @@ void gsRendererDraw(const GsDrawState* st, const GsVertex* v, int nverts)
     {
         glDrawArrays(mode, 0, n);
     }
+
+    if (decal_depth_priority)
+        pcGsDisable(GL_POLYGON_OFFSET_FILL);
 
     /* Diagnostic overlay only: fixed-UV textured primitives (the usual 2D UI/text path).
      * Force a solid color so transparency and the suspect UVs cannot hide the geometry. */
@@ -2981,13 +2816,6 @@ void gsRendererPresent(unsigned int dispfb_fbp, unsigned int dispfb_fbw)
     frame_counter++;
     stats.frames++;
 
-    if (gs_z_precision_diag_enabled())
-    {
-        gsZPrecisionDiagFrames++;
-        if ((gsZPrecisionDiagFrames % 120) == 0)
-            gs_z_precision_diag_report();
-    }
-
     gsTakeClutFrameStats(&clut_loads, &clut_flushes, &clut_vertices, &clut_draw_calls, &clut_draw_seconds);
     if (diagnostics && (texFrameStats.misses > 0 || clut_flushes >= 4 || clut_loads >= 32 || clut_draw_seconds >= 0.0005))
     {
@@ -3027,7 +2855,6 @@ void gsRendererPresent(unsigned int dispfb_fbp, unsigned int dispfb_fbw)
             gsDumpFrame = (dump_at >= 0) && ((frame_counter == (unsigned int)dump_at) || (frame_counter == (unsigned int)dump_at + 1));
         }
 
-        dump_draw_index = 0;
         dump_frame = (dump_at >= 0) && ((frame_counter == (unsigned int)dump_at) || (frame_counter == (unsigned int)dump_at + 1));
     }
 
