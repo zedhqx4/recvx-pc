@@ -575,6 +575,7 @@ static RenderTarget rts[MAX_RT];
 static DepthBuffer dbs[MAX_DB];
 static unsigned int frame_counter;
 static int dump_frame;
+static unsigned int dump_draw_index;
 static int ui_wireframe;
 
 int pcGsToggleUiWireframe(void)
@@ -2529,11 +2530,28 @@ void gsRendererDraw(const GsDrawState* st, const GsVertex* v, int nverts)
             if (v[i].z > z1) z1 = v[i].z;
         }
 
-        pcLog("draw fb %u/%u psm %u msk %08x type %d n %d iip %d tme %d fst %d abe %d fge %d | tex0 %016llx tex1 %llx clamp %llx"
+        dump_draw_index++;
+        pcLog("draw fb[%u] %u/%u psm %u msk %08x type %d n %d iip %d tme %d fst %d abe %d fge %d | tex0 %016llx tex1 %llx clamp %llx"
               " | alpha %010llx test %05llx zbuf %llx sc %016llx texa %llx | x %.1f..%.1f y %.1f..%.1f z %u..%u c0 %02x%02x%02x%02x q %g st %g,%g",
-              fbp, fbw, fpsm, fbmsk, st->type, nverts, st->iip, st->tme, st->fst, st->abe, st->fge,
+              dump_draw_index, fbp, fbw, fpsm, fbmsk, st->type, nverts, st->iip, st->tme, st->fst, st->abe, st->fge,
               st->tex0, st->tex1, st->clamp, st->alpha, st->test, st->zbuf, st->scissor, st->texa,
               x0, x1, y0, y1, z0, z1, v[0].r, v[0].g, v[0].b, v[0].a, v[0].q, v[0].s, v[0].t);
+
+        /* Print exact vertex positions for the dump frame so overlapping geometry can be compared. */
+        for (i = 0; i < nverts; i++)
+        {
+            if (nverts <= 96 || i < 48 || i >= nverts - 48)
+            {
+                float z = v[i].z * zs;
+                pcLog("drawv fb[%u] v=%d/%d xy=(%.4f,%.4f) rawZ=%08x normZ=%.9g clipZ=%.9g",
+                      dump_draw_index, i, nverts, v[i].x, v[i].y, v[i].z, z, z * 2.0f - 1.0f);
+            }
+            else if (i == 48)
+            {
+                pcLog("drawv fb[%u]: omitted %d middle vertices (showing first/last 48)",
+                      dump_draw_index, nverts - 96);
+            }
+        }
     }
 
     if (rt->vram_dirty)
@@ -2990,6 +3008,7 @@ void gsRendererPresent(unsigned int dispfb_fbp, unsigned int dispfb_fbw)
             gsDumpFrame = (dump_at >= 0) && ((frame_counter == (unsigned int)dump_at) || (frame_counter == (unsigned int)dump_at + 1));
         }
 
+        dump_draw_index = 0;
         dump_frame = (dump_at >= 0) && ((frame_counter == (unsigned int)dump_at) || (frame_counter == (unsigned int)dump_at + 1));
     }
 
