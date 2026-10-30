@@ -574,6 +574,7 @@ typedef struct {
 static RenderTarget rts[MAX_RT];
 static DepthBuffer dbs[MAX_DB];
 static unsigned int frame_counter;
+static unsigned int decal_draw_order;
 static int dump_frame;
 static int ui_wireframe;
 
@@ -2676,11 +2677,18 @@ void gsRendererDraw(const GsDrawState* st, const GsVertex* v, int nverts)
         static int logged = 0;
         if (!logged)
         {
-            pcLog("gs: coplanar decal priority active (Z16S, GEQUAL, blended textured 3D): polygon offset +1 depth unit");
+            pcLog("gs: coplanar decal priority active (Z16S, GEQUAL, blended textured 3D): polygon offset +1..+4 depth units by draw order");
             logged = 1;
         }
 
-        glPolygonOffset(0.0f, 1.0f);
+        /* Give later decal draws a small depth advantage over earlier ones.
+         * Keep it bounded so render order cannot pull decals through nearby geometry. */
+        {
+            unsigned int priority = ++decal_draw_order;
+            if (priority > 4)
+                priority = 4;
+            glPolygonOffset(0.0f, (GLfloat)priority);
+        }
         pcGsEnable(GL_POLYGON_OFFSET_FILL);
     }
 
@@ -2813,6 +2821,8 @@ void gsRendererPresent(unsigned int dispfb_fbp, unsigned int dispfb_fbw)
     double clut_draw_seconds;
 
     gsRendererFlush();
+    /* The frame just submitted is complete; restart decal ordering for the next frame. */
+    decal_draw_order = 0;
     frame_counter++;
     stats.frames++;
 
