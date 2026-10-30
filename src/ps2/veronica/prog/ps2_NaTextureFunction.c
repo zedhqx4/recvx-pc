@@ -344,7 +344,7 @@ Sint32	njLoadTexture(NJS_TEXLIST *texlist)
      * assets here, while their source surfaces are resident and the renderer can decode them
      * concurrently with the rest of room setup. Ps2TexLoad is reused so the GS transfer,
      * CLUT banking and format conversions stay identical to the normal path. */
-    if (pcGsTextureAssetCacheEnabled())
+    if (pcGsTexturePreloaderReady() && pcGsTextureAssetCacheEnabled())
     {
         NJS_TEXMEMLIST* saved_now_tex = Ps2_now_tex;
 
