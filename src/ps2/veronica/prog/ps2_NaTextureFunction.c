@@ -4,6 +4,10 @@
 #include "../../../ps2/veronica/prog/ps2_texture.h"
 #include "../../../ps2/veronica/prog/main.h"
 
+#ifdef TARGET_PC
+#include "../../../../pc/include/pc_texture_cache.h"
+#endif
+
 NJS_TEXMEMLIST* Ps2_tex_info __attribute__((aligned(64)));
 unsigned int Ps2_texmemlist_num;
 void* Ps2_tex_buff;
