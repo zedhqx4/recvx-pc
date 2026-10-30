@@ -1711,6 +1711,556 @@ static GLuint get_texture(unsigned int asset_id, int asset_id_valid, uint64_t co
     return t->tex;
 }
 
+
+/* ------------------------------------------------------------------------------------------- */
+/* Asynchronous preloading of static indexed TIM2 assets.
+ *
+ * The game/GS thread snapshots the source pages before queueing a job. The worker only decodes
+ * that immutable copy; all GL allocation and upload stays on the thread owning the GL context. */
+#define GS_PRELOAD_MAX_JOBS 48
+#define GS_PRELOAD_MAX_BYTES (32u * 1024u * 1024u)
+
+typedef struct GsTexturePreloadJob {
+    struct GsTexturePreloadJob* queue_next;
+    struct GsTexturePreloadJob* done_next;
+    struct GsTexturePreloadJob* all_next;
+    GsMemSnapshot snapshot;
+    unsigned char* indices;
+    size_t memory_bytes;
+    u64 tex0, texa, texclut;
+    u64 key0, key1, key2, gen;
+    u64 index_key0;
+    unsigned int asset_id;
+    uint64_t content_hash;
+    unsigned int page_lo, page_hi, clut_page, stride;
+    int w, h, rows, cols;
+} GsTexturePreloadJob;
+
+static SDL_Mutex* gs_preload_mutex;
+static SDL_Condition* gs_preload_condition;
+static SDL_Thread* gs_preload_thread;
+static GsTexturePreloadJob* gs_preload_queue_head;
+static GsTexturePreloadJob* gs_preload_queue_tail;
+static GsTexturePreloadJob* gs_preload_done_head;
+static GsTexturePreloadJob* gs_preload_done_tail;
+static GsTexturePreloadJob* gs_preload_all_jobs;
+static unsigned int gs_preload_job_count;
+static size_t gs_preload_memory_bytes;
+static int gs_preload_start_attempted;
+static int gs_preload_stop;
+
+static void gs_texture_preload_free_job(GsTexturePreloadJob* job)
+{
+    if (job == NULL)
+        return;
+
+    gsMemReleaseSnapshot(&job->snapshot);
+    free(job->indices);
+    free(job);
+}
+
+static void gs_texture_preload_remove_all_locked(GsTexturePreloadJob* job)
+{
+    GsTexturePreloadJob** link = &gs_preload_all_jobs;
+
+    while (*link != NULL)
+    {
+        if (*link == job)
+        {
+            *link = job->all_next;
+            job->all_next = NULL;
+            if (gs_preload_job_count > 0)
+                gs_preload_job_count--;
+            if (gs_preload_memory_bytes >= job->memory_bytes)
+                gs_preload_memory_bytes -= job->memory_bytes;
+            else
+                gs_preload_memory_bytes = 0;
+            return;
+        }
+
+        link = &(*link)->all_next;
+    }
+}
+
+static int SDLCALL gs_texture_preload_worker(void* userdata)
+{
+    (void)userdata;
+
+    for (;;)
+    {
+        GsTexturePreloadJob* job;
+
+        SDL_LockMutex(gs_preload_mutex);
+        while ((gs_preload_queue_head == NULL) && !gs_preload_stop)
+            SDL_WaitCondition(gs_preload_condition, gs_preload_mutex);
+
+        if (gs_preload_stop)
+        {
+            SDL_UnlockMutex(gs_preload_mutex);
+            break;
+        }
+
+        job = gs_preload_queue_head;
+        gs_preload_queue_head = job->queue_next;
+        if (gs_preload_queue_head == NULL)
+            gs_preload_queue_tail = NULL;
+        job->queue_next = NULL;
+        SDL_UnlockMutex(gs_preload_mutex);
+
+        /* CPU-only: no OpenGL and no reads from live GS VRAM. */
+        gsDecodeIndicesSnapshot(job->tex0, job->w, job->h, &job->snapshot, job->indices);
+
+        SDL_LockMutex(gs_preload_mutex);
+        if (gs_preload_done_tail != NULL)
+            gs_preload_done_tail->done_next = job;
+        else
+            gs_preload_done_head = job;
+        gs_preload_done_tail = job;
+        SDL_UnlockMutex(gs_preload_mutex);
+    }
+
+    return 0;
+}
+
+static void gs_texture_preload_shutdown(void)
+{
+    GsTexturePreloadJob* job;
+    int status = 0;
+
+    if (gs_preload_mutex == NULL)
+        return;
+
+    SDL_LockMutex(gs_preload_mutex);
+    gs_preload_stop = 1;
+    SDL_BroadcastCondition(gs_preload_condition);
+    SDL_UnlockMutex(gs_preload_mutex);
+
+    if (gs_preload_thread != NULL)
+    {
+        SDL_WaitThread(gs_preload_thread, &status);
+        gs_preload_thread = NULL;
+    }
+
+    job = gs_preload_all_jobs;
+    while (job != NULL)
+    {
+        GsTexturePreloadJob* next = job->all_next;
+        gs_texture_preload_free_job(job);
+        job = next;
+    }
+    gs_preload_all_jobs = NULL;
+
+    SDL_DestroyCondition(gs_preload_condition);
+    SDL_DestroyMutex(gs_preload_mutex);
+    gs_preload_condition = NULL;
+    gs_preload_mutex = NULL;
+}
+
+static void gs_texture_preload_init(void)
+{
+    if (gs_preload_start_attempted)
+        return;
+
+    gs_preload_start_attempted = 1;
+    gs_preload_mutex = SDL_CreateMutex();
+    gs_preload_condition = SDL_CreateCondition();
+
+    if ((gs_preload_mutex == NULL) || (gs_preload_condition == NULL))
+    {
+        pcLog("gs: asynchronous texture preload unavailable: %s", SDL_GetError());
+        if (gs_preload_condition != NULL)
+            SDL_DestroyCondition(gs_preload_condition);
+        if (gs_preload_mutex != NULL)
+            SDL_DestroyMutex(gs_preload_mutex);
+        gs_preload_condition = NULL;
+        gs_preload_mutex = NULL;
+        return;
+    }
+
+    gs_preload_thread = SDL_CreateThread(gs_texture_preload_worker, "GS texture preload", NULL);
+    if (gs_preload_thread == NULL)
+    {
+        pcLog("gs: could not start texture preload worker: %s", SDL_GetError());
+        SDL_DestroyCondition(gs_preload_condition);
+        SDL_DestroyMutex(gs_preload_mutex);
+        gs_preload_condition = NULL;
+        gs_preload_mutex = NULL;
+        return;
+    }
+
+    atexit(gs_texture_preload_shutdown);
+    pcLog("gs: asynchronous indexed texture preloader ready");
+}
+
+static int gs_texture_preload_publish(GsTexturePreloadJob* job)
+{
+    int i, atlas_slot = -1, oldest_atlas = 0;
+    int tex_slot = -1, oldest_tex = 0;
+    GLuint atlas_texture = 0;
+    CachedTex* t;
+
+    /* Asset identity is content-based. The GS upload area is reused for many TIM2 files, so
+     * its page generation may legitimately move after this immutable snapshot was captured. */
+    if (pcGsTextureAssetCacheEnabled())
+    {
+        int cached = texture_cache_find_asset(job->asset_id, job->content_hash,
+                                              job->key0, job->w, job->h,
+                                              job->rows, job->cols);
+        if (cached >= 0)
+        {
+            texcache[cached].last_use = frame_counter;
+            indexed_atlases[texcache[cached].index_slot].last_use = frame_counter;
+            return 0;
+        }
+    }
+
+    {
+        int cached = texture_cache_find(job->gen, job->key0, job->key1, job->key2,
+                                        job->w, job->h, job->rows, job->cols);
+        if (cached >= 0)
+        {
+            texture_cache_asset_insert(job->asset_id, job->content_hash, cached);
+            return 0;
+        }
+    }
+
+    /* Prefer an atlas already produced for this exact source generation. */
+    for (i = 0; i < MAX_INDEXED_ATLASES; i++)
+    {
+        CachedIndexedAtlas* atlas = &indexed_atlases[i];
+
+        if (!atlas->used)
+        {
+            if (atlas_slot < 0)
+                atlas_slot = i;
+            continue;
+        }
+
+        if ((atlas->key0 == job->index_key0) && (atlas->gen == job->gen) &&
+            (atlas->w == job->w) && (atlas->h == job->h))
+        {
+            atlas_slot = i;
+            break;
+        }
+
+        if (atlas->last_use < indexed_atlases[oldest_atlas].last_use)
+            oldest_atlas = i;
+    }
+
+    if (atlas_slot >= 0 && indexed_atlases[atlas_slot].used &&
+        (indexed_atlases[atlas_slot].key0 == job->index_key0) &&
+        (indexed_atlases[atlas_slot].gen == job->gen) &&
+        (indexed_atlases[atlas_slot].w == job->w) &&
+        (indexed_atlases[atlas_slot].h == job->h))
+    {
+        atlas_texture = indexed_atlases[atlas_slot].tex;
+        indexed_atlases[atlas_slot].last_use = frame_counter;
+    }
+    else
+    {
+        if (atlas_slot < 0)
+            atlas_slot = oldest_atlas;
+
+        if (indexed_atlases[atlas_slot].used)
+        {
+            for (i = 0; i < MAX_TEX; i++)
+            {
+                if (texcache[i].used && texcache[i].indexed &&
+                    (texcache[i].index_slot == atlas_slot))
+                {
+                    texture_cache_remove(i);
+                    texcache[i].used = 0;
+                    texcache[i].tex = 0;
+                    texcache[i].indexed = 0;
+                    texcache[i].index_slot = -1;
+                    texcache[i].hash_next = -1;
+                }
+            }
+
+            pcGsDeleteTextures(1, &indexed_atlases[atlas_slot].tex);
+            tex_cached--;
+            tex_cached_bytes -= (double)indexed_atlases[atlas_slot].w * indexed_atlases[atlas_slot].h;
+        }
+
+        memset(&indexed_atlases[atlas_slot], 0, sizeof(indexed_atlases[atlas_slot]));
+        indexed_atlases[atlas_slot].used = 1;
+        indexed_atlases[atlas_slot].key0 = job->index_key0;
+        indexed_atlases[atlas_slot].gen = job->gen;
+        indexed_atlases[atlas_slot].w = job->w;
+        indexed_atlases[atlas_slot].h = job->h;
+        indexed_atlases[atlas_slot].last_use = frame_counter;
+
+        pcGsActiveTexture(GL_TEXTURE0);
+        atlas_texture = make_texture(job->w, job->h, GL_R8, GL_RED, GL_UNSIGNED_BYTE, GL_NEAREST);
+        pcGsBindTexture(GL_TEXTURE_2D, atlas_texture);
+        glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, job->w, job->h,
+                        GL_RED, GL_UNSIGNED_BYTE, job->indices);
+        glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+
+        indexed_atlases[atlas_slot].tex = atlas_texture;
+        tex_cached++;
+        tex_cached_bytes += (double)job->w * job->h;
+    }
+
+    /* The regular texture table stores palette-specific aliases to this palette-independent
+     * atlas. Evicting an alias must not delete the shared atlas texture. */
+    for (i = 0; i < MAX_TEX; i++)
+    {
+        if (!texcache[i].used)
+        {
+            if (tex_slot < 0)
+                tex_slot = i;
+        }
+        else if (texcache[i].last_use < texcache[oldest_tex].last_use)
+        {
+            oldest_tex = i;
+        }
+    }
+
+    if (tex_slot < 0)
+    {
+        tex_slot = oldest_tex;
+        texture_cache_remove(tex_slot);
+
+        if (!texcache[tex_slot].hd && !texcache[tex_slot].indexed)
+        {
+            pcGsDeleteTextures(1, &texcache[tex_slot].tex);
+            tex_cached--;
+            tex_cached_bytes -= (double)texcache[tex_slot].w * texcache[tex_slot].h * 4;
+        }
+    }
+
+    t = &texcache[tex_slot];
+    memset(t, 0, sizeof(*t));
+    t->used = 1;
+    t->key0 = job->key0;
+    t->key1 = job->key1;
+    t->key2 = job->key2;
+    t->w = job->w;
+    t->h = job->h;
+    t->rows = job->rows;
+    t->cols = job->cols;
+    t->page_lo = job->page_lo;
+    t->page_hi = job->page_hi;
+    t->clut_page = job->clut_page;
+    t->gen = job->gen;
+    t->tex = atlas_texture;
+    t->hd = 0;
+    t->indexed = 1;
+    t->index_slot = atlas_slot;
+    t->last_use = frame_counter;
+    t->hash_next = -1;
+    texture_cache_insert(tex_slot);
+    texture_cache_asset_insert(job->asset_id, job->content_hash, tex_slot);
+    indexed_atlases[atlas_slot].last_use = frame_counter;
+    return 1;
+}
+
+/* Called only by the GS/game thread after Ps2BindTextureState has loaded TEX0 and its CLUT. */
+void pcGsPreloadCurrentTexture(unsigned int asset_id, int asset_valid, uint64_t content_hash)
+{
+    GsTexturePreloadJob* job;
+    GsTexturePreloadJob* scan;
+    u64 tex0, texa, key0, index_key0, key2, gen, cpsm_key;
+    unsigned int psm, tw, th, w, h, tbp, tbw, page_lo, stride, clut_page;
+    int pw, ph, page_cols, page_rows;
+    size_t memory_bytes;
+
+    if (!asset_valid || !pcGsTextureAssetCacheEnabled() ||
+        (gs_preload_thread == NULL) || (gs_preload_mutex == NULL))
+        return;
+
+    tex0 = gsRegs.tex0[0];
+    texa = gsRegs.texa;
+    psm = GSF(tex0, 20, 6);
+
+    /* This first implementation deliberately targets immutable, native indexed TIM2 assets.
+     * Direct-color, render-target, movie and VQ paths retain their existing synchronous path. */
+    if ((psm != GS_PSMT4) && (psm != GS_PSMT8))
+        return;
+
+    tw = GSF(tex0, 26, 4);
+    th = GSF(tex0, 30, 4);
+    if ((tw > 10) || (th > 10))
+        return;
+
+    w = 1u << tw;
+    h = 1u << th;
+    if ((w == 0) || (h == 0) || ((size_t)w * h > 1024u * 1024u))
+        return;
+
+    tbp = GSF(tex0, 0, 14);
+    tbw = GSF(tex0, 14, 6);
+    index_key0 = tex0 & 0x0000001FFFFFFFFFULL & ~(0x3ULL << 35) & ~(1ULL << 34);
+    cpsm_key = ((u64)GSF(tex0, 51, 4) << 37);
+    key0 = index_key0 | cpsm_key;
+    key2 = gsClutHash(tex0);
+    psm_page_size((int)psm, &pw, &ph);
+    stride = (tbw * 64u + (unsigned int)pw - 1u) / (unsigned int)pw;
+    if (stride == 0)
+        stride = 1;
+
+    page_lo = tbp >> 5;
+    page_cols = (int)((w + (unsigned int)pw - 1u) / (unsigned int)pw);
+    page_rows = (int)((h + (unsigned int)ph - 1u) / (unsigned int)ph);
+    clut_page = GSF(tex0, 37, 14) >> 5;
+    gen = gen_sum_rect(page_lo, stride, page_rows, page_cols);
+
+    /* If the normal renderer has already populated the complete asset, no worker job is needed. */
+    if (texture_cache_find_asset(asset_id, content_hash, key0, (int)w, (int)h,
+                                 (int)h, (int)w) >= 0)
+        return;
+
+    /* Drain finished work before enforcing the bounded queue/memory budget. */
+    gs_texture_preload_pump_uploads(8u * 1024u * 1024u);
+
+    SDL_LockMutex(gs_preload_mutex);
+    for (scan = gs_preload_all_jobs; scan != NULL; scan = scan->all_next)
+    {
+        if ((scan->asset_id == asset_id) && (scan->content_hash == content_hash) &&
+            (scan->index_key0 == index_key0) && (scan->w == (int)w) &&
+            (scan->h == (int)h))
+        {
+            SDL_UnlockMutex(gs_preload_mutex);
+            return;
+        }
+    }
+    if ((gs_preload_job_count >= GS_PRELOAD_MAX_JOBS) ||
+        (gs_preload_memory_bytes >= GS_PRELOAD_MAX_BYTES))
+    {
+        SDL_UnlockMutex(gs_preload_mutex);
+        return;
+    }
+    SDL_UnlockMutex(gs_preload_mutex);
+
+    job = (GsTexturePreloadJob*)calloc(1, sizeof(*job));
+    if (job == NULL)
+        return;
+
+    job->tex0 = tex0;
+    job->texa = texa;
+    job->texclut = gsRegs.texclut;
+    job->key0 = key0;
+    job->index_key0 = index_key0;
+    job->key1 = texa;
+    job->key2 = key2;
+    job->gen = gen;
+    job->asset_id = asset_id;
+    job->content_hash = content_hash;
+    job->page_lo = page_lo;
+    job->page_hi = page_lo + (unsigned int)(page_rows - 1) * stride + (unsigned int)page_cols;
+    job->clut_page = clut_page;
+    job->stride = stride;
+    job->w = (int)w;
+    job->h = (int)h;
+    job->rows = (int)h;
+    job->cols = (int)w;
+
+    /* The page copy and generation are captured on the same thread that performs GS writes. */
+    if (!gsMemSnapshotTexture(tex0, (int)w, (int)h, &job->snapshot) ||
+        (gen_sum_rect(page_lo, stride, page_rows, page_cols) != gen))
+    {
+        gs_texture_preload_free_job(job);
+        return;
+    }
+
+    job->indices = (unsigned char*)malloc((size_t)w * h);
+    if (job->indices == NULL)
+    {
+        gs_texture_preload_free_job(job);
+        return;
+    }
+
+    memory_bytes = (size_t)job->snapshot.page_count * 8192u + (size_t)w * h;
+    job->memory_bytes = memory_bytes;
+
+    SDL_LockMutex(gs_preload_mutex);
+    for (scan = gs_preload_all_jobs; scan != NULL; scan = scan->all_next)
+    {
+        if ((scan->asset_id == asset_id) && (scan->content_hash == content_hash) &&
+            (scan->index_key0 == index_key0) && (scan->w == (int)w) &&
+            (scan->h == (int)h))
+        {
+            SDL_UnlockMutex(gs_preload_mutex);
+            gs_texture_preload_free_job(job);
+            return;
+        }
+    }
+
+    if ((gs_preload_job_count >= GS_PRELOAD_MAX_JOBS) ||
+        (gs_preload_memory_bytes + memory_bytes > GS_PRELOAD_MAX_BYTES))
+    {
+        SDL_UnlockMutex(gs_preload_mutex);
+        gs_texture_preload_free_job(job);
+        return;
+    }
+
+    job->all_next = gs_preload_all_jobs;
+    gs_preload_all_jobs = job;
+    gs_preload_job_count++;
+    gs_preload_memory_bytes += memory_bytes;
+
+    if (gs_preload_queue_tail != NULL)
+        gs_preload_queue_tail->queue_next = job;
+    else
+        gs_preload_queue_head = job;
+    gs_preload_queue_tail = job;
+    SDL_SignalCondition(gs_preload_condition);
+    SDL_UnlockMutex(gs_preload_mutex);
+}
+
+/* GL upload is budgeted and always runs on the renderer thread. */
+static void gs_texture_preload_pump_uploads(size_t max_bytes)
+{
+    size_t uploaded_bytes = 0;
+
+    if (gs_preload_mutex == NULL)
+        return;
+
+    for (;;)
+    {
+        GsTexturePreloadJob* job;
+
+        SDL_LockMutex(gs_preload_mutex);
+        job = gs_preload_done_head;
+        if (job != NULL)
+        {
+            gs_preload_done_head = job->done_next;
+            if (gs_preload_done_head == NULL)
+                gs_preload_done_tail = NULL;
+            job->done_next = NULL;
+        }
+        SDL_UnlockMutex(gs_preload_mutex);
+
+        if (job == NULL)
+            break;
+
+        /* Do at least one job per pump to avoid starving a texture larger than the budget. */
+        if ((uploaded_bytes != 0) && (uploaded_bytes + (size_t)job->w * job->h > max_bytes))
+        {
+            SDL_LockMutex(gs_preload_mutex);
+            job->done_next = gs_preload_done_head;
+            gs_preload_done_head = job;
+            if (gs_preload_done_tail == NULL)
+                gs_preload_done_tail = job;
+            SDL_UnlockMutex(gs_preload_mutex);
+            break;
+        }
+
+        gs_texture_preload_publish(job);
+        uploaded_bytes += (size_t)job->w * job->h;
+
+        SDL_LockMutex(gs_preload_mutex);
+        gs_texture_preload_remove_all_locked(job);
+        SDL_UnlockMutex(gs_preload_mutex);
+        gs_texture_preload_free_job(job);
+
+        if (uploaded_bytes >= max_bytes)
+            break;
+    }
+}
+
 /* ------------------------------------------------------------------------------------------- */
 /* upscaled movies (pc_movie.c): while one plays, textures at its TBP sample this frame instead
  * of GS memory, like an HD texture. The frame sits at the top left of a texture that stands for
