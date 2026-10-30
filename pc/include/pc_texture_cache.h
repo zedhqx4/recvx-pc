@@ -11,4 +11,5 @@ uint64_t pcGsGetTextureBindingGeneration(void);
 void pcGsResetTextureAssetCache(void);
 /* Queue the currently bound immutable indexed TIM2 texture for background decode. */
 void pcGsPreloadCurrentTexture(unsigned int asset_id, int asset_valid, uint64_t content_hash);
+int pcGsTexturePreloaderReady(void);
 #endif
