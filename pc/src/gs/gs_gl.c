@@ -540,7 +540,7 @@ static GLuint get_texture(u64 tex0, u64 texa, u64 texclut, int w, int h, int row
              * Reuse its GL allocation instead of retaining another historical version.
              * GS writes flush pending primitives before changing VRAM, so no queued draw can
              * still depend on the old contents when this upload happens. */
-            if ((stale == NULL) || (t->last_use > stale->last_use))
+            if (!t->hd && ((stale == NULL) || (t->last_use > stale->last_use)))
             {
                 stale = t;
             }
