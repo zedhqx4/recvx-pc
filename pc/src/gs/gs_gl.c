@@ -2640,6 +2640,7 @@ void gsRendererInit(void)
 
     decode_buf = malloc(1024 * 1024 * 4);
     index_buf = malloc(1024 * 1024);
+    gs_texture_preload_init();
 
     prog = link(vs_src, fs_src);
     present_prog = link(present_vs, present_fs);
@@ -2908,6 +2909,7 @@ void gsRendererDraw(const GsDrawState* st, const GsVertex* v, int nverts)
     double perf_total_start = perf_timing ? pcOsTime() : 0.0;
     double perf_phase_start = perf_total_start;
 
+    gs_texture_preload_pump_uploads(4u * 1024u * 1024u);
     rt->last_use = frame_counter;
     stats.draws++;
     stats.verts += nverts;
@@ -3361,6 +3363,7 @@ void gsRendererPresent(unsigned int dispfb_fbp, unsigned int dispfb_fbw)
     unsigned int clut_loads, clut_flushes, clut_vertices, clut_draw_calls;
     double clut_draw_seconds;
 
+    gs_texture_preload_pump_uploads(8u * 1024u * 1024u);
     gsRendererFlush();
     /* The frame just submitted is complete; restart decal ordering for the next frame. */
     decal_draw_order = 0;
