@@ -526,17 +526,17 @@ static GLuint get_texture(u64 tex0, u64 texa, u64 texclut, int w, int h, int row
     {
         t = &texcache[i];
 
-        if (t->used && (t->key0 == key0) && (t->key1 == key1) && (t->w == w) && (t->h == h) &&
-            (t->rows == rows) && (t->cols == cols))
+        if (t->used && (t->key0 == key0) && (t->key1 == key1) && (t->key2 == key2) &&
+            (t->w == w) && (t->h == h) && (t->rows == rows) && (t->cols == cols))
         {
-            if ((t->gen == gen) && (t->key2 == key2))
+            if (t->gen == gen)
             {
                 t->last_use = frame_counter;
                 *hd = t->hd;
                 return t->tex;
             }
 
-            /* The same GS texture descriptor now has different contents (or a new CLUT).
+            /* The same GS texture descriptor and CLUT now have different pixel contents.
              * Reuse its GL allocation instead of retaining another historical version.
              * GS writes flush pending primitives before changing VRAM, so no queued draw can
              * still depend on the old contents when this upload happens. */
@@ -567,17 +567,17 @@ static GLuint get_texture(u64 tex0, u64 texa, u64 texclut, int w, int h, int row
 
         if (!t->hd)
         {
-            double t0;
+            double t0 = pcOsTime();
 
             gsDecodeTexture(tex0, texa, texclut, cols, rows, decode_buf);
-            t0 = pcOsTime();
-            glBindTexture(GL_TEXTURE_2D, t->tex);
-            glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
-            glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, cols, rows, GL_RGBA, GL_UNSIGNED_BYTE, decode_buf);
             stats.tex_decodes++;
             stats.tex_updates++;
             stats.tex_texels += cols * rows;
             stats.t_decode += pcOsTime() - t0;
+
+            glBindTexture(GL_TEXTURE_2D, t->tex);
+            glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+            glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, cols, rows, GL_RGBA, GL_UNSIGNED_BYTE, decode_buf);
         }
 
         return t->tex;
