@@ -2571,8 +2571,6 @@ void gsRendererDraw(const GsDrawState* st, const GsVertex* v, int nverts)
                 }
             }
         }
-    
-        }
     }
 
     if (rt->vram_dirty)
