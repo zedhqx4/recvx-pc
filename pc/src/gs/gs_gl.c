@@ -248,7 +248,7 @@ static unsigned int frame_counter;
 static int dump_frame;
 
 /* per-interval statistics for the periodic log */
-static struct { unsigned int frames, draws, verts, rt_loads, rt_reads, tex_decodes, tex_texels; double t_load, t_read, t_decode; } stats;
+static struct { unsigned int frames, draws, verts, rt_loads, rt_reads, tex_decodes, tex_texels, tex_updates, tex_evictions; double t_load, t_read, t_decode; } stats;
 static int tex_cached;                     /* textures in the cache, decoded from GS memory */
 static double tex_cached_bytes;            /* their size */
 
@@ -261,7 +261,8 @@ void pcGsLogStats(void)
     pcLog("gs/frame: %u draws, %u verts, %.1f rt loads (%.1f ms), %.1f rt reads (%.1f ms), %.1f tex decodes (%u texels, %.1f ms)",
           stats.draws / f, stats.verts / f, (double)stats.rt_loads / f, stats.t_load * 1000 / f, (double)stats.rt_reads / f,
           stats.t_read * 1000 / f, (double)stats.tex_decodes / f, stats.tex_texels / f, stats.t_decode * 1000 / f);
-    pcLog("gs: %d textures cached (%.0f MB)", tex_cached, tex_cached_bytes / 1048576.0);
+    pcLog("gs: %d textures cached (%.0f MB), %u in-place updates, %u evictions",
+          tex_cached, tex_cached_bytes / 1048576.0, stats.tex_updates, stats.tex_evictions);
     memset(&stats, 0, sizeof(stats));
 }
 
@@ -477,6 +478,7 @@ static GLuint get_texture(u64 tex0, u64 texa, u64 texclut, int w, int h, int row
     unsigned int page_lo, page_hi, clut_page, stride;
     unsigned long long gen;
     CachedTex* t;
+    CachedTex* stale = NULL;
 
     key0 |= cpsm_key;
     psm_page_size(psm, &pw, &ph);
@@ -524,12 +526,24 @@ static GLuint get_texture(u64 tex0, u64 texa, u64 texclut, int w, int h, int row
     {
         t = &texcache[i];
 
-        if (t->used && (t->gen == gen) && (t->key0 == key0) && (t->key1 == key1) && (t->key2 == key2) && (t->w == w) && (t->h == h) &&
+        if (t->used && (t->key0 == key0) && (t->key1 == key1) && (t->w == w) && (t->h == h) &&
             (t->rows == rows) && (t->cols == cols))
         {
-            t->last_use = frame_counter;
-            *hd = t->hd;
-            return t->tex;
+            if ((t->gen == gen) && (t->key2 == key2))
+            {
+                t->last_use = frame_counter;
+                *hd = t->hd;
+                return t->tex;
+            }
+
+            /* The same GS texture descriptor now has different contents (or a new CLUT).
+             * Reuse its GL allocation instead of retaining another historical version.
+             * GS writes flush pending primitives before changing VRAM, so no queued draw can
+             * still depend on the old contents when this upload happens. */
+            if ((stale == NULL) || (t->last_use > stale->last_use))
+            {
+                stale = t;
+            }
         }
 
         if (!t->used && (slot < 0))
@@ -543,9 +557,36 @@ static GLuint get_texture(u64 tex0, u64 texa, u64 texclut, int w, int h, int row
         }
     }
 
+    if (stale != NULL)
+    {
+        t = stale;
+        t->gen = gen;
+        t->key2 = key2;
+        t->last_use = frame_counter;
+        *hd = t->hd;
+
+        if (!t->hd)
+        {
+            double t0;
+
+            gsDecodeTexture(tex0, texa, texclut, cols, rows, decode_buf);
+            t0 = pcOsTime();
+            glBindTexture(GL_TEXTURE_2D, t->tex);
+            glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+            glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, cols, rows, GL_RGBA, GL_UNSIGNED_BYTE, decode_buf);
+            stats.tex_decodes++;
+            stats.tex_updates++;
+            stats.tex_texels += cols * rows;
+            stats.t_decode += pcOsTime() - t0;
+        }
+
+        return t->tex;
+    }
+
     if (slot < 0)
     {
         slot = oldest;
+        stats.tex_evictions++;
 
         if (!texcache[slot].hd)
         {
