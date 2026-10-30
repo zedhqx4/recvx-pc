@@ -393,23 +393,19 @@ unsigned int gsMemReadSnapshot(const GsMemSnapshot* snapshot, int psm, unsigned 
     case GS_PSMCT16:
         p = snapshot_address(snapshot, addr16(bp, bw, x, y, blockTable16));
         if (p == NULL) return 0;
-        memcpy(&value, p, sizeof(unsigned short));
-        return value & 0xFFFFu;
+        { unsigned short small; memcpy(&small, p, sizeof(small)); return small; }
     case GS_PSMCT16S:
         p = snapshot_address(snapshot, addr16(bp, bw, x, y, blockTable16S));
         if (p == NULL) return 0;
-        memcpy(&value, p, sizeof(unsigned short));
-        return value & 0xFFFFu;
+        { unsigned short small; memcpy(&small, p, sizeof(small)); return small; }
     case GS_PSMZ16:
         p = snapshot_address(snapshot, addr16(bp, bw, x, y, blockTable16Z));
         if (p == NULL) return 0;
-        memcpy(&value, p, sizeof(unsigned short));
-        return value & 0xFFFFu;
+        { unsigned short small; memcpy(&small, p, sizeof(small)); return small; }
     case GS_PSMZ16S:
         p = snapshot_address(snapshot, addr16(bp, bw, x, y, blockTable16SZ));
         if (p == NULL) return 0;
-        memcpy(&value, p, sizeof(unsigned short));
-        return value & 0xFFFFu;
+        { unsigned short small; memcpy(&small, p, sizeof(small)); return small; }
     case GS_PSMT8:
         p = snapshot_address(snapshot, addr8(bp, bw, x, y));
         return (p != NULL) ? *p : 0;
