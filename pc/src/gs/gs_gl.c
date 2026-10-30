@@ -2059,6 +2059,11 @@ static int gs_texture_preload_publish(GsTexturePreloadJob* job)
     return 1;
 }
 
+int pcGsTexturePreloaderReady(void)
+{
+    return gs_preload_thread != NULL;
+}
+
 /* Called only by the GS/game thread after Ps2BindTextureState has loaded TEX0 and its CLUT. */
 void pcGsPreloadCurrentTexture(unsigned int asset_id, int asset_valid, uint64_t content_hash)
 {
