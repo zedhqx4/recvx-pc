@@ -2880,6 +2880,8 @@ int Ps2TexLoad(NJS_TEXMEMLIST* addr)
 
 #ifdef TARGET_PC
     pcGsSetTextureAssetIdentity(timp->Gindex, asset_cache_eligible, image_content_hash);
+    if (asset_cache_eligible && !asset_cache_hit)
+        pcGsPreloadCurrentTexture(timp->Gindex, 1, image_content_hash);
     if (asset_cache_eligible)
     {
         pc_ps2_texture_bind_cache.valid = 1;
