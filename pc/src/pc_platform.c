@@ -54,7 +54,8 @@ static void pcVramViewerOpen(void)
 
     if (vram_window != NULL) return;
 
-    vram_window = SDL_CreateWindow("GS VRAM - raw byte map (4 MiB)", 1024, 1024, SDL_WINDOW_RESIZABLE);
+    vram_window = SDL_CreateWindow("GS VRAM - raw byte map (4 MiB)", 900, 900,
+                                      SDL_WINDOW_RESIZABLE | SDL_WINDOW_NOT_FOCUSABLE);
     if (vram_window == NULL)
     {
         pcLog("VRAM viewer: could not create window: %s", SDL_GetError());
