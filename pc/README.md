@@ -110,6 +110,8 @@ Environment variables for testing:
 | `RECVX_SPEED=<n>` | run n times faster |
 | `RECVX_SHOTS=<seconds>` | save screenshots to `shots/` periodically |
 | `RECVX_GSDUMP=<frame>` | log every GS draw of that frame |
+| `RECVX_UV_TRACE=1` | trace the UV pipeline: GS UV register at vertex latch, OpenGL vertex attributes, FST/STQ shader-coordinate conversion and final texture sampling coordinates; output is bounded per source/path |
+| `RECVX_VRAM_VIEWER=1` | enable the raw GS VRAM inspector (press `L`); disabled by default |
 | `RECVX_DATA`, `RECVX_ISO`, `RECVX_SAVES`, `RECVX_HDTEX`, `RECVX_MOD` | override the `recvx.ini` paths |
 | `RECVX_WARP=<stage>,<room>[,<entrance>[,<room case>[,<player>]]]` | a new game starts in that room instead of the first one (stage 7 room 11 is `RM_7110.RDX`; player 0 Claire, 1 Chris); the input script's presses still apply |
 | `RECVX_TEST_DOOR=<area>[,<presses>]` | action press number `<presses>` in play (default 1) uses trigger area `<area>` of the current room: a door area as if walked through, any other area as if examined (for testing random doors) |
