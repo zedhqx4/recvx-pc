@@ -2356,6 +2356,7 @@ void gsRendererDraw(const GsDrawState* st, const GsVertex* v, int nverts)
     int indexed_texture = 0;
     GLuint palette_texture = 0;
     int trace_tw = 0, trace_th = 0, trace_hd = 0, trace_movie = 0, trace_texrt = 0;
+    int trace_rt_w = 0, trace_rt_h = 0;
     int perf_timing = gs_perf_timing_enabled();
     double perf_total_start = perf_timing ? pcOsTime() : 0.0;
     double perf_phase_start = perf_total_start;
@@ -2599,6 +2600,8 @@ void gsRendererDraw(const GsDrawState* st, const GsVertex* v, int nverts)
             glUniform1i(U.texrt, (gsPsmBits(tpsm) == 16) ? 2 : 1);
             glUniform1i(U.hd, 0);
             trace_texrt = (gsPsmBits(tpsm) == 16) ? 2 : 1;
+            trace_rt_w = src->w;
+            trace_rt_h = src->h;
             glUniform2f(U.rtsize, (float)src->w, (float)src->h);
             glUniform3f(U.texa, (float)GSF(st->texa, 0, 8), (float)GSF(st->texa, 32, 8), (float)GSF(st->texa, 15, 1));
         }
@@ -2680,8 +2683,9 @@ void gsRendererDraw(const GsDrawState* st, const GsVertex* v, int nverts)
                       j, glverts[j].x, glverts[j].y, glverts[j].u, glverts[j].v,
                       glverts[j].s, glverts[j].t, glverts[j].q,
                       glverts[j].cu0, glverts[j].cv0, glverts[j].cu1, glverts[j].cv1,
-                      su, sv, (trace_hd && trace_tw && trace_th) ? su / trace_tw : su,
-                      (trace_hd && trace_tw && trace_th) ? sv / trace_th : sv);
+                      su, sv,
+                      (trace_texrt && trace_rt_w) ? su / trace_rt_w : ((trace_hd && trace_tw) ? su / trace_tw : su),
+                      (trace_texrt && trace_rt_h) ? sv / trace_rt_h : ((trace_hd && trace_th) ? sv / trace_th : sv));
             }
             (*count)++;
         }
