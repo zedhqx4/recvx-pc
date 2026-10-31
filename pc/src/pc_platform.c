@@ -24,6 +24,26 @@ static struct { double last, sum, worst, swap, present; int n; } frame_time;
 
 static SDL_Window* window;
 
+/* The raw VRAM inspector is a development-only tool. Keep it completely opt-in. */
+static int pcVramViewerEnabled(void)
+{
+    static int initialized;
+    static int enabled;
+
+    if (!initialized)
+    {
+        const char* value = SDL_getenv("RECVX_VRAM_VIEWER");
+        enabled = (value != NULL) && (atoi(value) != 0);
+        initialized = 1;
+        if (enabled)
+        {
+            pcLog("VRAM viewer: enabled by RECVX_VRAM_VIEWER");
+        }
+    }
+
+    return enabled;
+}
+
 /* Diagnostic GS VRAM viewer: one grayscale pixel per byte, in physical address order.
  * It deliberately reads gsVram directly and does not use or modify the OpenGL texture cache. */
 #define PC_VRAM_VIEW_W 2048
@@ -95,7 +115,7 @@ static void pcVramViewerUpdate(void)
     Uint64 now;
     int i;
 
-    if (vram_window == NULL) return;
+    if (!pcVramViewerEnabled() || (vram_window == NULL)) return;
     now = SDL_GetTicks();
     if (now - vram_last_update < 250) return; /* 4 Hz: keep diagnostic overhead bounded */
     vram_last_update = now;
@@ -1159,9 +1179,10 @@ int pcVideoPumpEvents(void)
             SDL_ShowCursor(SDL_ENABLE);
         }
 
-        /* L toggles the raw GS VRAM inspector; consume both edges so the game never sees it. */
-        if (((ev.type == SDL_EVENT_KEY_DOWN) || (ev.type == SDL_EVENT_KEY_UP)) &&
-            (ev.key.scancode == SDL_SCANCODE_L))
+        /* L toggles the raw GS VRAM inspector only when explicitly enabled for diagnostics. */
+        if (pcVramViewerEnabled() &&
+            (((ev.type == SDL_EVENT_KEY_DOWN) || (ev.type == SDL_EVENT_KEY_UP)) &&
+             (ev.key.scancode == SDL_SCANCODE_L)))
         {
             if ((ev.type == SDL_EVENT_KEY_DOWN) && !ev.key.repeat)
             {
