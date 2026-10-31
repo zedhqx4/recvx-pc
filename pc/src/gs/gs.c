@@ -242,21 +242,22 @@ static void latch_vertex(u64 xyz, int has_f, int kick)
         unsigned int tbp = GSF(gsRegs.tex0[c], 0, 14);
         int tme = GSF(active_prim, 4, 1);
         int fst = GSF(active_prim, 8, 1);
-        unsigned int* count;
-
-        if (!tme) goto uv_trace_done;
-        count = (tbp == 14208) ? &movie_samples : &static_samples[fst];
+        int active_type = GSF(active_prim, 0, 3);
         unsigned int limit = (tbp == 14208) ? 24 : 12;
 
-        if (*count < limit)
+        if (tme)
         {
-            pcLog("UVTRACE GS latch src=%s TBP=%u type=%d FST=%d ctxt=%d rawUV=%016llx UV=(%.3f,%.3f) STQ=(%.7g,%.7g,%.7g) kick=%d",
-                  (tbp == 14208) ? "movie" : "static", tbp, type, fst, c,
-                  (unsigned long long)gsRegs.uv, v.u, v.v, v.s, v.t, v.q, kick);
-            (*count)++;
+            unsigned int* count = (tbp == 14208) ? &movie_samples : &static_samples[fst];
+
+            if (*count < limit)
+            {
+                pcLog("UVTRACE GS latch src=%s TBP=%u type=%d FST=%d ctxt=%d rawUV=%016llx UV=(%.3f,%.3f) STQ=(%.7g,%.7g,%.7g) kick=%d",
+                      (tbp == 14208) ? "movie" : "static", tbp, active_type, fst, c,
+                      (unsigned long long)gsRegs.uv, v.u, v.v, v.s, v.t, v.q, kick);
+                (*count)++;
+            }
         }
     }
-uv_trace_done:
 
     vq[0] = vq[1];
     vq[1] = vq[2];
