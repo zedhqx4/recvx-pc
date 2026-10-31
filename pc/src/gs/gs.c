@@ -42,7 +42,7 @@ int gsUvTraceEnabled(void)
     if (enabled < 0)
     {
         const char* value = getenv("RECVX_UV_TRACE");
-        enabled = (value != NULL && value[0] == '1' && value[1] == '\\0') ? 1 : 0;
+        enabled = (value != NULL && value[0] == '1' && value[1] == '\0') ? 1 : 0;
     }
 
     return enabled;
