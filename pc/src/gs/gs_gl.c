@@ -19,6 +19,8 @@
 
 /* Defined by gs.c; renderer timing is disabled unless RECVX_GS_TEX_DIAG=1. */
 extern int gsTextureDiagnosticsEnabled(void);
+/* Defined by gs.c; UV tracing is opt-in via RECVX_UV_TRACE=1. */
+extern int gsUvTraceEnabled(void);
 
 int pcGsScale = 3;
 float pcGsScaleX = 3.0f;
@@ -2353,6 +2355,7 @@ void gsRendererDraw(const GsDrawState* st, const GsVertex* v, int nverts)
     int n = 0, i;
     int indexed_texture = 0;
     GLuint palette_texture = 0;
+    int trace_tw = 0, trace_th = 0, trace_hd = 0, trace_movie = 0, trace_texrt = 0;
     int perf_timing = gs_perf_timing_enabled();
     double perf_total_start = perf_timing ? pcOsTime() : 0.0;
     double perf_phase_start = perf_total_start;
@@ -2558,6 +2561,9 @@ void gsRendererDraw(const GsDrawState* st, const GsVertex* v, int nverts)
     {
         int tw = 1 << GSF(st->tex0, 26, 4), th = 1 << GSF(st->tex0, 30, 4);
         unsigned int tbp = GSF(st->tex0, 0, 14);
+
+        trace_tw = tw;
+        trace_th = th;
         unsigned int tpsm = GSF(st->tex0, 20, 6);
         RenderTarget* src = NULL;
         int linear = GSF(st->tex1, 5, 1);
@@ -2592,6 +2598,7 @@ void gsRendererDraw(const GsDrawState* st, const GsVertex* v, int nverts)
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, linear ? GL_LINEAR : GL_NEAREST);
             glUniform1i(U.texrt, (gsPsmBits(tpsm) == 16) ? 2 : 1);
             glUniform1i(U.hd, 0);
+            trace_texrt = (gsPsmBits(tpsm) == 16) ? 2 : 1;
             glUniform2f(U.rtsize, (float)src->w, (float)src->h);
             glUniform3f(U.texa, (float)GSF(st->texa, 0, 8), (float)GSF(st->texa, 32, 8), (float)GSF(st->texa, 15, 1));
         }
@@ -2602,6 +2609,8 @@ void gsRendererDraw(const GsDrawState* st, const GsVertex* v, int nverts)
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
             glUniform1i(U.texrt, 0);
             glUniform1i(U.hd, 1);
+            trace_movie = 1;
+            trace_hd = 1;
         }
         else
         {
@@ -2614,6 +2623,7 @@ void gsRendererDraw(const GsDrawState* st, const GsVertex* v, int nverts)
             pcGsBindTexture(GL_TEXTURE_2D, gt);
             glUniform1i(U.texrt, 0);
             glUniform1i(U.hd, hd);
+            trace_hd = hd;
 
             if (hd)
             {
@@ -2635,6 +2645,46 @@ void gsRendererDraw(const GsDrawState* st, const GsVertex* v, int nverts)
         glUniform2i(U.wrap, GSF(st->clamp, 0, 2), GSF(st->clamp, 2, 2));
         glUniform4i(U.region, GSF(st->clamp, 4, 10), GSF(st->clamp, 14, 10), GSF(st->clamp, 24, 10), GSF(st->clamp, 34, 10));
         glUniform1i(U.linear, linear);
+    }
+
+    /* Report the exact per-vertex coordinates selected by the fragment shader.
+     * FST=1 clamps integer UVs; FST=0 converts ST/Q to texture-texel units. */
+    if (gsUvTraceEnabled() && st->tme)
+    {
+        static unsigned int movie_draws;
+        static unsigned int static_draws[2];
+        unsigned int tbp = GSF(st->tex0, 0, 14);
+        unsigned int* count = trace_movie ? &movie_draws : &static_draws[st->fst != 0];
+        unsigned int limit = trace_movie ? 24 : 12;
+
+        if (*count < limit)
+        {
+            int j, shown = (n < 4) ? n : 4;
+            pcLog("UVTRACE GL draw src=%s TBP=%u type=%d FST=%d nGS=%d nGL=%d tex=%dx%d HD=%d TexRT=%d",
+                  trace_movie ? "movie" : "static", tbp, st->type, st->fst, nverts, n,
+                  trace_tw, trace_th, trace_hd, trace_texrt);
+            for (j = 0; j < shown; j++)
+            {
+                float su, sv;
+                if (st->fst)
+                {
+                    su = fminf(fmaxf(glverts[j].u, glverts[j].cu0), glverts[j].cu1);
+                    sv = fminf(fmaxf(glverts[j].v, glverts[j].cv0), glverts[j].cv1);
+                }
+                else
+                {
+                    su = (glverts[j].s / glverts[j].q) * trace_tw;
+                    sv = (glverts[j].t / glverts[j].q) * trace_th;
+                }
+                pcLog("UVTRACE GL v%d pos=(%.2f,%.2f) UVin=(%.3f,%.3f) STQ=(%.7g,%.7g,%.7g) clamp=(%.3f,%.3f..%.3f,%.3f) shaderUV=(%.3f,%.3f) sampleUV=(%.6f,%.6f)",
+                      j, glverts[j].x, glverts[j].y, glverts[j].u, glverts[j].v,
+                      glverts[j].s, glverts[j].t, glverts[j].q,
+                      glverts[j].cu0, glverts[j].cv0, glverts[j].cu1, glverts[j].cv1,
+                      su, sv, (trace_hd && trace_tw && trace_th) ? su / trace_tw : su,
+                      (trace_hd && trace_tw && trace_th) ? sv / trace_th : sv);
+            }
+            (*count)++;
+        }
     }
 
     /* Do not let render-target, movie, untextured, or direct-color draws inherit
