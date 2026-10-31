@@ -2570,6 +2570,7 @@ void Ps2InitTexCache()
     Ps2PcTextureSourceCacheReset();
     pcGsResetTextureAssetCache();
     pcGsSetTextureAssetIdentity(0, 0, 0);
+    pcGsSetTextureSourceIdentity(0, -1, 0);
 #endif
 }
 
@@ -2852,6 +2853,7 @@ int Ps2TexLoad(NJS_TEXMEMLIST* addr)
             pc_ps2_texture_bind_cache.render_sub_flag == PS2_Render_tex_sub_flag)
         {
             Ps2_tex_cache_buff[0] = addr->texinfo.texsurface.pSurface;
+            pcGsSetTextureSourceIdentity(timp->Gindex, addr->bank, timp->Gindex != 0xFFFFFFFFU);
             if (profile_texture)
             {
                 pcGameProfileRecordTextureLoad(pcGameProfileNowMs() - profile_texload_t0, 0.0, 0);
@@ -2880,6 +2882,7 @@ int Ps2TexLoad(NJS_TEXMEMLIST* addr)
 
 #ifdef TARGET_PC
     pcGsSetTextureAssetIdentity(timp->Gindex, asset_cache_eligible, image_content_hash);
+    pcGsSetTextureSourceIdentity(timp->Gindex, addr->bank, timp->Gindex != 0xFFFFFFFFU);
     if (asset_cache_eligible)
     {
         pc_ps2_texture_bind_cache.valid = 1;

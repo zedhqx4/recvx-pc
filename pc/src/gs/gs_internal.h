@@ -51,9 +51,12 @@ typedef struct {
     int iip, tme, fge, abe, aa1, fst, ctxt, fix;
     u64 tex0, tex1, clamp, alpha, test, fba, frame, zbuf, scissor;
     u64 texa, fogcol, pabe, dthe, colclamp, texclut;
-    unsigned int texture_asset_id; /* TIM2 Gindex */
+    unsigned int texture_asset_id; /* TIM2 Gindex, used by the texture cache */
     uint64_t texture_asset_content_hash; /* source index-plane content */
-    int texture_asset_valid;
+    int texture_asset_valid; /* cache eligibility, not source identity validity */
+    unsigned int texture_source_id; /* TIM2 Gindex supplied by Ps2TexLoad */
+    int texture_source_bank; /* PS2 texture bank / CLUT variant */
+    int texture_source_valid;
 } GsDrawState;
 
 /* gs_mem.c */

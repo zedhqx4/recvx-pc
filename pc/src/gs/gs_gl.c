@@ -8,6 +8,7 @@
  * Colors stay in GS units in the shader (0x80 = 1.0 for vertex colors and alpha); render target
  * alpha holds As / 128 so the GS blend factor As maps to GL_SRC_ALPHA.
  */
+#include <float.h>
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
@@ -21,6 +22,54 @@
 extern int gsTextureDiagnosticsEnabled(void);
 /* Defined by gs.c; UV tracing is opt-in via RECVX_UV_TRACE=1. */
 extern int gsUvTraceEnabled(void);
+
+#define UV_TRACE_ASSET_SLOTS 256
+#define UV_TRACE_DRAWS_PER_ASSET 8
+
+typedef struct
+{
+    int used;
+    unsigned int gindex;
+    int bank;
+    unsigned int draws;
+} UvTraceAssetBudget;
+
+static UvTraceAssetBudget uvTraceAssetBudgets[UV_TRACE_ASSET_SLOTS];
+static unsigned int uvTraceDrawSequence;
+
+static int gsUvTraceClaimAssetDraw(unsigned int gindex, int bank)
+{
+    int i, free_slot = -1;
+
+    for (i = 0; i < UV_TRACE_ASSET_SLOTS; i++)
+    {
+        UvTraceAssetBudget* entry = &uvTraceAssetBudgets[i];
+
+        if (!entry->used)
+        {
+            if (free_slot < 0)
+                free_slot = i;
+            continue;
+        }
+
+        if ((entry->gindex == gindex) && (entry->bank == bank))
+        {
+            if (entry->draws >= UV_TRACE_DRAWS_PER_ASSET)
+                return 0;
+            entry->draws++;
+            return 1;
+        }
+    }
+
+    if (free_slot < 0)
+        return 0;
+
+    uvTraceAssetBudgets[free_slot].used = 1;
+    uvTraceAssetBudgets[free_slot].gindex = gindex;
+    uvTraceAssetBudgets[free_slot].bank = bank;
+    uvTraceAssetBudgets[free_slot].draws = 1;
+    return 1;
+}
 
 int pcGsScale = 3;
 float pcGsScaleX = 3.0f;
@@ -2650,44 +2699,60 @@ void gsRendererDraw(const GsDrawState* st, const GsVertex* v, int nverts)
         glUniform1i(U.linear, linear);
     }
 
-    /* Report the exact per-vertex coordinates selected by the fragment shader.
-     * FST=1 clamps integer UVs; FST=0 converts ST/Q to texture-texel units. */
-    if (gsUvTraceEnabled() && st->tme)
+    /* Trace only PS2 TIM2-backed 3D geometry. Screen/UI sprites, video, render-target
+     * sampling, and draws without a Ps2TexLoad source identity are deliberately excluded. */
+    if (gsUvTraceEnabled() && st->tme && !st->fst &&
+        (st->type >= 3) && (st->type <= 5) &&
+        st->texture_source_valid && !trace_movie && !trace_texrt &&
+        gsUvTraceClaimAssetDraw(st->texture_source_id, st->texture_source_bank))
     {
-        static unsigned int movie_draws;
-        static unsigned int static_draws[2];
-        unsigned int tbp = GSF(st->tex0, 0, 14);
-        unsigned int* count = trace_movie ? &movie_draws : &static_draws[st->fst != 0];
-        unsigned int limit = trace_movie ? 24 : 12;
+        float u_min = FLT_MAX, v_min = FLT_MAX;
+        float u_max = -FLT_MAX, v_max = -FLT_MAX;
+        int valid_uv = 0;
+        int j, shown = (n < 6) ? n : 6;
+        unsigned int sequence = ++uvTraceDrawSequence;
 
-        if (*count < limit)
+        for (i = 0; i < n; i++)
         {
-            int j, shown = (n < 4) ? n : 4;
-            pcLog("UVTRACE GL draw src=%s TBP=%u type=%d FST=%d nGS=%d nGL=%d tex=%dx%d HD=%d TexRT=%d",
-                  trace_movie ? "movie" : "static", tbp, st->type, st->fst, nverts, n,
-                  trace_tw, trace_th, trace_hd, trace_texrt);
-            for (j = 0; j < shown; j++)
+            float q = glverts[i].q;
+            if (!isfinite(q) || (fabsf(q) < 1.0e-20f))
+                continue;
+
             {
-                float su, sv;
-                if (st->fst)
-                {
-                    su = fminf(fmaxf(glverts[j].u, glverts[j].cu0), glverts[j].cu1);
-                    sv = fminf(fmaxf(glverts[j].v, glverts[j].cv0), glverts[j].cv1);
-                }
-                else
-                {
-                    su = (glverts[j].s / glverts[j].q) * trace_tw;
-                    sv = (glverts[j].t / glverts[j].q) * trace_th;
-                }
-                pcLog("UVTRACE GL v%d pos=(%.2f,%.2f) UVin=(%.3f,%.3f) STQ=(%.7g,%.7g,%.7g) clamp=(%.3f,%.3f..%.3f,%.3f) shaderUV=(%.3f,%.3f) sampleUV=(%.6f,%.6f)",
-                      j, glverts[j].x, glverts[j].y, glverts[j].u, glverts[j].v,
-                      glverts[j].s, glverts[j].t, glverts[j].q,
-                      glverts[j].cu0, glverts[j].cv0, glverts[j].cu1, glverts[j].cv1,
-                      su, sv,
-                      (trace_texrt && trace_rt_w) ? su / trace_rt_w : ((trace_hd && trace_tw) ? su / trace_tw : su),
-                      (trace_texrt && trace_rt_h) ? sv / trace_rt_h : ((trace_hd && trace_th) ? sv / trace_th : sv));
+                float su = (glverts[i].s / q) * trace_tw;
+                float sv = (glverts[i].t / q) * trace_th;
+                if (!isfinite(su) || !isfinite(sv))
+                    continue;
+                if (su < u_min) u_min = su;
+                if (su > u_max) u_max = su;
+                if (sv < v_min) v_min = sv;
+                if (sv > v_max) v_max = sv;
+                valid_uv++;
             }
-            (*count)++;
+        }
+
+        pcLog("UVTRACE PS2ASSET draw=%u Gindex=%08x bank=%d TBP=%u type=%d FST=%d nGS=%d nGL=%d tex=%dx%d uvVerts=%d shaderUV=(%.3f..%.3f, %.3f..%.3f) normalized=(%.6f..%.6f, %.6f..%.6f) CLAMP=%016llx",
+              sequence, st->texture_source_id, st->texture_source_bank,
+              GSF(st->tex0, 0, 14), st->type, st->fst, nverts, n, trace_tw, trace_th,
+              valid_uv, (valid_uv ? u_min : 0.0f), (valid_uv ? u_max : 0.0f),
+              (valid_uv ? v_min : 0.0f), (valid_uv ? v_max : 0.0f),
+              (valid_uv && trace_tw ? u_min / trace_tw : 0.0f),
+              (valid_uv && trace_tw ? u_max / trace_tw : 0.0f),
+              (valid_uv && trace_th ? v_min / trace_th : 0.0f),
+              (valid_uv && trace_th ? v_max / trace_th : 0.0f),
+              (unsigned long long)st->clamp);
+
+        for (j = 0; j < shown; j++)
+        {
+            float q = glverts[j].q;
+            float su = (isfinite(q) && (fabsf(q) >= 1.0e-20f)) ?
+                       (glverts[j].s / q) * trace_tw : 0.0f;
+            float sv = (isfinite(q) && (fabsf(q) >= 1.0e-20f)) ?
+                       (glverts[j].t / q) * trace_th : 0.0f;
+            pcLog("UVTRACE PS2ASSET v%d STQ=(%.8g,%.8g,%.8g) shaderUV=(%.3f,%.3f) normalized=(%.6f,%.6f)",
+                  j, glverts[j].s, glverts[j].t, q, su, sv,
+                  (trace_tw ? su / trace_tw : 0.0f),
+                  (trace_th ? sv / trace_th : 0.0f));
         }
     }
 

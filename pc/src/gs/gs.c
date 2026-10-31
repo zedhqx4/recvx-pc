@@ -16,6 +16,9 @@ GsRegs gsRegs;
 static unsigned int gsTextureAssetId[2];
 static uint64_t gsTextureAssetContentHash[2];
 static int gsTextureAssetValid[2];
+static unsigned int gsTextureSourceId[2];
+static int gsTextureSourceBank[2];
+static int gsTextureSourceValid[2];
 static uint64_t gsTextureBindingGeneration;
 int gsDumpFrame;
 static int kicks;
@@ -53,6 +56,13 @@ void pcGsSetTextureAssetIdentity(unsigned int asset_id, int valid, uint64_t cont
     gsTextureAssetId[0] = asset_id;
     gsTextureAssetContentHash[0] = valid ? content_hash : 0;
     gsTextureAssetValid[0] = valid != 0;
+}
+
+void pcGsSetTextureSourceIdentity(unsigned int asset_id, int bank, int valid)
+{
+    gsTextureSourceId[0] = asset_id;
+    gsTextureSourceBank[0] = valid ? bank : -1;
+    gsTextureSourceValid[0] = valid != 0;
 }
 
 uint64_t pcGsGetTextureBindingGeneration(void)
@@ -107,6 +117,9 @@ static void current_state(GsDrawState* st)
     st->texture_asset_id = gsTextureAssetId[c];
     st->texture_asset_content_hash = gsTextureAssetContentHash[c];
     st->texture_asset_valid = gsTextureAssetValid[c];
+    st->texture_source_id = gsTextureSourceId[c];
+    st->texture_source_bank = gsTextureSourceBank[c];
+    st->texture_source_valid = gsTextureSourceValid[c];
 }
 
 static unsigned int frameClutLoads;
@@ -232,33 +245,6 @@ static void latch_vertex(u64 xyz, int has_f, int kick)
     v.u = GSF(gsRegs.uv, 0, 14) / 16.0f;
     v.v = GSF(gsRegs.uv, 16, 14) / 16.0f;
 
-    /* Capture the raw GS UV register at the exact point it becomes a vertex attribute.
-     * Keep separate small budgets for movie TBP 14208 and ordinary textured geometry. */
-    if (gsUvTraceEnabled())
-    {
-        static unsigned int movie_samples;
-        static unsigned int static_samples[2];
-        u64 active_prim = GSF(gsRegs.prmodecont, 0, 1) ? gsRegs.prim : gsRegs.prmode;
-        unsigned int tbp = GSF(gsRegs.tex0[c], 0, 14);
-        int tme = GSF(active_prim, 4, 1);
-        int fst = GSF(active_prim, 8, 1);
-        int active_type = GSF(active_prim, 0, 3);
-        unsigned int limit = (tbp == 14208) ? 24 : 12;
-
-        if (tme)
-        {
-            unsigned int* count = (tbp == 14208) ? &movie_samples : &static_samples[fst];
-
-            if (*count < limit)
-            {
-                pcLog("UVTRACE GS latch src=%s TBP=%u type=%d FST=%d ctxt=%d rawUV=%016llx UV=(%.3f,%.3f) STQ=(%.7g,%.7g,%.7g) kick=%d",
-                      (tbp == 14208) ? "movie" : "static", tbp, active_type, fst, c,
-                      (unsigned long long)gsRegs.uv, v.u, v.v, v.s, v.t, v.q, kick);
-                (*count)++;
-            }
-        }
-    }
-
     vq[0] = vq[1];
     vq[1] = vq[2];
     vq[2] = v;
@@ -365,8 +351,18 @@ void gsWriteReg(int reg, u64 value)
     case 0x03: gsRegs.uv = value; break;
     case 0x04: latch_vertex(value, 1, 1); break;
     case 0x05: latch_vertex(value, 0, 1); break;
-    case 0x06: gsRegs.tex0[0] = value; gsTextureAssetId[0] = 0; gsTextureAssetContentHash[0] = 0; gsTextureAssetValid[0] = 0; clut_load(value); break;
-    case 0x07: gsRegs.tex0[1] = value; gsTextureAssetId[1] = 0; gsTextureAssetContentHash[1] = 0; gsTextureAssetValid[1] = 0; clut_load(value); break;
+    case 0x06:
+        gsRegs.tex0[0] = value;
+        gsTextureAssetId[0] = 0; gsTextureAssetContentHash[0] = 0; gsTextureAssetValid[0] = 0;
+        gsTextureSourceId[0] = 0; gsTextureSourceBank[0] = -1; gsTextureSourceValid[0] = 0;
+        clut_load(value);
+        break;
+    case 0x07:
+        gsRegs.tex0[1] = value;
+        gsTextureAssetId[1] = 0; gsTextureAssetContentHash[1] = 0; gsTextureAssetValid[1] = 0;
+        gsTextureSourceId[1] = 0; gsTextureSourceBank[1] = -1; gsTextureSourceValid[1] = 0;
+        clut_load(value);
+        break;
     case 0x08: gsRegs.clamp[0] = value; break;
     case 0x09: gsRegs.clamp[1] = value; break;
     case 0x0a: gsRegs.fog = value; break;
@@ -384,6 +380,9 @@ void gsWriteReg(int reg, u64 value)
         gsTextureAssetId[c] = 0;
         gsTextureAssetContentHash[c] = 0;
         gsTextureAssetValid[c] = 0;
+        gsTextureSourceId[c] = 0;
+        gsTextureSourceBank[c] = -1;
+        gsTextureSourceValid[c] = 0;
         gsRegs.tex2[c] = value;
         gsRegs.tex0[c] = (gsRegs.tex0[c] & ~mask) | (value & mask);
         clut_load(gsRegs.tex0[c] | (value & (7ULL << 61)));

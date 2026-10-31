@@ -110,7 +110,7 @@ Environment variables for testing:
 | `RECVX_SPEED=<n>` | run n times faster |
 | `RECVX_SHOTS=<seconds>` | save screenshots to `shots/` periodically |
 | `RECVX_GSDUMP=<frame>` | log every GS draw of that frame |
-| `RECVX_UV_TRACE=1` | trace the UV pipeline: GS UV register at vertex latch, OpenGL vertex attributes, FST/STQ shader-coordinate conversion and final texture sampling coordinates; output is bounded per source/path |
+| `RECVX_UV_TRACE=1` | trace only textured 3D draws backed by `Ps2TexLoad()`: TIM2 Gindex/bank, full-draw STQ-to-shader-UV bounds, and up to six vertex samples; excludes UI/sprites, video, render-target sampling, and untagged draws. Output is capped at eight draws per Gindex/bank |
 | `RECVX_VRAM_VIEWER=1` | enable the raw GS VRAM inspector (press `L`); disabled by default |
 | `RECVX_DATA`, `RECVX_ISO`, `RECVX_SAVES`, `RECVX_HDTEX`, `RECVX_MOD` | override the `recvx.ini` paths |
 | `RECVX_WARP=<stage>,<room>[,<entrance>[,<room case>[,<player>]]]` | a new game starts in that room instead of the first one (stage 7 room 11 is `RM_7110.RDX`; player 0 Claire, 1 Chris); the input script's presses still apply |
