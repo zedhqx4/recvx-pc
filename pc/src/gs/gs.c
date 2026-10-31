@@ -34,6 +34,20 @@ int gsTextureDiagnosticsEnabled(void)
     return enabled;
 }
 
+/* UV pipeline tracing is opt-in and independent from the texture-cache diagnostics. */
+int gsUvTraceEnabled(void)
+{
+    static int enabled = -1;
+
+    if (enabled < 0)
+    {
+        const char* value = getenv("RECVX_UV_TRACE");
+        enabled = (value != NULL && value[0] == '1' && value[1] == '\\0') ? 1 : 0;
+    }
+
+    return enabled;
+}
+
 void pcGsSetTextureAssetIdentity(unsigned int asset_id, int valid, uint64_t content_hash)
 {
     gsTextureAssetId[0] = asset_id;
@@ -217,6 +231,26 @@ static void latch_vertex(u64 xyz, int has_f, int kick)
     }
     v.u = GSF(gsRegs.uv, 0, 14) / 16.0f;
     v.v = GSF(gsRegs.uv, 16, 14) / 16.0f;
+
+    /* Capture the raw GS UV register at the exact point it becomes a vertex attribute.
+     * Keep separate small budgets for movie TBP 14208 and ordinary textured geometry. */
+    if (gsUvTraceEnabled() && GSF(gsRegs.prim, 4, 1))
+    {
+        static unsigned int movie_samples;
+        static unsigned int static_samples[2];
+        unsigned int tbp = GSF(gsRegs.tex0[c], 0, 14);
+        int fst = GSF(gsRegs.prim, 8, 1);
+        unsigned int* count = (tbp == 14208) ? &movie_samples : &static_samples[fst];
+        unsigned int limit = (tbp == 14208) ? 24 : 12;
+
+        if (*count < limit)
+        {
+            pcLog("UVTRACE GS latch src=%s TBP=%u type=%d FST=%d ctxt=%d rawUV=%016llx UV=(%.3f,%.3f) STQ=(%.7g,%.7g,%.7g) kick=%d",
+                  (tbp == 14208) ? "movie" : "static", tbp, type, fst, c,
+                  (unsigned long long)gsRegs.uv, v.u, v.v, v.s, v.t, v.q, kick);
+            (*count)++;
+        }
+    }
 
     vq[0] = vq[1];
     vq[1] = vq[2];
