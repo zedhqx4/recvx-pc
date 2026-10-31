@@ -62,7 +62,7 @@ static void pcVramViewerOpen(void)
         return;
     }
 
-    vram_renderer = SDL_CreateRenderer(vram_window, NULL);
+    vram_renderer = SDL_CreateRenderer(vram_window, "software");
     if (vram_renderer == NULL)
     {
         pcLog("VRAM viewer: could not create renderer: %s", SDL_GetError());
