@@ -234,13 +234,18 @@ static void latch_vertex(u64 xyz, int has_f, int kick)
 
     /* Capture the raw GS UV register at the exact point it becomes a vertex attribute.
      * Keep separate small budgets for movie TBP 14208 and ordinary textured geometry. */
-    if (gsUvTraceEnabled() && GSF(gsRegs.prim, 4, 1))
+    if (gsUvTraceEnabled())
     {
         static unsigned int movie_samples;
         static unsigned int static_samples[2];
+        u64 active_prim = GSF(gsRegs.prmodecont, 0, 1) ? gsRegs.prim : gsRegs.prmode;
         unsigned int tbp = GSF(gsRegs.tex0[c], 0, 14);
-        int fst = GSF(gsRegs.prim, 8, 1);
-        unsigned int* count = (tbp == 14208) ? &movie_samples : &static_samples[fst];
+        int tme = GSF(active_prim, 4, 1);
+        int fst = GSF(active_prim, 8, 1);
+        unsigned int* count;
+
+        if (!tme) goto uv_trace_done;
+        count = (tbp == 14208) ? &movie_samples : &static_samples[fst];
         unsigned int limit = (tbp == 14208) ? 24 : 12;
 
         if (*count < limit)
@@ -251,6 +256,7 @@ static void latch_vertex(u64 xyz, int has_f, int kick)
             (*count)++;
         }
     }
+uv_trace_done:
 
     vq[0] = vq[1];
     vq[1] = vq[2];
