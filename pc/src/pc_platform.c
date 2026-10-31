@@ -896,9 +896,6 @@ void pcVideoInit(void)
     pcGsInit(spr);
     pcOsStartupLog("pcVideoInit: GS renderer initialized");
 
-    /* Open the raw GS VRAM inspector in its own non-OpenGL window on this diagnostic branch. */
-    pcVramViewerOpen();
-
     pcPadInit();
     pcOsStartupLog("pcVideoInit: controller initialized");
 
@@ -1160,6 +1157,25 @@ int pcVideoPumpEvents(void)
         {
             last_mouse_move = SDL_GetTicks();
             SDL_ShowCursor(SDL_ENABLE);
+        }
+
+        /* L toggles the raw GS VRAM inspector; consume both edges so the game never sees it. */
+        if (((ev.type == SDL_EVENT_KEY_DOWN) || (ev.type == SDL_EVENT_KEY_UP)) &&
+            (ev.key.scancode == SDL_SCANCODE_L))
+        {
+            if ((ev.type == SDL_EVENT_KEY_DOWN) && !ev.key.repeat)
+            {
+                if (vram_window != NULL)
+                {
+                    pcVramViewerClose();
+                    pcLog("VRAM viewer: closed by L");
+                }
+                else
+                {
+                    pcVramViewerOpen();
+                }
+            }
+            continue;
         }
 
         /* Live UV crop tuner; changes take effect on the next UI draw and are saved to recvx.ini. */
