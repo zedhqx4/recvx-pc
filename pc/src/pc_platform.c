@@ -23,6 +23,93 @@ static struct { double last, sum, worst, swap, present; int n; } frame_time;
 #define PS2_HEIGHT 480
 
 static SDL_Window* window;
+
+/* Diagnostic GS VRAM viewer: one grayscale pixel per byte, in physical address order.
+ * It deliberately reads gsVram directly and does not use or modify the OpenGL texture cache. */
+#define PC_VRAM_VIEW_W 2048
+#define PC_VRAM_VIEW_H 2048
+#define PC_VRAM_VIEW_BYTES (PC_VRAM_VIEW_W * PC_VRAM_VIEW_H)
+static SDL_Window* vram_window;
+static SDL_Renderer* vram_renderer;
+static SDL_Texture* vram_texture;
+static Uint32* vram_pixels;
+static Uint64 vram_last_update;
+extern unsigned char gsVram[4 * 1024 * 1024];
+
+static void pcVramViewerClose(void)
+{
+    if (vram_texture) SDL_DestroyTexture(vram_texture);
+    if (vram_renderer) SDL_DestroyRenderer(vram_renderer);
+    if (vram_window) SDL_DestroyWindow(vram_window);
+    free(vram_pixels);
+    vram_texture = NULL;
+    vram_renderer = NULL;
+    vram_window = NULL;
+    vram_pixels = NULL;
+}
+
+static void pcVramViewerOpen(void)
+{
+    int i;
+
+    if (vram_window != NULL) return;
+
+    vram_window = SDL_CreateWindow("GS VRAM - raw byte map (4 MiB)", 1024, 1024, SDL_WINDOW_RESIZABLE);
+    if (vram_window == NULL)
+    {
+        pcLog("VRAM viewer: could not create window: %s", SDL_GetError());
+        return;
+    }
+
+    vram_renderer = SDL_CreateRenderer(vram_window, NULL);
+    if (vram_renderer == NULL)
+    {
+        pcLog("VRAM viewer: could not create renderer: %s", SDL_GetError());
+        pcVramViewerClose();
+        return;
+    }
+
+    vram_texture = SDL_CreateTexture(vram_renderer, SDL_PIXELFORMAT_RGBA32,
+                                     SDL_TEXTUREACCESS_STREAMING, PC_VRAM_VIEW_W, PC_VRAM_VIEW_H);
+    vram_pixels = (Uint32*)malloc(PC_VRAM_VIEW_BYTES * sizeof(Uint32));
+    if (vram_texture == NULL || vram_pixels == NULL)
+    {
+        pcLog("VRAM viewer: could not allocate display texture/buffer: %s", SDL_GetError());
+        pcVramViewerClose();
+        return;
+    }
+
+    SDL_SetTextureScaleMode(vram_texture, SDL_SCALEMODE_NEAREST);
+    for (i = 0; i < PC_VRAM_VIEW_BYTES; i++)
+    {
+        Uint32 v = gsVram[i];
+        vram_pixels[i] = 0xFF000000u | (v << 16) | (v << 8) | v;
+    }
+    SDL_UpdateTexture(vram_texture, NULL, vram_pixels, PC_VRAM_VIEW_W * (int)sizeof(Uint32));
+    pcLog("VRAM viewer: opened (4 MiB, one grayscale pixel per byte; physical address order)");
+}
+
+static void pcVramViewerUpdate(void)
+{
+    Uint64 now;
+    int i;
+
+    if (vram_window == NULL) return;
+    now = SDL_GetTicks();
+    if (now - vram_last_update < 250) return; /* 4 Hz: keep diagnostic overhead bounded */
+    vram_last_update = now;
+
+    for (i = 0; i < PC_VRAM_VIEW_BYTES; i++)
+    {
+        Uint32 v = gsVram[i];
+        vram_pixels[i] = 0xFF000000u | (v << 16) | (v << 8) | v;
+    }
+
+    SDL_UpdateTexture(vram_texture, NULL, vram_pixels, PC_VRAM_VIEW_W * (int)sizeof(Uint32));
+    SDL_RenderClear(vram_renderer);
+    SDL_RenderTexture(vram_renderer, vram_texture, NULL, NULL);
+    SDL_RenderPresent(vram_renderer);
+}
 static int pcPadFullscreenKey(void);
 static int pcPadFullscreenButton(void);
 static int title_event(const SDL_Event* ev);
@@ -808,6 +895,9 @@ void pcVideoInit(void)
     pcGsInit(spr);
     pcOsStartupLog("pcVideoInit: GS renderer initialized");
 
+    /* Open the raw GS VRAM inspector in its own non-OpenGL window on this diagnostic branch. */
+    pcVramViewerOpen();
+
     pcPadInit();
     pcOsStartupLog("pcVideoInit: controller initialized");
 
@@ -845,6 +935,14 @@ static int pause_until_active(void)
         if (ev.type == SDL_EVENT_QUIT)
         {
             return 0;
+        }
+
+        /* Closing the diagnostic window must not close the game window. */
+        if ((ev.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED) && (vram_window != NULL) &&
+            (ev.window.windowID == SDL_GetWindowID(vram_window)))
+        {
+            pcVramViewerClose();
+            continue;
         }
 
         if (pc_window_event(ev.type) != PC_WINDOW_EVENT_NONE)
@@ -1122,6 +1220,7 @@ void pcVideoPresent(void)
     fps_tick();
 
     pcGsPresent();
+    pcVramViewerUpdate();
 
     /* testing aid: RECVX_SHOTS=<seconds> saves the display buffer to shots/ periodically */
     {
