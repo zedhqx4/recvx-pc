@@ -14,6 +14,7 @@ on:
       - experiment/clut-identical-skip
       - experiment/ps2-tex-cache
       - alpha
+      - debuggin_vram-viewer
       - c3853984-baseline
       - merge-c3853984-into-graphics-fixes
     paths-ignore:
