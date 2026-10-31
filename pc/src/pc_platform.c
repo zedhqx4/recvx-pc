@@ -1131,6 +1131,14 @@ int pcVideoPumpEvents(void)
             return 0;
         }
 
+        /* The auxiliary inspector has its own lifetime; closing it leaves the game running. */
+        if ((ev.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED) && (vram_window != NULL) &&
+            (ev.window.windowID == SDL_GetWindowID(vram_window)))
+        {
+            pcVramViewerClose();
+            continue;
+        }
+
         if (pc_window_event(ev.type) != PC_WINDOW_EVENT_NONE)
         {
             if ((pc_window_event(ev.type) == PC_WINDOW_EVENT_MOVED) || (pc_window_event(ev.type) == PC_WINDOW_EVENT_SIZE_CHANGED) ||
