@@ -3,6 +3,9 @@ name: Upload Progress Report
 on:
   push:
 
+permissions:
+  contents: read
+
 jobs:
   upload:
     runs-on: ubuntu-latest
@@ -11,8 +14,18 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Upload Artifact
+      - name: Prepare artifact name
+        id: artifact-meta
+        shell: bash
+        run: |
+          branch="${GITHUB_REF_NAME//\//-}"
+          branch="$(printf '%s' "$branch" | sed 's/[^A-Za-z0-9._-]/-/g')"
+          commit="${GITHUB_SHA:0:7}"
+          echo "name=recvx-pc_${branch}_${commit}" >> "$GITHUB_OUTPUT"
+
+      - name: Upload Progress Report
         uses: actions/upload-artifact@v4
         with:
-          name: SLUS_201.84_report
+          name: ${{ steps.artifact-meta.outputs.name }}
           path: ./report.json
+          if-no-files-found: error
