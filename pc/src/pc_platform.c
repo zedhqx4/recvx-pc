@@ -32,6 +32,7 @@ static void save_event(const SDL_Event* ev);
 static void save_tick(void);
 static void fps_tick(void);
 static void update_title(int force);
+static void gs_trace_hotkeys_init(void);
 
 /* SDL3 gives each window event its own event type; map the subset the platform handles. */
 enum { PC_WINDOW_EVENT_NONE=0, PC_WINDOW_EVENT_MOVED, PC_WINDOW_EVENT_SIZE_CHANGED,
