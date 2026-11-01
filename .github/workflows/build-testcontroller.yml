@@ -1,0 +1,169 @@
+name: Build SDL3 testcontroller (GameCube)
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - gamecube-controller
+
+permissions:
+  contents: read
+
+jobs:
+  build-testcontroller:
+    name: Build testcontroller (Windows x64)
+    runs-on: windows-2022
+
+    steps:
+      - name: Checkout SDL3 GameCube/libusb source
+        uses: actions/checkout@v4
+        with:
+          repository: zedhqx4/SDL_Windows_LibUSB
+          ref: SDL3
+          path: SDL_Windows_LibUSB
+          submodules: recursive
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Set up libusb for MSVC
+        id: libusb
+        uses: ./SDL_Windows_LibUSB/.github/actions/setup-msvc-libusb
+        with:
+          version: '1.0.27'
+          arch: x64
+
+      - name: Configure SDL3 and testcontroller
+        shell: pwsh
+        working-directory: SDL_Windows_LibUSB
+        run: |
+          if (-not $env:LibUSB_ROOT) {
+            throw 'The libusb setup action did not define LibUSB_ROOT.'
+          }
+
+          $libusbPaths = $env:LibUSB_ROOT -split ';'
+          if ($libusbPaths.Count -lt 2) {
+            throw "Unexpected LibUSB_ROOT value: $env:LibUSB_ROOT"
+          }
+
+          $libusbInclude = $libusbPaths[0]
+          $libusbLibDir = $libusbPaths[1]
+          $libusbLibrary = Join-Path $libusbLibDir 'libusb-1.0.lib'
+          $libusbDll = Join-Path $libusbLibDir 'libusb-1.0.dll'
+
+          foreach ($required in @($libusbInclude, $libusbLibrary, $libusbDll)) {
+            if (-not (Test-Path $required)) {
+              throw "Required libusb file was not found: $required"
+            }
+          }
+
+          cmake -S . -B build -G 'Visual Studio 17 2022' -A x64 `
+            -DSDL_SHARED=ON `
+            -DSDL_STATIC=OFF `
+            -DSDL_HIDAPI=ON `
+            -DSDL_HIDAPI_JOYSTICK=ON `
+            -DSDL_HIDAPI_LIBUSB=ON `
+            -DSDL_HIDAPI_LIBUSB_SHARED=OFF `
+            -DSDL_TEST_LIBRARY=ON `
+            -DSDL_TESTS=ON `
+            -DSDL_TESTS_LINK_SHARED=ON `
+            -DSDL_EXAMPLES=OFF `
+            -DSDL_INSTALL=OFF `
+            "-DLibUSB_INCLUDE_PATH=$libusbInclude" `
+            "-DLibUSB_LIBRARY=$libusbLibrary"
+
+          if ($LASTEXITCODE -ne 0) {
+            exit $LASTEXITCODE
+          }
+
+          $cache = Get-Content 'build/CMakeCache.txt' -Raw
+          foreach ($option in @(
+            'SDL_HIDAPI:BOOL=ON',
+            'SDL_HIDAPI_JOYSTICK:BOOL=ON',
+            'SDL_HIDAPI_LIBUSB:BOOL=ON',
+            'SDL_TEST_LIBRARY:BOOL=ON',
+            'SDL_TESTS:BOOL=ON'
+          )) {
+            if (-not $cache.Contains($option)) {
+              throw "SDL CMake configuration is missing required option: $option"
+            }
+          }
+
+          Write-Host "libusb include: $libusbInclude"
+          Write-Host "libusb library: $libusbLibrary"
+          Write-Host 'SDL3 HIDAPI/libusb and test targets are enabled.'
+
+      - name: Build testcontroller
+        shell: pwsh
+        working-directory: SDL_Windows_LibUSB
+        run: |
+          cmake --build build --config Release --target testcontroller --parallel
+          if ($LASTEXITCODE -ne 0) {
+            exit $LASTEXITCODE
+          }
+
+      - name: Package testcontroller and runtime DLLs
+        shell: pwsh
+        working-directory: SDL_Windows_LibUSB
+        run: |
+          $buildRoot = Join-Path $PWD 'build'
+          $outputDir = Join-Path $PWD 'artifacts/testcontroller'
+          New-Item -ItemType Directory -Force -Path $outputDir | Out-Null
+
+          $exe = Get-ChildItem $buildRoot -Filter 'testcontroller.exe' -File -Recurse |
+            Where-Object { $_.FullName -match '\\Release\\' } |
+            Select-Object -First 1
+          $sdlDll = Get-ChildItem $buildRoot -Filter 'SDL3.dll' -File -Recurse |
+            Where-Object { $_.FullName -match '\\Release\\' } |
+            Select-Object -First 1
+
+          if (-not $exe) {
+            throw 'testcontroller.exe was not found in the Release build output.'
+          }
+          if (-not $sdlDll) {
+            throw 'SDL3.dll was not found in the Release build output.'
+          }
+
+          $libusbPaths = $env:LibUSB_ROOT -split ';'
+          $libusbDll = Join-Path $libusbPaths[1] 'libusb-1.0.dll'
+          if (-not (Test-Path $libusbDll)) {
+            throw "libusb runtime DLL was not found: $libusbDll"
+          }
+
+          Copy-Item $exe.FullName (Join-Path $outputDir 'testcontroller.exe') -Force
+          Copy-Item $sdlDll.FullName (Join-Path $outputDir 'SDL3.dll') -Force
+          Copy-Item $libusbDll (Join-Path $outputDir 'libusb-1.0.dll') -Force
+
+          @'
+          @echo off
+          setlocal
+          set SDL_JOYSTICK_HIDAPI=1
+          set SDL_JOYSTICK_HIDAPI_GAMECUBE=1
+          set SDL_HIDAPI_LIBUSB=1
+          set SDL_HIDAPI_LIBUSB_GAMECUBE=1
+          "%~dp0testcontroller.exe" %*
+          '@ | Set-Content -Path (Join-Path $outputDir 'start-testcontroller.bat') -Encoding ascii
+
+          $revision = git rev-parse HEAD
+          @"
+          SDL3 GameCube testcontroller
+          Source: https://github.com/zedhqx4/SDL_Windows_LibUSB/tree/SDL3
+          Source commit: $revision
+          Architecture: Windows x64
+          Configuration: Release
+          Features: HIDAPI joystick + GameCube driver + libusb
+
+          Run start-testcontroller.bat to launch with the GameCube HIDAPI/libusb hints enabled.
+          "@ | Set-Content -Path (Join-Path $outputDir 'README.txt') -Encoding utf8
+
+          Get-ChildItem $outputDir | Format-Table Name, Length
+
+      - name: Upload testcontroller artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: testcontroller-windows-x64
+          path: SDL_Windows_LibUSB/artifacts/testcontroller/*
+          if-no-files-found: error
+          retention-days: 14
