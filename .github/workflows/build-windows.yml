@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - pc-port
+      - experimental/gs-rebuild
     paths-ignore:
       - '**.md'
       - 'docs/**'
@@ -55,7 +56,7 @@ jobs:
         shell: pwsh
         run: |
           $dir = Join-Path $env:GITHUB_WORKSPACE 'build_pc'
-          $required = @('recvx.exe', 'recvx-config.exe')
+          $required = @('recvx.exe', 'recvx-config.exe', 'SDL3.dll', 'libusb-1.0.dll')
 
           foreach ($name in $required) {
             $file = Join-Path $dir $name
@@ -82,4 +83,6 @@ jobs:
           path: |
             build_pc/recvx.exe
             build_pc/recvx-config.exe
+            build_pc/SDL3.dll
+            build_pc/libusb-1.0.dll
           if-no-files-found: error

@@ -9,7 +9,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include <SDL.h>
+#include <SDL3/SDL.h>
 
 #include "pc_platform.h"
 #include "pc_audio.h"
@@ -32,34 +32,24 @@ typedef struct {
 static Voice voices[MAX_VOICES];
 static volatile long starved[MAX_VOICES]; /* times a playing voice had too little for a pass */
 static int was_full[MAX_VOICES];          /* the voice filled the whole previous pass */
-static SDL_AudioDeviceID device;
+static SDL_AudioStream* audio_stream;
 static int init_done;
 
 static void lock(void)
 {
-    if (device != 0)
-    {
-        SDL_LockAudioDevice(device);
-    }
+    if (audio_stream != NULL) SDL_LockAudioStream(audio_stream);
 }
 
 static void unlock(void)
 {
-    if (device != 0)
-    {
-        SDL_UnlockAudioDevice(device);
-    }
+    if (audio_stream != NULL) SDL_UnlockAudioStream(audio_stream);
 }
 
-static void SDLCALL callback(void* userdata, Uint8* stream, int len)
+static void mix_audio(float* out, int frames)
 {
-    float* out = (float*)stream;
-    int frames = len / (int)(2 * sizeof(float));
     int v, i;
 
-    (void)userdata;
-
-    memset(stream, 0, len);
+    memset(out, 0, (size_t)frames * 2 * sizeof(*out));
 
     for (v = 0; v < MAX_VOICES; v++)
     {
@@ -165,9 +155,33 @@ static void SDLCALL callback(void* userdata, Uint8* stream, int len)
     }
 }
 
+
+/* SDL3 requests source-format bytes from the stream callback. A bounded work buffer avoids
+ * unbounded stack use on the audio thread and preserves the existing float stereo mixer. */
+static void SDLCALL callback(void* userdata, SDL_AudioStream* stream, int additional_amount, int total_amount)
+{
+    float buffer[2048 * 2];
+    const int frame_bytes = (int)(2 * sizeof(float));
+    const int capacity = (int)sizeof(buffer);
+    int remaining = additional_amount;
+
+    (void)userdata;
+    (void)total_amount;
+
+    while (remaining > 0) {
+        int bytes = remaining;
+        if (bytes > capacity) bytes = capacity;
+        bytes = ((bytes + frame_bytes - 1) / frame_bytes) * frame_bytes;
+        if (bytes > capacity) bytes = capacity;
+        mix_audio(buffer, bytes / frame_bytes);
+        if (!SDL_PutAudioStreamData(stream, buffer, bytes)) break;
+        remaining -= bytes;
+    }
+}
+
 void pcAudioInit(void)
 {
-    SDL_AudioSpec want, have;
+    SDL_AudioSpec want, have = {0};
 
     if (init_done)
     {
@@ -178,28 +192,28 @@ void pcAudioInit(void)
 
     SDL_zero(want);
     want.freq = OUT_RATE;
-    want.format = AUDIO_F32SYS;
+    want.format = SDL_AUDIO_F32;
     want.channels = 2;
-    want.samples = 1024;
-    want.callback = callback;
 
-    device = SDL_OpenAudioDevice(NULL, 0, &want, &have, 0);
+    audio_stream = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &want, callback, NULL);
 
-    if (device == 0)
+    if (audio_stream == NULL)
     {
         pcLog("audio: no device (%s), sound disabled", SDL_GetError());
         return;
     }
 
-    SDL_PauseAudioDevice(device, 0);
+    SDL_GetAudioStreamFormat(audio_stream, NULL, &have);
+    SDL_ResumeAudioStreamDevice(audio_stream);
     pcLog("audio: %d Hz stereo", have.freq);
 }
 
 void pcAudioPause(int pause)
 {
-    if (device != 0)
+    if (audio_stream != NULL)
     {
-        SDL_PauseAudioDevice(device, pause);
+        if (pause) SDL_PauseAudioStreamDevice(audio_stream);
+        else SDL_ResumeAudioStreamDevice(audio_stream);
     }
 }
 
@@ -338,7 +352,7 @@ int pcAudioQueuedSamples(int voice)
 
     lock();
 
-    if ((device == 0) && (vc->sfreq > 0))
+    if ((audio_stream == NULL) && (vc->sfreq > 0))
     {
         /* no device: "play" in real time */
         double now = pcOsTime();

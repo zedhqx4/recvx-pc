@@ -1,8 +1,8 @@
 /* PC port: OpenGL 3.3 core entry points used by the renderer, loaded through SDL. */
 #pragma once
 
-#include <SDL.h>
-#include <SDL_opengl.h>
+#include <SDL3/SDL.h>
+#include <SDL3/SDL_opengl.h>
 
 #ifndef GL_FRAMEBUFFER
 #define GL_FRAMEBUFFER 0x8D40

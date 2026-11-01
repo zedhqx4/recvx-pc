@@ -2,7 +2,7 @@
 
 usage: python pc/tools/build.py [--debug] [--clean]
 Optimised by default; --debug builds without optimisation (separate object directory).
-Compiles changed sources in parallel, links against SDL2 and copies SDL2.dll next to the exe.
+Compiles changed sources in parallel, links against SDL3 and copies SDL3.dll next to the exe.
 Failing compiles are listed; the link step still runs so missing symbols show up together.
 """
 import argparse, os, re, shutil, sys
@@ -66,9 +66,9 @@ def main():
     os.makedirs(OBJ_DIR, exist_ok=True)
     common.sync_katana()
     fetch_deps.fetch()
-    sdl = fetch_deps.sdl2_dir()
+    sdl = fetch_deps.sdl3_dir()
 
-    flags = common.CFLAGS + common.include_flags() + ["/I" + os.path.join(sdl, "include"),
+    flags = common.CFLAGS + ["/arch:SSE2"] + common.include_flags() + ["/I" + os.path.join(sdl, "include"),
                                                       "/Zi", "/FS", "/Fd" + os.path.join(common.BUILD, "recvx_c.pdb")]
     # /GF-: the game writes into string literals (gdFsInit uppercases file names in place)
     flags += ["/O2", "/GF-", "/MD"] if not opts.debug else ["/Od", "/MDd", "/D_DEBUG"]
@@ -100,7 +100,7 @@ def main():
         f.write("\n".join('"%s"' % o for o in objs))
     # a Windows program (no console window) that still starts at main(); RECVX_CONSOLE=1 opens one
     link = ["link", "/nologo", "/DEBUG", "/SUBSYSTEM:WINDOWS", "/ENTRY:mainCRTStartup", "/MACHINE:X86", "/OUT:" + EXE,
-            "/LIBPATH:" + os.path.join(sdl, "lib", "x86"), "SDL2.lib", "@" + rsp]
+            "/LIBPATH:" + os.path.join(sdl, "lib", "x86"), "SDL3.lib", "@" + rsp]
     r = msvc.run(link, capture_output=True, text=True, errors="replace", cwd=common.ROOT)
     out = r.stdout + r.stderr
     with open(os.path.join(common.BUILD, "link.log"), "w") as f:
@@ -109,16 +109,22 @@ def main():
     if r.returncode != 0:
         print(out[-3000:] if not unresolved else "")
         if unresolved:
-            print(f"{len(unresolved)} unresolved symbols (full list in build_pc/link.log)")
+            print(f"{len(unresolved)} unresolved symbols: " + ", ".join(unresolved))
+            print("Full linker output: build_pc/link.log")
             with open(os.path.join(common.BUILD, "unresolved.txt"), "w") as f:
                 f.write("\n".join(unresolved) + "\n")
         return 1
-    dll_src = os.path.join(sdl, "lib", "x86", "SDL2.dll")
-    dll_dst = os.path.join(common.BUILD, "SDL2.dll")
-    # only when it changed: a running recvx.exe or recvx-config.exe keeps it open
-    if not os.path.exists(dll_dst) or os.path.getsize(dll_dst) != os.path.getsize(dll_src):
-        shutil.copyfile(dll_src, dll_dst)
-    print("built " + EXE)
+    dll_src = os.path.join(sdl, "lib", "x86", "SDL3.dll")
+    dll_dst = os.path.join(common.BUILD, "SDL3.dll")
+    # SDL3 imports libusb for the Wii U GameCube adapter; both DLLs must be beside the EXEs.
+    shutil.copyfile(dll_src, dll_dst)
+    libusb_src = os.path.join(sdl, "lib", "x86", "libusb-1.0.dll")
+    libusb_dst = os.path.join(common.BUILD, "libusb-1.0.dll")
+    if not os.path.isfile(libusb_src):
+        print("missing SDL dependency: " + libusb_src)
+        return 1
+    shutil.copyfile(libusb_src, libusb_dst)
+    print("built " + EXE + " (SDL3 HIDAPI/libusb)")
     return build_config(sdl, opts.debug)
 
 
@@ -159,7 +165,7 @@ def build_config(sdl, debug):
     if res is None:
         return 1
     link = ["link", "/nologo", "/SUBSYSTEM:WINDOWS", "/MACHINE:X86", "/MANIFEST:EMBED", "/OUT:" + exe] + objs + [res,
-            "/LIBPATH:" + os.path.join(sdl, "lib", "x86"), "SDL2.lib", "user32.lib", "gdi32.lib"]
+            "/LIBPATH:" + os.path.join(sdl, "lib", "x86"), "SDL3.lib", "user32.lib", "gdi32.lib"]
     r = msvc.run(link, capture_output=True, text=True, errors="replace", cwd=common.ROOT)
     if r.returncode != 0:
         print("FAILED linking recvx-config.exe")
