@@ -2852,6 +2852,16 @@ int Ps2TexLoad(NJS_TEXMEMLIST* addr)
             pc_ps2_texture_bind_cache.render_sub_flag == PS2_Render_tex_sub_flag)
         {
             Ps2_tex_cache_buff[0] = addr->texinfo.texsurface.pSurface;
+
+            /*
+             * Reuse the cached image, but still reapply the lightweight GS texture
+             * state on every Ps2TexLoad request. TEX0 writes clear the asset hint and
+             * advance the binding generation, so restore both after the bind packet.
+             */
+            Ps2BindTextureState(addr, timp, psm, tbw, tw, th);
+            pcGsSetTextureAssetIdentity(timp->Gindex, asset_cache_eligible, image_content_hash);
+            pc_ps2_texture_bind_cache.state_generation = pcGsGetTextureBindingGeneration();
+
             if (profile_texture)
             {
                 pcGameProfileRecordTextureLoad(pcGameProfileNowMs() - profile_texload_t0, 0.0, 0);
