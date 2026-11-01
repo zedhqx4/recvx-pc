@@ -67,10 +67,18 @@ jobs:
 
           Get-ChildItem $dir -File
 
+      - name: Prepare artifact name
+        id: artifact-meta
+        shell: pwsh
+        run: |
+          $branch = $env:GITHUB_REF_NAME -replace '[^A-Za-z0-9._-]', '-'
+          $commit = $env:GITHUB_SHA.Substring(0, 7)
+          "name=recvx-pc_${branch}_${commit}" | Add-Content -Path $env:GITHUB_OUTPUT
+
       - name: Upload Windows build
         uses: actions/upload-artifact@v4
         with:
-          name: recvx-pc-windows
+          name: ${{ steps.artifact-meta.outputs.name }}
           path: |
             build_pc/recvx.exe
             build_pc/recvx-config.exe
