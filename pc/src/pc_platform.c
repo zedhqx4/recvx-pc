@@ -851,7 +851,7 @@ static int gs_trace_handle_key(const SDL_Event* ev)
         return 1;
     }
 
-    if (ev->key.scancode == SDL_SCANCODE_KP_9)
+    if ((ev->key.scancode == SDL_SCANCODE_KP_9) && pcGsTraceActive())
     {
         pcGsTraceErrorMarker();
         return 1;

@@ -14,6 +14,11 @@ GsRegs gsRegs;
 int gsDumpFrame;
 static int kicks;
 
+int pcGsTraceActive(void)
+{
+    return gsTraceActive();
+}
+
 int pcGsTraceToggle(void)
 {
     int enabled = !gsTraceActive();

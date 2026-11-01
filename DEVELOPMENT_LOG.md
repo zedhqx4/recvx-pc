@@ -375,14 +375,14 @@ user-generated marker at the moment a visual error appears.
 - **Numpad 7** toggles capture ON/OFF. The first ON opens the file in overwrite mode; later
   ON windows append to the same file. OFF flushes and closes the file.
 - **Numpad 9** writes `USER_MARKER label=ERROR_HERE` with the current frame and sequence,
-  but only while capture is ON.
+  but only while capture is ON; while capture is OFF, the key is passed through to the game.
 - Without `RECVX_GS_TRACE`, these keys are not intercepted by the trace feature and no GS
   trace file is created.
 
 ### Implementation
 
 - `pc/src/pc_platform.c` intercepts SDL3 keypad scancodes only when the trace path is configured.
-- `pc/src/gs/gs.c` exposes platform-facing toggle and marker functions.
+- `pc/src/gs/gs.c` exposes platform-facing capture-state, toggle, and marker functions.
 - `pc/src/gs/gs_internal.h` declares runtime trace enablement.
 - `pc/src/gs/gs_mem.c` opens/closes the file per capture window, appends later windows, and
   tags transfer lifetimes with their capture session so transfers crossing ON/OFF boundaries
