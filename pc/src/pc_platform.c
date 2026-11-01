@@ -603,6 +603,7 @@ static void save_window(void)
 void pcVideoInit(void)
 {
     Uint32 flags = SDL_WINDOW_RESIZABLE | SDL_WINDOW_OPENGL;
+    unsigned char* spr;
     int x = SDL_WINDOWPOS_CENTERED, y = SDL_WINDOWPOS_CENTERED;
 
     if (window != NULL)
@@ -616,6 +617,15 @@ void pcVideoInit(void)
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMECONTROLLER | SDL_INIT_AUDIO) != 0)
     {
         pcPlatformFatal("SDL_Init failed: %s", SDL_GetError());
+    }
+
+    /* Reserve the PS2's fixed-address scratchpad before creating an OpenGL window/context.
+     * Loading the graphics driver can occupy 0x70000000, which the PS2 code requires. */
+    spr = (unsigned char*)pcOsAllocScratchpad();
+
+    if (spr == NULL)
+    {
+        pcPlatformFatal("Could not reserve the PS2 scratchpad address range (0x70000000).");
     }
 
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
@@ -677,16 +687,7 @@ void pcVideoInit(void)
 
     SDL_GL_SetSwapInterval(0);   /* frame pacing comes from the emulated VBLANK */
 
-    {
-        unsigned char* spr = pcOsAllocScratchpad();
-
-        if (spr == NULL)
-        {
-            pcPlatformFatal("Could not reserve the PS2 scratchpad address range (0x70000000).");
-        }
-
-        pcGsInit(spr);
-    }
+    pcGsInit(spr);
 
     pcPadInit();
 
