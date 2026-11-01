@@ -395,3 +395,26 @@ user-generated marker at the moment a visual error appears.
 
 - Source edits and capture-window guards reviewed.
 - Windows compilation and runtime hotkey verification remain pending.
+
+
+## 2026-11-01 — Step 7: Fix GS Trace Hotkey Initializer Declaration
+
+**Category:** Build fix  
+**Status:** Source fix committed; Windows build validation pending  
+**Finding:** The Windows CI build failed at `pc/src/pc_platform.c` because
+`pcVideoInit()` called `gs_trace_hotkeys_init()` before the function's later
+`static void` definition. Without a prior prototype, MSVC diagnosed the later
+definition as a conflicting/redefinition of the earlier implicit declaration
+(C2371).
+
+### Fix
+
+- Added `static void gs_trace_hotkeys_init(void);` alongside the file-scope
+  forward declarations, before `pcVideoInit()`.
+- Left the initializer, Numpad 7/9 event handling, and GS trace implementation
+  otherwise unchanged.
+
+### Validation
+
+- Confirmed the failing call precedes the function definition and lacked a prototype.
+- Windows rebuild is required to verify this correction; no successful build is claimed.
