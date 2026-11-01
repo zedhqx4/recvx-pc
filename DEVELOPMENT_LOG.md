@@ -183,7 +183,7 @@ No database file is bundled or copied into the build artifact; the user-provided
 
 - **Source review:** Confirmed the mapping loader runs after SDL initialization and before
   controller enumeration.
-- **Build:** Pending GitHub Actions for this implementation commit.
+- **Build:** Passed on GitHub Actions run 41333335884 for commit bb3d105.
 - **Runtime mapping test:** Pending. Test with a known custom mapping file and confirm the log
   reports accepted mappings and the expected controller name/layout.
 - **Missing-file behavior:** Source path is non-fatal; runtime log behavior still needs testing.
@@ -193,4 +193,73 @@ No database file is bundled or copied into the build artifact; the user-provided
 Verify the Windows build, then place a valid `gamecontrollerdb.txt` beside `recvx.exe` and
 confirm that the custom mapping is loaded before the controller is opened. Also test startup
 without the file to confirm SDL's built-in mappings remain available.
+
+
+## 2026-11-01 — Step 4: Use a 512x448 Native GS Rendering Base
+
+**Category:** Graphics correctness / internal render resolution  
+**Status:** Implemented; Windows build in progress; visual/runtime validation pending  
+**Reference:** Earlier internal-resolution implementation in `graphics-fixes` commit `dc2bf1a`  
+**Implementation commit on this branch:** `1fa70a3`
+
+### Problem
+
+The clean PC port currently rasterizes its 640x480 logical GS frame at a 640x480 base.
+The intended native PS2 GS backing base for this game is 512x448. Changing the logical game
+dimensions themselves would be incorrect because game coordinates, display layout, and UI
+code continue to use the 640x480 coordinate space.
+
+### Change
+
+Keep the game's logical coordinate space at 640x480, but derive independent floating-point
+horizontal and vertical backing-buffer scales from a 512x448 native GS base:
+
+- Horizontal backing scale retains the existing aspect-ratio adjustment and applies the
+  512/640 base-width ratio.
+- Vertical backing scale applies the 448/480 base-height ratio.
+- The existing `scale=` setting remains a supersampling multiplier; it does not redefine
+  the native logical GS base.
+
+In `pc/src/gs/gs_gl.c`, render-target and depth-texture allocation, VRAM-to-render-target
+loading, local-to-local readback, viewport, scissor, and debug screenshots now use the
+independent floating-point scales. VRAM-to-render-target loads use nearest-neighbour sampling
+when converting the logical GS buffer into the smaller backing buffer. Integer supersampling
+factors retain the replication fast path.
+
+This is a renderer-coordinate change, not a rewrite of game coordinates or a change to the
+PC window size.
+
+### Files Changed
+
+- `pc/src/pc_platform.c`
+  - Defines the 512x448 native GS backing base.
+  - Calculates the effective horizontal and vertical scales while leaving 640x480 logical
+    coordinates and window defaults unchanged.
+- `pc/include/pc_gs.h`
+  - Changes the horizontal scale declaration to floating point and adds the vertical scale.
+- `pc/src/gs/gs_gl.c`
+  - Adds coordinate-to-backing-pixel helpers.
+  - Applies the new scales to render targets, depth buffers, VRAM transfers, viewport,
+    scissor, and screenshots.
+
+### Explicitly Excluded
+
+- No UI UV crop, font sampling, VSync, or other graphics-fixes changes were imported.
+- No GS VRAM allocator, page-generation, texture-cache, movie, or memory-management behavior
+  was changed.
+- The logical 640x480 game coordinate space and PC window configuration were not changed.
+
+### Validation
+
+- **Source review:** Confirmed that the logical 640x480 dimensions remain unchanged and
+  backing dimensions are derived independently.
+- **Windows build:** GitHub Actions run 41333587254 is in progress.
+- **Runtime/visual validation:** Pending. Check menus, 3D scenes, render-target effects,
+  FMVs, and screenshots at the default scale and aspect ratio.
+
+### Next Checkpoint
+
+Complete the Windows build, then inspect the generated build and test representative game
+scenes. Confirm that the 512x448 base does not introduce clipping, incorrect aspect mapping,
+render-target desynchronization, or screenshot regressions before starting the GS/VRAM audit.
 
