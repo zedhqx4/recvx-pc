@@ -19,7 +19,7 @@ independently.
 ## 2026-11-01 — Step 1: Reserve the PS2 Scratchpad Before OpenGL Initialization
 
 **Category:** Startup / address-space compatibility fix  
-**Status:** Implemented; runtime validation pending  
+**Status:** Implemented; startup validated by user; full regression pending  
 **Reference:** `experimental/videofixing` commit `d5bfca1`  
 **Implementation commit on this branch:** `0d084e8`
 
@@ -60,20 +60,20 @@ No GS memory, texture-cache, VRAM, renderer, or game texture-management logic wa
 - **Source review:** Confirmed the change is limited to `pc/src/pc_platform.c`.
 - **Branch comparison:** At implementation commit `0d084e8`, the branch differed from
   `pc-port` only in that file.
-- **Build:** Not yet verified.
-- **Runtime startup:** Not yet verified.
-- **Game/scene regression:** Not yet verified.
+- **Build:** Windows Actions build passed for the SDL3 migration tip, which includes this scratchpad change.
+- **Runtime startup:** User confirmed that the resulting SDL3 build starts successfully.
+- **Game/scene regression:** Not yet completed.
 
 ### Next Checkpoint
 
-Build this branch and launch the executable. Confirm that scratchpad reservation succeeds before
-OpenGL initialization and that `pcGsInit(spr)` completes. If reservation fails, capture the
-startup log and inspect the address-space diagnostic before changing the allocation strategy.
+The SDL3 build now launches successfully according to the user. Continue validating gameplay and
+individual platform subsystems separately; do not reopen the scratchpad allocation strategy unless
+a reproducible startup or address-space failure appears.
 
 ## 2026-11-01 — Step 2: Migrate the Clean PC Port to SDL3
 
 **Category:** Platform / dependency migration  
-**Status:** Implemented; Windows build and runtime validation pending  
+**Status:** Implemented; Windows build and startup validated; subsystem regression pending  
 **Reference migration:** `SDL3` branch commit `d9497ce`  
 **Additional SDL3 ownership correction:** `SDL3` branch commit `3eee5d1`  
 **Implementation commit on this branch:** `2bbe52c`
@@ -133,13 +133,11 @@ The scratchpad reservation remains immediately after successful `SDL_Init()` and
 - **Scratchpad order:** Confirmed `pcOsAllocScratchpad()` remains before `SDL_CreateWindow()`.
 - **Branch comparison:** This migration commit changes only the nine files listed above relative
   to the preceding log commit.
-- **Windows build:** Not yet verified.
-- **Startup smoke test:** Not yet verified.
-- **Audio, keyboard/mouse, controller, GameCube adapter and in-game regression:** Not yet verified.
+- **Windows build:** Passed on GitHub Actions run 41332210307; the workflow verified both executables and the SDL3/libusb runtime DLLs and uploaded the artifact.
+- **Runtime startup:** User confirmed that the generated build starts successfully.
+- **Audio, keyboard/mouse, controller, GameCube adapter and in-game regression:** Not yet fully verified.
 
 ### Next Checkpoint
 
-Run the Windows Actions build from `experimental/gs-rebuild`. Confirm that it builds SDL3 and
-libusb, links both executables, and packages `SDL3.dll` and `libusb-1.0.dll`. Then launch the game
-and verify the scratchpad reservation, SDL window/OpenGL startup, audio playback, and basic input
-before restoring any graphics or GS changes.
+The Windows Actions build and user-confirmed startup checkpoint have passed. Validate audio and
+input behavior during subsequent targeted checks. Keep graphics and GS changes out of this step.
