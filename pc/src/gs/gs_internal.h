@@ -57,6 +57,14 @@ typedef struct {
 extern unsigned char gsVram[GS_VRAM_SIZE];
 extern unsigned int gsPageGen[GS_PAGES];
 
+void gsTraceEvent(const char* event, const char* fmt, ...);
+int gsTraceActive(void);
+const char* gsTraceSetSource(const char* source);
+const char* gsTraceCurrentSource(void);
+void gsTraceSetFrame(unsigned int frame);
+void gsTraceResetPages(void);
+void gsTraceReportPages(const char* event, const char* details);
+
 void gsMemInit(void);
 unsigned int gsMemRead(int psm, unsigned int bp, unsigned int bw, unsigned int x, unsigned int y);
 void gsMemWrite(int psm, unsigned int bp, unsigned int bw, unsigned int x, unsigned int y, unsigned int v);

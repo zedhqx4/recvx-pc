@@ -7,12 +7,164 @@
  * layouts must match the real hardware; gsMemSelfTest() checks them against the game's own
  * conversion routines (ps2_pxlconv.c).
  */
+#include <stdarg.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "gs_internal.h"
 
 unsigned char gsVram[GS_VRAM_SIZE];
 unsigned int gsPageGen[GS_PAGES];
+
+/* Optional trace. The path is supplied by RECVX_GS_TRACE and is overwritten per process. */
+static FILE* gs_trace_file;
+static int gs_trace_checked;
+static unsigned int gs_trace_event_seq;
+static unsigned int gs_trace_frame;
+static const char* gs_trace_source = "GS_OTHER";
+static unsigned char gs_trace_pages[GS_PAGES];
+static const char* gs_trace_page_owner[GS_PAGES];
+
+static void gs_trace_open(void)
+{
+    const char* path;
+
+    if (gs_trace_checked)
+    {
+        return;
+    }
+
+    gs_trace_checked = 1;
+    path = getenv("RECVX_GS_TRACE");
+
+    if ((path == NULL) || (path[0] == '\0'))
+    {
+        return;
+    }
+
+    gs_trace_file = fopen(path, "w");
+    if (gs_trace_file == NULL)
+    {
+        fprintf(stderr, "GS trace: could not open '%s'\\n", path);
+        return;
+    }
+
+    setvbuf(gs_trace_file, NULL, _IOLBF, 0);
+    fprintf(gs_trace_file,
+            "RECVX_GS_TRACE version=1 vram_bytes=%u page_bytes=8192 page_count=%u\\n",
+            (unsigned int)GS_VRAM_SIZE, (unsigned int)GS_PAGES);
+    fflush(gs_trace_file);
+}
+
+int gsTraceActive(void)
+{
+    gs_trace_open();
+    return gs_trace_file != NULL;
+}
+
+void gsTraceEvent(const char* event, const char* fmt, ...)
+{
+    va_list args;
+
+    gs_trace_open();
+    if (gs_trace_file == NULL)
+    {
+        return;
+    }
+
+    fprintf(gs_trace_file, "seq=%08u frame=%u source=%s event=%s ",
+            ++gs_trace_event_seq, gs_trace_frame, gs_trace_source, event);
+
+    if (fmt != NULL)
+    {
+        va_start(args, fmt);
+        vfprintf(gs_trace_file, fmt, args);
+        va_end(args);
+    }
+
+    fputc('\\n', gs_trace_file);
+    fflush(gs_trace_file);
+}
+
+const char* gsTraceSetSource(const char* source)
+{
+    const char* previous = gs_trace_source;
+    gs_trace_source = (source != NULL) ? source : "GS_OTHER";
+    return previous;
+}
+
+const char* gsTraceCurrentSource(void)
+{
+    return gs_trace_source;
+}
+
+void gsTraceSetFrame(unsigned int frame)
+{
+    gs_trace_frame = frame;
+}
+
+void gsTraceResetPages(void)
+{
+    if (gs_trace_file != NULL)
+    {
+        memset(gs_trace_pages, 0, sizeof(gs_trace_pages));
+    }
+}
+
+/* These are 8 KiB page-level reuse indicators, not byte-overlap proofs. */
+void gsTraceReportPages(const char* event, const char* details)
+{
+    char pages[8192];
+    size_t used = 0;
+    unsigned int count = 0;
+    unsigned int i;
+
+    if (gs_trace_file == NULL)
+    {
+        return;
+    }
+
+    pages[0] = '\0';
+
+    for (i = 0; i < GS_PAGES; i++)
+    {
+        if (gs_trace_pages[i])
+        {
+            int n;
+
+            if (used < sizeof(pages) - 1)
+            {
+                n = snprintf(pages + used, sizeof(pages) - used, "%s%u:%u",
+                             (count == 0) ? "" : ",", i, gsPageGen[i]);
+                if (n > 0)
+                {
+                    used += (size_t)n;
+                    if (used >= sizeof(pages))
+                    {
+                        used = sizeof(pages) - 1;
+                    }
+                }
+            }
+
+            if ((gs_trace_page_owner[i] != NULL) &&
+                (strcmp(gs_trace_page_owner[i], gs_trace_source) != 0))
+            {
+                gsTraceEvent("PAGE_WRITER_CHANGE",
+                             "page=%u previous=%s current=%s note=same_8KiB_page_only_byte_overlap_not_proven",
+                             i, gs_trace_page_owner[i], gs_trace_source);
+            }
+
+            gs_trace_page_owner[i] = gs_trace_source;
+            count++;
+        }
+    }
+
+    gsTraceEvent(event, "%s changed_pages=%u page_list=%s",
+                 (details != NULL) ? details : "", count,
+                 (count != 0) ? pages : "none");
+    memset(gs_trace_pages, 0, sizeof(gs_trace_pages));
+}
 
 static const unsigned char blockTable32[4][8] = {
     {  0,  1,  4,  5, 16, 17, 20, 21 },
@@ -167,6 +319,9 @@ void gsMemInit(void)
     }
 
     memset(gsVram, 0, sizeof(gsVram));
+    memset(gs_trace_pages, 0, sizeof(gs_trace_pages));
+    memset(gs_trace_page_owner, 0, sizeof(gs_trace_page_owner));
+    gsTraceEvent("VRAM_INIT", "bytes=%u pages=%u", (unsigned int)GS_VRAM_SIZE, (unsigned int)GS_PAGES);
 }
 
 /* ---- address functions: return a byte (or nibble for 4-bit) offset into gsVram ---- */
@@ -234,7 +389,13 @@ int gsBlockNumber(int psm, unsigned int bp, unsigned int bw, unsigned int x, uns
 
 static void touch(unsigned int byte_addr)
 {
-    gsPageGen[(byte_addr >> 13) & (GS_PAGES - 1)]++;
+    unsigned int page = (byte_addr >> 13) & (GS_PAGES - 1);
+
+    gsPageGen[page]++;
+    if (gs_trace_file != NULL)
+    {
+        gs_trace_pages[page] = 1;
+    }
 }
 
 unsigned int gsMemRead(int psm, unsigned int bp, unsigned int bw, unsigned int x, unsigned int y)
@@ -444,11 +605,31 @@ static struct {
     unsigned int bp, bw, psm;
     unsigned int sx, sy, w, h;
     unsigned int x, y;
+    unsigned int transferred;
+    unsigned int trace_id;
+    const char* source;
     int changed;
 } xfer;
 
+static unsigned int gs_trace_transfer_seq;
+
+static void trace_transfer_end(const char* status)
+{
+    char details[256];
+    const char* previous_source = gsTraceSetSource(xfer.source);
+
+    snprintf(details, sizeof(details),
+             "id=%u status=%s bp=0x%04X bw=%u psm=0x%02X rect=%u,%u %ux%u pixels=%u changed=%d",
+             xfer.trace_id, status, xfer.bp, xfer.bw, xfer.psm,
+             xfer.sx, xfer.sy, xfer.w, xfer.h, xfer.transferred, xfer.changed);
+    gsTraceReportPages("TRANSFER_END", details);
+    gsTraceSetSource(previous_source);
+}
+
 static void advance(void)
 {
+    xfer.transferred++;
+
     if (++xfer.x >= xfer.sx + xfer.w)
     {
         xfer.x = xfer.sx;
@@ -457,6 +638,7 @@ static void advance(void)
         {
             xfer.active = 0;
 
+            trace_transfer_end("complete");
             gsXferDone(xfer.bp, xfer.bw, xfer.psm, xfer.sx, xfer.sy, xfer.w, xfer.h, xfer.changed);
         }
     }
@@ -470,6 +652,16 @@ void gsMemStartTransfer(const GsRegs* r)
 
     if (dir == 0)          /* host -> local */
     {
+        if (xfer.active)
+        {
+            trace_transfer_end("aborted_by_next_TRXDIR");
+            xfer.active = 0;
+        }
+
+        gsTraceResetPages();
+        xfer.transferred = 0;
+        xfer.trace_id = ++gs_trace_transfer_seq;
+        xfer.source = gsTraceCurrentSource();
         xfer.bp = (unsigned int)(r->bitbltbuf >> 32) & 0x3FFF;
         xfer.bw = (unsigned int)(r->bitbltbuf >> 48) & 0x3F;
         xfer.psm = (unsigned int)(r->bitbltbuf >> 56) & 0x3F;
@@ -481,6 +673,16 @@ void gsMemStartTransfer(const GsRegs* r)
         xfer.y = xfer.sy;
         xfer.active = (xfer.w != 0) && (xfer.h != 0);
         xfer.changed = 0;
+
+        gsTraceEvent("TRANSFER_BEGIN",
+                     "id=%u dir=HOST_TO_LOCAL bp=0x%04X bw=%u psm=0x%02X rect=%u,%u %ux%u",
+                     xfer.trace_id, xfer.bp, xfer.bw, xfer.psm,
+                     xfer.sx, xfer.sy, xfer.w, xfer.h);
+
+        if (!xfer.active)
+        {
+            trace_transfer_end("empty_rect");
+        }
     }
     else if (dir == 2)     /* local -> local */
     {
@@ -498,18 +700,32 @@ void gsMemStartTransfer(const GsRegs* r)
         unsigned int h = (unsigned int)(r->trxreg >> 32) & 0xFFF;
         unsigned int x, y;
 
-        gsFlushLocalToLocal(sbp, sbw, spsm, ssx, ssy, w, h);
-
-        for (y = 0; y < h; y++)
         {
-            for (x = 0; x < w; x++)
-            {
-                gsMemWrite(dpsm, dbp, dbw, dsx + x, dsy + y, gsMemRead(spsm, sbp, sbw, ssx + x, ssy + y));
-            }
-        }
+            const char* previous_source = gsTraceSetSource("GS_LOCAL_COPY");
+            char details[192];
 
-        xfer.active = 0;
-        gsXferDone(dbp, dbw, dpsm, dsx, dsy, w, h, 1);
+            gsFlushLocalToLocal(sbp, sbw, spsm, ssx, ssy, w, h);
+            gsTraceResetPages();
+            gsTraceEvent("LOCAL_COPY_BEGIN",
+                         "src_bp=0x%04X src_bw=%u src_psm=0x%02X src_xy=%u,%u dst_bp=0x%04X dst_bw=%u dst_psm=0x%02X dst_xy=%u,%u size=%ux%u",
+                         sbp, sbw, spsm, ssx, ssy, dbp, dbw, dpsm, dsx, dsy, w, h);
+
+            for (y = 0; y < h; y++)
+            {
+                for (x = 0; x < w; x++)
+                {
+                    gsMemWrite(dpsm, dbp, dbw, dsx + x, dsy + y, gsMemRead(spsm, sbp, sbw, ssx + x, ssy + y));
+                }
+            }
+
+            snprintf(details, sizeof(details),
+                     "src_bp=0x%04X src_bw=%u dst_bp=0x%04X dst_bw=%u dst_psm=0x%02X rect=%u,%u %ux%u",
+                     sbp, sbw, dbp, dbw, dpsm, dsx, dsy, w, h);
+            gsTraceReportPages("LOCAL_COPY_END", details);
+            xfer.active = 0;
+            gsXferDone(dbp, dbw, dpsm, dsx, dsy, w, h, 1);
+            gsTraceSetSource(previous_source);
+        }
     }
     else                   /* local -> host: handled by gsMemReadImage */
     {

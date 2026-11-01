@@ -256,7 +256,9 @@ void gsWriteReg(int reg, u64 value)
     case 0x22: gsRegs.scanmsk = value; break;
     case 0x3b: gsRegs.texa = value; break;
     case 0x3d: gsRegs.fogcol = value; break;
-    case 0x3f: break; /* TEXFLUSH */
+    case 0x3f:
+        gsTraceEvent("TEXFLUSH", "GS TEXFLUSH register observed; texture coherence remains generation/hash based");
+        break;
     case 0x40: gsRegs.scissor[0] = value; break;
     case 0x41: gsRegs.scissor[1] = value; break;
     case 0x42: gsRegs.alpha[0] = value; break;
@@ -608,6 +610,7 @@ static void clut_load(u64 tex0)
     unsigned int cld = GSF(tex0, 61, 3);
     int entries = clut_entries(psm);
     int i, load;
+    unsigned long long hash_before;
 
     if (entries == 0)
     {
@@ -628,6 +631,11 @@ static void clut_load(u64 tex0)
     {
         return;
     }
+
+    hash_before = (unsigned long long)gsClutHash(tex0);
+    gsTraceEvent("CLUT_LOAD_BEGIN",
+                 "cbp=0x%04X cpsm=0x%X csm=%u csa=%u cld=%u entries=%d old_hash=%016llX",
+                 cbp, cpsm, csm, csa, cld, entries, hash_before);
 
     /* primitives already queued use the old palette */
     gsFlushPrims();
@@ -672,6 +680,11 @@ static void clut_load(u64 tex0)
             clut_buf[e & 511] = (unsigned short)gsMemRead((cpsm == 10) ? GS_PSMCT16S : GS_PSMCT16, cbp, bw, x, y);
         }
     }
+
+    gsTraceEvent("CLUT_LOAD_END",
+                 "cbp=0x%04X cpsm=0x%X csm=%u csa=%u cld=%u entries=%d old_hash=%016llX new_hash=%016llX",
+                 cbp, cpsm, csm, csa, cld, entries, hash_before,
+                 (unsigned long long)gsClutHash(tex0));
 }
 
 static void read_clut(u64 tex0, u64 texa, int entries, unsigned int* clut)

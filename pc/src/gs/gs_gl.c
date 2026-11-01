@@ -9,6 +9,7 @@
  * alpha holds As / 128 so the GS blend factor As maps to GL_SRC_ALPHA.
  */
 #include <math.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -409,6 +410,7 @@ typedef struct {
     GLuint tex;
     int hd;              /* tex is an HD replacement (owned by gs_replace.c) */
     unsigned int last_use;
+    unsigned int trace_last_frame;
 } CachedTex;
 
 #define MAX_TEX 2048
@@ -538,6 +540,16 @@ static GLuint get_texture(u64 tex0, u64 texa, u64 texclut, int w, int h, int row
         if (t->used && (t->gen == gen) && (t->key0 == key0) && (t->key1 == key1) && (t->key2 == key2) && (t->w == w) && (t->h == h) &&
             (t->rows == rows) && (t->cols == cols))
         {
+            if (gsTraceActive() && (t->trace_last_frame != frame_counter))
+            {
+                gsTraceEvent("TEX_CACHE_HIT",
+                             "slot=%d tbp=0x%04X tbw=%u psm=0x%02X size=%ux%u sample=%ux%u page_base=%u page_stride=%u page_bands=%u page_cols=%u gen=%016llX clut=%016llX hd=%d",
+                             i, tbp, tbw, psm, w, h, cols, rows, page_lo, stride,
+                             (rows + ph - 1) / ph, (cols + pw - 1) / pw,
+                             (unsigned long long)gen, (unsigned long long)key2, t->hd);
+                t->trace_last_frame = frame_counter;
+            }
+
             t->last_use = frame_counter;
             *hd = t->hd;
             return t->tex;
@@ -558,12 +570,30 @@ static GLuint get_texture(u64 tex0, u64 texa, u64 texclut, int w, int h, int row
     {
         slot = oldest;
 
+        if (gsTraceActive())
+        {
+            gsTraceEvent("TEX_CACHE_EVICT",
+                         "slot=%d tbp=0x%04X old_size=%ux%u old_gen=%016llX hd=%d",
+                         slot, GSF(texcache[slot].key0, 0, 14),
+                         texcache[slot].w, texcache[slot].h,
+                         (unsigned long long)texcache[slot].gen, texcache[slot].hd);
+        }
+
         if (!texcache[slot].hd)
         {
             glDeleteTextures(1, &texcache[slot].tex);
             tex_cached--;
             tex_cached_bytes -= (double)texcache[slot].w * texcache[slot].h * 4;
         }
+    }
+
+    if (gsTraceActive())
+    {
+        gsTraceEvent("TEX_CACHE_MISS",
+                     "slot=%d replace=%d tbp=0x%04X tbw=%u psm=0x%02X size=%ux%u sample=%ux%u page_base=%u page_stride=%u page_bands=%u page_cols=%u gen=%016llX clut=%016llX",
+                     slot, texcache[slot].used, tbp, tbw, psm, w, h, cols, rows, page_lo, stride,
+                     (rows + ph - 1) / ph, (cols + pw - 1) / pw,
+                     (unsigned long long)gen, (unsigned long long)key2);
     }
 
     t = &texcache[slot];
@@ -580,6 +610,7 @@ static GLuint get_texture(u64 tex0, u64 texa, u64 texclut, int w, int h, int row
     t->clut_page = clut_page;
     t->gen = gen;
     t->last_use = frame_counter;
+    t->trace_last_frame = 0xFFFFFFFFu;
     t->hd = 0;
 
     {
@@ -772,6 +803,11 @@ void gsXferDone(unsigned int bp, unsigned int bw, unsigned int psm, unsigned int
 
         if (rt->used && (changed || rt->rendered) && rt_overlaps(rt, bp, bw, psm, y, h))
         {
+            gsTraceEvent("RT_TRANSFER_OVERLAP",
+                         "write_bp=%u write_bw=%u write_psm=0x%02X rect=%u,%u %ux%u changed=%d rt_fbp=%u rt_fbw=%u rt_size=%ux%u rt_rendered=%d rt_drawn_h=%d",
+                         bp, bw, psm, x, y, w, h, changed,
+                         rt->fbp, rt->fbw, rt->w, rt->h, rt->rendered, rt->drawn_h);
+
             /* the rows of the render target the transfer touches (32-row bands of fbw pages) */
             int band = rt->fbw * 32;
             int lo = (int)(bp + (y / 32) * bw * 32) - (int)(rt->fbp * 32);
@@ -830,6 +866,8 @@ void gsFlushLocalToLocal(unsigned int bp, unsigned int bw, unsigned int psm, uns
             unsigned int* buf;
             int px, py, rows;
             double t0;
+            const char* previous_trace_source;
+            char trace_details[192];
 
             rt_sync(rt);
 
@@ -870,6 +908,9 @@ void gsFlushLocalToLocal(unsigned int bp, unsigned int bw, unsigned int psm, uns
             glReadPixels(0, 0, rt->w, rows, GL_RGBA, GL_UNSIGNED_BYTE, buf);
             glBindFramebuffer(GL_FRAMEBUFFER, rt->fbo);
 
+            previous_trace_source = gsTraceSetSource("RT_WRITEBACK");
+            gsTraceResetPages();
+
             for (py = 0; py < rows; py++)
             {
                 for (px = 0; px < rt->w; px++)
@@ -880,6 +921,11 @@ void gsFlushLocalToLocal(unsigned int bp, unsigned int bw, unsigned int psm, uns
                     gsMemWrite(GS_PSMCT32, rt->fbp * 32, rt->fbw, px, py, (c & 0xFFFFFF) | (a << 24));
                 }
             }
+
+            snprintf(trace_details, sizeof(trace_details),
+                     "fbp=%u fbw=%u size=%ux%u rows=%d", rt->fbp, rt->fbw, rt->w, rt->h, rows);
+            gsTraceReportPages("RT_WRITEBACK_END", trace_details);
+            gsTraceSetSource(previous_trace_source);
 
             free(buf);
             rt->vram_dirty = 0;
@@ -1502,6 +1548,7 @@ void gsRendererPresent(unsigned int dispfb_fbp, unsigned int dispfb_fbw)
 
     gsRendererFlush();
     frame_counter++;
+    gsTraceSetFrame(frame_counter + 1);
     stats.frames++;
 
     /* debug: RECVX_GSDUMP=<frame> logs every draw of that frame (and the next one) */

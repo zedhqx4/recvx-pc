@@ -263,3 +263,88 @@ Complete the Windows build, then inspect the generated build and test representa
 scenes. Confirm that the 512x448 base does not introduce clipping, incorrect aspect mapping,
 render-target desynchronization, or screenshot regressions before starting the GS/VRAM audit.
 
+
+
+## 2026-11-01 — Step 5: Add Opt-In GS VRAM / Texture-Coherency Trace
+
+**Category:** Diagnostic instrumentation only  
+**Status:** Implemented on `debug/gs-memory`; build and A/B runtime capture pending  
+**Purpose:** Compare the same game session with movies skipped versus movies played, observing
+the common GS memory path used by movie frames, TIM2 model textures, CLUTs, render-target
+writebacks, and the OpenGL texture cache.
+
+### Changes
+
+- Added an opt-in trace file selected by `RECVX_GS_TRACE`. It is opened in overwrite mode once
+  per process, is line-buffered, and flushes each event. Without the variable, no trace file is
+  created.
+- Added source labels for normal movie uploads (`MOVIE`) and TIM2 uploads
+  (`TIM2_CLUT` / `TIM2_IMAGE`). HD movie frames are marked as bypassing GS VRAM.
+- Logged host-to-local transfer registers, completion/abortion, pixels processed, and the physical
+  8 KiB GS pages whose contents actually changed. A page-writer transition means same-page reuse,
+  not proven byte-level overlap.
+- Logged local-to-local copies and render-target-to-VRAM writebacks, including changed pages.
+- Logged texture-cache hits (once per entry per frame), misses, evictions, sample extents, page
+  geometry, generations, and CLUT hashes.
+- Logged CLUT load decisions, before/after hashes, TEXFLUSH observations, and render-target
+  overlap/invalidation decisions.
+- No allocator, transfer dimensions, VRAM contents, cache policy, decoder, movie lifetime, or
+  cleanup behavior was intentionally changed.
+
+### Files Changed
+
+- `pc/src/gs/gs_internal.h` — shared trace declarations.
+- `pc/src/gs/gs_mem.c` — trace writer, page tracking, transfer and local-copy events.
+- `pc/src/gs/gs.c` — CLUT lifecycle and TEXFLUSH events.
+- `pc/src/gs/gs_gl.c` — texture-cache and render-target coherency events.
+- `pc/src/pc_movie.c` — normal/HD movie route and termination events.
+- `src/ps2/veronica/prog/ps2_loadtim2.c` — TIM2 CLUT/image source labels and asset metadata.
+- `DEVELOPMENT_LOG.md` — this entry.
+
+### How to Capture the A/B Logs
+
+Use two fresh game processes and separate paths. The trace path is relative to the process working
+directory unless absolute; each launch overwrites its selected trace file.
+
+For this experiment, set `movies_hd=0` in `recvx.ini` for **both** tests. Otherwise, when an
+upscaled movie exists, the game may select the HD route, which uses a separate OpenGL texture and
+does not write movie frames into GS VRAM. The trace will show `MOVIE_HD_FRAME` if that happens.
+
+**Windows CMD — test A (skip every movie):**
+
+```bat
+set RECVX_GS_TRACE=vram_no_movies.log
+recvx.exe
+```
+
+**Windows CMD — test B (play every movie):**
+
+```bat
+set RECVX_GS_TRACE=vram_with_movies.log
+recvx.exe
+```
+
+Reach the same reference room from the same starting save, follow the same route, wait the same
+duration (2 minutes), inspect the same area, then close normally. Do not change the executable,
+graphics settings, movie conversion files, or other configuration between tests.
+
+For PowerShell, set `$env:RECVX_GS_TRACE` to the corresponding filename before launching each
+process.
+
+### Interpreting the Trace
+
+- Compare `TRANSFER_BEGIN` / `TRANSFER_END` by source, TBP, TBW, PSM, rectangle, and changed pages.
+- `PAGE_WRITER_CHANGE` means two source labels changed some bytes in the same 8 KiB GS page.
+  Sharing a page alone does not establish byte-level overlap.
+- Compare texture-cache hits/misses to preceding page changes and each texture's page geometry.
+- Compare CLUT snapshots and render-target writeback/invalidation events.
+- Confirm the normal movie path appears as `source=MOVIE`, not `MOVIE_HD_FRAME`.
+
+### Validation
+
+- **Source review:** Instrumentation is opt-in; no functional policy change was intended.
+- **Build:** Not run in this environment.
+- **Runtime A/B capture:** Pending the two controlled sessions.
+- **Diagnostic limit:** Page ownership is tracked at 8 KiB granularity, so page transitions are
+  candidates for reuse, not exact byte-overlap reports. Each transfer retains its GS coordinates
+  and dimensions for further reconstruction.

@@ -17,6 +17,7 @@
 #include "../../include/ps2/veronica/prog/main.h"
 
 #include "pc_platform.h"
+#include "gs/gs_internal.h"
 
 extern unsigned int Ps2_vcount;
 
@@ -183,6 +184,8 @@ void readMpeg()
 
 void termAll()
 {
+    gsTraceEvent("MOVIE_TERM_BEGIN", "playing=%d hd=%d image=%dx%d", playing, hd, image_w, image_h);
+
     if (playing)
     {
         pcMpegClose();
@@ -195,6 +198,8 @@ void termAll()
         pcGsMovieFrame(0, NULL, 0, 0, 0);
         hd = 0;
     }
+
+    gsTraceEvent("MOVIE_TERM_END", "playing=%d hd=%d", playing, hd);
 }
 
 /* upload the current frame where the PS2 player put it */
@@ -215,12 +220,20 @@ void setImageTag(unsigned int* tags, void* unused)
 
     if (hd)
     {
+        gsTraceEvent("MOVIE_HD_FRAME", "frame=%u decoded=%dx%d scale=%d bypasses_GS_VRAM=1",
+                     Ps2_vcount, hd_w, hd_h, HD_SCALE);
         gsRendererFlush();   /* the previous frame's sprite may still be queued */
         pcGsMovieFrame(MOVIE_TBP, image + 16, hd_w, hd_h, HD_SCALE);
         return;
     }
 
-    gif[0] = SCE_GIF_SET_TAG(4, SCE_GS_TRUE, SCE_GS_FALSE, 0, SCE_GIF_PACKED, 1);
+    {
+        const char* previous_source = gsTraceSetSource("MOVIE");
+        qwc = (image_w * image_h * 4) / 16;
+        gsTraceEvent("MOVIE_FRAME", "frame=%u tbp=0x%04X tbw=%u psm=CT32 size=%dx%d qwc=%d",
+                     Ps2_vcount, MOVIE_TBP, MOVIE_TBW, image_w, image_h, qwc);
+
+        gif[0] = SCE_GIF_SET_TAG(4, SCE_GS_TRUE, SCE_GS_FALSE, 0, SCE_GIF_PACKED, 1);
     gif[1] = SCE_GIF_PACKED_AD;
     gif[2] = SCE_GS_SET_BITBLTBUF(0, 0, 0, MOVIE_TBP, MOVIE_TBW, SCE_GS_PSMCT32);
     gif[3] = SCE_GS_BITBLTBUF;
@@ -230,12 +243,13 @@ void setImageTag(unsigned int* tags, void* unused)
     gif[7] = SCE_GS_TRXREG;
     gif[8] = SCE_GS_SET_TRXDIR(0);
     gif[9] = SCE_GS_TRXDIR;
-    gsGifTransfer(gif, 5);
+        gsGifTransfer(gif, 5);
 
-    qwc = (image_w * image_h * 4) / 16;
-    ((u_long*)image)[0] = SCE_GIF_SET_TAG(qwc, SCE_GS_TRUE, SCE_GS_FALSE, 0, SCE_GIF_IMAGE, 0);
-    ((u_long*)image)[1] = 0;
-    gsGifTransfer(image, 1 + qwc);
+        ((u_long*)image)[0] = SCE_GIF_SET_TAG(qwc, SCE_GS_TRUE, SCE_GS_FALSE, 0, SCE_GIF_IMAGE, 0);
+        ((u_long*)image)[1] = 0;
+        gsGifTransfer(image, 1 + qwc);
+        gsTraceSetSource(previous_source);
+    }
 }
 
 /* the original's sprite: decoded image (TBP 14208) stretched to the movie's display rectangle */

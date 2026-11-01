@@ -2,6 +2,11 @@
 #include "../../../ps2/veronica/prog/ps2_dummy.h"
 #include "../../../ps2/veronica/prog/ps2_pxlconv.h"
 
+#ifdef TARGET_PC
+extern const char* gsTraceSetSource(const char* source);
+extern void gsTraceEvent(const char* event, const char* fmt, ...);
+#endif
+
 //#include <string.h>
 
 unsigned char clear_buff[1024];
@@ -343,6 +348,9 @@ int Send_1024_Clut_data(void* clt_adr, unsigned long send_clut_adr)
 int Send_Tim2_dataEx(void* tim2_top_adr, unsigned long send_image_adr, unsigned long send_clut_adr)
 {
     TIM2_PICTUREHEADER* pPhead;
+#ifdef TARGET_PC
+    const char* previous_trace_source = gsTraceSetSource("TIM2_CLUT");
+#endif
 
     if (((unsigned char*)tim2_top_adr)[5] != 0) 
     {
@@ -356,22 +364,37 @@ int Send_Tim2_dataEx(void* tim2_top_adr, unsigned long send_image_adr, unsigned 
     if ((pPhead->ClutType != 0) && (Clut_Load_Func(pPhead, send_clut_adr) < 0)) 
     {
         printf("Can't Load Clut\n");
-        
+#ifdef TARGET_PC
+        gsTraceSetSource(previous_trace_source);
+#endif
         return -1;
     }
-    else if (((pPhead->ImageWidth < 1024) && (pPhead->ImageHeight < 1024)) && ((pPhead->ImageWidth > 128) && (pPhead->ImageHeight > 128)) && ((pPhead->ImageType == 4) || (pPhead->ImageType == 5))) 
+
+#ifdef TARGET_PC
+    gsTraceSetSource("TIM2_IMAGE");
+    gsTraceEvent("TIM2_ASSET",
+                 "tbp=0x%04lX clut_bp=0x%04lX image=%ux%u image_type=%u image_bytes=%u clut_type=%u",
+                 send_image_adr, send_clut_adr, pPhead->ImageWidth, pPhead->ImageHeight,
+                 pPhead->ImageType, pPhead->ImageSize, pPhead->ClutType);
+#endif
+
+    if (((pPhead->ImageWidth < 1024) && (pPhead->ImageHeight < 1024)) && ((pPhead->ImageWidth > 128) && (pPhead->ImageHeight > 128)) && ((pPhead->ImageType == 4) || (pPhead->ImageType == 5))) 
     {
         P32_Image_Load(pPhead, send_image_adr);
         
         Set_GsTex(pPhead, send_image_adr, send_clut_adr);
-        
+#ifdef TARGET_PC
+        gsTraceSetSource(previous_trace_source);
+#endif
         return 1;
     }
-    
+
     Tim2_Image_Load(pPhead, send_image_adr);
-    
+
     Set_GsTex(pPhead, send_image_adr, send_clut_adr);
-    
+#ifdef TARGET_PC
+    gsTraceSetSource(previous_trace_source);
+#endif
     return 2;
 }
 
