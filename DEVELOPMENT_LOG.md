@@ -360,3 +360,38 @@ diagnostic-output corrections only.
 
 The trace writer uses a 64 KiB output buffer and flushes every 128 events to limit synchronous
 disk I/O during the capture. Closing the game normally flushes the remaining buffer.
+
+
+## 2026-11-01 — Step 6: Add Numpad-Controlled GS Trace Capture
+
+**Category:** Diagnostic tooling only  
+**Status:** Implemented on `debug/gs-memory`; Windows build and runtime validation pending  
+**Purpose:** Replace full-session, multi-gigabyte traces with short capture windows and a
+user-generated marker at the moment a visual error appears.
+
+### Controls
+
+- Set `RECVX_GS_TRACE` to the desired output filename before launching the game.
+- **Numpad 7** toggles capture ON/OFF. The first ON opens the file in overwrite mode; later
+  ON windows append to the same file. OFF flushes and closes the file.
+- **Numpad 9** writes `USER_MARKER label=ERROR_HERE` with the current frame and sequence,
+  but only while capture is ON.
+- Without `RECVX_GS_TRACE`, these keys are not intercepted by the trace feature and no GS
+  trace file is created.
+
+### Implementation
+
+- `pc/src/pc_platform.c` intercepts SDL3 keypad scancodes only when the trace path is configured.
+- `pc/src/gs/gs.c` exposes platform-facing toggle and marker functions.
+- `pc/src/gs/gs_internal.h` declares runtime trace enablement.
+- `pc/src/gs/gs_mem.c` opens/closes the file per capture window, appends later windows, and
+  tags transfer lifetimes with their capture session so transfers crossing ON/OFF boundaries
+  are not attributed to the wrong window.
+- `pc/include/pc_gs.h` exposes the platform-facing controls.
+- No GS allocation, VRAM transfer, texture decode/cache policy, movie playback, or render-target
+  behavior is intentionally changed.
+
+### Validation
+
+- Source edits and capture-window guards reviewed.
+- Windows compilation and runtime hotkey verification remain pending.

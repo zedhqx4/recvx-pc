@@ -14,6 +14,22 @@ GsRegs gsRegs;
 int gsDumpFrame;
 static int kicks;
 
+int pcGsTraceToggle(void)
+{
+    int enabled = !gsTraceActive();
+
+    return gsTraceSetEnabled(enabled) ? enabled : -1;
+}
+
+void pcGsTraceErrorMarker(void)
+{
+    if (gsTraceActive())
+    {
+        gsTraceEvent("USER_MARKER", "label=ERROR_HERE");
+    }
+}
+
+
 /* ------------------------------------------------------------------------------------------- */
 /* vertex queue and kicks */
 

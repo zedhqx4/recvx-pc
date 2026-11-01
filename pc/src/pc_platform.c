@@ -680,6 +680,8 @@ void pcVideoInit(void)
     {
         pcPlatformFatal("SDL_Init failed: %s", SDL_GetError());
     }
+    gs_trace_hotkeys_init();
+
 
     /* Reserve the PS2's fixed-address scratchpad before creating an OpenGL window/context.
      * Loading the graphics driver can occupy 0x70000000, which the PS2 code requires. */
@@ -812,6 +814,53 @@ static int pause_until_active(void)
 
 static Uint64 last_mouse_move;
 
+static int gs_trace_hotkeys_armed;
+
+static void gs_trace_hotkeys_init(void)
+{
+    const char* path = getenv("RECVX_GS_TRACE");
+
+    gs_trace_hotkeys_armed = (path != NULL) && (path[0] != '\0');
+    if (gs_trace_hotkeys_armed)
+    {
+        pcLog("GS trace controls: Numpad 7 = capture ON/OFF, Numpad 9 = ERROR_HERE marker");
+    }
+}
+
+static int gs_trace_handle_key(const SDL_Event* ev)
+{
+    int enabled;
+
+    if (!gs_trace_hotkeys_armed || (ev->type != SDL_EVENT_KEY_DOWN) || ev->key.repeat ||
+        (ev->key.mod & (SDL_KMOD_CTRL | SDL_KMOD_ALT | SDL_KMOD_GUI)))
+    {
+        return 0;
+    }
+
+    if (ev->key.scancode == SDL_SCANCODE_KP_7)
+    {
+        enabled = pcGsTraceToggle();
+        if (enabled < 0)
+        {
+            pcLog("GS trace: could not open RECVX_GS_TRACE output file");
+        }
+        else
+        {
+            pcLog("GS trace: capture %s", enabled ? "ON" : "OFF");
+        }
+        return 1;
+    }
+
+    if (ev->key.scancode == SDL_SCANCODE_KP_9)
+    {
+        pcGsTraceErrorMarker();
+        return 1;
+    }
+
+    return 0;
+}
+
+
 int pcVideoPumpEvents(void)
 {
     SDL_Event ev;
@@ -855,6 +904,13 @@ int pcVideoPumpEvents(void)
             toggle_fullscreen();
             continue;
         }
+
+        /* Reserve Numpad 7/9 only when RECVX_GS_TRACE is configured. */
+        if (gs_trace_handle_key(&ev))
+        {
+            continue;
+        }
+
 
         if ((ev.type == SDL_EVENT_GAMEPAD_ADDED) || (ev.type == SDL_EVENT_GAMEPAD_REMOVED))
         {

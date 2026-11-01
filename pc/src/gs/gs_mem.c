@@ -17,16 +17,20 @@
 unsigned char gsVram[GS_VRAM_SIZE];
 unsigned int gsPageGen[GS_PAGES];
 
-/* Optional trace. The path is supplied by RECVX_GS_TRACE and is overwritten per process. */
+/* Optional trace. RECVX_GS_TRACE selects the path; runtime hotkeys control capture. */
 static FILE* gs_trace_file;
 static int gs_trace_checked;
+static int gs_trace_enabled;
+static int gs_trace_has_opened;
+static unsigned int gs_trace_session;
 static unsigned int gs_trace_event_seq;
 static unsigned int gs_trace_frame;
+static char gs_trace_path[1024];
 static const char* gs_trace_source = "GS_OTHER";
 static unsigned char gs_trace_pages[GS_PAGES];
 static const char* gs_trace_page_owner[GS_PAGES];
 
-static void gs_trace_open(void)
+static void gs_trace_configure(void)
 {
     const char* path;
 
@@ -37,44 +41,85 @@ static void gs_trace_open(void)
 
     gs_trace_checked = 1;
     path = getenv("RECVX_GS_TRACE");
-
-    if ((path == NULL) || (path[0] == '\0'))
+    if ((path != NULL) && (path[0] != '\0'))
     {
-        return;
+        snprintf(gs_trace_path, sizeof(gs_trace_path), "%s", path);
+    }
+}
+
+/* Each OFF boundary flushes/closes the file. Later ON windows append to it. */
+int gsTraceSetEnabled(int enabled)
+{
+    gs_trace_configure();
+
+    if (!enabled)
+    {
+        if (gs_trace_file != NULL)
+        {
+            gsTraceEvent("TRACE_DISABLED", "session=%u", gs_trace_session);
+            fflush(gs_trace_file);
+            fclose(gs_trace_file);
+            gs_trace_file = NULL;
+        }
+
+        gs_trace_enabled = 0;
+        memset(gs_trace_pages, 0, sizeof(gs_trace_pages));
+        memset(gs_trace_page_owner, 0, sizeof(gs_trace_page_owner));
+        return 1;
     }
 
-    gs_trace_file = fopen(path, "w");
+    if (gs_trace_enabled && (gs_trace_file != NULL))
+    {
+        return 1;
+    }
+
+    if (gs_trace_path[0] == '\0')
+    {
+        return 0;
+    }
+
+    gs_trace_file = fopen(gs_trace_path, gs_trace_has_opened ? "a" : "w");
     if (gs_trace_file == NULL)
     {
-        fprintf(stderr, "GS trace: could not open '%s'\n", path);
-        return;
+        return 0;
     }
 
     setvbuf(gs_trace_file, NULL, _IOFBF, 65536);
-    fprintf(gs_trace_file,
-            "RECVX_GS_TRACE version=1 vram_bytes=%u page_bytes=8192 page_count=%u\n",
-            (unsigned int)GS_VRAM_SIZE, (unsigned int)GS_PAGES);
+
+    if (!gs_trace_has_opened)
+    {
+        fprintf(gs_trace_file,
+                "RECVX_GS_TRACE version=2 vram_bytes=%u page_bytes=8192 page_count=%u\n",
+                (unsigned int)GS_VRAM_SIZE, (unsigned int)GS_PAGES);
+        gs_trace_has_opened = 1;
+    }
+
+    gs_trace_enabled = 1;
+    gs_trace_session++;
+    memset(gs_trace_pages, 0, sizeof(gs_trace_pages));
+    memset(gs_trace_page_owner, 0, sizeof(gs_trace_page_owner));
+    gsTraceEvent("TRACE_ENABLED", "session=%u", gs_trace_session);
     fflush(gs_trace_file);
+    return 1;
 }
 
 int gsTraceActive(void)
 {
-    gs_trace_open();
-    return gs_trace_file != NULL;
+    gs_trace_configure();
+    return gs_trace_enabled && (gs_trace_file != NULL);
 }
 
 void gsTraceEvent(const char* event, const char* fmt, ...)
 {
     va_list args;
 
-    gs_trace_open();
-    if (gs_trace_file == NULL)
+    if (!gsTraceActive())
     {
         return;
     }
 
-    fprintf(gs_trace_file, "seq=%08u frame=%u source=%s event=%s ",
-            ++gs_trace_event_seq, gs_trace_frame, gs_trace_source, event);
+    fprintf(gs_trace_file, "seq=%08u frame=%u session=%u source=%s event=%s ",
+            ++gs_trace_event_seq, gs_trace_frame, gs_trace_session, gs_trace_source, event);
 
     if (fmt != NULL)
     {
@@ -109,7 +154,7 @@ void gsTraceSetFrame(unsigned int frame)
 
 void gsTraceResetPages(void)
 {
-    if (gs_trace_file != NULL)
+    if (gsTraceActive())
     {
         memset(gs_trace_pages, 0, sizeof(gs_trace_pages));
     }
@@ -123,7 +168,7 @@ void gsTraceReportPages(const char* event, const char* details)
     unsigned int count = 0;
     unsigned int i;
 
-    if (gs_trace_file == NULL)
+    if (!gsTraceActive())
     {
         return;
     }
@@ -395,7 +440,7 @@ static void touch(unsigned int byte_addr)
     unsigned int page = (byte_addr >> 13) & (GS_PAGES - 1);
 
     gsPageGen[page]++;
-    if (gs_trace_file != NULL)
+    if (gsTraceActive())
     {
         gs_trace_pages[page] = 1;
     }
@@ -610,6 +655,7 @@ static struct {
     unsigned int x, y;
     unsigned int transferred;
     unsigned int trace_id;
+    unsigned int trace_session;
     const char* source;
     int changed;
 } xfer;
@@ -619,8 +665,15 @@ static unsigned int gs_trace_transfer_seq;
 static void trace_transfer_end(const char* status)
 {
     char details[256];
-    const char* previous_source = gsTraceSetSource(xfer.source);
+    const char* previous_source;
 
+    /* A transfer that crosses capture windows must not appear in the wrong session. */
+    if ((xfer.trace_id == 0) || (xfer.trace_session != gs_trace_session) || !gsTraceActive())
+    {
+        return;
+    }
+
+    previous_source = gsTraceSetSource(xfer.source);
     snprintf(details, sizeof(details),
              "id=%u status=%s bp=0x%04X bw=%u psm=0x%02X rect=%u,%u %ux%u pixels=%u changed=%d",
              xfer.trace_id, status, xfer.bp, xfer.bw, xfer.psm,
@@ -661,9 +714,9 @@ void gsMemStartTransfer(const GsRegs* r)
             xfer.active = 0;
         }
 
-        gsTraceResetPages();
         xfer.transferred = 0;
-        xfer.trace_id = ++gs_trace_transfer_seq;
+        xfer.trace_id = 0;
+        xfer.trace_session = 0;
         xfer.source = gsTraceCurrentSource();
         xfer.bp = (unsigned int)(r->bitbltbuf >> 32) & 0x3FFF;
         xfer.bw = (unsigned int)(r->bitbltbuf >> 48) & 0x3F;
@@ -677,12 +730,18 @@ void gsMemStartTransfer(const GsRegs* r)
         xfer.active = (xfer.w != 0) && (xfer.h != 0);
         xfer.changed = 0;
 
-        gsTraceEvent("TRANSFER_BEGIN",
+        if (gsTraceActive())
+        {
+            gsTraceResetPages();
+            xfer.trace_id = ++gs_trace_transfer_seq;
+            xfer.trace_session = gs_trace_session;
+            gsTraceEvent("TRANSFER_BEGIN",
                      "id=%u dir=HOST_TO_LOCAL bp=0x%04X bw=%u psm=0x%02X rect=%u,%u %ux%u",
-                     xfer.trace_id, xfer.bp, xfer.bw, xfer.psm,
-                     xfer.sx, xfer.sy, xfer.w, xfer.h);
+                         xfer.trace_id, xfer.bp, xfer.bw, xfer.psm,
+                         xfer.sx, xfer.sy, xfer.w, xfer.h);
+        }
 
-        if (!xfer.active)
+        if (!xfer.active && (xfer.trace_id != 0))
         {
             trace_transfer_end("empty_rect");
         }

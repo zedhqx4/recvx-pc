@@ -58,6 +58,7 @@ extern unsigned char gsVram[GS_VRAM_SIZE];
 extern unsigned int gsPageGen[GS_PAGES];
 
 void gsTraceEvent(const char* event, const char* fmt, ...);
+int gsTraceSetEnabled(int enabled);
 int gsTraceActive(void);
 const char* gsTraceSetSource(const char* source);
 const char* gsTraceCurrentSource(void);
