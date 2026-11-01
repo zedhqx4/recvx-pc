@@ -6,4 +6,5 @@ void pcGsSetDisplay(unsigned int fbp, unsigned int fbw);
 void pcGsPresent(void);                         /* draws the display buffer to the window */
 
 extern int pcGsScale;                           /* internal resolution multiplier */
-extern int pcGsScaleX;                          /* horizontal multiplier (higher for widescreen) */
+extern float pcGsScaleX;                        /* horizontal backing-buffer scale per logical pixel */
+extern float pcGsScaleY;                        /* vertical backing-buffer scale per logical pixel */
