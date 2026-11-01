@@ -713,6 +713,25 @@ void pcVideoInit(void)
     }
     pcOsStartupLog("pcVideoInit: SDL_Init succeeded");
 
+    /* Load optional community mappings beside recvx.exe before enumerating gamepads. */
+    {
+        char dir[1024], path[1100];
+        int mappings;
+
+        pcPlatformExeDir(dir, sizeof(dir));
+        snprintf(path, sizeof(path), "%s/gamecontrollerdb.txt", dir);
+        mappings = SDL_AddGamepadMappingsFromFile(path);
+
+        if (mappings < 0)
+        {
+            pcLog("controller: could not load %s: %s (using SDL built-in mappings)", path, SDL_GetError());
+        }
+        else
+        {
+            pcLog("controller: loaded %d gamepad mapping(s) from %s", mappings, path);
+        }
+    }
+
     /* Reserve the PS2's fixed-address scratchpad before creating an OpenGL window/context.
      * Loading the graphics driver can occupy 0x70000000, which the PS2 code requires. */
     pcOsStartupLog("pcVideoInit: reserving PS2 scratchpad");
