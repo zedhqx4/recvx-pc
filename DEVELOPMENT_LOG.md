@@ -348,3 +348,11 @@ process.
 - **Diagnostic limit:** Page ownership is tracked at 8 KiB granularity, so page transitions are
   candidates for reuse, not exact byte-overlap reports. Each transfer retains its GS coordinates
   and dimensions for further reconstruction.
+
+
+### Post-commit review
+
+A follow-up review corrected escaped line terminators in the trace writer, initializes the trace
+frame label before the first rendered frame, and includes raw TEX0 plus CLUT page metadata in
+cache events. Movie-open events now also record whether the HD bypass was selected. These are
+diagnostic-output corrections only.

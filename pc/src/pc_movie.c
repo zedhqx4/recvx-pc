@@ -139,6 +139,7 @@ void pcMovieStart(const char* name)
 
     playing = 1;
     image_new = 0;
+    gsTraceEvent("MOVIE_OPEN", "file=%s hd=%d", path, hd);
 }
 
 void readMpeg()
@@ -234,15 +235,15 @@ void setImageTag(unsigned int* tags, void* unused)
                      Ps2_vcount, MOVIE_TBP, MOVIE_TBW, image_w, image_h, qwc);
 
         gif[0] = SCE_GIF_SET_TAG(4, SCE_GS_TRUE, SCE_GS_FALSE, 0, SCE_GIF_PACKED, 1);
-    gif[1] = SCE_GIF_PACKED_AD;
-    gif[2] = SCE_GS_SET_BITBLTBUF(0, 0, 0, MOVIE_TBP, MOVIE_TBW, SCE_GS_PSMCT32);
-    gif[3] = SCE_GS_BITBLTBUF;
-    gif[4] = SCE_GS_SET_TRXPOS(0, 0, 0, 0, 0);
-    gif[5] = SCE_GS_TRXPOS;
-    gif[6] = SCE_GS_SET_TRXREG(image_w, image_h);
-    gif[7] = SCE_GS_TRXREG;
-    gif[8] = SCE_GS_SET_TRXDIR(0);
-    gif[9] = SCE_GS_TRXDIR;
+        gif[1] = SCE_GIF_PACKED_AD;
+        gif[2] = SCE_GS_SET_BITBLTBUF(0, 0, 0, MOVIE_TBP, MOVIE_TBW, SCE_GS_PSMCT32);
+        gif[3] = SCE_GS_BITBLTBUF;
+        gif[4] = SCE_GS_SET_TRXPOS(0, 0, 0, 0, 0);
+        gif[5] = SCE_GS_TRXPOS;
+        gif[6] = SCE_GS_SET_TRXREG(image_w, image_h);
+        gif[7] = SCE_GS_TRXREG;
+        gif[8] = SCE_GS_SET_TRXDIR(0);
+        gif[9] = SCE_GS_TRXDIR;
         gsGifTransfer(gif, 5);
 
         ((u_long*)image)[0] = SCE_GIF_SET_TAG(qwc, SCE_GS_TRUE, SCE_GS_FALSE, 0, SCE_GIF_IMAGE, 0);

@@ -46,13 +46,13 @@ static void gs_trace_open(void)
     gs_trace_file = fopen(path, "w");
     if (gs_trace_file == NULL)
     {
-        fprintf(stderr, "GS trace: could not open '%s'\\n", path);
+        fprintf(stderr, "GS trace: could not open '%s'\n", path);
         return;
     }
 
     setvbuf(gs_trace_file, NULL, _IOLBF, 0);
     fprintf(gs_trace_file,
-            "RECVX_GS_TRACE version=1 vram_bytes=%u page_bytes=8192 page_count=%u\\n",
+            "RECVX_GS_TRACE version=1 vram_bytes=%u page_bytes=8192 page_count=%u\n",
             (unsigned int)GS_VRAM_SIZE, (unsigned int)GS_PAGES);
     fflush(gs_trace_file);
 }
@@ -83,7 +83,7 @@ void gsTraceEvent(const char* event, const char* fmt, ...)
         va_end(args);
     }
 
-    fputc('\\n', gs_trace_file);
+    fputc('\n', gs_trace_file);
     fflush(gs_trace_file);
 }
 

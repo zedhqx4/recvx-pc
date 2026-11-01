@@ -543,9 +543,9 @@ static GLuint get_texture(u64 tex0, u64 texa, u64 texclut, int w, int h, int row
             if (gsTraceActive() && (t->trace_last_frame != frame_counter))
             {
                 gsTraceEvent("TEX_CACHE_HIT",
-                             "slot=%d tbp=0x%04X tbw=%u psm=0x%02X size=%ux%u sample=%ux%u page_base=%u page_stride=%u page_bands=%u page_cols=%u gen=%016llX clut=%016llX hd=%d",
-                             i, tbp, tbw, psm, w, h, cols, rows, page_lo, stride,
-                             (rows + ph - 1) / ph, (cols + pw - 1) / pw,
+                             "slot=%d tbp=0x%04X tbw=%u psm=0x%02X tex0=%016llX size=%ux%u sample=%ux%u page_base=%u page_stride=%u page_bands=%u page_cols=%u clut_page=%u gen=%016llX clut_hash=%016llX hd=%d",
+                             i, tbp, tbw, psm, (unsigned long long)tex0, w, h, cols, rows, page_lo, stride,
+                             (rows + ph - 1) / ph, (cols + pw - 1) / pw, clut_page,
                              (unsigned long long)gen, (unsigned long long)key2, t->hd);
                 t->trace_last_frame = frame_counter;
             }
@@ -590,9 +590,9 @@ static GLuint get_texture(u64 tex0, u64 texa, u64 texclut, int w, int h, int row
     if (gsTraceActive())
     {
         gsTraceEvent("TEX_CACHE_MISS",
-                     "slot=%d replace=%d tbp=0x%04X tbw=%u psm=0x%02X size=%ux%u sample=%ux%u page_base=%u page_stride=%u page_bands=%u page_cols=%u gen=%016llX clut=%016llX",
-                     slot, texcache[slot].used, tbp, tbw, psm, w, h, cols, rows, page_lo, stride,
-                     (rows + ph - 1) / ph, (cols + pw - 1) / pw,
+                     "slot=%d replace=%d tbp=0x%04X tbw=%u psm=0x%02X tex0=%016llX size=%ux%u sample=%ux%u page_base=%u page_stride=%u page_bands=%u page_cols=%u clut_page=%u gen=%016llX clut_hash=%016llX",
+                     slot, texcache[slot].used, tbp, tbw, psm, (unsigned long long)tex0, w, h, cols, rows, page_lo, stride,
+                     (rows + ph - 1) / ph, (cols + pw - 1) / pw, clut_page,
                      (unsigned long long)gen, (unsigned long long)key2);
     }
 
@@ -943,6 +943,8 @@ void gsFlushLocalToLocal(unsigned int bp, unsigned int bw, unsigned int psm, uns
 
 void gsRendererInit(void)
 {
+    gsTraceSetFrame(1);
+
     if (!pcGlLoad())
     {
         pcPlatformFatal("The graphics driver does not support OpenGL 3.3, which the game needs.\n\n"
