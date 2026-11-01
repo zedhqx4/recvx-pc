@@ -276,8 +276,8 @@ writebacks, and the OpenGL texture cache.
 ### Changes
 
 - Added an opt-in trace file selected by `RECVX_GS_TRACE`. It is opened in overwrite mode once
-  per process, is line-buffered, and flushes each event. Without the variable, no trace file is
-  created.
+  per process and uses buffered writes, flushing every 128 events. Normal process shutdown flushes
+  the remainder. Without the variable, no trace file is created.
 - Added source labels for normal movie uploads (`MOVIE`) and TIM2 uploads
   (`TIM2_CLUT` / `TIM2_IMAGE`). HD movie frames are marked as bypassing GS VRAM.
 - Logged host-to-local transfer registers, completion/abortion, pixels processed, and the physical
@@ -356,3 +356,7 @@ A follow-up review corrected escaped line terminators in the trace writer, initi
 frame label before the first rendered frame, and includes raw TEX0 plus CLUT page metadata in
 cache events. Movie-open events now also record whether the HD bypass was selected. These are
 diagnostic-output corrections only.
+
+
+The trace writer uses a 64 KiB output buffer and flushes every 128 events to limit synchronous
+disk I/O during the capture. Closing the game normally flushes the remaining buffer.

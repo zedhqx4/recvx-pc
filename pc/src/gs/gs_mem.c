@@ -50,7 +50,7 @@ static void gs_trace_open(void)
         return;
     }
 
-    setvbuf(gs_trace_file, NULL, _IOLBF, 0);
+    setvbuf(gs_trace_file, NULL, _IOFBF, 65536);
     fprintf(gs_trace_file,
             "RECVX_GS_TRACE version=1 vram_bytes=%u page_bytes=8192 page_count=%u\n",
             (unsigned int)GS_VRAM_SIZE, (unsigned int)GS_PAGES);
@@ -84,7 +84,10 @@ void gsTraceEvent(const char* event, const char* fmt, ...)
     }
 
     fputc('\n', gs_trace_file);
-    fflush(gs_trace_file);
+    if ((gs_trace_event_seq & 127u) == 0)
+    {
+        fflush(gs_trace_file);
+    }
 }
 
 const char* gsTraceSetSource(const char* source)
