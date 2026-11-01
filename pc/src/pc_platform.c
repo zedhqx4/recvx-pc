@@ -1300,12 +1300,42 @@ int pcTitleRequested(void)
     return 1;
 }
 
+/* Load optional custom mappings before SDL enumerates gamepads. SDL's built-in database
+ * remains available when gamecontrollerdb.txt is not shipped beside the executable. */
+static void load_gamepad_mapping_database(void)
+{
+    char dir[1024], path[1200];
+    FILE* f;
+    int added;
+
+    pcPlatformExeDir(dir, sizeof(dir));
+    snprintf(path, sizeof(path), "%s/gamecontrollerdb.txt", dir);
+
+    f = fopen(path, "rb");
+    if (f == NULL)
+    {
+        pcLog("controller: no custom mapping database found at %s; using SDL built-in mappings", path);
+        return;
+    }
+    fclose(f);
+
+    added = SDL_AddGamepadMappingsFromFile(path);
+    if (added < 0)
+    {
+        pcLog("controller: could not load %s: %s", path, SDL_GetError());
+        return;
+    }
+
+    pcLog("controller: accepted %d custom mapping(s) from %s", added, path);
+}
+
 void pcPadInit(void)
 {
     SDL_JoystickID* joysticks;
     int joystick_count = 0, i;
 
     load_bindings();
+    load_gamepad_mapping_database();
 
     if (controller != NULL)
     {
