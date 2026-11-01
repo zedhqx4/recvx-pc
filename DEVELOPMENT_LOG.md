@@ -141,3 +141,56 @@ The scratchpad reservation remains immediately after successful `SDL_Init()` and
 
 The Windows Actions build and user-confirmed startup checkpoint have passed. Validate audio and
 input behavior during subsequent targeted checks. Keep graphics and GS changes out of this step.
+
+## 2026-11-01 — Step 3: Load Optional SDL3 Gamepad Mappings at Startup
+
+**Category:** Platform / controller configuration  
+**Status:** Implemented; build and controller runtime validation pending  
+**Reference API:** SDL3 `SDL_AddGamepadMappingsFromFile()` (available since SDL 3.2.0)  
+**Implementation commit on this branch:** `bb3d105`
+
+### Problem
+
+SDL3 and HIDAPI/libusb support were enabled in Step 2, but the port did not yet load a
+user-provided SDL gamepad mapping database. This left controller recognition dependent only
+on SDL's built-in mappings.
+
+### Change
+
+In `pc/src/pc_platform.c`, a new `load_gamepad_mapping_database()` helper checks for
+`gamecontrollerdb.txt` beside `recvx.exe` and loads it with
+`SDL_AddGamepadMappingsFromFile()`.
+
+The helper is called from `pcPadInit()` after SDL initialization and before joystick enumeration
+and `SDL_IsGamepad()`. This allows custom entries to add mappings or replace an existing mapping
+before the port chooses a gamepad.
+
+The file is optional:
+- If it is absent, the game logs that SDL's built-in mappings will be used.
+- If loading fails, the error is logged and startup continues.
+- If loading succeeds, the number of accepted mappings is logged.
+
+No database file is bundled or copied into the build artifact; the user-provided
+`gamecontrollerdb.txt` must be placed beside `recvx.exe`.
+
+### Files Changed
+
+- `pc/src/pc_platform.c`
+  - Added `load_gamepad_mapping_database()`.
+  - Called it from `pcPadInit()` before `SDL_GetJoysticks()` and `SDL_IsGamepad()`.
+
+### Validation
+
+- **Source review:** Confirmed the mapping loader runs after SDL initialization and before
+  controller enumeration.
+- **Build:** Pending GitHub Actions for this implementation commit.
+- **Runtime mapping test:** Pending. Test with a known custom mapping file and confirm the log
+  reports accepted mappings and the expected controller name/layout.
+- **Missing-file behavior:** Source path is non-fatal; runtime log behavior still needs testing.
+
+### Next Checkpoint
+
+Verify the Windows build, then place a valid `gamecontrollerdb.txt` beside `recvx.exe` and
+confirm that the custom mapping is loaded before the controller is opened. Also test startup
+without the file to confirm SDL's built-in mappings remain available.
+
