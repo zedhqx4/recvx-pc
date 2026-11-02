@@ -1028,7 +1028,7 @@ static int font_uv_handle_event(const SDL_Event* ev)
         return 0;
     }
 
-    /* No correction and no live tuner unless explicitly enabled in recvx.ini. */
+    /* The base correction is always active; only the live tuner requires fontUVfix=1. */
     if (!pcFontUvDebugEnabled())
     {
         return 0;
