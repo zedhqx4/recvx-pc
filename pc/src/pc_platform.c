@@ -1443,10 +1443,20 @@ void pcPadInit(void)
     }
 }
 
+/* Numpad controls reserved by the experimental decal-priority test. */
+static int is_decal_control_scancode(SDL_Scancode key)
+{
+    return (key == SDL_SCANCODE_KP_MULTIPLY) ||
+           (key == SDL_SCANCODE_KP_PLUS) ||
+           (key == SDL_SCANCODE_KP_MINUS) ||
+           (key == SDL_SCANCODE_KP_DIVIDE);
+}
+
 /* a binding is held on the keyboard or the controller */
 static int pad_down(const PadMap* m, const bool* keys)
 {
-    int down = (m->key != SDL_SCANCODE_UNKNOWN) && keys[m->key];
+    int down = (m->key != SDL_SCANCODE_UNKNOWN) &&
+               !is_decal_control_scancode(m->key) && keys[m->key];
 
     if ((m->key == SDL_SCANCODE_RETURN) && (SDL_GetModState() & SDL_KMOD_ALT))
     {

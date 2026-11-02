@@ -112,7 +112,8 @@ Bias is clamped to `-2.00..4.00` and quantized to 0.25 steps. Positive values
 preserve Alpha's offset direction; zero neutralizes the offset; negative values reverse it.
 Changes take effect immediately. The title bar shows the current enabled state and bias;
 save attempts are verified and reported in both the title bar and `recvx.log`.
-These numpad keys are consumed by the PC platform layer and are not sent to the game.
+These numpad keys are reserved by the PC platform layer: they are consumed as events and ignored
+by keyboard-to-pad bindings, even if a matching `key_*` binding exists in `recvx.ini`.
 
 ## Tools
 

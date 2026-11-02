@@ -443,7 +443,7 @@ Keep Alpha's eligibility conditions and bounded per-frame draw ordering unchange
   - `/`: save both current values to `recvx.ini`, then read them back to verify the write.
 - Bias is clamped to `-2.00..4.00` and quantized to quarter-unit steps. Zero neutralizes the offset; negative values reverse its direction.
 - Added title-bar feedback and `recvx.log` entries for changes and save verification.
-- Consumed these keys in the platform event pump so they do not reach game controls or the input recorder.
+- Consumed these keys in the platform event pump and excluded them from keyboard-to-pad bindings, so they do not reach game controls even if mapped in `recvx.ini`; they are also absent from recorded pad input.
 - Enabled the Windows build workflow for this experimental branch.
 
 ### Files Changed
