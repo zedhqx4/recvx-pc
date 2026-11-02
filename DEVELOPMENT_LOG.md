@@ -295,7 +295,7 @@ No movie-specific runtime counters, periodic debug messages, or per-frame timing
 ## 2026-11-01 — Step 5: Optimize 32-bit Host-to-GS Image Transfers
 
 **Category:** GS memory / transfer performance  
-**Status:** Implemented; Windows build and runtime validation pending  
+**Status:** Implemented; Windows build passed; performance improvement reported by user  
 **Branch:** `experimental/gs-rebuild`  
 **Reference:** Alpha branch `pc/src/gs/gs_mem.c` implementation of `transfer32Run()` and page-touch coalescing  
 **Implementation commit:** `c1158bd`
@@ -347,5 +347,69 @@ In `pc/src/gs/gs_mem.c`:
 
 - **Source comparison:** Confirmed the 32-bit column table and `addr32()` implementation match Alpha before copying its fast path.
 - **Code review:** Confirmed page-generation coalescing is active only inside `gsMemTransferData()` and is reset at the end of the call. Non-32-bit transfer handlers remain in place.
-- **Build:** Pending GitHub Actions result.
-- **Runtime:** Pending. Compare representative scenes and inspect texture correctness and frame-time changes.
+- **Build:** Passed on GitHub Actions run [41383491046](https://github.com/zedhqx4/recvx-pc/actions/runs/41383491046) for implementation commit `c1158bd`.
+- **Runtime performance:** User reports that the 8×8 transfer optimization raises performance from approximately 22–25 FPS to 30 FPS in many areas.
+- **Further regression:** Continue checking scene transitions and texture correctness; the reported improvement is not a claim that every area has been measured.
+
+
+## 2026-11-01 — Step 6: Add Configurable OpenGL VSync
+
+**Category:** Video presentation / frame synchronization  
+**Status:** Implemented; Windows build and runtime validation pending  
+**Branch:** `experimental/gs-rebuild`  
+**Reference:** Alpha branch `pc/src/pc_platform.c` VSync configuration and swap-interval handling
+
+### Problem
+
+GS-Rebuild currently calls `SDL_GL_SetSwapInterval(0)` unconditionally after creating the OpenGL context. This requests unsynchronized buffer swaps regardless of the user's display configuration.
+
+The game's emulated VBLANK/frame pacing and the display's vertical refresh synchronization are separate things. Timing the emulated GS around VBLANK does not by itself request that OpenGL present each completed frame at a display refresh boundary. With swap interval zero, presentation may occur mid-refresh and produce visible tearing.
+
+### Scope and Rationale
+
+Restore the same user-controlled VSync behavior already present in Alpha:
+
+- Enable VSync by default, matching Alpha.
+- Allow the user to disable it through `vsync=0` in `recvx.ini`.
+- Apply the requested swap interval only after the OpenGL context exists.
+- Query the active interval and log the actual result, rather than assuming that the request succeeded.
+
+This keeps the change limited to presentation synchronization. It does not alter the game's emulated VBLANK scheduler or introduce a new frame limiter.
+
+### Change
+
+In `pc/src/pc_platform.c`:
+
+- Added `video_cfg.vsync` to the video settings structure.
+- Load `vsync` from `recvx.ini` with a default of `1`.
+- After creating the OpenGL context, call `SDL_GL_SetSwapInterval(1)` when enabled or `SDL_GL_SetSwapInterval(0)` when disabled.
+- Query `SDL_GL_GetSwapInterval()` and log the active interval. If SDL rejects the request, log the SDL error and the interval reported by the driver.
+
+### Configuration
+
+```ini
+vsync=1
+```
+
+Use `vsync=0` to request unsynchronized presentation. If the key is absent, VSync is enabled by default. The active interval reported in the log is authoritative if the graphics driver cannot honor the requested setting.
+
+### Files Changed
+
+- `pc/src/pc_platform.c`
+  - Added the configuration field and INI load.
+  - Replaced the unconditional swap-interval-zero request with Alpha's configurable request, active-interval query, and result logging.
+- `DEVELOPMENT_LOG.md`
+  - Recorded the rationale, behavior, configuration, and validation status.
+
+### Explicitly Excluded
+
+- No change to emulated VBLANK timing or frame pacing.
+- No additional frame limiter or FPS cap.
+- No settings-app UI changes; this follows Alpha's `recvx.ini` configuration behavior.
+- No GS transfer, renderer, or texture-cache changes in this step.
+
+### Validation
+
+- **Source comparison:** Matched the VSync field, default, INI loading, swap-interval request, active-interval query, and logging against Alpha.
+- **Build:** Pending GitHub Actions.
+- **Runtime:** Pending. Test with the default setting and with `vsync=0`; confirm the log reports the active swap interval and check for tearing/frame-pacing differences.

@@ -467,13 +467,14 @@ int pcPlatformFindFile(const char* dir, const char* ext, char* out, int size)
 /* ------------------------------------------------------------------------------------------- */
 /* video */
 
-/* recvx.ini video settings: scale=N, window=WxH, fullscreen=0|1|desktop, aspect=W:H */
+/* recvx.ini video settings: scale=N, window=WxH, fullscreen=0|1|desktop, aspect=W:H, vsync=0|1 */
 static struct {
     int loaded;
     int win_w, win_h;
     int win_x, win_y, has_pos;   /* window_pos= (remembered from the last run) */
     int maximized;               /* window_max= */
     int fullscreen;          /* 0 window, 1 exclusive, 2 desktop */
+    int vsync;               /* vsync= (default 1) */
     int pause_unfocused;     /* pause_unfocused= (default 1) */
     float aspect;            /* display aspect, 4:3 = 1.333 */
 } video_cfg;
@@ -534,6 +535,7 @@ static void video_settings(void)
     }
 
     video_cfg.maximized = pcIniGetInt("window_max", 0) != 0;
+    video_cfg.vsync = pcIniGetInt("vsync", 1) != 0;
     video_cfg.pause_unfocused = pcIniGetInt("pause_unfocused", 1) != 0;
 
     /* Keep 640x480 game coordinates while rasterizing into a 512x448 GS backing base.
@@ -739,7 +741,23 @@ void pcVideoInit(void)
         pcPlatformFatal("Could not create an OpenGL 3.3 context: %s", SDL_GetError());
     }
 
-    SDL_GL_SetSwapInterval(0);   /* frame pacing comes from the emulated VBLANK */
+    {
+        int swap_interval = video_cfg.vsync ? 1 : 0;
+        bool swap_result = SDL_GL_SetSwapInterval(swap_interval);
+        int active_interval = 0;
+        SDL_GL_GetSwapInterval(&active_interval);
+
+        if (swap_result)
+        {
+            pcLog("video: VSync %s (active swap interval=%d)",
+                  (active_interval != 0) ? "enabled" : "disabled", active_interval);
+        }
+        else
+        {
+            pcLog("video: SDL_GL_SetSwapInterval(%d) failed: %s (active swap interval=%d)",
+                  swap_interval, SDL_GetError(), active_interval);
+        }
+    }
 
     pcGsInit(spr);
 
