@@ -534,3 +534,62 @@ This is a direct port of the reference implementation, not a texture-filtering o
 - **Scope review:** Confirmed only the font-specific `njDrawPolygon2DM()` UV corner values change; PS2/non-PC values remain unchanged.
 - **Build:** Pending GitHub Actions.
 - **Runtime/visual:** Pending. Inspect messages, item names, and loading text at the same elevated internal resolution where glyph seams were visible.
+
+## 2026-11-02 — Step 10: Add Configurable Font UV Edge Tuning
+
+**Category:** Graphics correctness / font UV diagnostics  
+**Status:** Implemented in source; Windows build and visual/runtime validation pending  
+**Branch:** `FONTFix` (created from `experimental/gs-rebuild`)  
+**Reference:** Existing PC-only correction in `njDrawPolygon2DM()`, retained as the enabled default
+
+### Behavior
+
+The font UV correction is now controlled by `fontUVfix` in `recvx.ini`:
+
+- Missing or `fontUVfix=0`: the configurable PC correction is disabled. `njDrawPolygon2DM()` uses the original PS2 corner offsets (`+8/+4`) instead.
+- `fontUVfix=1`: the PC-only per-edge correction is enabled. Its default values reproduce the previous PC correction: left `8`, right `-8`, top `8`, bottom `-8`.
+- The four settings are independently stored as `fontUVleft`, `fontUVright`, `fontUVtop`, and `fontUVbottom`.
+- Each value is clamped to `-32…32`, in GS UV units of `1/16` texel.
+
+Corner mapping is explicit: left affects top-left and bottom-left U; right affects top-right and bottom-right U; top affects the two upper V coordinates; bottom affects the two lower V coordinates.
+
+### Live Tuning Controls
+
+The F10 tuner is active only while `fontUVfix=1`:
+
+- F10 enters/leaves font UV tuning.
+- Tab selects left, right, top, then bottom.
+- Up/Down changes the selected value by one unit; Shift+Up/Down changes it by four.
+- Backspace restores the selected edge to its correction default; Shift+Backspace restores all four defaults.
+- Escape leaves tuning mode.
+- Adjusted values are saved to `recvx.ini` immediately and reported in the window title/log.
+
+The font tuner has its own state and values. It does not call or modify the menu UV crop API from `alpha`; the F10 binding can be reconsidered when menu UV tuning is added to this branch.
+
+### Files Changed
+
+- `pc/include/pc_platform.h`
+  - Declares the font UV configuration and live-adjustment API.
+- `pc/src/pc_platform.c`
+  - Loads the master switch and four edge values.
+  - Applies the `-32…32` bounds and persists live edits.
+  - Adds the F10/Tab/Up/Down/Backspace/Escape tuner and title-bar status.
+- `src/ps2/veronica/prog/ps2_NaDraw2D.c`
+  - Applies the four independent offsets only in the PC branch of `njDrawPolygon2DM()`, and only when `fontUVfix=1`.
+  - Retains the original PS2 UV values as the disabled/default path.
+- `DEVELOPMENT_LOG.md`
+  - Records configuration, key behavior, scope and validation status.
+
+### Explicitly Excluded
+
+- No menu/UI UV crop implementation or `pcUiUvCrop*` controls were imported.
+- No rotated UI UV profile, automatic UI crop, wireframe toggle, or unrelated renderer changes.
+- No texture filtering, font assets, font loading, or GS memory changes.
+- No changes to non-PC UV behavior.
+
+### Validation
+
+- **Source review:** Confirmed the four side-to-corner mappings, the `fontUVfix=0` fallback to original PS2 offsets, the enabled defaults, and the `-32…32` bounds.
+- **Diff review:** Confirmed the live tuner is independent of the menu UV crop controls and only intercepts its keys while `fontUVfix=1`.
+- **Build:** Not yet run.
+- **Runtime/visual:** Pending. Compare `fontUVfix=0` and `fontUVfix=1`, verify each edge changes only its two intended corners, and check that the menu/UI UV behavior is unchanged.
