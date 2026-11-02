@@ -187,7 +187,7 @@ void njDrawPolygon2DM(NJS_POINT2COL* p, int n, float pri, unsigned int attr)
     unsigned long prim; 
 #ifdef TARGET_PC
     int font_uv_fix_enabled = pcFontUvFixEnabled();
-    int font_uv_left = 8, font_uv_right = -8, font_uv_top = 8, font_uv_bottom = -8;
+    int font_uv_left = 4, font_uv_right = -4, font_uv_top = 4, font_uv_bottom = -4;
 
     if (font_uv_fix_enabled)
     {
