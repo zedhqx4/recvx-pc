@@ -1103,6 +1103,148 @@ static int font_uv_handle_event(const SDL_Event* ev)
     return 1;
 }
 
+
+/* Menu/UI UV crop tuner. The automatic correction is active independently of this debug control. */
+static int pc_debug_mode_enabled(void)
+{
+    static int enabled = -1;
+
+    if (enabled < 0)
+    {
+        enabled = pcIniGetInt("debug", 0) != 0;
+    }
+
+    return enabled;
+}
+
+static int ui_uv_tuning;
+static int ui_uv_crop_selected_edge;
+static int ui_uv_crop_rot90_cw;
+static int ui_uv_consume_escape_up;
+static const char* const ui_uv_crop_edge_names[4] = { "LEFT", "RIGHT", "TOP", "BOTTOM" };
+
+static void ui_uv_crop_show_status(const char* state)
+{
+    int left, right, top, bottom;
+    const char* profile = ui_uv_crop_rot90_cw ? "ROT90_CW" : "STANDARD";
+    char notice[160];
+
+    if (ui_uv_crop_rot90_cw)
+        pcUiUvCropRot90CWGet(&left, &right, &top, &bottom);
+    else
+        pcUiUvCropGet(&left, &right, &top, &bottom);
+
+    snprintf(notice, sizeof(notice), "MENU UV %s %s | %s | L:%d R:%d T:%d B:%d",
+             profile, state, ui_uv_crop_edge_names[ui_uv_crop_selected_edge],
+             left, right, top, bottom);
+    pcLog("Menu UV crop profile=%s %s: left=%d right=%d top=%d bottom=%d; selected=%s (1/16 texel units)",
+          profile, state, left, right, top, bottom, ui_uv_crop_edge_names[ui_uv_crop_selected_edge]);
+    title_notice_show(notice);
+}
+
+/* Ctrl+F10 toggles the menu tuner; plain F10 remains dedicated to font UV tuning. */
+static int ui_uv_crop_handle_event(const SDL_Event* ev)
+{
+    int down;
+    SDL_Scancode key;
+    int ctrl_f10;
+
+    if ((ev->type != SDL_EVENT_KEY_DOWN) && (ev->type != SDL_EVENT_KEY_UP))
+    {
+        return 0;
+    }
+
+    down = (ev->type == SDL_EVENT_KEY_DOWN);
+    key = ev->key.scancode;
+    ctrl_f10 = (key == SDL_SCANCODE_F10) && ((ev->key.mod & SDL_KMOD_CTRL) != 0);
+
+    if (!pc_debug_mode_enabled())
+    {
+        return ctrl_f10;
+    }
+
+    if (ctrl_f10)
+    {
+        if (down && !ev->key.repeat)
+        {
+            ui_uv_tuning = !ui_uv_tuning;
+            if (ui_uv_tuning)
+            {
+                font_uv_tuning = 0;
+            }
+            ui_uv_crop_show_status(ui_uv_tuning ?
+                "TUNING ON (CTRL+F10 DONE, TAB EDGE, R PROFILE, UP/DOWN, SHIFT STEP 4, BS RESET)" :
+                "TUNING OFF");
+        }
+        return 1;
+    }
+
+    if (key == SDL_SCANCODE_ESCAPE)
+    {
+        if (down && ui_uv_tuning && !ev->key.repeat)
+        {
+            ui_uv_tuning = 0;
+            ui_uv_consume_escape_up = 1;
+            ui_uv_crop_show_status("TUNING OFF");
+            return 1;
+        }
+        if (!down && ui_uv_consume_escape_up)
+        {
+            ui_uv_consume_escape_up = 0;
+            return 1;
+        }
+    }
+
+    if (!ui_uv_tuning)
+    {
+        return 0;
+    }
+
+    if (!down || ev->key.repeat)
+    {
+        return 1;
+    }
+
+    switch (key)
+    {
+    case SDL_SCANCODE_TAB:
+        ui_uv_crop_selected_edge = (ui_uv_crop_selected_edge + 1) & 3;
+        ui_uv_crop_show_status("EDGE SELECTED");
+        break;
+
+    case SDL_SCANCODE_R:
+        ui_uv_crop_rot90_cw = !ui_uv_crop_rot90_cw;
+        ui_uv_crop_show_status("PROFILE SELECTED");
+        break;
+
+    case SDL_SCANCODE_UP:
+    case SDL_SCANCODE_DOWN:
+    {
+        int step = (ev->key.mod & SDL_KMOD_SHIFT) ? 4 : 1;
+        int delta = (key == SDL_SCANCODE_UP) ? step : -step;
+        if (ui_uv_crop_rot90_cw)
+            pcUiUvCropRot90CWAdjust(ui_uv_crop_selected_edge, delta);
+        else
+            pcUiUvCropAdjust(ui_uv_crop_selected_edge, delta);
+        ui_uv_crop_show_status("VALUE CHANGED");
+        break;
+    }
+
+    case SDL_SCANCODE_BACKSPACE:
+        if (ui_uv_crop_rot90_cw)
+            pcUiUvCropRot90CWReset((ev->key.mod & SDL_KMOD_SHIFT) ? -1 : ui_uv_crop_selected_edge);
+        else
+            pcUiUvCropReset((ev->key.mod & SDL_KMOD_SHIFT) ? -1 : ui_uv_crop_selected_edge);
+        ui_uv_crop_show_status((ev->key.mod & SDL_KMOD_SHIFT) ? "ALL EDGES RESET" : "EDGE RESET");
+        break;
+
+    default:
+        break;
+    }
+
+    return 1; /* while tuning, do not leak keyboard input to the game */
+}
+
 int pcVideoPumpEvents(void)
 {
     SDL_Event ev;
@@ -1137,6 +1279,12 @@ int pcVideoPumpEvents(void)
         {
             last_mouse_move = SDL_GetTicks();
             SDL_ShowCursor(SDL_ENABLE);
+        }
+
+        /* Menu/UI UV tuner: Ctrl+F10. Plain F10 remains reserved for font UV tuning. */
+        if (ui_uv_crop_handle_event(&ev))
+        {
+            continue;
         }
 
         /* R switches font glyph sampling between bilinear and nearest at runtime. */
