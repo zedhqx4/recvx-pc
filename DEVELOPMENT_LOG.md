@@ -610,7 +610,9 @@ The font tuner has its own state and values. It does not call or modify the menu
 ### Implementation and Scope
 
 - In `src/ps2/veronica/prog/ps2_NaDraw2D.c`, mark textured submissions from `njDrawPolygon2DM()` around the `Ps2AddPrim2D()` call.
-- The PC `loadImage()` path processes the DMA/GIF chain synchronously. `pc/src/gs/gs.c` captures the temporary font-draw marker in `GsDrawState`.
+- Font quads use the deferred Ordering Table path (`attr=0x80000060`). The direct-draw path is synchronous, but the OT path is emitted later, so a stack-scoped marker alone would not survive until rendering.
+- For OT entries, `Ps2AddOT()` stores the nearest-filter request in the existing `PS2_OT.pad` field. When `Ps2DrawOTagSub()` assembles the PC DMA chain, it sets bit 16 of that entry's DMA tag. This bit is reserved by the DMA tag format and is consumed only as PC-side metadata; QWC, ID and address fields are unchanged.
+- `pc/src/gs/gs.c` scopes that metadata around the corresponding GIF segment and captures it in `GsDrawState`. The direct path uses the temporary font-draw marker instead.
 - The marker is part of the GS batch state, so font and non-font primitives are separated when necessary rather than applying the override to a mixed batch.
 - In `pc/src/gs/gs_gl.c`, derive the effective linear-filter flag from the original `TEX1` state, except for marked font draws while `fontFilter=0`. The existing shader then uses its nearest/texel-fetch path instead of its manual four-texel bilinear interpolation. Render-target sampling also receives the effective filter.
 - The runtime filter toggle is independent of `fontUVfix`; it works whether the UV correction is enabled or disabled.
@@ -624,6 +626,8 @@ The font tuner has its own state and values. It does not call or modify the menu
   - Tracks the synchronous font-draw scope.
 - `src/ps2/veronica/prog/ps2_NaDraw2D.c`
   - Marks only textured `njDrawPolygon2DM()` submissions.
+- `src/ps2/veronica/prog/ps2_dummy.c`
+  - Preserves the marker in deferred OT entries and attaches it to each corresponding PC DMA segment.
 - `pc/src/gs/gs_internal.h`
   - Adds the font-only nearest-sampling marker to `GsDrawState`.
 - `pc/src/gs/gs.c`
@@ -642,7 +646,7 @@ The font tuner has its own state and values. It does not call or modify the menu
 
 ### Validation
 
-- **Source review:** Confirmed the font marker is active only around textured `njDrawPolygon2DM()` submissions and is captured synchronously before the marker is cleared.
+- **Source review:** Confirmed the actual font call uses `njDrawPolygon2DM(..., 0x80000060)`, which is deferred through the Ordering Table. The PC-only OT sideband preserves the per-entry filter mode until the corresponding GIF segment is parsed; direct submissions retain the scoped marker path.
 - **Batch review:** Confirmed the marker participates in `GsDrawState` comparison, preventing font-nearest draws from merging with ordinary draws using the same GS registers.
 - **Filter review:** Confirmed marked font draws select nearest sampling while all unmarked draws continue to use the original `TEX1` state.
 - **Build:** Not yet run.
