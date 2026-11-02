@@ -295,21 +295,47 @@ No movie-specific runtime counters, periodic debug messages, or per-frame timing
 ## 2026-11-01 — Step 5: Optimize 32-bit Host-to-GS Image Transfers
 
 **Category:** GS memory / transfer performance  
-**Status:** Implemented; build and runtime validation pending  
+**Status:** Implemented; Windows build and runtime validation pending  
 **Branch:** `experimental/gs-rebuild`  
-**Reference:** Alpha branch `pc/src/gs/gs_mem.c` implementation of `transfer32Run()` and page-touch coalescing
+**Reference:** Alpha branch `pc/src/gs/gs_mem.c` implementation of `transfer32Run()` and page-touch coalescing  
+**Implementation commit:** `c1158bd`
+
+### Problem
+
+The host-to-GS IMAGE path for PSMCT32 and PSMZ32 originally handled every 32-bit pixel separately. For each pixel, it called the generic memory-write path and advanced the transfer coordinates. That repeats address/swizzle and transfer-advance work even when a transfer contains many complete, aligned GS blocks.
+
+The GS stores 32-bit pixels in 8×8 blocks (64 pixels / 256 bytes), with a fixed swizzled column order. When a transfer is aligned and contains complete blocks, the emulator can assemble one block in that physical order and compare/copy it as a unit instead of resolving and writing all 64 pixels independently. Partial or misaligned transfers still need a per-pixel fallback.
+
+There was also redundant page-generation work. `gsPageGen` is used as a texture-cache invalidation generation, not as a count of pixel writes. Incrementing the same page's generation for every changed pixel in one transfer batch provides no additional invalidation information after the first increment, but repeats the bookkeeping.
+
+### Scope and Rationale
+
+Apply the Alpha 32-bit transfer optimization to GS-Rebuild while keeping the change isolated to GS memory:
+
+- Use complete 8×8 block assembly for aligned PSMCT32/PSMZ32 data.
+- Retain the horizontal run fallback for partial rows and misaligned rectangles.
+- Coalesce page-generation increments during each call to `gsMemTransferData()`. This applies to every format handled by that function, because all of those writes use the same `touch()` invalidation path—not only the 32-bit fast path.
+- Leave writes made outside `gsMemTransferData()` with their original per-write generation increments.
+
+The expected benefit is less CPU work in bulk host-to-GS transfers and less repeated invalidation bookkeeping. This is a performance hypothesis; the actual gain and any scene-specific effect still require measurement.
 
 ### Change
-
-Port the Alpha implementation into GS-Rebuild without importing its unrelated profiling code or texture-cache work.
 
 In `pc/src/gs/gs_mem.c`:
 
 - Added Alpha's `transfer32Run()` path for PSMCT32 and PSMZ32 host-to-GS IMAGE transfers.
 - Complete aligned 8×8 blocks are assembled in GS swizzled column order, then compared and copied as 256-byte blocks.
-- Transfers that do not meet the complete-block conditions use Alpha's horizontal run path, processing up to the next 8-pixel block boundary while reusing the page/block calculation.
-- Added Alpha's `pageTouchEpoch` invalidation coalescing. During a call to `gsMemTransferData()`, each modified 8 KB GS page advances `gsPageGen` at most once; writes outside that scope retain the original per-write increment behavior.
-- The existing non-32-bit transfer formats retain their original handlers.
+- Transfers that do not meet the complete-block conditions use the horizontal run path, processing up to the next 8-pixel block boundary while reusing the page/block calculation.
+- Added Alpha's `pageTouchEpoch` invalidation coalescing. Each modified 8 KB page advances `gsPageGen` at most once per call to `gsMemTransferData()`, regardless of how many pixels in that batch change.
+- Kept the existing handlers for the non-32-bit transfer formats unchanged; they benefit only from the shared page-generation coalescing.
+
+### Files Changed
+
+- `pc/src/gs/gs_mem.c`
+  - Added `transfer32Run()`.
+  - Updated `touch()` and `gsMemTransferData()` for page-generation coalescing.
+- `DEVELOPMENT_LOG.md`
+  - Recorded the motivation, scope, implementation, and pending validation.
 
 ### Explicitly Excluded
 
@@ -320,6 +346,6 @@ In `pc/src/gs/gs_mem.c`:
 ### Validation
 
 - **Source comparison:** Confirmed the 32-bit column table and `addr32()` implementation match Alpha before copying its fast path.
-- **Build:** Pending.
+- **Code review:** Confirmed page-generation coalescing is active only inside `gsMemTransferData()` and is reset at the end of the call. Non-32-bit transfer handlers remain in place.
+- **Build:** Pending GitHub Actions result.
 - **Runtime:** Pending. Compare representative scenes and inspect texture correctness and frame-time changes.
-
