@@ -440,7 +440,7 @@ int pcIniGetInt(const char* key, int def)
 
 /* PC-only font glyph UV correction. Values are offsets in GS 1/16-texel units.
  * The default values reproduce the existing half-texel inward correction. */
-static const int pc_font_uv_defaults[4] = { 8, -8, 8, -8 };
+static const int pc_font_uv_defaults[4] = { 4, -4, 4, -4 };
 static const char* const pc_font_uv_keys[4] = {
     "fontUVleft", "fontUVright", "fontUVtop", "fontUVbottom"
 };
@@ -459,7 +459,7 @@ int pcFontUvFixEnabled(void)
 {
     if (pc_font_uv_fix_enabled < 0)
     {
-        pc_font_uv_fix_enabled = pcIniGetInt("fontUVfix", 1) != 0;
+        pc_font_uv_fix_enabled = pcIniGetInt("fontUVfix", 0) != 0;
     }
     return pc_font_uv_fix_enabled;
 }
