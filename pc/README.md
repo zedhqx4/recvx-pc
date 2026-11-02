@@ -96,7 +96,7 @@ The settings are loaded from `recvx.ini` (next to `recvx.exe`):
 
 ```ini
 decal_priority=1
-decal_bias=1.00
+decal_offset_multiplier=1.00
 ```
 
 Use the numeric keypad while playing:
@@ -104,13 +104,13 @@ Use the numeric keypad while playing:
 | Key | Action |
 |---|---|
 | `*` | Toggle decal priority on/off |
-| `+` | Increase bias by 0.25 |
-| `-` | Decrease bias by 0.25 |
+| `+` | Increase offset multiplier by 0.25 |
+| `-` | Decrease offset multiplier by 0.25 |
 | `/` | Save both current values to `recvx.ini` |
 
-Bias is clamped to `-2.00..4.00` and quantized to 0.25 steps. Positive values
+Offset multiplier is clamped to `-2.00..4.00` and quantized to 0.25 steps. Positive values
 preserve Alpha's offset direction; zero neutralizes the offset; negative values reverse it.
-Changes take effect immediately. The title bar shows the current enabled state and bias;
+Changes take effect immediately. The title bar shows the current enabled state and offset multiplier;
 save attempts are verified and reported in both the title bar and `recvx.log`.
 These numpad keys are reserved by the PC platform layer: they are consumed as events and ignored
 by keyboard-to-pad bindings, even if a matching `key_*` binding exists in `recvx.ini`.

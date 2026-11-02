@@ -837,7 +837,7 @@ static int handle_decal_control_key(SDL_Scancode key)
 {
     static char notice[128];
     int enabled, saved = 0;
-    float bias;
+    float offset_multiplier;
 
     switch (key)
     {
@@ -845,26 +845,26 @@ static int handle_decal_control_key(SDL_Scancode key)
         pcGsDecalPriorityToggle();
         break;
     case SDL_SCANCODE_KP_PLUS:
-        pcGsDecalBiasAdjust(1);
+        pcGsDecalOffsetMultiplierAdjust(1);
         break;
     case SDL_SCANCODE_KP_MINUS:
-        pcGsDecalBiasAdjust(-1);
+        pcGsDecalOffsetMultiplierAdjust(-1);
         break;
     case SDL_SCANCODE_KP_DIVIDE:
         saved = pcGsSaveDecalSettings();
-        pcGsGetDecalSettings(&enabled, &bias);
-        snprintf(notice, sizeof(notice), "DECAL %s: %s / BIAS %.2f",
+        pcGsGetDecalSettings(&enabled, &offset_multiplier);
+        snprintf(notice, sizeof(notice), "DECAL %s: %s / OFFSET x %.2f",
                  saved ? "SETTINGS SAVED" : "SAVE FAILED",
-                 enabled ? "ON" : "OFF", bias);
+                 enabled ? "ON" : "OFF", offset_multiplier);
         title_notice_show(notice);
         return 1;
     default:
         return 0;
     }
 
-    pcGsGetDecalSettings(&enabled, &bias);
-    snprintf(notice, sizeof(notice), "DECAL PRIORITY: %s / BIAS %.2f",
-             enabled ? "ON" : "OFF", bias);
+    pcGsGetDecalSettings(&enabled, &offset_multiplier);
+    snprintf(notice, sizeof(notice), "DECAL PRIORITY: %s / OFFSET x %.2f",
+             enabled ? "ON" : "OFF", offset_multiplier);
     title_notice_show(notice);
     return 1;
 }

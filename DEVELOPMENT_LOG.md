@@ -435,13 +435,13 @@ Keep Alpha's eligibility conditions and bounded per-frame draw ordering unchange
 
 - Ported Alpha's eligibility predicate: active depth testing, `GEQUAL`, `Z16S`, textured non-FST STQ drawing, blending enabled, and primitive types 3 through 5.
 - Preserved Alpha's draw-order priorities: `+1` through `+4`, clamped at `+4`, with the counter reset after each frame's GS flush.
-- Added `decal_priority` (default `1`) and `decal_bias` (default `1.00`) to `recvx.ini`.
-- Applied the offset as `glPolygonOffset(0.0f, priority * decal_bias)`; the factor remains zero as in Alpha.
+- Added `decal_priority` (default `1`) and `decal_offset_multiplier` (default `1.00`) to `recvx.ini`.
+- Kept Alpha's ordinal priority (1..4) unchanged, derived the same base offset from it, then multiplied that offset before passing it to `glPolygonOffset(0.0f, offset)`; the factor remains zero as in Alpha.
 - Added runtime numpad controls:
   - `*`: toggle decal priority.
-  - `+` / `-`: adjust bias by `0.25`.
+  - `+` / `-`: adjust offset multiplier by `0.25`.
   - `/`: save both current values to `recvx.ini`, then read them back to verify the write.
-- Bias is clamped to `-2.00..4.00` and quantized to quarter-unit steps. Zero neutralizes the offset; negative values reverse its direction.
+- Offset multiplier is clamped to `-2.00..4.00` and quantized to quarter-unit steps. Zero neutralizes the offset; negative values reverse its direction.
 - Added title-bar feedback and `recvx.log` entries for changes and save verification.
 - Consumed these keys in the platform event pump and excluded them from keyboard-to-pad bindings, so they do not reach game controls even if mapped in `recvx.ini`; they are also absent from recorded pad input.
 - Enabled the Windows build workflow for this experimental branch.
@@ -449,7 +449,7 @@ Keep Alpha's eligibility conditions and bounded per-frame draw ordering unchange
 ### Files Changed
 
 - `pc/src/gs/gs_gl.c`
-  - Added INI-backed runtime state, bias normalization, save/readback verification, Alpha's bounded polygon-offset application, and per-frame draw-order reset.
+  - Added INI-backed runtime state, offset multiplier normalization, save/readback verification, Alpha's bounded polygon-offset application, and per-frame draw-order reset.
 - `pc/src/gs/gl_funcs.h`
   - Added `glPolygonOffset` to the SDL OpenGL function resolver table.
 - `pc/include/pc_gs.h`
@@ -476,4 +476,4 @@ Keep Alpha's eligibility conditions and bounded per-frame draw ordering unchange
 - **Source comparison:** Matched the eligibility predicate, zero polygon-offset factor, +1..+4 bounded draw order, and per-frame reset against Alpha.
 - **Code review:** Confirmed the polygon-offset enable is disabled immediately after the eligible draw, including its alpha-test multipass.
 - **Build:** Pending GitHub Actions for this branch.
-- **Runtime:** Pending. Test toggle A/B and bias values in the exact scene showing the reported visual regression; record the smallest bias that reproduces or eliminates it.
+- **Runtime:** Pending. Test toggle A/B and offset multiplier values in the exact scene showing the reported visual regression; record the smallest offset multiplier that reproduces or eliminates it.

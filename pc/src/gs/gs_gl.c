@@ -36,11 +36,11 @@ PC_GL_FUNCS(PC_GL_DEFINE)
 
 static unsigned int decal_draw_order;
 static int decal_priority_enabled = -1;
-static float decal_bias = 1.0f;
+static float decal_offset_multiplier = 1.0f;
 
-/* Decal-priority test controls. Bias is quantized to quarter-unit steps so keyboard
+/* Decal-priority test controls. Offset multiplier is quantized to quarter-unit steps so keyboard
  * adjustments and values saved to recvx.ini remain deterministic. */
-static float gs_decal_bias_normalize(float value)
+static float gs_decal_offset_multiplier_normalize(float value)
 {
     if (!(value == value)) /* NaN */
         value = 1.0f;
@@ -53,48 +53,49 @@ static void gs_decal_settings_init(void)
 {
     char text[64];
     char* end;
-    float initial_bias = 1.0f;
+    float initial_offset_multiplier = 1.0f;
 
     if (decal_priority_enabled >= 0)
         return;
 
     decal_priority_enabled = pcIniGetInt("decal_priority", 1) != 0;
 
-    if (pcIniGet("decal_bias", text, sizeof(text)))
+    if (pcIniGet("decal_offset_multiplier", text, sizeof(text)) ||
+        pcIniGet("decal_bias", text, sizeof(text)))
     {
-        initial_bias = strtof(text, &end);
-        if ((end == text) || (*end != '\0') || !(initial_bias == initial_bias))
-            initial_bias = 1.0f;
+        initial_offset_multiplier = strtof(text, &end);
+        if ((end == text) || (*end != '\0') || !(initial_offset_multiplier == initial_offset_multiplier))
+            initial_offset_multiplier = 1.0f;
     }
 
-    decal_bias = gs_decal_bias_normalize(initial_bias);
-    pcLog("gs: decal priority %s, bias=%.2f (range -2.00..4.00, step 0.25)",
-          decal_priority_enabled ? "enabled" : "disabled", decal_bias);
+    decal_offset_multiplier = gs_decal_offset_multiplier_normalize(initial_offset_multiplier);
+    pcLog("gs: decal priority %s, offset multiplier=%.2f (range -2.00..4.00, step 0.25)",
+          decal_priority_enabled ? "enabled" : "disabled", decal_offset_multiplier);
 }
 
-void pcGsGetDecalSettings(int* enabled, float* bias)
+void pcGsGetDecalSettings(int* enabled, float* offset_multiplier)
 {
     gs_decal_settings_init();
     if (enabled != NULL) *enabled = decal_priority_enabled;
-    if (bias != NULL) *bias = decal_bias;
+    if (offset_multiplier != NULL) *offset_multiplier = decal_offset_multiplier;
 }
 
 void pcGsDecalPriorityToggle(void)
 {
     gs_decal_settings_init();
     decal_priority_enabled = !decal_priority_enabled;
-    pcLog("gs: decal priority %s (bias=%.2f)",
-          decal_priority_enabled ? "enabled" : "disabled", decal_bias);
+    pcLog("gs: decal priority %s (offset multiplier=%.2f)",
+          decal_priority_enabled ? "enabled" : "disabled", decal_offset_multiplier);
 }
 
-void pcGsDecalBiasAdjust(int direction)
+void pcGsDecalOffsetMultiplierAdjust(int direction)
 {
     gs_decal_settings_init();
     if (direction == 0)
         return;
 
-    decal_bias = gs_decal_bias_normalize(decal_bias + ((direction > 0) ? 0.25f : -0.25f));
-    pcLog("gs: decal bias=%.2f (%s)", decal_bias,
+    decal_offset_multiplier = gs_decal_offset_multiplier_normalize(decal_offset_multiplier + ((direction > 0) ? 0.25f : -0.25f));
+    pcLog("gs: decal offset multiplier=%.2f (%s)", decal_offset_multiplier,
           decal_priority_enabled ? "priority enabled" : "priority disabled");
 }
 
@@ -102,33 +103,33 @@ int pcGsSaveDecalSettings(void)
 {
     char text[32], verify[64];
     char* end;
-    float saved_bias;
+    float saved_offset_multiplier;
     int saved_enabled;
 
     gs_decal_settings_init();
-    snprintf(text, sizeof(text), "%.2f", decal_bias);
+    snprintf(text, sizeof(text), "%.2f", decal_offset_multiplier);
     pcIniSet("decal_priority", decal_priority_enabled ? "1" : "0");
-    pcIniSet("decal_bias", text);
+    pcIniSet("decal_offset_multiplier", text);
 
     saved_enabled = pcIniGetInt("decal_priority", -1);
-    if (!pcIniGet("decal_bias", verify, sizeof(verify)))
+    if (!pcIniGet("decal_offset_multiplier", verify, sizeof(verify)))
     {
         pcLog("gs: could not verify saved decal settings");
         return 0;
     }
 
-    saved_bias = strtof(verify, &end);
+    saved_offset_multiplier = strtof(verify, &end);
     if ((saved_enabled != (decal_priority_enabled ? 1 : 0)) ||
-        (end == verify) || (*end != '\0') || !(saved_bias == saved_bias) ||
-        (fabsf(saved_bias - decal_bias) > 0.001f))
+        (end == verify) || (*end != '\0') || !(saved_offset_multiplier == saved_offset_multiplier) ||
+        (fabsf(saved_offset_multiplier - decal_offset_multiplier) > 0.001f))
     {
-        pcLog("gs: decal settings save verification failed (expected priority=%d bias=%.2f)",
-              decal_priority_enabled, decal_bias);
+        pcLog("gs: decal settings save verification failed (expected priority=%d offset multiplier=%.2f)",
+              decal_priority_enabled, decal_offset_multiplier);
         return 0;
     }
 
-    pcLog("gs: saved decal settings to recvx.ini (priority=%d bias=%.2f)",
-          decal_priority_enabled, decal_bias);
+    pcLog("gs: saved decal settings to recvx.ini (priority=%d offset multiplier=%.2f)",
+          decal_priority_enabled, decal_offset_multiplier);
     return 1;
 }
 
@@ -1574,8 +1575,11 @@ void gsRendererDraw(const GsDrawState* st, const GsVertex* v, int nverts)
         if (priority > 4)
             priority = 4;
 
-        /* Alpha's factor remains zero; the runtime bias scales its bounded +1..+4 units. */
-        glPolygonOffset(0.0f, (GLfloat)priority * decal_bias);
+        /* Preserve Alpha's ordinal priority and +1..+4 base offset.
+         * Scale the resulting OpenGL offset units, not the priority counter. */
+        GLfloat offset = (GLfloat)priority;
+        offset *= decal_offset_multiplier;
+        glPolygonOffset(0.0f, offset);
         glEnable(GL_POLYGON_OFFSET_FILL);
     }
 
