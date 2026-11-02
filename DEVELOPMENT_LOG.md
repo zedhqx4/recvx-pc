@@ -611,7 +611,7 @@ The font tuner has its own state and values. It does not call or modify the menu
 
 - In `src/ps2/veronica/prog/ps2_NaDraw2D.c`, mark textured submissions from `njDrawPolygon2DM()` around the `Ps2AddPrim2D()` call.
 - Font quads use the deferred Ordering Table path (`attr=0x80000060`). The direct-draw path is synchronous, but the OT path is emitted later, so a stack-scoped marker alone would not survive until rendering.
-- For OT entries, `Ps2AddOT()` stores the nearest-filter request in the existing `PS2_OT.pad` field. The first DMA tag in an OT entry is an OT link / optional texture-state REF; the second tag, at `p->p + 16`, carries the primitive's GIF draw payload. After texture-reference setup is complete, `Ps2DrawOTagSub()` sets bit 16 on that second tag only. This bit is reserved by the DMA tag format and is consumed only as PC-side metadata; QWC, ID and address fields are unchanged.
+- For OT entries, `Ps2AddOT()` stores the nearest-filter request in the existing `PS2_OT.pad` field. The DMA tag header begins at `p->p`; its inline GIF payload follows at `p->p + 16` and is not another DMA tag. After optional texture-reference preparation is complete, `Ps2DrawOTagSub()` sets reserved bit 16 in the first word of the DMA tag (`((unsigned int*)p->p)[0]`). `gsDmaChain()` reads that bit from `tag[0]` and scopes it around the inline GIF payload. QWC, ID and address fields remain unchanged.
 - `pc/src/gs/gs.c` scopes that metadata around the corresponding GIF segment and captures it in `GsDrawState`. The direct path uses the temporary font-draw marker instead.
 - The marker is part of the GS batch state, so font and non-font primitives are separated when necessary rather than applying the override to a mixed batch.
 - In `pc/src/gs/gs_gl.c`, derive the effective linear-filter flag from the original `TEX1` state, except for marked font draws while `fontFilter=0`. The existing shader then uses its nearest/texel-fetch path instead of its manual four-texel bilinear interpolation. Render-target sampling also receives the effective filter.
@@ -648,11 +648,11 @@ The font tuner has its own state and values. It does not call or modify the menu
 
 ### Validation
 
-- **Source review:** Confirmed the actual font call uses `njDrawPolygon2DM(..., 0x80000060)`, which is deferred through the Ordering Table. The PC-only OT sideband is written to the second DMA tag (`p->p + 16)) carrying the primitive's GIF draw payload—not the first link / texture-state REF tag—so the override remains active for the correct segment. Direct submissions retain the scoped marker path.
+- **Source review:** Confirmed the actual font call uses `njDrawPolygon2DM(..., 0x80000060)`, which is deferred through the Ordering Table. The PC-only sideband is written to reserved bit 16 of the DMA header at `p->p`; the parser reads it from `tag[0]` and applies it only to the inline GIF payload that follows. Direct submissions retain the scoped marker path.
 - **Batch review:** Confirmed the marker participates in `GsDrawState` comparison, preventing font-nearest draws from merging with ordinary draws using the same GS registers.
 - **Filter review:** Confirmed marked font draws select nearest sampling while all unmarked draws continue to use the original `TEX1` state.
 - **Windows CI:** Run [41529410526](https://github.com/zedhqx4/recvx-pc/actions/runs/41529410526) passed for commit `428bc231`: `Build game`, `Verify executables`, and `Upload Windows build` all succeeded. Artifact: `recvx-pc_FONTFix_428bc23`.
-- **Follow-up correction:** The OT sideband was moved from the entry's first/link tag to its second DMA tag (`p->p + 16`), the one that actually carries the primitive GIF payload. Run [41529912728](https://github.com/zedhqx4/recvx-pc/actions/runs/41529912728) is validating this latest placement on commit `861f58b3`; final result pending.
+- **Follow-up correction (superseded):** An earlier attempt placed the sideband at `p->p + 16`, incorrectly treating the inline GIF payload header as a second DMA tag. This was corrected in Step 14: the marker belongs in bit 16 of the actual DMA header at `p->p`.
 - **Runtime/visual:** Pending. Compare the default and R-toggled modes on the same font strings, then verify that menu text outside `njDrawPolygon2DM()`, UI artwork, 3D textures and movies retain their previous filtering.
 
 ## 2026-11-02 — Step 12: Set Conservative Font UV and Filter Code Defaults
@@ -713,3 +713,17 @@ fontUVbottom=-4
 - Windows build commit `d24a50bcb8306ff4d1f85bd8666df165f75cafbe` passed the build, executable verification, and artifact upload steps. The merged source head adds only the development-log update after that code commit.
 - No runtime visual test has been performed yet. Check font filtering with R, enable/tune UV correction with `fontUVfix=1`, and verify unrelated GS textures remain unchanged.
 - `FONTFix` is retained as a separate branch for comparison; it was not deleted.
+
+## 2026-11-02 — Step 14: Correct Font Filter Metadata Placement in OT DMA Header
+
+**Category:** Graphics correctness / deferred font draw state  
+**Status:** Source corrected in both branches; Windows build and runtime validation pending  
+**Branches:** `FONTFix`, `experimental/gs-rebuild`
+
+- Rechecked the OT DMA packet layout against both `Ps2AddOT()` and the PC `gsDmaChain()` parser.
+- The DMA header starts at `p->p`. Its inline payload begins 16 bytes later and contains GIF data; it is not a second DMA tag.
+- The PC parser reads the private marker from bit 16 of `tag[0]`. Therefore the correct marker write is `((unsigned int*)p->p)[0] |= (1u << 16)`, performed after optional texture-reference setup in `Ps2DrawOTagSub()`.
+- Reverted the incorrect write to `p->p + 16`, which would have modified the beginning of the inline GIF payload instead of the DMA header.
+- The source branch and integrated target branch now use the same corrected code.
+- **Build:** Pending for the corrected metadata placement.
+- **Runtime/visual:** Pending. Exercise deferred text draws in both bilinear and nearest modes and confirm non-font draws are unaffected.
