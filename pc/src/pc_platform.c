@@ -986,11 +986,10 @@ static int font_filter_handle_event(const SDL_Event* ev)
     {
         int linear = pcFontFilterToggle();
         const char* mode = linear ? "BILINEAR" : "NEAREST";
-        char notice[96];
 
-        snprintf(notice, sizeof(notice), "FONT FILTER: %s (R TO TOGGLE)", mode);
         pcLog("font filtering: %s", mode);
-        title_notice_show(notice);
+        title_notice_show(linear ? "FONT FILTER: BILINEAR (R TO TOGGLE)" :
+                                   "FONT FILTER: NEAREST (R TO TOGGLE)");
     }
 
     return 1; /* reserve both key-down and key-up; don't leak R to the game */
