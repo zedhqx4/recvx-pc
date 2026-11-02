@@ -544,18 +544,18 @@ This is a direct port of the reference implementation, not a texture-filtering o
 
 ### Behavior
 
-The font UV correction is now controlled by `fontUVfix` in `recvx.ini`:
+The base PC font UV correction is always applied. The `fontUVfix` key in `recvx.ini` controls only whether the optional live debug tuner is available:
 
-- Missing or `fontUVfix=0`: the configurable PC correction is disabled. `njDrawPolygon2DM()` uses the original PS2 corner offsets (`+8/+4`) instead.
-- `fontUVfix=1`: the PC-only per-edge correction is enabled. Its code defaults are left `4`, right `-4`, top `4`, bottom `-4`.
-- The four settings are independently stored as `fontUVleft`, `fontUVright`, `fontUVtop`, and `fontUVbottom`.
+- Missing or `fontUVfix=0`: the PC glyph correction remains active using the four configured offsets (code defaults: left `4`, right `-4`, top `4`, bottom `-4`); F10 tuning is disabled.
+- `fontUVfix=1`: the exact same correction remains active, and the F10 live debug tuner is enabled.
+- The four settings are independently stored as `fontUVleft`, `fontUVright`, `fontUVtop`, and `fontUVbottom`; they are always read and applied regardless of `fontUVfix`.
 - Each value is clamped to `-32…32`, in GS UV units of `1/16` texel.
 
 Corner mapping is explicit: left affects top-left and bottom-left U; right affects top-right and bottom-right U; top affects the two upper V coordinates; bottom affects the two lower V coordinates.
 
 ### Live Tuning Controls
 
-The F10 tuner is active only while `fontUVfix=1`:
+The optional F10 debug tuner is active only while `fontUVfix=1`; this does not turn the underlying correction on or off:
 
 - F10 enters/leaves font UV tuning.
 - Tab selects left, right, top, then bottom.
@@ -575,8 +575,8 @@ The font tuner has its own state and values. It does not call or modify the menu
   - Applies the `-32…32` bounds and persists live edits.
   - Adds the F10/Tab/Up/Down/Backspace/Escape tuner and title-bar status.
 - `src/ps2/veronica/prog/ps2_NaDraw2D.c`
-  - Applies the four independent offsets only in the PC branch of `njDrawPolygon2DM()`, and only when `fontUVfix=1`.
-  - Retains the original PS2 UV values as the disabled/default path.
+  - Applies the four independent offsets unconditionally in the PC branch of `njDrawPolygon2DM()`.
+  - Retains the original PS2 UV values only in the non-PC branch; `fontUVfix` no longer selects that path on PC.
 - `DEVELOPMENT_LOG.md`
   - Records configuration, key behavior, scope and validation status.
 
@@ -589,7 +589,7 @@ The font tuner has its own state and values. It does not call or modify the menu
 
 ### Validation
 
-- **Source review:** Confirmed the four side-to-corner mappings, the `fontUVfix=0` fallback to original PS2 offsets, the `4/-4/4/-4` code defaults used when enabled, and the `-32…32` bounds.
+- **Source review:** Confirmed the four side-to-corner mappings, always-applied PC offsets, `4/-4/4/-4` code defaults, and the `-32…32` bounds. The native PS2 offsets remain confined to non-PC builds.
 - **Diff review:** Confirmed the live tuner is independent of the menu UV crop controls and only intercepts its keys while `fontUVfix=1`.
 - **Build:** Not yet run.
 - **Runtime/visual:** Pending. Compare `fontUVfix=0` and `fontUVfix=1`, verify each edge changes only its two intended corners, and check that the menu/UI UV behavior is unchanged.
@@ -675,9 +675,9 @@ fontUVbottom=-4
 ```
 
 - `fontFilter=1` preserves the original bilinear magnification-filter behavior. R still toggles bilinear/nearest at runtime and writes the selected value to the INI.
-- `fontUVfix=0` keeps the configurable font UV correction disabled by default.
-- When a user enables `fontUVfix=1`, the four edge defaults above are used. They are independently configurable through `recvx.ini` and through the existing F10 runtime tuner; tuner edits are saved immediately.
-- F10 remains gated by `fontUVfix=1`; users can opt in through the INI and restart before tuning. The tuner does not silently enable the UV correction.
+- `fontUVfix=0` keeps the optional F10 debug tuner disabled by default; it does **not** disable the font UV correction.
+- The four edge defaults above are always used unless overridden by explicit `fontUVleft/right/top/bottom` INI entries. Those custom offsets are applied whether `fontUVfix` is `0` or `1`.
+- F10 remains gated by `fontUVfix=1`; users opt into live tuning through the INI before launching. The tuner edits offsets that are already active; it does not enable/disable the underlying correction.
 - Explicit INI values always override the code defaults. Existing user settings are therefore preserved.
 - This changes only PC defaults. Non-PC PS2 UV behavior, the menu UV crop system, and non-font texture filtering remain unchanged.
 
@@ -685,7 +685,7 @@ fontUVbottom=-4
 
 - `pc/src/pc_platform.c`
   - Sets the fallback array to `{ 4, -4, 4, -4 }`.
-  - Defaults the `fontUVfix` master switch to `0`; keeps `fontFilter` default at `1`.
+  - Defaults the `fontUVfix` debug-tuner gate to `0`; the base PC UV correction remains active. Keeps `fontFilter` default at `1`.
 - `src/ps2/veronica/prog/ps2_NaDraw2D.c`
   - Aligns the local fallback edge values with `{ 4, -4, 4, -4 }`.
 - `DEVELOPMENT_LOG.md`
@@ -693,7 +693,7 @@ fontUVbottom=-4
 
 ### Validation
 
-- **Source review:** Confirmed the INI lookup defaults and local fallback values match the six settings above.
+- **Source review:** Confirmed the six INI/code defaults. The four UV offsets are consumed by PC glyph draws regardless of the `fontUVfix` debug gate.
 - **Windows build:** Pending for this exact default change.
 - **Runtime/visual:** Pending. Test with all six keys absent, then with custom INI values and F10/R runtime controls.
 
@@ -710,3 +710,42 @@ fontUVbottom=-4
 - The source branch and integrated target branch now use the same corrected code.
 - **Build:** Pending for the corrected metadata placement.
 - **Runtime/visual:** Pending. Exercise deferred text draws in both bilinear and nearest modes and confirm non-font draws are unaffected.
+
+## 2026-11-02 — Step 15: Separate the Base Font UV Fix from Runtime Debug
+
+**Category:** Graphics correctness / font UV behavior and diagnostics  
+**Status:** Source and log updated; Windows build and runtime validation pending  
+**Branches:** `FONTFix`, `experimental/gs-rebuild`
+
+### Corrected Semantics
+
+The earlier implementation incorrectly used `fontUVfix` as a master switch for the actual glyph UV correction. When it was `0`, PC glyphs fell back to the original PS2 offsets (`+8/+4`), which reintroduced the atlas bleeding.
+
+The responsibilities are now separated:
+
+- The PC font UV correction is always applied.
+- The four offsets are always loaded from `fontUVleft`, `fontUVright`, `fontUVtop`, and `fontUVbottom`; missing keys use `4/-4/4/-4`.
+- `fontUVfix=0` (default) disables only the optional F10 live debug tuner. It does **not** disable the base correction.
+- `fontUVfix=1` enables the F10 tuner. The rendered UVs continue using the same configured values; tuning updates those values and saves them immediately.
+- `pcFontUvDebugEnabled()` names the setting according to its actual role. `njDrawPolygon2DM()` no longer branches to the original PS2 UVs based on this debug flag.
+- The original PS2 UV offsets remain unchanged for non-PC builds.
+- `fontFilter` and its R toggle are independent of both the correction and the tuner.
+
+### Files Changed
+
+- `pc/include/pc_platform.h`
+  - Renames the old correction-enable query to `pcFontUvDebugEnabled()` and documents that it controls only F10.
+- `pc/src/pc_platform.c`
+  - Renames the cached `fontUVfix` state as a debug-tuner gate; F10 is still consumed only when that gate is enabled.
+  - Continues loading and saving the four UV offsets independently of the debug gate.
+- `src/ps2/veronica/prog/ps2_NaDraw2D.c`
+  - Always reads and applies the four configurable offsets on PC font glyph draws.
+  - Keeps the original PS2 corner offsets under the non-PC preprocessor branch only.
+- `DEVELOPMENT_LOG.md`
+  - Corrects earlier descriptions that incorrectly called `fontUVfix` a rendering master switch.
+
+### Validation
+
+- **Source review:** Confirmed that the PC draw function always calls `pcFontUvFixGet()` and always uses the returned offsets. The only remaining `fontUVfix` check is in the F10 tuner event handler.
+- **Build:** Pending.
+- **Runtime/visual:** Pending. With `fontUVfix=0` and offsets `4/-4/4/-4`, confirm glyphs remain free of bleeding; then set `fontUVfix=1` and verify F10 changes the same active offsets without changing the correction mode.
