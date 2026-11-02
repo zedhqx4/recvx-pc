@@ -438,15 +438,15 @@ int pcIniGetInt(const char* key, int def)
 }
 
 
-/* PC-only font glyph UV correction. Values are offsets in GS 1/16-texel units.
- * The default values reproduce the existing half-texel inward correction. */
+/* PC-only font glyph UV correction offsets in GS 1/16-texel units.
+ * These offsets are always applied. fontUVfix only enables the optional live F10 tuner. */
 static const int pc_font_uv_defaults[4] = { 4, -4, 4, -4 };
 static const char* const pc_font_uv_keys[4] = {
     "fontUVleft", "fontUVright", "fontUVtop", "fontUVbottom"
 };
 static int pc_font_uv_values[4];
 static int pc_font_uv_values_loaded;
-static int pc_font_uv_fix_enabled = -1;
+static int pc_font_uv_debug_enabled = -1;
 
 static int pc_font_uv_clamp(int value)
 {
@@ -455,13 +455,13 @@ static int pc_font_uv_clamp(int value)
     return value;
 }
 
-int pcFontUvFixEnabled(void)
+int pcFontUvDebugEnabled(void)
 {
-    if (pc_font_uv_fix_enabled < 0)
+    if (pc_font_uv_debug_enabled < 0)
     {
-        pc_font_uv_fix_enabled = pcIniGetInt("fontUVfix", 0) != 0;
+        pc_font_uv_debug_enabled = pcIniGetInt("fontUVfix", 0) != 0;
     }
-    return pc_font_uv_fix_enabled;
+    return pc_font_uv_debug_enabled;
 }
 
 static void pc_font_uv_load_values(void)
@@ -1029,7 +1029,7 @@ static int font_uv_handle_event(const SDL_Event* ev)
     }
 
     /* No correction and no live tuner unless explicitly enabled in recvx.ini. */
-    if (!pcFontUvFixEnabled())
+    if (!pcFontUvDebugEnabled())
     {
         return 0;
     }
