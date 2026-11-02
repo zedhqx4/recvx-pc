@@ -490,3 +490,47 @@ The depth attachment's format also affects the effective resolution of depth val
 - **Code review:** Confirmed the decal signature's ZBUF PSM (10) now selects D16, while Z32 and Z24 select D32 and D24 respectively.
 - **Build:** Pending GitHub Actions.
 - **Runtime:** Pending. Retest the same coplanar decal scene and negative controls. This source correction is not yet considered a verified visual fix.
+
+
+## 2026-11-02 — Step 9: Correct Font Glyph UV Sampling
+
+**Category:** Graphics correctness / 2D font texture sampling  
+**Status:** Implemented in source; Windows build and visual validation pending  
+**Branch:** `experimental/gs-rebuild`  
+**Reference:** `alpha` implementation; originally from Aikatore's `recvx-decomp` commit `b4212c43faf4d88c3e7d73730517971289713f53`, recorded in `recvx-enhanced-port` commit `d01d2801133d0ee63272e2c686de2d206182e7cb` (fmil95)
+
+### Problem
+
+At higher internal resolutions, font glyph quads could sample into the neighbouring glyph cell. The far-side UV coordinates sat on the far texel's edge, producing visible seams/bleed around letters in messages, item names and loading text.
+
+### Change
+
+In `src/ps2/veronica/prog/ps2_NaDraw2D.c`, `njDrawPolygon2DM()` now uses the same PC-only UV correction already present in Alpha and the decompilation source:
+
+- For the four glyph-quad corners, move each U/V coordinate half a texel (8 units in the GS 4-bit fractional UV representation) inward from the corresponding cell edge.
+- Near edges use `+8`; far edges use `-8`.
+- Keep the original non-PC/PS2 coordinate path unchanged under `#else`.
+- Keep the existing color conversion, geometry, primitive setup, and `Ps2AddPrim2D()` submission unchanged.
+
+This is a direct port of the reference implementation, not a texture-filtering or renderer-wide UV adjustment.
+
+### Files Changed
+
+- `src/ps2/veronica/prog/ps2_NaDraw2D.c`
+  - Updated only the four-corner UV selection inside `njDrawPolygon2DM()`.
+  - The correction is guarded by `TARGET_PC`; the original PS2 UV values remain intact.
+- `DEVELOPMENT_LOG.md`
+  - Recorded the source lineage, exact scope, and validation status.
+
+### Explicitly Excluded
+
+- No changes to `njDrawPolygon2D()`, `njDrawLine2D()`, texture filtering, GS texture memory, font assets, scaling, or OpenGL sampling.
+- No changes to 3D/model UVs or general-purpose texture coordinates.
+- No changes to the decals/depth implementation or other GS-Rebuild work.
+
+### Validation
+
+- **Reference comparison:** Confirmed the four-corner `TARGET_PC` branch matches Alpha and Aikatore's decompilation implementation.
+- **Scope review:** Confirmed only the font-specific `njDrawPolygon2DM()` UV corner values change; PS2/non-PC values remain unchanged.
+- **Build:** Pending GitHub Actions.
+- **Runtime/visual:** Pending. Inspect messages, item names, and loading text at the same elevated internal resolution where glyph seams were visible.
