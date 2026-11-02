@@ -744,3 +744,47 @@ capture, the marked arms and shirt were not decals, but the broad rule could sel
 - **Runtime:** Pending. Retest the same arms, shirt and decal surfaces; confirm the arms and shirt
   no longer receive priority while the previously marked decal surfaces still do.
 
+
+
+## 2026-11-02 — Step 13: Halve the Allowlisted Decal Polygon Offset
+
+**Category:** GS renderer / decal depth priority tuning  
+**Status:** Implemented in source; Windows CI and runtime validation pending  
+**Branch:** `experimental/decals-wip`  
+**Base:** `fc772fe292f55ee690ceeb4e78ef9dd0d7757aa5`
+
+### Request and Rationale
+
+The exact-signature allowlist is reported as an improvement, but its depth adjustment may still
+be stronger than necessary. Reduce only the final OpenGL polygon offset magnitude by 50%, without
+changing the draw-order priority sequence.
+
+### Changes
+
+- Kept the integer draw-order priority unchanged: increment per allowlisted draw and clamp at 1..4.
+- Changed only the units passed to `glPolygonOffset()`:
+  `priority * 0.50f`.
+- The resulting units are +0.5, +1.0, +1.5 and +2.0 for priorities 1 through 4.
+- Kept the factor at zero, the exact 25-signature matcher, per-frame reset, and polygon-offset
+  enable/disable scope unchanged.
+
+### Files Changed
+
+- `pc/src/gs/gs_gl.c`: multiply only the final polygon-offset units by 0.50.
+- `pc/README.md`: document the unchanged priority sequence and halved offset range.
+- `DEVELOPMENT_LOG.md`: record the tuning step and validation state.
+
+### Explicitly Excluded
+
+- No scaling of the draw-order priority itself.
+- No change to the allowlist or its common register-field checks.
+- No changes to blend/alpha/depth tests, depth-buffer precision, frame reset or draw cleanup.
+- No additional settings, INI keys or runtime controls.
+
+### Validation
+
+- **Source review:** Confirmed the priority ordinal remains integer 1..4 and only the final
+  `glPolygonOffset()` units are multiplied by 0.50.
+- **Build:** Pending GitHub Actions for this commit.
+- **Runtime:** Pending. Compare the same scene against the prior allowlist build and check decal
+  visibility, coplanar overlap and the arms/shirt negative controls.

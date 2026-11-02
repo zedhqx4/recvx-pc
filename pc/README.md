@@ -121,7 +121,9 @@ equations (`0x44` and `0x48`) are represented in the allowlist.
 The later marked arms and shirt states from `recvx(1).zip` are negative controls and are
 deliberately not included. Their different material signatures therefore receive no polygon
 offset, even where the arms happen to share some of the old broad GS conditions. Only an exact
-allowlist match receives the bounded +1..+4 depth-unit offset (factor 0), reset every frame.
+allowlist match receives the bounded +0.5..+2.0 depth-unit offset (factor 0): the draw-order
+priority remains 1..4, while the final offset is multiplied by 0.50. The priority counter still
+resets every frame.
 
 The allowlist is based on GS material state, not source object identity. If another draw reuses
 one of the same exact registered signatures, it will also match; the renderer has no stable

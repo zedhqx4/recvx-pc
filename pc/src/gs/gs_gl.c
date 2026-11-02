@@ -1938,7 +1938,7 @@ void gsRendererDraw(const GsDrawState* st, const GsVertex* v, int nverts)
             unsigned int priority = ++decal_draw_order;
             if (priority > 4)
                 priority = 4;
-            glPolygonOffset(0.0f, (GLfloat)priority);
+            glPolygonOffset(0.0f, (GLfloat)priority * 0.50f);
         }
         glEnable(GL_POLYGON_OFFSET_FILL);
     }
