@@ -413,3 +413,32 @@ Use `vsync=0` to request unsynchronized presentation. If the key is absent, VSyn
 - **Source comparison:** Matched the VSync field, default, INI loading, swap-interval request, active-interval query, and logging against Alpha.
 - **Build:** Pending GitHub Actions.
 - **Runtime:** Pending. Test with the default setting and with `vsync=0`; confirm the log reports the active swap interval and check for tearing/frame-pacing differences.
+
+## 2026-11-02 — Step 7: Port the Allowlisted Decal Depth Correction
+
+**Category:** GS renderer / coplanar decal depth priority  
+**Status:** Implemented in source; Windows build and runtime validation pending  
+**Branch:** `experimental/gs-rebuild`  
+**Reference:** `882fea544de02290194fd436559ef7887a86f9cb` (`experimental/decals-wip`)
+
+### Changes
+
+- Ported the 25 exact GS material signatures and their common register-state checks.
+- Kept the exact TEX0 and ALPHA comparisons; the two recorded arms/shirt negative controls are not in the allowlist.
+- Applied draw-order priority 1–4 (clamped at 4) with `glPolygonOffset(0.0f, priority * 0.50f)`.
+- Reset the priority counter at the presented-frame boundary.
+- Enabled polygon offset only around the matched draw and disabled it immediately afterward, including the alpha-test multipass path.
+- Added only the required `glPolygonOffset` OpenGL function entry to the renderer's loader.
+
+### Explicitly Excluded
+
+- No material inspector, candidate collection, wireframe highlighting, marking controls, or diagnostic logging.
+- No new keyboard bindings, INI settings, runtime controls, or environment variables.
+- No changes to depth formats, blend/alpha tests, geometry, UVs, texture memory, or unrelated renderer behavior.
+
+### Validation
+
+- **Source review:** Confirmed 25 allowlist entries, exact common-field/TEX0/ALPHA matching, 1–4 priority cap, half-scale units, frame reset, and per-draw cleanup.
+- **Build:** Pending GitHub Actions.
+- **Runtime:** Pending. Retest the previously marked decal surfaces and the arms/shirt negative controls in the same scene.
+
