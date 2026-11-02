@@ -260,8 +260,9 @@ static int dump_frame;
 
 /* per-interval statistics for the periodic log */
 static struct { unsigned int frames, draws, verts, rt_loads, rt_reads, tex_decodes, tex_texels; double t_load, t_read, t_decode; } stats;
-static int tex_cached;                     /* textures in the cache, decoded from GS memory */
-static double tex_cached_bytes;            /* their size */
+static int tex_cached;                     /* decoded GS textures currently cached */
+static double tex_cached_bytes;            /* nominal RGBA8 allocation size */
+static unsigned int tex_cache_refreshes, tex_cache_evictions;
 
 /* Normal movies keep one mutable GL representation of their GS VRAM surface.
  * This is separate from the content-addressed texture cache and from MOVIE_HD. */
@@ -278,7 +279,10 @@ void pcGsLogStats(void)
     pcLog("gs/frame: %u draws, %u verts, %.1f rt loads (%.1f ms), %.1f rt reads (%.1f ms), %.1f tex decodes (%u texels, %.1f ms)",
           stats.draws / f, stats.verts / f, (double)stats.rt_loads / f, stats.t_load * 1000 / f, (double)stats.rt_reads / f,
           stats.t_read * 1000 / f, (double)stats.tex_decodes / f, stats.tex_texels / f, stats.t_decode * 1000 / f);
-    pcLog("gs: %d textures cached (%.0f MB)", tex_cached, tex_cached_bytes / 1048576.0);
+    pcLog("gs: %d textures cached (%.1f / 64 MiB, %u refreshed, %u evicted)",
+          tex_cached, tex_cached_bytes / 1048576.0, tex_cache_refreshes, tex_cache_evictions);
+    tex_cache_refreshes = 0;
+    tex_cache_evictions = 0;
     if (movie_vram_tex != 0)
     {
         pcLog("gs: movie VRAM texture: %s, %u frame updates",
@@ -487,6 +491,53 @@ static unsigned long long gen_sum_rect(unsigned int page_lo, unsigned int stride
     return s;
 }
 
+#define MAX_TEX_CACHE_BYTES (64.0 * 1024.0 * 1024.0)
+
+/* Return the least recently used cache entry. HD entries do not own their GL texture,
+ * but they still occupy a metadata slot and can be discarded when the table is full. */
+static int oldest_cached_texture(int include_hd)
+{
+    int i, oldest = -1;
+
+    for (i = 0; i < MAX_TEX; i++)
+    {
+        CachedTex* t = &texcache[i];
+
+        if (t->used && (include_hd || !t->hd) &&
+            ((oldest < 0) || (t->last_use < texcache[oldest].last_use)))
+        {
+            oldest = i;
+        }
+    }
+
+    return oldest;
+}
+
+static void evict_cached_texture(int slot)
+{
+    CachedTex* t = &texcache[slot];
+
+    if (!t->used)
+    {
+        return;
+    }
+
+    if (!t->hd)
+    {
+        glDeleteTextures(1, &t->tex);
+        tex_cached--;
+        tex_cached_bytes -= (double)t->w * t->h * 4;
+
+        if (tex_cached_bytes < 0.0)
+        {
+            tex_cached_bytes = 0.0;
+        }
+    }
+
+    memset(t, 0, sizeof(*t));
+    tex_cache_evictions++;
+}
+
 static GLuint get_texture(u64 tex0, u64 texa, u64 texclut, int w, int h, int rows, int cols, int* hd)
 {
     unsigned int psm = GSF(tex0, 20, 6);
@@ -496,9 +547,10 @@ static GLuint get_texture(u64 tex0, u64 texa, u64 texclut, int w, int h, int row
     u64 cpsm_key = ((u64)GSF(tex0, 51, 4) << 37);
     u64 key1 = ((psm == GS_PSMCT24) || (gsPsmBits(psm) == 16) || (GSF(tex0, 51, 4) >= 2)) ? texa : 0;
     u64 key2 = gsClutHash(tex0);   /* palette contents (0-entry hash for direct color) */
-    int pw, ph, i, slot = -1, oldest = 0;
+    int pw, ph, i, slot = -1;
     unsigned int page_lo, page_hi, clut_page, stride;
     unsigned long long gen;
+    double bytes = (double)w * h * 4;
     CachedTex* t;
 
     key0 |= cpsm_key;
@@ -547,11 +599,33 @@ static GLuint get_texture(u64 tex0, u64 texa, u64 texclut, int w, int h, int row
     {
         t = &texcache[i];
 
-        if (t->used && (t->gen == gen) && (t->key0 == key0) && (t->key1 == key1) && (t->key2 == key2) && (t->w == w) && (t->h == h) &&
-            (t->rows == rows) && (t->cols == cols))
+        /* The descriptor and palette identify the decoded texture. A changed VRAM generation
+         * refreshes its existing GL object instead of retaining another historical version.
+         * HD replacements are different: they are validated against the source VRAM content. */
+        if (t->used && (t->key0 == key0) && (t->key1 == key1) && (t->key2 == key2) &&
+            (t->w == w) && (t->h == h) && (t->rows == rows) && (t->cols == cols) &&
+            (!t->hd || (t->gen == gen)))
         {
             t->last_use = frame_counter;
             *hd = t->hd;
+
+            if (!t->hd && (t->gen != gen))
+            {
+                double t0 = pcOsTime();
+
+                gsDecodeTexture(tex0, texa, texclut, cols, rows, decode_buf);
+                stats.tex_decodes++;
+                stats.tex_texels += cols * rows;
+                stats.t_decode += pcOsTime() - t0;
+
+                glBindTexture(GL_TEXTURE_2D, t->tex);
+                glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+                glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, cols, rows, GL_RGBA, GL_UNSIGNED_BYTE, decode_buf);
+
+                t->gen = gen;
+                tex_cache_refreshes++;
+            }
+
             return t->tex;
         }
 
@@ -559,27 +633,23 @@ static GLuint get_texture(u64 tex0, u64 texa, u64 texclut, int w, int h, int row
         {
             slot = i;
         }
-
-        if (t->last_use < texcache[oldest].last_use)
-        {
-            oldest = i;
-        }
     }
 
+    /* Keep the fixed metadata table bounded as well as the actual texture memory. */
     if (slot < 0)
     {
-        slot = oldest;
+        slot = oldest_cached_texture(1);
 
-        if (!texcache[slot].hd)
+        if (slot < 0)
         {
-            glDeleteTextures(1, &texcache[slot].tex);
-            tex_cached--;
-            tex_cached_bytes -= (double)texcache[slot].w * texcache[slot].h * 4;
+            return 0;
         }
+
+        evict_cached_texture(slot);
     }
 
     t = &texcache[slot];
-    t->used = 1;
+    t->used = 0;
     t->key0 = key0;
     t->key1 = key1;
     t->key2 = key2;
@@ -602,17 +672,40 @@ static GLuint get_texture(u64 tex0, u64 texa, u64 texclut, int w, int h, int row
         {
             t->tex = r;
             t->hd = 1;
+            t->used = 1;
             *hd = 1;
             return r;
         }
     }
 
+    /* The cache stores decoded RGBA8 copies, so cap their nominal allocation size in bytes.
+     * This is independent of MAX_TEX, which only protects the number of metadata entries. */
+    while ((tex_cached_bytes + bytes > MAX_TEX_CACHE_BYTES))
+    {
+        int victim = oldest_cached_texture(0);
+
+        if (victim < 0)
+        {
+            break;
+        }
+
+        evict_cached_texture(victim);
+    }
+
     *hd = 0;
     t->tex = make_texture(w, h, GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE, GL_NEAREST);
+    t->used = 1;
     tex_cached++;
-    tex_cached_bytes += (double)w * h * 4;
+    tex_cached_bytes += bytes;
 
-    { double t0 = pcOsTime(); gsDecodeTexture(tex0, texa, texclut, cols, rows, decode_buf); stats.tex_decodes++; stats.tex_texels += cols * rows; stats.t_decode += pcOsTime() - t0; }
+    {
+        double t0 = pcOsTime();
+        gsDecodeTexture(tex0, texa, texclut, cols, rows, decode_buf);
+        stats.tex_decodes++;
+        stats.tex_texels += cols * rows;
+        stats.t_decode += pcOsTime() - t0;
+    }
+
     glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
     glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, cols, rows, GL_RGBA, GL_UNSIGNED_BYTE, decode_buf);
 

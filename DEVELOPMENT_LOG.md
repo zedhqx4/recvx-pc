@@ -333,3 +333,57 @@ The special movie surface is selected before render-target and generic texture-c
 ### Next Checkpoint
 
 Build this branch and test both a short normal movie and a long normal movie. Compare periodic `gs: ... textures cached (... MB)` and `gs: movie VRAM texture: active, ... frame updates` logs against the earlier run. Confirm that the movie stays visible and that cache memory no longer grows with each decoded movie frame before considering the 16-pixel strip-transfer stage.
+
+## 2026-11-01 — Generic GS Texture Cache: Reuse Updated Textures and Enforce a Byte Budget
+
+**Category:** GS renderer / OpenGL texture-cache memory management  
+**Status:** Implemented; Windows build and runtime validation pending  
+**Branch:** `experimental/movie-texture-reuse`  
+**Parent:** `905b2ac17e27c72234d9caefc62e58a1cfc01b8a`
+
+### Problem
+
+The previous cache retained a distinct GL texture for each observed content generation. When the game rewrote the same GS texture address and descriptor, a new cache entry was created while the old decoded RGBA8 copy remained resident. The fixed `MAX_TEX = 2048` table only triggered LRU replacement after all metadata slots had been consumed; it did not impose a practical memory limit.
+
+The supplied runtime log showed the generic cache reaching approximately 2048 entries and 500 MB after ordinary gameplay. The earlier movie experiment stopped normal movie frames from adding entries, but did not address this general growth.
+
+### Change
+
+In `pc/src/gs/gs_gl.c`:
+
+- Cache identity continues to include the texture descriptor, TEXA-relevant state, palette-content hash, dimensions, and decoded extent.
+- The content-generation hash is now treated as a version of that identity rather than part of the identity itself.
+- When an existing non-HD entry is requested with a new VRAM generation, the renderer decodes the new pixels and updates that entry's existing GL texture with `glTexSubImage2D()`. It no longer allocates and retains another GL object for every generation of the same descriptor/palette.
+- HD replacement entries retain the previous content-generation validation. Their GL textures are owned by `gs_replace.c`, so the generic cache does not delete them.
+- Added a 64 MiB nominal RGBA8 allocation budget for the generic decoded-texture cache. On allocation, least-recently-used non-HD entries are evicted until the new texture fits. `MAX_TEX` remains a separate metadata-entry ceiling.
+- Added per-interval counts for in-place refreshes and cache evictions to the GS statistics log.
+
+The 64 MiB limit applies only to the generic decoded GS texture cache. It is not a claim about total OpenGL/driver memory and does not include render targets, depth buffers, movie textures, HD replacements, or driver-side allocation overhead.
+
+### Explicitly Excluded
+
+- No changes to GS VRAM size, page-generation tracking, texture decoding formats, or render-target coherency.
+- No changes to the normal-movie persistent texture path or `MOVIE_HD`.
+- No attempt to collapse different texture descriptors, PSMs, dimensions, extents, or palette contents into one GL object.
+- No change to the Windows build workflow.
+
+### Files Changed
+
+- `pc/src/gs/gs_gl.c`
+  - Refresh matching non-HD texture objects when their GS content generation changes.
+  - Add LRU eviction by byte budget, independent of the fixed entry-count limit.
+  - Report refresh and eviction activity in the periodic GS log.
+- `DEVELOPMENT_LOG.md`
+  - Record this cache-management step and its validation status.
+
+### Validation
+
+- **Source review:** Confirmed that generic texture identity remains descriptor/palette-specific, while changed page content refreshes the existing GL object.
+- **Ownership review:** HD replacement textures remain owned by `gs_replace.c`; generic cache eviction calls `glDeleteTextures()` only for non-HD entries.
+- **Accounting review:** The byte budget counts the full `w × h × 4` RGBA8 allocation created by `make_texture()`, not merely the uploaded `cols × rows` rectangle.
+- **Build:** Pending Windows Actions result.
+- **Runtime:** Pending. Verify that the cache remains at or below 64 MiB, refresh/eviction counts are plausible, frequently reused textures do not corrupt, and scenes/FMVs remain visually correct with acceptable decode cost and frame pacing.
+
+### Next Checkpoint
+
+Run the Windows build, then repeat the long gameplay path that previously grew the generic cache toward 500 MB. Compare cache bytes, refreshes, evictions, texture correctness, and frame pacing. A stable byte count alone is not sufficient: inspect whether the budget causes excessive cache churn or decode spikes.
