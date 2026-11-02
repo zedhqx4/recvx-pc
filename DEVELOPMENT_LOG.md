@@ -771,7 +771,7 @@ The responsibilities are now separated:
 ## 2026-11-02 — Step 16: Restore Automatic Menu/UI UV Edge Correction
 
 **Category:** Graphics correctness / 2D UI atlas sampling  
-**Status:** Implemented on source; Windows build and runtime/visual validation pending  
+**Status:** Implemented; source review complete; Windows build in progress; runtime/visual validation pending  
 **Branch:** `experimental/gs-rebuild`  
 **Reference:** Alpha UI UV crop implementation (menu/UI crop series, finalized with the rotated-profile defaults and guarded edge validation)
 
@@ -812,6 +812,6 @@ The responsibilities are now separated:
 
 ### Validation
 
-- **Source review:** Pending final diff review.
-- **Windows build:** Pending.
+- **Source review:** Confirmed the standard/rotated code defaults, profile selection, complete-axis eligibility guards, PC-only scope, INI persistence on manual edits, and exclusion of font draws from menu snapping/cropping/right-edge trimming.
+- **Windows build:** Run [41538077059](https://github.com/zedhqx4/recvx-pc/actions/runs/41538077059) is compiling commit `a81bbaeafc59dc7c6b8948e796af7aaf8d37c2c4`; no final result or artifact was available at the time of this log update.
 - **Runtime/visual:** Pending. Compare standard inventory/menu panels and the clockwise-rotated UI pieces at the same render scale. Verify that menu crop does not alter font glyphs or ordinary 3D textures.
