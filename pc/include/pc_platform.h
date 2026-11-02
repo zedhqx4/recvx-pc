@@ -22,6 +22,14 @@ int pcIniFileGetInt(const char* ini, const char* key, int def);
 /* Set (or with value NULL remove) "key=value" in recvx.ini, keeping every other line. */
 void pcIniSet(const char* key, const char* value);
 
+/* Live UI UV crop controls. Edge order: left=0, right=1, top=2, bottom=3. */
+void pcUiUvCropGet(int* left, int* right, int* top, int* bottom);
+void pcUiUvCropAdjust(int edge, int delta);
+void pcUiUvCropReset(int edge);
+void pcUiUvCropRot90CWGet(int* left, int* right, int* top, int* bottom);
+void pcUiUvCropRot90CWAdjust(int edge, int delta);
+void pcUiUvCropRot90CWReset(int edge);
+
 /* PC font glyph UV correction values use GS 1/16-texel units. The correction is always applied. */
 void pcFontUvFixGet(int* left, int* right, int* top, int* bottom);
 /* fontUVfix gates only the optional live F10 tuner; it does not disable the correction. */
