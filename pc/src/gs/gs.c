@@ -58,6 +58,7 @@ static void current_state(GsDrawState* st)
     st->dthe = gsRegs.dthe;
     st->colclamp = gsRegs.colclamp;
     st->texclut = gsRegs.texclut;
+    st->font_filter_nearest = pcFontFilterDrawActive() && !pcFontFilterIsLinear();
 }
 
 void gsFlushPrims(void)
