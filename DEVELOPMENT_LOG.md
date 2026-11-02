@@ -772,36 +772,36 @@ The responsibilities are now separated:
 
 **Category:** Graphics correctness / 2D UI atlas sampling  
 **Status:** Implemented on source; Windows build and runtime/visual validation pending  
-**Branch:** \`experimental/gs-rebuild\`  
+**Branch:** `experimental/gs-rebuild`  
 **Reference:** Alpha UI UV crop implementation (menu/UI crop series, finalized with the rotated-profile defaults and guarded edge validation)
 
 ### Behavior
 
 - Restores the PC-only automatic UV edge crop for eligible textured 2D primitives. The crop is applied to the copied 2D vertex buffer before submission; the original source vertices are not modified.
-- Standard profile code defaults are \`left=-8, right=16, top=-16, bottom=16\`, in GS UV units of \`1/16\` texel.
-- Clockwise-rotated profile defaults are \`left=0, right=8, top=16, bottom=1\`. The code detects the 90-degree clockwise UV-to-screen mapping and selects this profile automatically.
-- Values can be overridden with \`ui_uv_crop_left/right/top/bottom\` and \`ui_uv_crop_rot90_cw_left/right/top/bottom\` in \`recvx.ini\`. No keys are required for the code defaults.
+- Standard profile code defaults are `left=-8, right=16, top=-16, bottom=16`, in GS UV units of `1/16` texel.
+- Clockwise-rotated profile defaults are `left=0, right=8, top=16, bottom=1`. The code detects the 90-degree clockwise UV-to-screen mapping and selects this profile automatically.
+- Values can be overridden with `ui_uv_crop_left/right/top/bottom` and `ui_uv_crop_rot90_cw_left/right/top/bottom` in `recvx.ini`. No keys are required for the code defaults.
 - The edge algorithm identifies whether U or V follows each screen axis, accounts for mirrored direction, and validates the complete primitive axis before changing it. Degenerate, scaled, ambiguous, out-of-range, or collapsing mappings are skipped.
 - The existing PC font draw scope is explicitly excluded from menu snap/crop and right-edge trimming, keeping the font-specific UV correction and font sampling path independent.
-- The optional diagnostic log is gated by \`ui_uv_crop_debug=1\`; it does not change rendering.
+- The optional diagnostic log is gated by `ui_uv_crop_debug=1`; it does not change rendering.
 
 ### Live Tuner
 
-- The tuner is available only with \`debug=1\` in \`recvx.ini\`; the automatic base correction does not require debug mode.
+- The tuner is available only with `debug=1` in `recvx.ini`; the automatic base correction does not require debug mode.
 - **Ctrl+F10** enters/leaves the menu UV tuner. Plain **F10** remains the font UV tuner, avoiding a key collision.
 - Tab selects LEFT, RIGHT, TOP, BOTTOM; R selects the STANDARD / ROT90_CW profile; Up/Down adjusts by one unit (Shift changes by four); Backspace resets the selected edge to zero (Shift+Backspace resets the profile); Escape exits.
-- Live edits are saved to \`recvx.ini\` immediately.
+- Live edits are saved to `recvx.ini` immediately.
 
 ### Files Changed
 
-- \`src/ps2/veronica/prog/ps2_dummy.c\`
+- `src/ps2/veronica/prog/ps2_dummy.c`
   - Adds per-profile values, INI loading/saving, rotated-mapping detection, guarded edge cropping, and optional deduplicated diagnostics.
   - Applies the crop only to eligible PC 2D textured primitives; font draws skip menu-specific snapping/cropping and edge trimming.
-- \`pc/include/pc_platform.h\`
+- `pc/include/pc_platform.h`
   - Declares the menu UV crop getter, adjuster, and reset functions for both profiles.
-- \`pc/src/pc_platform.c\`
+- `pc/src/pc_platform.c`
   - Adds the debug-gated menu UV tuner and its independent Ctrl+F10 shortcut.
-- \`DEVELOPMENT_LOG.md\`
+- `DEVELOPMENT_LOG.md`
   - Records the restored system, defaults, key mapping, and validation status.
 
 ### Explicitly Excluded
