@@ -22,9 +22,10 @@ int pcIniFileGetInt(const char* ini, const char* key, int def);
 /* Set (or with value NULL remove) "key=value" in recvx.ini, keeping every other line. */
 void pcIniSet(const char* key, const char* value);
 
-/* PC font glyph UV correction: edge order left, right, top, bottom. Values use 1/16-texel units. */
-int pcFontUvFixEnabled(void);
+/* PC font glyph UV correction values use GS 1/16-texel units. The correction is always applied. */
 void pcFontUvFixGet(int* left, int* right, int* top, int* bottom);
+/* fontUVfix gates only the optional live F10 tuner; it does not disable the correction. */
+int pcFontUvDebugEnabled(void);
 void pcFontUvFixAdjust(int edge, int delta);
 void pcFontUvFixReset(int edge);  /* edge -1 restores all four correction defaults */
 
