@@ -672,6 +672,8 @@ void pcGsMovieVramFrame(unsigned int tbp, unsigned int tbw, int w, int h)
         return;
     }
 
+    glActiveTexture(GL_TEXTURE0);
+
     if (movie_vram_tex == 0)
     {
         movie_vram_tex = make_texture(512, 512, GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE, GL_NEAREST);
