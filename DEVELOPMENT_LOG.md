@@ -477,3 +477,45 @@ Keep Alpha's eligibility conditions and bounded per-frame draw ordering unchange
 - **Code review:** Confirmed the polygon-offset enable is disabled immediately after the eligible draw, including its alpha-test multipass.
 - **Build:** Pending GitHub Actions for this branch.
 - **Runtime:** Pending. Test toggle A/B and offset multiplier values in the exact scene showing the reported visual regression; record the smallest offset multiplier that reproduces or eliminates it.
+
+
+## 2026-11-01 — Step 8: Restore GS-Native Depth Buffer Precision for Decal Tests
+
+**Category:** GS renderer / depth buffer / decal-priority parity  
+**Status:** Implemented; Windows CI and runtime comparison pending  
+**Branch:** `experimental/decals-wip`  
+**Reference:** Alpha's `get_db()` implementation in `pc/src/gs/gs_gl.c`
+
+### Problem
+
+The decal-priority predicate, draw-order counter, and polygon-offset call had been compared with Alpha, but the two renderers were not using equivalent depth attachments. The WIP renderer created every depth texture as `GL_DEPTH_COMPONENT24`, regardless of the GS `ZBUF.PSM`. Alpha preserves the requested GS depth format. That difference changes the effective granularity of `glPolygonOffset(..., units)`, so equal numeric offset values need not produce the same depth adjustment.
+
+### Changes
+
+- Added the GS depth pixel-storage mode (`ZBUF.PSM`) to the `DepthBuffer` cache key. A buffer created for one precision is no longer reused for another PSM at the same ZBP and dimensions.
+- Ported Alpha's format selection:
+  - PSM 0 / Z32: `GL_DEPTH_COMPONENT32` with `GL_UNSIGNED_INT`.
+  - PSM 1 / Z24: `GL_DEPTH_COMPONENT24` with `GL_UNSIGNED_INT`.
+  - Other supported depth formats, including Z16S: `GL_DEPTH_COMPONENT16` with `GL_UNSIGNED_SHORT`.
+- Updated the draw path to pass `GSF(st->zbuf, 24, 4)` into `get_db()`.
+- Left the decal eligibility predicate, ordinal priorities (+1..+4), offset multiplier, and per-frame reset unchanged.
+
+### Files Changed
+
+- `pc/src/gs/gs_gl.c`
+  - Added `DepthBuffer.psm`, PSM-specific GL depth texture formats/types, PSM-aware cache lookup, and the PSM argument at the draw callsite.
+- `DEVELOPMENT_LOG.md`
+  - Recorded why the precision mismatch matters and the exact Alpha behavior restored.
+
+### Explicitly Excluded
+
+- No change to the decal predicate or draw-order algorithm.
+- No change to the offset multiplier or keypad controls.
+- No changes to texture caches, GS VRAM transfers, or render-target color attachments.
+
+### Validation
+
+- **Source comparison:** Ported the `get_db()` format selection and PSM-aware identity from Alpha.
+- **Code review:** Confirmed the draw path supplies the active `ZBUF.PSM`.
+- **Build:** Pending GitHub Actions for this commit.
+- **Runtime:** Pending. Compare the same scene against Alpha at multiplier `1.00`; only after parity is confirmed should the multiplier be tuned.
