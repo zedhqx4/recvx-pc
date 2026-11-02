@@ -385,6 +385,9 @@ static void pc_snap_uv(unsigned int* v, unsigned int num)
 static int pc_ui_uv_crop_values[4];
 static int pc_ui_uv_crop_rot90_cw_values[4];
 static int pc_ui_uv_crop_initialized;
+/* Defaults use 1/16-texel units and are shared by INI fallback and Backspace reset. */
+static const int pc_ui_uv_crop_defaults[4] = { -8, 18, -14, 16 };
+static const int pc_ui_uv_crop_rot90_cw_defaults[4] = { -4, 8, 10, 12 };
 static const char* pc_ui_uv_crop_keys[4] = {
     "ui_uv_crop_left", "ui_uv_crop_right", "ui_uv_crop_top", "ui_uv_crop_bottom"
 };
@@ -406,18 +409,16 @@ static void pc_ui_uv_crop_init(void)
 {
     if (!pc_ui_uv_crop_initialized)
     {
-        /* Defaults are in 1/16-texel units. Explicit recvx.ini values override them. */
-        static const int automatic_defaults[4] = { -8, 16, -16, 16 };
-        static const int rot90_cw_defaults[4] = { 0, 8, 16, 1 };
+        /* Explicit recvx.ini values override the shared profile defaults. */
         int legacy = pc_ui_uv_crop_value("ui_uv_crop", -1);
         int i;
 
         for (i = 0; i < 4; i++)
         {
-            int fallback = (legacy >= 0) ? legacy : automatic_defaults[i];
+            int fallback = (legacy >= 0) ? legacy : pc_ui_uv_crop_defaults[i];
             pc_ui_uv_crop_values[i] = pc_ui_uv_crop_value(pc_ui_uv_crop_keys[i], fallback);
             pc_ui_uv_crop_rot90_cw_values[i] =
-                pc_ui_uv_crop_value(pc_ui_uv_crop_rot90_cw_keys[i], rot90_cw_defaults[i]);
+                pc_ui_uv_crop_value(pc_ui_uv_crop_rot90_cw_keys[i], pc_ui_uv_crop_rot90_cw_defaults[i]);
         }
         pc_ui_uv_crop_initialized = 1;
     }
@@ -520,6 +521,7 @@ static void pc_ui_uv_crop_reset_profile(int profile, int edge)
 {
     int i, first = (edge == -1) ? 0 : edge, last = (edge == -1) ? 3 : edge;
     int* values = pc_ui_uv_crop_values_for_profile(profile);
+    const int* defaults = profile ? pc_ui_uv_crop_rot90_cw_defaults : pc_ui_uv_crop_defaults;
 
     pc_ui_uv_crop_init();
     if (first < 0 || last >= 4)
@@ -529,7 +531,7 @@ static void pc_ui_uv_crop_reset_profile(int profile, int edge)
 
     for (i = first; i <= last; i++)
     {
-        values[i] = 0;
+        values[i] = defaults[i];
         pc_ui_uv_crop_save_edge_profile(i, profile);
     }
 }

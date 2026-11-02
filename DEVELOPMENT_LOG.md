@@ -778,8 +778,8 @@ The responsibilities are now separated:
 ### Behavior
 
 - Restores the PC-only automatic UV edge crop for eligible textured 2D primitives. The crop is applied to the copied 2D vertex buffer before submission; the original source vertices are not modified.
-- Standard profile code defaults are `left=-8, right=16, top=-16, bottom=16`, in GS UV units of `1/16` texel.
-- Clockwise-rotated profile defaults are `left=0, right=8, top=16, bottom=1`. The code detects the 90-degree clockwise UV-to-screen mapping and selects this profile automatically.
+- Standard profile code defaults are `left=-8, right=18, top=-14, bottom=16`, in GS UV units of `1/16` texel.
+- Clockwise-rotated profile defaults are `left=-4, right=8, top=10, bottom=12`. The code detects the 90-degree clockwise UV-to-screen mapping and selects this profile automatically.
 - Values can be overridden with `ui_uv_crop_left/right/top/bottom` and `ui_uv_crop_rot90_cw_left/right/top/bottom` in `recvx.ini`. No keys are required for the code defaults.
 - The edge algorithm identifies whether U or V follows each screen axis, accounts for mirrored direction, and validates the complete primitive axis before changing it. Degenerate, scaled, ambiguous, out-of-range, or collapsing mappings are skipped.
 - The existing PC font draw scope is explicitly excluded from menu snap/crop and right-edge trimming, keeping the font-specific UV correction and font sampling path independent.
@@ -789,7 +789,7 @@ The responsibilities are now separated:
 
 - The tuner is available only with `debug=1` in `recvx.ini`; the automatic base correction does not require debug mode.
 - **Ctrl+F10** enters/leaves the menu UV tuner. Plain **F10** remains the font UV tuner, avoiding a key collision.
-- Tab selects LEFT, RIGHT, TOP, BOTTOM; R selects the STANDARD / ROT90_CW profile; Up/Down adjusts by one unit (Shift changes by four); Backspace resets the selected edge to zero (Shift+Backspace resets the profile); Escape exits.
+- Tab selects LEFT, RIGHT, TOP, BOTTOM; R selects the STANDARD / ROT90_CW profile; Up/Down adjusts by one unit (Shift changes by four); Backspace restores the selected edge to its profile code default (Shift+Backspace restores all four edges to their profile code defaults); Escape exits.
 - Live edits are saved to `recvx.ini` immediately.
 
 ### Files Changed
@@ -815,3 +815,61 @@ The responsibilities are now separated:
 - **Source review:** Confirmed the standard/rotated code defaults, profile selection, complete-axis eligibility guards, PC-only scope, INI persistence on manual edits, and exclusion of font draws from menu snapping/cropping/right-edge trimming.
 - **Windows build:** Run [41538077059](https://github.com/zedhqx4/recvx-pc/actions/runs/41538077059) is compiling commit `a81bbaeafc59dc7c6b8948e796af7aaf8d37c2c4`; no final result or artifact was available at the time of this log update.
 - **Runtime/visual:** Pending. Compare standard inventory/menu panels and the clockwise-rotated UI pieces at the same render scale. Verify that menu crop does not alter font glyphs or ordinary 3D textures.
+
+## 2026-11-02 — Step 17: Unify the Font and Menu UV Tuner Selector
+
+**Category:** Graphics diagnostics / live UV tuning controls  
+**Status:** Implemented; Windows build passed; runtime/visual validation pending  
+**Branch:** `experimental/gs-rebuild`
+
+### Shared Mode Selector
+
+### Purpose and Scope
+
+These are PC-side visual diagnostics for investigating and correcting potential UV/texture-sampling artifacts during development and testing. They are **not gameplay features**, are not part of the normal game control scheme, and should not be presented as player-facing controls in the eventual README. The automatic corrections and their configured values remain separate from whether a live tuner is currently selected.
+
+
+The font and menu UV tuners now use one explicit mode enum in `pc/src/pc_platform.c`:
+
+- `OFF`
+- `FONT UV`
+- `MENU UV`
+
+F10 cycles only through tuners enabled in `recvx.ini`, in FONT UV then MENU UV order; disabled modes are omitted from the cycle. **F10 never selects OFF.** With both modes enabled, the sequence is OFF (initial state) → FONT UV → MENU UV → FONT UV → MENU UV, and so on. With only one mode enabled, F10 selects that tuner from OFF; pressing F10 again leaves the same tuner selected. **Escape is the only way to leave a selected tuner and return to OFF.** If neither tuner is enabled, F10 is not consumed by this selector.
+
+- `fontUVfix=1` enables the FONT UV tuner.
+- `menuUVfix=1` enables the MENU UV tuner.
+- `debug=1` is no longer required to enter the menu UV tuner; this selector does not alter other uses of the debug setting.
+- Escape exits the currently selected tuner and returns to OFF. It is deliberately a separate exit action; cycling F10 does not turn the tuner off.
+
+### R Key Routing
+
+R is handled only by the selected UV tuner mode:
+
+- **FONT UV:** R toggles the existing font sampling filter (`fontFilter`, bilinear/nearest).
+- **MENU UV:** R switches the active crop profile (STANDARD / ROT90_CW).
+- **OFF:** neither UV tuner nor the font-filter diagnostic consumes R.
+
+Tab, Up/Down, Shift+Up/Down, and Backspace retain their existing edge-selection, adjustment, and reset behavior for the selected tuner. Up/Down key repeats are accepted so holding an arrow continues adjusting. Navigation keys are normalized from SDL keycodes with scancode fallback. Menu UV arrow adjustments log the selected profile and edge plus the actual before/after values; the title reports when an edge is at its clamp limit. The inactive tuner does not process these inputs, so the two systems cannot react to the same key event.
+
+### Implementation
+
+- `pc/src/pc_platform.c`
+  - Replaces the two independent tuner-active booleans and Ctrl+F10 shortcut with the shared `PcUvTunerMode` selector.
+  - Adds the independent `menuUVfix` opt-in gate, defaulting to disabled.
+  - Routes R and all tuner editing keys according to the selected mode.
+  - Cycles F10 only through enabled INI modes; Escape alone exits to OFF.
+  - Normalizes navigation keys from SDL keycodes with scancode fallback, permits arrow-key repeats, and logs menu adjustment before/after values.
+  - Keeps the crop algorithms, font filtering implementation, persistence, and automatic corrections unchanged; updates the profile defaults to the tested values listed below.
+  - Copies title-bar notice text into persistent storage, keeping status messages built from temporary local buffers valid for the full display interval.
+  - Resets the selected edge or all four edges to the code defaults for the active profile instead of zero: STANDARD `{-8, 18, -14, 16}`; ROT90_CW `{-4, 8, 10, 12}`. The restored values are saved immediately to their INI keys.
+- `src/ps2/veronica/prog/ps2_dummy.c`
+  - Shares the profile default arrays between initialization and reset so Backspace restores the correct standard or rotated values.
+- `DEVELOPMENT_LOG.md`
+  - Records the unified selector and its controls, and corrects Step 16's reset description.
+
+### Validation
+
+- **Source review:** Confirmed a single mode state, F10 cycling only through enabled INI modes, mode-specific R handling, Escape-to-OFF behavior, removal of the menu tuner's dependency on `debug=1`, arrow-key keycode/scancode handling with repeat support, explicit before/after logging for menu adjustments, and shared profile-default arrays used by both INI fallback and Backspace reset.
+- **Windows build:** Run [41546313454](https://github.com/zedhqx4/recvx-pc/actions/runs/41546313454) passed for the preceding source revision `b9280f8` (`Build game`, `Verify executables`, and `Upload Windows build` all succeeded). This amendment changes only this comment and the development log; a fresh CI run will validate the amended commit.
+- **Runtime:** Pending. Test all four INI combinations for `fontUVfix` and `menuUVfix`, F10 cycling, R routing in each mode, and Escape exit.
