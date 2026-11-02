@@ -263,3 +263,69 @@ Complete the Windows build, then inspect the generated build and test representa
 scenes. Confirm that the 512x448 base does not introduce clipping, incorrect aspect mapping,
 render-target desynchronization, or screenshot regressions before starting the GS/VRAM audit.
 
+
+
+## 2026-11-01 — Normal Movies: Reuse One OpenGL Texture for the GS VRAM Surface
+
+**Category:** GS renderer / movie memory usage  
+**Status:** Implemented; Windows build and runtime validation pending  
+**Branch:** `experimental/movie-texture-reuse` (based on `experimental/gs-rebuild`)
+
+### Goal
+
+Test whether the per-frame growth of the generic OpenGL texture cache is responsible for the memory pressure and black normal-movie playback observed during long FMVs.
+
+The experiment deliberately keeps the existing full-frame host-to-local GS transfer. It changes only how the renderer represents and samples the movie's GS VRAM region.
+
+### Change
+
+For normal (non-`MOVIE_HD`) movies:
+
+- Keep the existing MPEG decoder and full-frame IMAGE transfer into GS VRAM at TBP 14208 / TBW 5 / PSMCT32.
+- Flush queued renderer primitives before overwriting the movie surface, so earlier draws finish using the previous contents.
+- After the GS transfer completes, decode the active rectangle back out of emulated GS VRAM using `gsDecodeTexture()`.
+- Upload that rectangle with `glTexSubImage2D()` into one persistent 512x512 OpenGL texture (1 MiB).
+- While the normal movie is active, sample this persistent texture directly for TBP 14208 instead of calling the content-addressed `get_texture()` cache.
+- Keep the last valid texture contents if an invalid frame size is supplied; disable only the special sampling path when the movie ends.
+- Log the persistent texture's active/idle state and the number of frame updates per GS statistics interval. Its memory is intentionally not counted as a generic cached texture.
+
+The special movie surface is selected before render-target and generic texture-cache sampling while active. The existing `MOVIE_HD` texture path is left unchanged.
+
+### Files Changed
+
+- `pc/src/pc_movie.c`
+  - Flush pending draws before overwriting the normal movie's GS surface.
+  - Refresh the persistent renderer texture after the full-frame GS transfer.
+  - Disable the special movie VRAM sampling path at normal movie termination.
+- `pc/src/gs/gs_gl.c`
+  - Allocate one persistent 512x512 GL texture for normal movie VRAM.
+  - Read the current PSMCT32 movie rectangle back from GS VRAM and update the same GL object.
+  - Bypass the generic content-addressed texture cache for the active movie TBP.
+  - Add periodic logging of movie texture updates and include its decode work in GS texture-decode statistics.
+
+### Explicitly Excluded
+
+- No 16-pixel strip transfers yet.
+- No changes to `pl_mpeg`, MPEG timing, or the audio path.
+- No changes to the `MOVIE_HD` path.
+- No changes to generic texture-cache policy for non-movie textures.
+- No changes to GS VRAM allocation or the 4 MiB GS memory model.
+
+### Validation
+
+- **Source review:** Confirmed that the persistent texture is refreshed from emulated GS VRAM, and active normal-movie draws bypass `get_texture()`.
+- **Memory accounting:** The persistent 512x512 texture is 1 MiB and is allocated once; it is separate from `tex_cached_bytes`.
+- **Build:** Pending.
+- **Runtime:** Pending. Compare long normal-movie playback with the previous log: verify stable generic texture-cache counts/bytes, continuous frame updates, no black video, and no regression after `termAll()`.
+- **Causality:** The experiment is intended to test whether the previous per-frame texture-cache accumulation caused the memory pressure and black-video failure. That conclusion remains pending runtime results.
+
+### Implementation Commits
+
+- `e5c1a9f` — Reuse one GL texture for normal movie VRAM.
+- `f18dd6d` — Refresh persistent movie texture from GS VRAM.
+- `10ba160` — Track movie VRAM texture decode work.
+- `0323792` — Prioritize active movie VRAM surface in sampling.
+
+### Next Checkpoint
+
+Build this branch and test both a short normal movie and a long normal movie. Compare periodic `gs: ... textures cached (... MB)` and `gs: movie VRAM texture: active, ... frame updates` logs against the earlier run. Confirm that the movie stays visible and that cache memory no longer grows with each decoded movie frame before considering the 16-pixel strip-transfer stage.
