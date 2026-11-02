@@ -446,9 +446,9 @@ Use `vsync=0` to request unsynchronized presentation. If the key is absent, VSyn
 
 ## 2026-11-02 — Step 8: Restore GS ZBUF Precision for Decal Depth Priority
 
-**Category:** GS renderer / depth attachment format  \
-**Status:** Implemented in source; Windows build and in-game validation pending  \
-**Branch:** `experimental/gs-rebuild`  \
+**Category:** GS renderer / depth attachment format  
+**Status:** Implemented in source; Windows build and in-game validation pending  
+**Branch:** `experimental/gs-rebuild`  
 **Reference:** PSM-aware `get_db()` implementation from `experimental/decals-wip`
 
 ### Problem
