@@ -92,7 +92,9 @@ Environment variables for testing:
 ## Experimental GS material inspector
 
 On the `experimental/decals-wip` branch, the numeric keypad controls a runtime material-state
-inspector. It is disabled by default and does not modify the game's materials or apply a depth offset.
+inspector. It is disabled by default and does not alter game materials. The renderer's bounded
+decal depth-priority heuristic runs independently of the inspector; its eligibility and behavior
+are described below.
 
 | Key | Action |
 |---|---|
@@ -114,10 +116,16 @@ records GS state signatures, not a stable game-side material pointer: different 
 that produce identical GS state may share one candidate. The 512-candidate and 64-mark limits are
 fixed diagnostic bounds.
 
-The earlier polygon-offset experiment remains in the source under disabled `#if 0` blocks for
-reference. Its automatic eligibility heuristic and offset application are not active while this
-inspector is in use. The numeric keypad keys above are consumed by the platform layer and do not
-reach keyboard-to-pad bindings.
+The renderer separately applies an experimental bounded depth priority to blended, textured 3D
+triangle batches using perspective UVs when Z testing is GEQUAL and ZBUF uses Z16S. Later eligible
+draws receive polygon offset +1..+4 depth units (factor 0), capped at +4 and reset every frame.
+This is a broad GS-state heuristic, not a semantic CNK decal identifier; ordinary transparent
+geometry with the same state can also qualify. The ALPHA equation and texture PSM/TBP/size are not
+eligibility checks, so conventional and additive blend equations are both covered when ABE is enabled.
+
+The inspector itself only collects and highlights GS-state signatures; it does not apply or change
+the offset. It records no source object/material identity. The numeric keypad keys above are consumed
+by the platform layer and do not reach keyboard-to-pad bindings.
 
 ## Tools
 
