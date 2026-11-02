@@ -540,14 +540,14 @@ This is a direct port of the reference implementation, not a texture-filtering o
 **Category:** Graphics correctness / font UV diagnostics  
 **Status:** Implemented in source; Windows build and visual/runtime validation pending  
 **Branch:** `FONTFix` (created from `experimental/gs-rebuild`)  
-**Reference:** Existing PC-only correction in `njDrawPolygon2DM()`, retained as the enabled default
+**Reference:** Configurable PC-only per-edge correction in `njDrawPolygon2DM()`
 
 ### Behavior
 
 The font UV correction is now controlled by `fontUVfix` in `recvx.ini`:
 
 - Missing or `fontUVfix=0`: the configurable PC correction is disabled. `njDrawPolygon2DM()` uses the original PS2 corner offsets (`+8/+4`) instead.
-- `fontUVfix=1`: the PC-only per-edge correction is enabled. Its default values reproduce the previous PC correction: left `8`, right `-8`, top `8`, bottom `-8`.
+- `fontUVfix=1`: the PC-only per-edge correction is enabled. Its code defaults are left `4`, right `-4`, top `4`, bottom `-4`.
 - The four settings are independently stored as `fontUVleft`, `fontUVright`, `fontUVtop`, and `fontUVbottom`.
 - Each value is clamped to `-32…32`, in GS UV units of `1/16` texel.
 
@@ -589,7 +589,7 @@ The font tuner has its own state and values. It does not call or modify the menu
 
 ### Validation
 
-- **Source review:** Confirmed the four side-to-corner mappings, the `fontUVfix=0` fallback to original PS2 offsets, the enabled defaults, and the `-32…32` bounds.
+- **Source review:** Confirmed the four side-to-corner mappings, the `fontUVfix=0` fallback to original PS2 offsets, the `4/-4/4/-4` code defaults used when enabled, and the `-32…32` bounds.
 - **Diff review:** Confirmed the live tuner is independent of the menu UV crop controls and only intercepts its keys while `fontUVfix=1`.
 - **Build:** Not yet run.
 - **Runtime/visual:** Pending. Compare `fontUVfix=0` and `fontUVfix=1`, verify each edge changes only its two intended corners, and check that the menu/UI UV behavior is unchanged.
@@ -654,3 +654,45 @@ The font tuner has its own state and values. It does not call or modify the menu
 - **Windows CI:** Run [41529410526](https://github.com/zedhqx4/recvx-pc/actions/runs/41529410526) passed for commit `428bc231`: `Build game`, `Verify executables`, and `Upload Windows build` all succeeded. Artifact: `recvx-pc_FONTFix_428bc23`.
 - **Follow-up correction:** The OT sideband was moved from the entry's first/link tag to its second DMA tag (`p->p + 16`), the one that actually carries the primitive GIF payload. Run [41529912728](https://github.com/zedhqx4/recvx-pc/actions/runs/41529912728) is validating this latest placement on commit `861f58b3`; final result pending.
 - **Runtime/visual:** Pending. Compare the default and R-toggled modes on the same font strings, then verify that menu text outside `njDrawPolygon2DM()`, UI artwork, 3D textures and movies retain their previous filtering.
+
+## 2026-11-02 — Step 12: Set Conservative Font UV and Filter Code Defaults
+
+**Category:** Graphics correctness / user-facing defaults  
+**Status:** Code and documentation updated; Windows build and runtime validation pending  
+**Branch:** `FONTFix`
+
+### Code Defaults
+
+These are fallback values in the PC code when the corresponding keys are absent from `recvx.ini`:
+
+```ini
+fontFilter=1
+fontUVfix=0
+fontUVleft=4
+fontUVright=-4
+fontUVtop=4
+fontUVbottom=-4
+```
+
+- `fontFilter=1` preserves the original bilinear magnification-filter behavior. R still toggles bilinear/nearest at runtime and writes the selected value to the INI.
+- `fontUVfix=0` keeps the configurable font UV correction disabled by default.
+- When a user enables `fontUVfix=1`, the four edge defaults above are used. They are independently configurable through `recvx.ini` and through the existing F10 runtime tuner; tuner edits are saved immediately.
+- F10 remains gated by `fontUVfix=1`; users can opt in through the INI and restart before tuning. The tuner does not silently enable the UV correction.
+- Explicit INI values always override the code defaults. Existing user settings are therefore preserved.
+- This changes only PC defaults. Non-PC PS2 UV behavior, the menu UV crop system, and non-font texture filtering remain unchanged.
+
+### Files Changed
+
+- `pc/src/pc_platform.c`
+  - Sets the fallback array to `{ 4, -4, 4, -4 }`.
+  - Defaults the `fontUVfix` master switch to `0`; keeps `fontFilter` default at `1`.
+- `src/ps2/veronica/prog/ps2_NaDraw2D.c`
+  - Aligns the local fallback edge values with `{ 4, -4, 4, -4 }`.
+- `DEVELOPMENT_LOG.md`
+  - Records the exact defaults and opt-in behavior.
+
+### Validation
+
+- **Source review:** Confirmed the INI lookup defaults and local fallback values match the six settings above.
+- **Windows build:** Pending for this exact default change.
+- **Runtime/visual:** Pending. Test with all six keys absent, then with custom INI values and F10/R runtime controls.
