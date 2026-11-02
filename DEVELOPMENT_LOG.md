@@ -488,3 +488,44 @@ This change makes the generic decoded GL staging resource one object and 4 MiB, 
 ### OpenGL Ordering
 
 Texture uploads and draws are submitted sequentially on the renderer's GL context. The design relies on GL command ordering: each draw consumes the texture contents established by the preceding upload before a later upload overwrites the same object. Runtime testing must verify that this produces correct images and does not introduce an unacceptable synchronization stall.
+
+
+## 2026-11-01 — Restore the Normal GS Texture Cache; Keep the Memory Special-Case Movie-Only
+
+**Category:** GS renderer / FMV memory isolation and menu performance  
+**Status:** Source correction committed; Windows build and runtime validation pending  
+**Branch:** `experimental/movie-texture-reuse`
+
+### Problem
+
+The one-buffer experiment changed the generic `get_texture()` path. That function serves ordinary game and menu textures as well as other non-HD GS texture requests. Replacing its cache with one mutable 1024x1024 OpenGL texture forced every ordinary texture request to decode and upload again, overwriting the same GL object between draws. This caused severe repeated decode/upload work and possible synchronization stalls outside movie playback.
+
+The three-slot predecessor had the same scope error: it also replaced the generic path and applied the memory restriction to all GS textures rather than only FMV playback.
+
+### Correction
+
+- Restore the normal content-addressed GS texture cache and its existing reuse behavior from the pre-experiment renderer baseline (`905b2ac`).
+- Keep the dedicated normal-movie VRAM texture path: while a normal FMV is active, its GS surface is decoded into and sampled from the persistent movie texture instead of adding each decoded movie frame to the generic cache.
+- Keep the separate `MOVIE_HD` / upscaled movie path unchanged.
+- Remove the one-object generic upload buffer and its per-request unconditional decode/upload behavior.
+- Do not impose a new byte ceiling, slot count, or overwrite policy on menu/game textures in this correction.
+
+### Scope Clarification
+
+The bounded resource is the dedicated movie-playback texture, not the renderer's general texture system. Render targets, depth buffers, HD replacements, and ordinary game/menu textures remain on their existing independent paths. This correction does not claim to solve every source of renderer memory use; it restores the intended isolation so FMV-specific memory handling cannot throttle ordinary rendering.
+
+### Files Changed
+
+- `pc/src/gs/gs_gl.c`
+  - Restore the pre-experiment generic texture-cache implementation.
+  - Preserve the dedicated `pcGsMovieVramFrame()` persistent movie surface and the `pcGsMovieFrame()` path.
+- `DEVELOPMENT_LOG.md`
+  - Record the scope error, corrective action, and validation status.
+
+### Validation
+
+- **Source comparison:** Restored `pc/src/gs/gs_gl.c` from the branch's pre-generic-cache-experiment baseline `905b2ac`, which already contains the dedicated movie texture paths.
+- **Scope review:** Confirmed the generic `get_texture()` cache is restored; FMV-specific texture updates remain separate.
+- **Windows build:** Pending.
+- **Runtime:** Pending. Verify that menus and normal gameplay recover their previous frame pacing, and that short and long normal FMVs continue updating without generic-cache growth from movie frames.
+
