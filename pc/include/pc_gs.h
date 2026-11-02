@@ -5,12 +5,11 @@ void pcGsInit(unsigned char* scratchpad);      /* needs a current OpenGL 3.3 con
 void pcGsSetDisplay(unsigned int fbp, unsigned int fbw);
 void pcGsPresent(void);                         /* draws the display buffer to the window */
 
-/* Experimental decal-priority controls (decals-wip branch only). */
-void pcGsGetDecalSettings(int* enabled, float* offset_multiplier, float* priority_multiplier);
-void pcGsDecalPriorityToggle(void);
-void pcGsDecalOffsetMultiplierAdjust(int direction);        /* +1/-1 changes offset multiplier by 0.25 */
-void pcGsDecalPriorityMultiplierAdjust(int direction);      /* +1/-1 changes priority multiplier by 0.25 */
-int pcGsSaveDecalSettings(void);
+/* Experimental material-state inspector (decals-wip branch only). */
+void pcGsMaterialDebugToggle(void);
+void pcGsMaterialDebugCycle(int direction); /* +1/-1 selects the next/previous in-frustum state */
+int pcGsMaterialDebugMark(void);             /* records the selected GS material state in recvx.log */
+void pcGsMaterialDebugStatus(int* enabled, int* selected, int* count, int* marked);
 
 extern int pcGsScale;                           /* internal resolution multiplier */
 extern float pcGsScaleX;                        /* horizontal backing-buffer scale per logical pixel */

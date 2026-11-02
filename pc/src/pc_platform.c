@@ -831,46 +831,45 @@ static int pause_until_active(void)
 
 static Uint64 last_mouse_move;
 
-/* Numpad-only controls for the experimental decal-priority test. These keys are consumed
+/* Numpad controls for the runtime GS material-state inspector. These keys are consumed
  * here so they never reach the game's input layer or the input recorder. */
-static int handle_decal_control_key(SDL_Scancode key)
+static int handle_material_debug_key(SDL_Scancode key)
 {
     static char notice[128];
-    int enabled, saved = 0;
-    float offset_multiplier, priority_multiplier;
+    int enabled, selected, count, marked;
+    int mark_result = -1;
 
     switch (key)
     {
     case SDL_SCANCODE_KP_MULTIPLY:
-        pcGsDecalPriorityToggle();
+        pcGsMaterialDebugToggle();
         break;
     case SDL_SCANCODE_KP_PLUS:
-        pcGsDecalOffsetMultiplierAdjust(1);
+        pcGsMaterialDebugCycle(1);
         break;
     case SDL_SCANCODE_KP_MINUS:
-        pcGsDecalOffsetMultiplierAdjust(-1);
-        break;
-    case SDL_SCANCODE_KP_7:
-        pcGsDecalPriorityMultiplierAdjust(-1);
-        break;
-    case SDL_SCANCODE_KP_9:
-        pcGsDecalPriorityMultiplierAdjust(1);
+        pcGsMaterialDebugCycle(-1);
         break;
     case SDL_SCANCODE_KP_DIVIDE:
-        saved = pcGsSaveDecalSettings();
-        pcGsGetDecalSettings(&enabled, &offset_multiplier, &priority_multiplier);
-        snprintf(notice, sizeof(notice), "DECAL %s: %s / PRIO x %.2f / OFFSET x %.2f",
-                 saved ? "SETTINGS SAVED" : "SAVE FAILED",
-                 enabled ? "ON" : "OFF", priority_multiplier, offset_multiplier);
-        title_notice_show(notice);
-        return 1;
+        mark_result = pcGsMaterialDebugMark();
+        break;
     default:
         return 0;
     }
 
-    pcGsGetDecalSettings(&enabled, &offset_multiplier, &priority_multiplier);
-    snprintf(notice, sizeof(notice), "DECAL %s / PRIO x %.2f / OFFSET x %.2f",
-             enabled ? "ON" : "OFF", priority_multiplier, offset_multiplier);
+    pcGsMaterialDebugStatus(&enabled, &selected, &count, &marked);
+    if (key == SDL_SCANCODE_KP_DIVIDE)
+    {
+        snprintf(notice, sizeof(notice), "%s / MAT %d/%d / MARKED %d",
+                 (mark_result == 1) ? "MATERIAL MARKED" :
+                 (mark_result == 2) ? "ALREADY MARKED" : "NO MATERIAL",
+                 selected, count, marked);
+    }
+    else
+    {
+        snprintf(notice, sizeof(notice), "MAT DEBUG %s / %d/%d / MARKED %d",
+                 enabled ? "ON" : "OFF", selected, count, marked);
+    }
     title_notice_show(notice);
     return 1;
 }
@@ -911,9 +910,9 @@ int pcVideoPumpEvents(void)
             SDL_ShowCursor(SDL_ENABLE);
         }
 
-        /* Decal experiment: *, +, -, 7, 9 and / on the numeric keypad. */
+        /* Material inspector: * toggles, +/- cycle candidates, / marks the selection. */
         if ((ev.type == SDL_EVENT_KEY_DOWN) && !ev.key.repeat &&
-            handle_decal_control_key(ev.key.scancode))
+            handle_material_debug_key(ev.key.scancode))
         {
             continue;
         }

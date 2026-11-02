@@ -564,3 +564,69 @@ Allow the decal priority itself to be scaled independently from the polygon-offs
 - **Source review:** Confirm declarations, definitions and platform call sites agree; verify the ordinal cap occurs before the new priority multiplier.
 - **Build:** Pending GitHub Actions for this commit.
 - **Runtime:** Pending. Test priority multiplier with offset multiplier held at `1.00`, then test offset multiplier independently with priority multiplier held at `1.00`.
+
+
+## 2026-11-02 — Step 10: Add an Interactive GS Material-State Inspector
+
+**Category:** Graphics diagnostics / decal identification  
+**Status:** Implemented in source; build and in-game validation pending  
+**Branch:** `experimental/decals-wip`  
+**Base commit:** `d6b90be5a441a0688ba8954cc10325bfa248ae7d`
+
+### Motivation
+
+The broad renderer-side decal predicate and polygon-offset tuning do not identify which
+source materials actually represent decals. Before designing an automatic offset rule, collect
+a small set of known decal examples and compare their original GS texture, blend, alpha-test and
+depth properties.
+
+### Changes
+
+- Disabled the previous automatic decal-priority / polygon-offset experiment with `#if 0`
+  blocks, retaining its implementation in the source for reference.
+- Added a runtime inspector that collects unique GS material-state signatures from 3D triangle
+  batches whose post-projection bounds overlap the 640x480 viewport, GS scissor and normalized
+  depth range.
+- Added magenta wireframe highlighting for the selected state. The overlay uses the existing
+  geometry and shader, bypasses texture/fog/alpha sampling only for the diagnostic pass, and
+  restores the GS depth, blend and color-mask state afterward.
+- Added a bounded sample table (512 candidates, 64 marked states). Numpad `/` logs the selected
+  state's primitive type, TEX0 fields, TEX1, CLAMP, ALPHA, TEST, ZBUF, TEXA, TEXCLUT and PABE.
+- Repeated marks of the same GS state are ignored.
+- Reassigned the numpad controls: `*` toggles the inspector, `+`/`-` cycle candidates, and
+  `/` marks the selected candidate. The previous offset and priority multiplier controls are
+  no longer active.
+
+### Files Changed
+
+- `pc/src/gs/gs_gl.c`
+  - Retained the old settings and priority implementation under disabled `#if 0` blocks.
+  - Added viewport/scissor/depth candidate filtering, GS-state signature comparison, sample
+    registration, mark logging and magenta wireframe rendering.
+- `pc/src/gs/gl_funcs.h`
+  - Added the OpenGL `glPolygonMode` entry required for the wireframe pass.
+- `pc/include/pc_gs.h`
+  - Replaced the old decal-priority control declarations with material-inspector controls.
+- `pc/src/pc_platform.c`
+  - Rebound Numpad `*`, `+`, `-` and `/`; these remain consumed before game input recording.
+- `pc/README.md`
+  - Documented the inspector controls, candidate semantics, recorded GS properties and limits.
+- `DEVELOPMENT_LOG.md`
+  - Recorded this diagnostic step and its validation status.
+
+### Important Scope Notes
+
+- The candidate is a GS material-state signature, not a source-level CNK material pointer.
+  Distinct game materials that produce identical GS state can share one candidate.
+- The frustum filter is a conservative post-projection bounding-box intersection against the
+  viewport, GS scissor and depth range; it is not exact polygon clipping.
+- No depth offset, polygon offset, material replacement, texture mutation, UV change or geometry
+  mutation is performed by the inspector.
+- The old automatic decal heuristic is deliberately inactive so it cannot bias the inspection.
+
+### Validation
+
+- **Source review:** Pending final review of generated diff.
+- **Build:** Not run in this environment; GitHub Actions should build the branch after push.
+- **Runtime:** Pending. Verify activation, candidate cycling, wireframe visibility, marking/log
+  output, and that disabling the inspector restores ordinary rendering.

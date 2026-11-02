@@ -34,6 +34,8 @@ static int gs_scale_y(int y)
 PC_GL_FUNCS(PC_GL_DEFINE)
 #undef PC_GL_DEFINE
 
+/* Legacy decal-priority controls retained for reference; disabled during material inspection. */
+#if 0
 static unsigned int decal_draw_order;
 static int decal_priority_enabled = -1;
 static float decal_offset_multiplier = 1.0f;
@@ -185,6 +187,201 @@ int pcGsSaveDecalSettings(void)
           decal_priority_enabled, decal_priority_multiplier, decal_offset_multiplier);
     return 1;
 }
+#endif
+
+
+/* Runtime GS material-state inspector.
+ * The GS interpreter has no stable game-side material pointer at this layer. A candidate is
+ * therefore a unique set of texture/blend/depth registers, collected from triangle batches whose
+ * post-projection bounds intersect the 640x480 view and the active GS scissor. */
+#define GS_DEBUG_MATERIAL_LIMIT 512
+#define GS_DEBUG_MARK_LIMIT 64
+
+static GsDrawState gs_debug_materials[GS_DEBUG_MATERIAL_LIMIT];
+static GsDrawState gs_debug_marked[GS_DEBUG_MARK_LIMIT];
+static int gs_debug_material_count;
+static int gs_debug_marked_count;
+static int gs_debug_selected;
+static int gs_debug_enabled;
+
+static int gs_debug_material_equal(const GsDrawState* a, const GsDrawState* b)
+{
+    return a->type == b->type &&
+           a->iip == b->iip && a->tme == b->tme && a->fge == b->fge &&
+           a->abe == b->abe && a->aa1 == b->aa1 && a->fst == b->fst &&
+           a->ctxt == b->ctxt && a->fix == b->fix &&
+           a->tex0 == b->tex0 && a->tex1 == b->tex1 && a->clamp == b->clamp &&
+           a->alpha == b->alpha && a->test == b->test && a->zbuf == b->zbuf &&
+           a->texa == b->texa && a->pabe == b->pabe && a->texclut == b->texclut;
+}
+
+static int gs_debug_in_frustum(const GsDrawState* st, const GsVertex* v, int nverts, float zs)
+{
+    float min_x = 1e30f, min_y = 1e30f, min_z = 1e30f;
+    float max_x = -1e30f, max_y = -1e30f, max_z = -1e30f;
+    int sx0, sy0, sx1, sy1, i;
+
+    /* The decal investigation concerns 3D triangle surfaces, not sprites or screen-space UI. */
+    if ((st->type < 3) || (st->type > 5) || (nverts < 3))
+        return 0;
+
+    for (i = 0; i < nverts; i++)
+    {
+        float z = v[i].z * zs;
+        if (v[i].x < min_x) min_x = v[i].x;
+        if (v[i].x > max_x) max_x = v[i].x;
+        if (v[i].y < min_y) min_y = v[i].y;
+        if (v[i].y > max_y) max_y = v[i].y;
+        if (z < min_z) min_z = z;
+        if (z > max_z) max_z = z;
+    }
+
+    /* GS XY coordinates are already post-projection. This is a conservative screen-space
+     * frustum test: the batch AABB must overlap the viewport, the GS scissor and the depth range. */
+    sx0 = (int)GSF(st->scissor, 0, 11);
+    sx1 = (int)GSF(st->scissor, 16, 11);
+    sy0 = (int)GSF(st->scissor, 32, 11);
+    sy1 = (int)GSF(st->scissor, 48, 11);
+
+    if (sx0 < 0) sx0 = 0;
+    if (sy0 < 0) sy0 = 0;
+    if (sx1 > 639) sx1 = 639;
+    if (sy1 > 479) sy1 = 479;
+
+    return (sx0 <= sx1) && (sy0 <= sy1) &&
+           (max_x >= (float)sx0) && (min_x <= (float)(sx1 + 1)) &&
+           (max_y >= (float)sy0) && (min_y <= (float)(sy1 + 1)) &&
+           (max_z >= 0.0f) && (min_z <= 1.0f);
+}
+
+static int gs_debug_register_material(const GsDrawState* st, const GsVertex* v, int nverts, float zs)
+{
+    int i;
+
+    if (!gs_debug_enabled || !gs_debug_in_frustum(st, v, nverts, zs))
+        return -1;
+
+    for (i = 0; i < gs_debug_material_count; i++)
+    {
+        if (gs_debug_material_equal(&gs_debug_materials[i], st))
+            return i;
+    }
+
+    if (gs_debug_material_count >= GS_DEBUG_MATERIAL_LIMIT)
+        return -1;
+
+    gs_debug_materials[gs_debug_material_count] = *st;
+    return gs_debug_material_count++;
+}
+
+static void gs_debug_log_material(const char* action, int index, const GsDrawState* st)
+{
+    pcLog("gs material %s #%d: prim=%d iip=%d tme=%d fst=%d abe=%d fge=%d ctxt=%d fix=%d"
+          " | TEX0=%016llx [TBP=%u TBW=%u PSM=%u TW=%u TH=%u TCC=%u TFX=%u]"
+          " | TEX1=%016llx CLAMP=%016llx"
+          " | ALPHA=%016llx TEST=%016llx ZBUF=%016llx"
+          " | TEXA=%016llx TEXCLUT=%016llx PABE=%016llx",
+          action, index + 1, st->type, st->iip, st->tme, st->fst, st->abe, st->fge, st->ctxt, st->fix,
+          (unsigned long long)st->tex0,
+          (unsigned int)GSF(st->tex0, 0, 14), (unsigned int)GSF(st->tex0, 14, 6),
+          (unsigned int)GSF(st->tex0, 20, 6), (unsigned int)GSF(st->tex0, 26, 4),
+          (unsigned int)GSF(st->tex0, 30, 4), (unsigned int)GSF(st->tex0, 34, 1),
+          (unsigned int)GSF(st->tex0, 35, 2),
+          (unsigned long long)st->tex1, (unsigned long long)st->clamp,
+          (unsigned long long)st->alpha, (unsigned long long)st->test, (unsigned long long)st->zbuf,
+          (unsigned long long)st->texa, (unsigned long long)st->texclut, (unsigned long long)st->pabe);
+}
+
+void pcGsMaterialDebugToggle(void)
+{
+    gs_debug_enabled = !gs_debug_enabled;
+    gs_debug_selected = 0;
+    pcLog("gs: material inspector %s", gs_debug_enabled ? "enabled" : "disabled");
+}
+
+void pcGsMaterialDebugCycle(int direction)
+{
+    if (!gs_debug_enabled)
+    {
+        pcLog("gs: material inspector is disabled; press Numpad * to enable it");
+        return;
+    }
+
+    /* Flush the final GS batch so the candidate list includes the complete scene. */
+    gsRendererFlush();
+
+    if (gs_debug_material_count <= 0)
+    {
+        pcLog("gs: material inspector has no in-frustum candidates yet");
+        return;
+    }
+
+    if (gs_debug_selected >= gs_debug_material_count)
+        gs_debug_selected = gs_debug_material_count - 1;
+
+    gs_debug_selected += (direction >= 0) ? 1 : -1;
+    if (gs_debug_selected >= gs_debug_material_count)
+        gs_debug_selected = 0;
+    if (gs_debug_selected < 0)
+        gs_debug_selected = gs_debug_material_count - 1;
+
+    pcLog("gs: material candidate %d/%d", gs_debug_selected + 1, gs_debug_material_count);
+}
+
+int pcGsMaterialDebugMark(void)
+{
+    const GsDrawState* st;
+    int i;
+
+    if (!gs_debug_enabled)
+    {
+        pcLog("gs: no material candidate to mark");
+        return 0;
+    }
+
+    /* Include the final not-yet-flushed GS batch in the sample list. */
+    gsRendererFlush();
+
+    if (gs_debug_material_count <= 0)
+    {
+        pcLog("gs: no material candidate to mark");
+        return 0;
+    }
+
+    if (gs_debug_selected >= gs_debug_material_count)
+        gs_debug_selected = gs_debug_material_count - 1;
+
+    st = &gs_debug_materials[gs_debug_selected];
+
+    for (i = 0; i < gs_debug_marked_count; i++)
+    {
+        if (gs_debug_material_equal(&gs_debug_marked[i], st))
+        {
+            pcLog("gs: material candidate %d/%d was already marked (sample %d)",
+                  gs_debug_selected + 1, gs_debug_material_count, i + 1);
+            return 2;
+        }
+    }
+
+    if (gs_debug_marked_count >= GS_DEBUG_MARK_LIMIT)
+    {
+        pcLog("gs: material mark table is full (%d samples)", GS_DEBUG_MARK_LIMIT);
+        return 0;
+    }
+
+    gs_debug_marked[gs_debug_marked_count] = *st;
+    gs_debug_log_material("marked", gs_debug_marked_count, st);
+    gs_debug_marked_count++;
+    return 1;
+}
+
+void pcGsMaterialDebugStatus(int* enabled, int* selected, int* count, int* marked)
+{
+    if (enabled != NULL) *enabled = gs_debug_enabled;
+    if (selected != NULL) *selected = (gs_debug_material_count > 0) ? (gs_debug_selected + 1) : 0;
+    if (count != NULL) *count = gs_debug_material_count;
+    if (marked != NULL) *marked = gs_debug_marked_count;
+}
 
 int pcGlLoad(void)
 {
@@ -239,6 +436,7 @@ static const char* fs_src =
     "uniform int uLinear;\n"
     "uniform int uAte, uAtst, uAref, uAtestInvert;\n"
     "uniform int uFge;\n"
+    "uniform int uDebug;\\n"
     "uniform vec3 uFogCol;\n"
     "out vec4 oColor;\n"
     "int wrapc(int c, int size, int mode, int mn, int mx) {\n"
@@ -285,6 +483,7 @@ static const char* fs_src =
     "    return r;\n"
     "}\n"
     "void main() {\n"
+    "    if (uDebug != 0) { oColor = vec4(1.0, 0.0, 1.0, 1.0); return; }\\n"
     "    vec4 vc = (uIip != 0 ? vColor : vFlatColor) * 255.0;\n"
     "    vec3 rgb = vc.rgb; float a = vc.a;\n"
     "    if (uTme != 0) {\n"
@@ -317,7 +516,7 @@ static GLuint prog, present_prog;
 static GLuint vao, vbo;
 
 static struct {
-    GLint target, tme, fst, tfx, tcc, iip, texrt, texsize, rtsize, wrap, region, linear;
+    GLint target, tme, fst, tfx, tcc, iip, texrt, texsize, rtsize, wrap, region, linear, debug;
     GLint ate, atst, aref, atinv, fge, fogcol, tex, texa, hd;
 } U;
 
@@ -1119,7 +1318,9 @@ void gsRendererInit(void)
                         "Updating the graphics driver usually fixes this.");
     }
 
+#if 0 /* Legacy decal-priority settings are retained but not initialized. */
     gs_decal_settings_init();
+#endif
     decode_buf = malloc(1024 * 1024 * 4);
 
     prog = link(vs_src, fs_src);
@@ -1128,7 +1329,7 @@ void gsRendererInit(void)
 #define UL(f, n) U.f = glGetUniformLocation(prog, n)
     UL(target, "uTarget"); UL(tme, "uTme"); UL(fst, "uFst"); UL(tfx, "uTfx"); UL(tcc, "uTcc"); UL(iip, "uIip");
     UL(texrt, "uTexRT"); UL(texsize, "uTexSize"); UL(rtsize, "uRTSize"); UL(wrap, "uWrap"); UL(region, "uRegion");
-    UL(linear, "uLinear"); UL(ate, "uAte"); UL(atst, "uAtst"); UL(aref, "uAref"); UL(atinv, "uAtestInvert");
+    UL(linear, "uLinear"); UL(ate, "uAte"); UL(atst, "uAtst"); UL(aref, "uAref"); UL(atinv, "uAtestInvert"); UL(debug, "uDebug");
     UL(fge, "uFge"); UL(fogcol, "uFogCol"); UL(tex, "uTex"); UL(texa, "uTexa"); UL(hd, "uHD");
 #undef UL
 
@@ -1372,12 +1573,15 @@ void gsRendererDraw(const GsDrawState* st, const GsVertex* v, int nverts)
     int atst = GSF(st->test, 1, 3);
     GLenum mode;
     int n = 0, i;
-    int decal_depth_priority;
+    int debug_material_index;
 
+    debug_material_index = gs_debug_register_material(st, v, nverts, zs);
+#if 0 /* Previous broad decal eligibility predicate, retained for comparison. */
     decal_depth_priority = decal_priority_enabled && use_depth &&
                            (ztst == 2) && (GSF(st->zbuf, 24, 4) == 10) &&
                            st->tme && !st->fst && st->abe &&
                            (st->type >= 3) && (st->type <= 5);
+#endif
 
     rt->last_use = frame_counter;
     stats.draws++;
@@ -1552,6 +1756,7 @@ void gsRendererDraw(const GsDrawState* st, const GsVertex* v, int nverts)
     glUseProgram(prog);
     glUniform2f(U.target, (float)rt->w, (float)rt->h);
     glUniform1i(U.iip, (st->type == 6) ? 0 : st->iip);
+    glUniform1i(U.debug, 0);
     glUniform1i(U.tme, st->tme);
     glUniform1i(U.fst, st->fst);
     glUniform1i(U.fge, st->fge);
@@ -1646,20 +1851,20 @@ void gsRendererDraw(const GsDrawState* st, const GsVertex* v, int nverts)
     glBindBuffer(GL_ARRAY_BUFFER, vbo);
     glBufferData(GL_ARRAY_BUFFER, n * sizeof(GlVertex), glverts, GL_STREAM_DRAW);
 
+#if 0 /* Previous automatic polygon-offset application, retained but disabled. */
     if (decal_depth_priority)
     {
         unsigned int priority = ++decal_draw_order;
         if (priority > 4)
             priority = 4;
 
-        /* Keep Alpha's capped ordinal (1..4), then scale that priority independently.
-         * The final OpenGL offset has its own multiplier below. */
         GLfloat priority_value = (GLfloat)priority;
         priority_value *= decal_priority_multiplier;
         GLfloat offset = priority_value * decal_offset_multiplier;
         glPolygonOffset(0.0f, offset);
         glEnable(GL_POLYGON_OFFSET_FILL);
     }
+#endif
 
     if (ate && (afail != 0) && (atst != 1))
     {
@@ -1690,8 +1895,47 @@ void gsRendererDraw(const GsDrawState* st, const GsVertex* v, int nverts)
         glDrawArrays(mode, 0, n);
     }
 
+#if 0 /* Previous polygon-offset cleanup, retained but disabled. */
     if (decal_depth_priority)
         glDisable(GL_POLYGON_OFFSET_FILL);
+#endif
+
+    if (gs_debug_enabled && (debug_material_index == gs_debug_selected) && (n > 0))
+    {
+        /* Magenta wireframe is a diagnostic second pass over the same vertices. It does not
+         * replace the GS texture/material or mutate UVs, geometry, or the depth buffer. */
+        glUniform1i(U.debug, 1);
+        glUniform1i(U.tme, 0);
+        glUniform1i(U.fge, 0);
+        glUniform1i(U.ate, 0);
+        glUniform1i(U.atinv, 0);
+        glDisable(GL_DEPTH_TEST);
+        glDepthMask(GL_FALSE);
+        glDisable(GL_BLEND);
+        glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+        glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
+        glDrawArrays(mode, 0, n);
+        glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+
+        /* Restore the GS state for the next batch. */
+        glUniform1i(U.debug, 0);
+        glUniform1i(U.tme, st->tme);
+        glUniform1i(U.fge, st->fge);
+        glUniform1i(U.ate, ate);
+        if (use_depth)
+        {
+            glEnable(GL_DEPTH_TEST);
+            glDepthMask(zmsk ? GL_FALSE : GL_TRUE);
+        }
+        else
+        {
+            glDisable(GL_DEPTH_TEST);
+            glDepthMask(GL_FALSE);
+        }
+        setup_blend(st);
+        glColorMask((fbmsk & 0xFF) != 0xFF, (fbmsk & 0xFF00) != 0xFF00, (fbmsk & 0xFF0000) != 0xFF0000,
+                    ((fbmsk & 0xFF000000) != 0xFF000000) && (fpsm != GS_PSMCT24));
+    }
 }
 
 /* ------------------------------------------------------------------------------------------- */
@@ -1748,7 +1992,12 @@ void gsRendererPresent(unsigned int dispfb_fbp, unsigned int dispfb_fbw)
     int i;
 
     gsRendererFlush();
+    if (gs_debug_selected >= gs_debug_material_count)
+        gs_debug_selected = (gs_debug_material_count > 0) ? gs_debug_material_count - 1 : 0;
+    gs_debug_material_count = 0;
+#if 0 /* Legacy per-frame priority counter reset. */
     decal_draw_order = 0;
+#endif
     frame_counter++;
     stats.frames++;
 

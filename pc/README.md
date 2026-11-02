@@ -89,36 +89,35 @@ Environment variables for testing:
 | `RECVX_SNDLOG=1` | log sound sequence starts, rejected sequences, sequence uploads and reverb changes |
 | `RECVX_MCLOG=1` | log save-folder (memory card) calls |
 
-## Experimental decal-priority controls
+## Experimental GS material inspector
 
-On the `experimental/decals-wip` branch, the decal-priority test is enabled by default.
-The settings are loaded from `recvx.ini` (next to `recvx.exe`):
-
-```ini
-decal_priority=1
-decal_offset_multiplier=1.00
-decal_priority_multiplier=1.00
-```
-
-Use the numeric keypad while playing:
+On the `experimental/decals-wip` branch, the numeric keypad controls a runtime material-state
+inspector. It is disabled by default and does not modify the game's materials or apply a depth offset.
 
 | Key | Action |
 |---|---|
-| `*` | Toggle decal priority on/off |
-| `+` | Increase offset multiplier by 0.25 |
-| `-` | Decrease offset multiplier by 0.25 |
-| `7` | Decrease priority multiplier by 0.25 |
-| `9` | Increase priority multiplier by 0.25 |
-| `/` | Save enabled state and both multipliers to `recvx.ini` |
+| `*` | Enable/disable candidate collection and magenta wireframe highlighting |
+| `+` | Select the next in-frustum GS material state |
+| `-` | Select the previous in-frustum GS material state |
+| `/` | Mark the selected state and write its GS properties to `recvx.log` |
 
-Offset multiplier is clamped to `-2.00..4.00`; priority multiplier is clamped to `0.00..4.00`.
-Both use 0.25 steps. The capped Alpha ordinal priority (1..4) is multiplied by the priority
-multiplier first; that result is then multiplied by the offset multiplier before OpenGL receives
-it. Positive offset values preserve Alpha's direction; zero neutralizes it; negative values reverse it.
-Changes take effect immediately. The title bar shows the enabled state and both multipliers;
-save attempts are verified and reported in both the title bar and `recvx.log`.
-These numpad keys (`*`, `+`, `-`, `7`, `9`, `/`) are reserved by the PC platform layer: they are consumed as events and ignored
-by keyboard-to-pad bindings, even if a matching `key_*` binding exists in `recvx.ini`.
+Candidates are unique GS material-state signatures gathered from triangle batches whose
+post-projection bounds intersect the 640x480 viewport, active GS scissor and normalized depth
+range. The signature includes texture, blend, alpha-test and depth registers. The selected
+batch is outlined in magenta without replacing its texture or changing its original GS state.
+The outline ignores depth so it remains useful for inspecting overlapping surfaces.
+
+A marked sample logs the primitive type, texture enable/mode, ABE, TEX0 fields (TBP/TBW/PSM/TW/TH),
+TEX1, CLAMP, ALPHA, TEST, ZBUF, TEXA, TEXCLUT and PABE. Samples are held in memory for the
+session and written to the normal log; marking the same state twice is ignored. The inspector
+records GS state signatures, not a stable game-side material pointer: different source materials
+that produce identical GS state may share one candidate. The 512-candidate and 64-mark limits are
+fixed diagnostic bounds.
+
+The earlier polygon-offset experiment remains in the source under disabled `#if 0` blocks for
+reference. Its automatic eligibility heuristic and offset application are not active while this
+inspector is in use. The numeric keypad keys above are consumed by the platform layer and do not
+reach keyboard-to-pad bindings.
 
 ## Tools
 
