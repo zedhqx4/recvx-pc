@@ -32,6 +32,7 @@ static void save_event(const SDL_Event* ev);
 static void save_tick(void);
 static void fps_tick(void);
 static void update_title(int force);
+static void title_notice_show(const char* text);
 
 /* SDL3 gives each window event its own event type; map the subset the platform handles. */
 enum { PC_WINDOW_EVENT_NONE=0, PC_WINDOW_EVENT_MOVED, PC_WINDOW_EVENT_SIZE_CHANGED,
@@ -436,6 +437,102 @@ int pcIniGetInt(const char* key, int def)
     return pcIniGet(key, v, sizeof(v)) ? atoi(v) : def;
 }
 
+
+/* PC-only font glyph UV correction. Values are offsets in GS 1/16-texel units.
+ * The default values reproduce the existing half-texel inward correction. */
+static const int pc_font_uv_defaults[4] = { 8, -8, 8, -8 };
+static const char* const pc_font_uv_keys[4] = {
+    "fontUVleft", "fontUVright", "fontUVtop", "fontUVbottom"
+};
+static int pc_font_uv_values[4];
+static int pc_font_uv_values_loaded;
+static int pc_font_uv_fix_enabled = -1;
+
+static int pc_font_uv_clamp(int value)
+{
+    if (value < -32) return -32;
+    if (value > 32) return 32;
+    return value;
+}
+
+int pcFontUvFixEnabled(void)
+{
+    if (pc_font_uv_fix_enabled < 0)
+    {
+        pc_font_uv_fix_enabled = pcIniGetInt("fontUVfix", 0) != 0;
+    }
+    return pc_font_uv_fix_enabled;
+}
+
+static void pc_font_uv_load_values(void)
+{
+    int i;
+
+    if (pc_font_uv_values_loaded)
+    {
+        return;
+    }
+
+    for (i = 0; i < 4; i++)
+    {
+        pc_font_uv_values[i] = pc_font_uv_clamp(pcIniGetInt(pc_font_uv_keys[i], pc_font_uv_defaults[i]));
+    }
+
+    pc_font_uv_values_loaded = 1;
+}
+
+void pcFontUvFixGet(int* left, int* right, int* top, int* bottom)
+{
+    pc_font_uv_load_values();
+    *left = pc_font_uv_values[0];
+    *right = pc_font_uv_values[1];
+    *top = pc_font_uv_values[2];
+    *bottom = pc_font_uv_values[3];
+}
+
+static void pc_font_uv_save_edge(int edge)
+{
+    char value[16];
+
+    snprintf(value, sizeof(value), "%d", pc_font_uv_values[edge]);
+    pcIniSet(pc_font_uv_keys[edge], value);
+}
+
+void pcFontUvFixAdjust(int edge, int delta)
+{
+    int value;
+
+    pc_font_uv_load_values();
+    if (edge < 0 || edge >= 4)
+    {
+        return;
+    }
+
+    value = pc_font_uv_clamp(pc_font_uv_values[edge] + delta);
+    if (value != pc_font_uv_values[edge])
+    {
+        pc_font_uv_values[edge] = value;
+        pc_font_uv_save_edge(edge);
+    }
+}
+
+void pcFontUvFixReset(int edge)
+{
+    int i, first = (edge == -1) ? 0 : edge, last = (edge == -1) ? 3 : edge;
+
+    pc_font_uv_load_values();
+    if (first < 0 || last >= 4)
+    {
+        return;
+    }
+
+    for (i = first; i <= last; i++)
+    {
+        pc_font_uv_values[i] = pc_font_uv_defaults[i];
+        pc_font_uv_save_edge(i);
+    }
+}
+
 int pcIniFileGetInt(const char* ini, const char* key, int def)
 {
     char v[64];
@@ -830,6 +927,115 @@ static int pause_until_active(void)
 
 static Uint64 last_mouse_move;
 
+
+/* -------------------------------------------------------------------------------------------------
+ * Live font UV edge tuner. It is deliberately separate from the menu/UI UV tuner so the two
+ * systems can receive independent hotkeys and correction values in the future. */
+static int font_uv_tuning;
+static int font_uv_selected_edge;
+static int font_uv_consume_escape_up;
+static const char* const font_uv_edge_names[4] = { "LEFT", "RIGHT", "TOP", "BOTTOM" };
+static char font_uv_notice[160];
+
+static void font_uv_show_status(const char* state)
+{
+    int left, right, top, bottom;
+
+    pcFontUvFixGet(&left, &right, &top, &bottom);
+    snprintf(font_uv_notice, sizeof(font_uv_notice),
+             "FONT UV %s | %s | L:%d R:%d T:%d B:%d",
+             state, font_uv_edge_names[font_uv_selected_edge], left, right, top, bottom);
+    pcLog("Font UV %s: left=%d right=%d top=%d bottom=%d; selected=%s (1/16 texel units)",
+          state, left, right, top, bottom, font_uv_edge_names[font_uv_selected_edge]);
+    title_notice_show(font_uv_notice);
+}
+
+/* True means the key event was consumed and must not reach the game. */
+static int font_uv_handle_event(const SDL_Event* ev)
+{
+    int down;
+    SDL_Scancode key;
+
+    if ((ev->type != SDL_EVENT_KEY_DOWN) && (ev->type != SDL_EVENT_KEY_UP))
+    {
+        return 0;
+    }
+
+    /* No correction and no live tuner unless explicitly enabled in recvx.ini. */
+    if (!pcFontUvFixEnabled())
+    {
+        return 0;
+    }
+
+    down = (ev->type == SDL_EVENT_KEY_DOWN);
+    key = ev->key.scancode;
+
+    if (key == SDL_SCANCODE_F10)
+    {
+        if (down && !ev->key.repeat)
+        {
+            font_uv_tuning = !font_uv_tuning;
+            font_uv_show_status(font_uv_tuning ?
+                "TUNING ON (TAB edge, UP/DOWN adjust, SHIFT step 4, BS reset, F10 done)" : "TUNING OFF");
+        }
+        return 1;
+    }
+
+    if (key == SDL_SCANCODE_ESCAPE)
+    {
+        if (down && font_uv_tuning && !ev->key.repeat)
+        {
+            font_uv_tuning = 0;
+            font_uv_consume_escape_up = 1;
+            font_uv_show_status("TUNING OFF");
+            return 1;
+        }
+        if (!down && font_uv_consume_escape_up)
+        {
+            font_uv_consume_escape_up = 0;
+            return 1;
+        }
+    }
+
+    if (!font_uv_tuning)
+    {
+        return 0;
+    }
+
+    if (!down || ev->key.repeat)
+    {
+        return 1;
+    }
+
+    switch (key)
+    {
+    case SDL_SCANCODE_TAB:
+        font_uv_selected_edge = (font_uv_selected_edge + 1) & 3;
+        font_uv_show_status("EDGE SELECTED");
+        break;
+
+    case SDL_SCANCODE_UP:
+    case SDL_SCANCODE_DOWN:
+    {
+        int step = (ev->key.mod & SDL_KMOD_SHIFT) ? 4 : 1;
+        pcFontUvFixAdjust(font_uv_selected_edge, (key == SDL_SCANCODE_UP) ? step : -step);
+        font_uv_show_status("VALUE CHANGED");
+        break;
+    }
+
+    case SDL_SCANCODE_BACKSPACE:
+        pcFontUvFixReset((ev->key.mod & SDL_KMOD_SHIFT) ? -1 : font_uv_selected_edge);
+        font_uv_show_status((ev->key.mod & SDL_KMOD_SHIFT) ?
+                            "ALL EDGES RESET TO DEFAULT" : "EDGE RESET TO DEFAULT");
+        break;
+
+    default:
+        break;
+    }
+
+    return 1;
+}
+
 int pcVideoPumpEvents(void)
 {
     SDL_Event ev;
@@ -864,6 +1070,12 @@ int pcVideoPumpEvents(void)
         {
             last_mouse_move = SDL_GetTicks();
             SDL_ShowCursor(SDL_ENABLE);
+        }
+
+        /* The font UV tuner owns its keys only while fontUVfix=1. */
+        if (font_uv_handle_event(&ev))
+        {
+            continue;
         }
 
         /* Alt+Enter: fullscreen on/off, like other Windows games. */
