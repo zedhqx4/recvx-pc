@@ -28,6 +28,13 @@ void pcFontUvFixGet(int* left, int* right, int* top, int* bottom);
 void pcFontUvFixAdjust(int edge, int delta);
 void pcFontUvFixReset(int edge);  /* edge -1 restores all four correction defaults */
 
+/* Runtime font-only filtering; fontFilter=1 is bilinear, 0 is nearest. */
+int pcFontFilterIsLinear(void);
+int pcFontFilterToggle(void);  /* returns the new linear/bilinear state */
+int pcFontFilterDrawActive(void);
+void pcFontFilterDrawBegin(void);
+void pcFontFilterDrawEnd(void);
+
 /* First file in dir whose name ends with ext (case-insensitive); full path in out. */
 int pcPlatformFindFile(const char* dir, const char* ext, char* out, int size);
 
