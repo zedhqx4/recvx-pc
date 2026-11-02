@@ -290,3 +290,36 @@ No movie-specific runtime counters, periodic debug messages, or per-frame timing
 - **Source review:** Confirmed the movie-only path bypasses the generic texture cache only while the normal FMV is active.
 - **Windows build:** Pending GitHub Actions.
 - **Runtime:** Pending. Verify short and long normal FMVs, transition back to menus/gameplay, and that ordinary texture cache behavior is unchanged.
+
+
+## 2026-11-01 — Step 5: Optimize 32-bit Host-to-GS Image Transfers
+
+**Category:** GS memory / transfer performance  
+**Status:** Implemented; build and runtime validation pending  
+**Branch:** `experimental/gs-rebuild`  
+**Reference:** Alpha branch `pc/src/gs/gs_mem.c` implementation of `transfer32Run()` and page-touch coalescing
+
+### Change
+
+Port the Alpha implementation into GS-Rebuild without importing its unrelated profiling code or texture-cache work.
+
+In `pc/src/gs/gs_mem.c`:
+
+- Added Alpha's `transfer32Run()` path for PSMCT32 and PSMZ32 host-to-GS IMAGE transfers.
+- Complete aligned 8×8 blocks are assembled in GS swizzled column order, then compared and copied as 256-byte blocks.
+- Transfers that do not meet the complete-block conditions use Alpha's horizontal run path, processing up to the next 8-pixel block boundary while reusing the page/block calculation.
+- Added Alpha's `pageTouchEpoch` invalidation coalescing. During a call to `gsMemTransferData()`, each modified 8 KB GS page advances `gsPageGen` at most once; writes outside that scope retain the original per-write increment behavior.
+- The existing non-32-bit transfer formats retain their original handlers.
+
+### Explicitly Excluded
+
+- No INI setting or runtime mode selection.
+- No additional transfer buffer or texture cache.
+- No renderer, movie, VRAM-size, or unrelated profiling changes.
+
+### Validation
+
+- **Source comparison:** Confirmed the 32-bit column table and `addr32()` implementation match Alpha before copying its fast path.
+- **Build:** Pending.
+- **Runtime:** Pending. Compare representative scenes and inspect texture correctness and frame-time changes.
+

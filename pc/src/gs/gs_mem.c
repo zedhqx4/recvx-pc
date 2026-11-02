@@ -14,6 +14,12 @@
 unsigned char gsVram[GS_VRAM_SIZE];
 unsigned int gsPageGen[GS_PAGES];
 
+/* Page generations invalidate cached textures; one bump per touched page per IMAGE
+ * packet is sufficient, rather than incrementing the same counter for every pixel. */
+static unsigned int pageTouchEpoch[GS_PAGES];
+static unsigned int currentPageTouchEpoch;
+static int coalescePageTouches;
+
 static const unsigned char blockTable32[4][8] = {
     {  0,  1,  4,  5, 16, 17, 20, 21 },
     {  2,  3,  6,  7, 18, 19, 22, 23 },
@@ -234,7 +240,20 @@ int gsBlockNumber(int psm, unsigned int bp, unsigned int bw, unsigned int x, uns
 
 static void touch(unsigned int byte_addr)
 {
-    gsPageGen[(byte_addr >> 13) & (GS_PAGES - 1)]++;
+    unsigned int page = (byte_addr >> 13) & (GS_PAGES - 1);
+
+    if (coalescePageTouches)
+    {
+        if (pageTouchEpoch[page] != currentPageTouchEpoch)
+        {
+            pageTouchEpoch[page] = currentPageTouchEpoch;
+            gsPageGen[page]++;
+        }
+    }
+    else
+    {
+        gsPageGen[page]++;
+    }
 }
 
 unsigned int gsMemRead(int psm, unsigned int bp, unsigned int bw, unsigned int x, unsigned int y)
@@ -517,7 +536,115 @@ void gsMemStartTransfer(const GsRegs* r)
     }
 }
 
-/* host -> local data (IMAGE mode GIF data), qwc quadwords */
+/* Fast path for 32-bit host-to-GS transfers. GS swizzling is constant for an 8-pixel
+ * horizontal run: compute the page/block once, then only look up each pixel's column offset.
+ * This preserves pixel writes and page-generation invalidation while avoiding a full addr32()
+ * calculation and transfer-advance branch for every pixel. */
+static void transfer32Run(const unsigned char* data, int bytes, const unsigned char bt[4][8])
+{
+    int i = 0;
+
+    /* Complete aligned 8x8 blocks can be assembled in GS swizzled order and
+     * compared/copied as one 256-byte unit. Partial rows and misaligned
+     * rectangles continue through the per-pixel fast path below. */
+    while (xfer.active &&
+           xfer.x == xfer.sx &&
+           (xfer.sx & 7u) == 0 &&
+           (xfer.w & 7u) == 0 &&
+           (xfer.y & 7u) == 0 &&
+           xfer.sy + xfer.h - xfer.y >= 8u &&
+           bytes - i >= (int)(xfer.w * 32u))
+    {
+        unsigned int row_bytes = xfer.w * 32u;
+        unsigned int bx, yy, xx;
+
+        for (bx = 0; bx < xfer.w; bx += 8u)
+        {
+            unsigned int block[64];
+            unsigned int a = addr32(xfer.bp, xfer.bw, xfer.sx + bx, xfer.y, bt);
+
+            for (yy = 0; yy < 8u; yy++)
+            {
+                for (xx = 0; xx < 8u; xx++)
+                {
+                    unsigned int v;
+                    unsigned int src_offset = (yy * xfer.w + bx + xx) * 4u;
+
+                    memcpy(&v, &data[i + src_offset], sizeof(v));
+                    block[columnTable32[yy][xx]] = v;
+                }
+            }
+
+            if (memcmp(&gsVram[a], block, sizeof(block)) != 0)
+            {
+                memcpy(&gsVram[a], block, sizeof(block));
+                touch(a);
+                xfer.changed = 1;
+            }
+        }
+
+        i += (int)row_bytes;
+        xfer.y += 8u;
+
+        if (xfer.y >= xfer.sy + xfer.h)
+        {
+            xfer.active = 0;
+            gsXferDone(xfer.bp, xfer.bw, xfer.psm, xfer.sx, xfer.sy,
+                       xfer.w, xfer.h, xfer.changed);
+        }
+    }
+
+    while ((i + 4 <= bytes) && xfer.active)
+    {
+        unsigned int run = 8u - (xfer.x & 7u);
+        unsigned int row_left = xfer.sx + xfer.w - xfer.x;
+        unsigned int available = (unsigned int)((bytes - i) / 4);
+        unsigned int page, block, block_base;
+        unsigned int j;
+
+        if (run > row_left)
+            run = row_left;
+        if (run > available)
+            run = available;
+
+        page = (xfer.y >> 5) * xfer.bw + (xfer.x >> 6);
+        block = xfer.bp + page * 32 + bt[(xfer.y >> 3) & 3][(xfer.x >> 3) & 7];
+        block_base = (block * 256u) & (GS_VRAM_SIZE - 1);
+
+        for (j = 0; j < run; j++)
+        {
+            unsigned int x = xfer.x + j;
+            unsigned int a = (block_base +
+                              (unsigned int)columnTable32[xfer.y & 7][x & 7] * 4u) &
+                             (GS_VRAM_SIZE - 1);
+            unsigned int v = *(const unsigned int*)&data[i + j * 4];
+            unsigned int* dst = (unsigned int*)&gsVram[a];
+
+            if (*dst != v)
+            {
+                *dst = v;
+                touch(a);
+                xfer.changed = 1;
+            }
+        }
+
+        i += (int)(run * 4u);
+        xfer.x += run;
+
+        if (xfer.x >= xfer.sx + xfer.w)
+        {
+            xfer.x = xfer.sx;
+
+            if (++xfer.y >= xfer.sy + xfer.h)
+            {
+                xfer.active = 0;
+                gsXferDone(xfer.bp, xfer.bw, xfer.psm, xfer.sx, xfer.sy,
+                           xfer.w, xfer.h, xfer.changed);
+            }
+        }
+    }
+}
+
 void gsMemTransferData(const unsigned char* data, int qwc)
 {
     int bytes = qwc * 16;
@@ -528,15 +655,22 @@ void gsMemTransferData(const unsigned char* data, int qwc)
         return;
     }
 
+    /* gsPageGen is a cache invalidation token, not a write count. During one IMAGE
+     * packet, bump each affected 8 KB page only once even if thousands of pixels change. */
+    currentPageTouchEpoch++;
+    if (currentPageTouchEpoch == 0)
+    {
+        memset(pageTouchEpoch, 0, sizeof(pageTouchEpoch));
+        currentPageTouchEpoch = 1;
+    }
+    coalescePageTouches = 1;
+
     switch (xfer.psm)
     {
     case GS_PSMCT32:
     case GS_PSMZ32:
-        for (i = 0; (i + 4 <= bytes) && xfer.active; i += 4)
-        {
-            xfer.changed |= mem_write(xfer.psm, xfer.bp, xfer.bw, xfer.x, xfer.y, *(const unsigned int*)&data[i]);
-            advance();
-        }
+        transfer32Run(data, bytes,
+                      (xfer.psm == GS_PSMZ32) ? blockTable32Z : blockTable32);
         break;
     case GS_PSMCT24:
     case GS_PSMZ24:
@@ -580,6 +714,7 @@ void gsMemTransferData(const unsigned char* data, int qwc)
         }
         break;
     }
+    coalescePageTouches = 0;
 }
 
 /* local -> host (sceGsExecStoreImage) */
