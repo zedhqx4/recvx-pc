@@ -534,3 +534,165 @@ This is a direct port of the reference implementation, not a texture-filtering o
 - **Scope review:** Confirmed only the font-specific `njDrawPolygon2DM()` UV corner values change; PS2/non-PC values remain unchanged.
 - **Build:** Pending GitHub Actions.
 - **Runtime/visual:** Pending. Inspect messages, item names, and loading text at the same elevated internal resolution where glyph seams were visible.
+
+## 2026-11-02 — Step 10: Add Configurable Font UV Edge Tuning
+
+**Category:** Graphics correctness / font UV diagnostics  
+**Status:** Implemented in source; Windows build and visual/runtime validation pending  
+**Branch:** `FONTFix` (created from `experimental/gs-rebuild`)  
+**Reference:** Configurable PC-only per-edge correction in `njDrawPolygon2DM()`
+
+### Behavior
+
+The font UV correction is now controlled by `fontUVfix` in `recvx.ini`:
+
+- Missing or `fontUVfix=0`: the configurable PC correction is disabled. `njDrawPolygon2DM()` uses the original PS2 corner offsets (`+8/+4`) instead.
+- `fontUVfix=1`: the PC-only per-edge correction is enabled. Its code defaults are left `4`, right `-4`, top `4`, bottom `-4`.
+- The four settings are independently stored as `fontUVleft`, `fontUVright`, `fontUVtop`, and `fontUVbottom`.
+- Each value is clamped to `-32…32`, in GS UV units of `1/16` texel.
+
+Corner mapping is explicit: left affects top-left and bottom-left U; right affects top-right and bottom-right U; top affects the two upper V coordinates; bottom affects the two lower V coordinates.
+
+### Live Tuning Controls
+
+The F10 tuner is active only while `fontUVfix=1`:
+
+- F10 enters/leaves font UV tuning.
+- Tab selects left, right, top, then bottom.
+- Up/Down changes the selected value by one unit; Shift+Up/Down changes it by four.
+- Backspace restores the selected edge to its correction default; Shift+Backspace restores all four defaults.
+- Escape leaves tuning mode.
+- Adjusted values are saved to `recvx.ini` immediately and reported in the window title/log.
+
+The font tuner has its own state and values. It does not call or modify the menu UV crop API from `alpha`; the F10 binding can be reconsidered when menu UV tuning is added to this branch.
+
+### Files Changed
+
+- `pc/include/pc_platform.h`
+  - Declares the font UV configuration and live-adjustment API.
+- `pc/src/pc_platform.c`
+  - Loads the master switch and four edge values.
+  - Applies the `-32…32` bounds and persists live edits.
+  - Adds the F10/Tab/Up/Down/Backspace/Escape tuner and title-bar status.
+- `src/ps2/veronica/prog/ps2_NaDraw2D.c`
+  - Applies the four independent offsets only in the PC branch of `njDrawPolygon2DM()`, and only when `fontUVfix=1`.
+  - Retains the original PS2 UV values as the disabled/default path.
+- `DEVELOPMENT_LOG.md`
+  - Records configuration, key behavior, scope and validation status.
+
+### Explicitly Excluded
+
+- No menu/UI UV crop implementation or `pcUiUvCrop*` controls were imported.
+- No rotated UI UV profile, automatic UI crop, wireframe toggle, or unrelated renderer changes.
+- No texture filtering, font assets, font loading, or GS memory changes.
+- No changes to non-PC UV behavior.
+
+### Validation
+
+- **Source review:** Confirmed the four side-to-corner mappings, the `fontUVfix=0` fallback to original PS2 offsets, the `4/-4/4/-4` code defaults used when enabled, and the `-32…32` bounds.
+- **Diff review:** Confirmed the live tuner is independent of the menu UV crop controls and only intercepts its keys while `fontUVfix=1`.
+- **Build:** Not yet run.
+- **Runtime/visual:** Pending. Compare `fontUVfix=0` and `fontUVfix=1`, verify each edge changes only its two intended corners, and check that the menu/UI UV behavior is unchanged.
+
+## 2026-11-02 — Step 11: Add Runtime Font Filtering Toggle
+
+**Category:** Graphics correctness / font texture sampling  
+**Status:** Implemented in source; Windows build and runtime validation pending  
+**Branch:** `FONTFix`
+
+### Behavior
+
+- `fontFilter=1` (default) respects the GS `TEX1` filtering state. The current font texture-loading path sets linear magnification filtering.
+- `fontFilter=0` forces nearest sampling for font glyph primitives.
+- Press `R` at runtime to toggle between the two modes. The setting is saved immediately to `recvx.ini` and restored on the next launch.
+- The title bar reports the selected mode after each toggle. The R key is reserved by this diagnostic and is not forwarded to the game; it is not one of the default game bindings.
+
+### Implementation and Scope
+
+- In `src/ps2/veronica/prog/ps2_NaDraw2D.c`, mark textured submissions from `njDrawPolygon2DM()` around the `Ps2AddPrim2D()` call.
+- Font quads use the deferred Ordering Table path (`attr=0x80000060`). The direct-draw path is synchronous, but the OT path is emitted later, so a stack-scoped marker alone would not survive until rendering.
+- For OT entries, `Ps2AddOT()` stores the nearest-filter request in the existing `PS2_OT.pad` field. The first DMA tag in an OT entry is an OT link / optional texture-state REF; the second tag, at `p->p + 16`, carries the primitive's GIF draw payload. After texture-reference setup is complete, `Ps2DrawOTagSub()` sets bit 16 on that second tag only. This bit is reserved by the DMA tag format and is consumed only as PC-side metadata; QWC, ID and address fields are unchanged.
+- `pc/src/gs/gs.c` scopes that metadata around the corresponding GIF segment and captures it in `GsDrawState`. The direct path uses the temporary font-draw marker instead.
+- The marker is part of the GS batch state, so font and non-font primitives are separated when necessary rather than applying the override to a mixed batch.
+- In `pc/src/gs/gs_gl.c`, derive the effective linear-filter flag from the original `TEX1` state, except for marked font draws while `fontFilter=0`. The existing shader then uses its nearest/texel-fetch path instead of its manual four-texel bilinear interpolation. Render-target sampling also receives the effective filter.
+- The runtime filter toggle is independent of `fontUVfix`; it works whether the UV correction is enabled or disabled.
+
+### Files Changed
+
+- `pc/include/pc_platform.h`
+  - Declares the runtime filter state and font-draw scope functions.
+- `pc/src/pc_platform.c`
+  - Loads `fontFilter` with a default of `1`, toggles and saves it on R, and reports the new state in the title bar.
+  - Tracks the temporary font-draw scope for direct PC submissions and OT queue insertion.
+- `src/ps2/veronica/prog/ps2_NaDraw2D.c`
+  - Marks only textured `njDrawPolygon2DM()` submissions.
+- `src/ps2/veronica/prog/ps2_dummy.c`
+  - Preserves the marker in deferred OT entries and attaches it to each corresponding PC DMA segment.
+- `pc/src/gs/gs_internal.h`
+  - Adds the font-only nearest-sampling marker to `GsDrawState`.
+- `pc/src/gs/gs.c`
+  - Captures the marker in the draw state so the normal GS batch comparison keeps modes separate.
+- `pc/src/gs/gs_gl.c`
+  - Forces the effective `TEX1` linear flag off only for marked font draws when nearest mode is selected.
+- `.github/workflows/build-windows.yml`
+  - Adds `FONTFix` to the Windows build workflow's push branches so this debug branch can be compiled by CI.
+- `DEVELOPMENT_LOG.md`
+  - Records the configuration, runtime control, scope and pending validation.
+
+### Explicitly Excluded
+
+- No global change to GS `TEX1` state or texture filtering.
+- No changes to 3D/model texture sampling, ordinary 2D UI/menu primitives, movie sampling, texture decoding, or filtering defaults for non-font draws.
+- No changes to font UV coordinates or the `fontUVfix` values and tuner.
+- No changes to the menu UV crop system.
+
+### Validation
+
+- **Source review:** Confirmed the actual font call uses `njDrawPolygon2DM(..., 0x80000060)`, which is deferred through the Ordering Table. The PC-only OT sideband is written to the second DMA tag (`p->p + 16)) carrying the primitive's GIF draw payload—not the first link / texture-state REF tag—so the override remains active for the correct segment. Direct submissions retain the scoped marker path.
+- **Batch review:** Confirmed the marker participates in `GsDrawState` comparison, preventing font-nearest draws from merging with ordinary draws using the same GS registers.
+- **Filter review:** Confirmed marked font draws select nearest sampling while all unmarked draws continue to use the original `TEX1` state.
+- **Windows CI:** Run [41529410526](https://github.com/zedhqx4/recvx-pc/actions/runs/41529410526) passed for commit `428bc231`: `Build game`, `Verify executables`, and `Upload Windows build` all succeeded. Artifact: `recvx-pc_FONTFix_428bc23`.
+- **Follow-up correction:** The OT sideband was moved from the entry's first/link tag to its second DMA tag (`p->p + 16`), the one that actually carries the primitive GIF payload. Run [41529912728](https://github.com/zedhqx4/recvx-pc/actions/runs/41529912728) is validating this latest placement on commit `861f58b3`; final result pending.
+- **Runtime/visual:** Pending. Compare the default and R-toggled modes on the same font strings, then verify that menu text outside `njDrawPolygon2DM()`, UI artwork, 3D textures and movies retain their previous filtering.
+
+## 2026-11-02 — Step 12: Set Conservative Font UV and Filter Code Defaults
+
+**Category:** Graphics correctness / user-facing defaults  
+**Status:** Code and documentation updated; Windows build and runtime validation pending  
+**Branch:** `FONTFix`
+
+### Code Defaults
+
+These are fallback values in the PC code when the corresponding keys are absent from `recvx.ini`:
+
+```ini
+fontFilter=1
+fontUVfix=0
+fontUVleft=4
+fontUVright=-4
+fontUVtop=4
+fontUVbottom=-4
+```
+
+- `fontFilter=1` preserves the original bilinear magnification-filter behavior. R still toggles bilinear/nearest at runtime and writes the selected value to the INI.
+- `fontUVfix=0` keeps the configurable font UV correction disabled by default.
+- When a user enables `fontUVfix=1`, the four edge defaults above are used. They are independently configurable through `recvx.ini` and through the existing F10 runtime tuner; tuner edits are saved immediately.
+- F10 remains gated by `fontUVfix=1`; users can opt in through the INI and restart before tuning. The tuner does not silently enable the UV correction.
+- Explicit INI values always override the code defaults. Existing user settings are therefore preserved.
+- This changes only PC defaults. Non-PC PS2 UV behavior, the menu UV crop system, and non-font texture filtering remain unchanged.
+
+### Files Changed
+
+- `pc/src/pc_platform.c`
+  - Sets the fallback array to `{ 4, -4, 4, -4 }`.
+  - Defaults the `fontUVfix` master switch to `0`; keeps `fontFilter` default at `1`.
+- `src/ps2/veronica/prog/ps2_NaDraw2D.c`
+  - Aligns the local fallback edge values with `{ 4, -4, 4, -4 }`.
+- `DEVELOPMENT_LOG.md`
+  - Records the exact defaults and opt-in behavior.
+
+### Validation
+
+- **Source review:** Confirmed the INI lookup defaults and local fallback values match the six settings above.
+- **Windows build:** Pending for this exact default change.
+- **Runtime/visual:** Pending. Test with all six keys absent, then with custom INI values and F10/R runtime controls.
