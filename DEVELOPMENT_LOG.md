@@ -413,3 +413,67 @@ Use `vsync=0` to request unsynchronized presentation. If the key is absent, VSyn
 - **Source comparison:** Matched the VSync field, default, INI loading, swap-interval request, active-interval query, and logging against Alpha.
 - **Build:** Pending GitHub Actions.
 - **Runtime:** Pending. Test with the default setting and with `vsync=0`; confirm the log reports the active swap interval and check for tearing/frame-pacing differences.
+
+
+## 2026-11-01 — Step 7: Add Runtime Controls for Experimental Decal Priority
+
+**Category:** GS renderer / depth testing / visual diagnostics  
+**Status:** Implemented; Windows CI and runtime A/B validation pending  
+**Branch:** `experimental/decals-wip`  
+**Base:** `experimental/gs-rebuild` at `1ae919a`  
+**Reference:** Alpha decal-priority implementation, especially `d91cb966`, `51f77b8`, and `4553e48`
+
+### Problem
+
+Alpha's coplanar decal adjustment was made permanent and lost its runtime switch. The user observed a small visual regression and wants to determine whether polygon offset is responsible, while retaining the ability to tune its magnitude in a live game session.
+
+### Scope and Rationale
+
+Keep Alpha's eligibility conditions and bounded per-frame draw ordering unchanged. Make only the enable state and offset magnitude adjustable at runtime, so A/B testing does not require rebuilding or restarting. The experimental branch starts with the Alpha behavior enabled; the selected values are saved only on an explicit keypad command so a test run cannot silently change the next run's baseline.
+
+### Changes
+
+- Ported Alpha's eligibility predicate: active depth testing, `GEQUAL`, `Z16S`, textured non-FST STQ drawing, blending enabled, and primitive types 3 through 5.
+- Preserved Alpha's draw-order priorities: `+1` through `+4`, clamped at `+4`, with the counter reset after each frame's GS flush.
+- Added `decal_priority` (default `1`) and `decal_bias` (default `1.00`) to `recvx.ini`.
+- Applied the offset as `glPolygonOffset(0.0f, priority * decal_bias)`; the factor remains zero as in Alpha.
+- Added runtime numpad controls:
+  - `*`: toggle decal priority.
+  - `+` / `-`: adjust bias by `0.25`.
+  - `/`: save both current values to `recvx.ini`, then read them back to verify the write.
+- Bias is clamped to `-2.00..4.00` and quantized to quarter-unit steps. Zero neutralizes the offset; negative values reverse its direction.
+- Added title-bar feedback and `recvx.log` entries for changes and save verification.
+- Consumed these keys in the platform event pump so they do not reach game controls or the input recorder.
+- Enabled the Windows build workflow for this experimental branch.
+
+### Files Changed
+
+- `pc/src/gs/gs_gl.c`
+  - Added INI-backed runtime state, bias normalization, save/readback verification, Alpha's bounded polygon-offset application, and per-frame draw-order reset.
+- `pc/src/gs/gl_funcs.h`
+  - Added `glPolygonOffset` to the SDL OpenGL function resolver table.
+- `pc/include/pc_gs.h`
+  - Declared the renderer controls consumed by the platform event pump.
+- `pc/src/pc_platform.c`
+  - Added the numpad event bindings and transient title-bar feedback.
+- `pc/README.md`
+  - Documented the branch-specific configuration and controls.
+- `.github/workflows/build-windows.yml`
+  - Added `experimental/decals-wip` to push-triggered Windows builds.
+- `DEVELOPMENT_LOG.md`
+  - Recorded the rationale, exact behavior, controls, and pending validation.
+
+### Explicitly Excluded
+
+- No change to Alpha's decal eligibility predicate.
+- No change to the +1..+4 draw-order cap or frame reset behavior.
+- No changes to GS memory transfers, texture caches, render-target readback, or unrelated rendering state.
+- No dependency on `debug=1`; controls are always active on this experimental branch.
+- Runtime changes are not written to `recvx.ini` unless Numpad `/` is pressed.
+
+### Validation
+
+- **Source comparison:** Matched the eligibility predicate, zero polygon-offset factor, +1..+4 bounded draw order, and per-frame reset against Alpha.
+- **Code review:** Confirmed the polygon-offset enable is disabled immediately after the eligible draw, including its alpha-test multipass.
+- **Build:** Pending GitHub Actions for this branch.
+- **Runtime:** Pending. Test toggle A/B and bias values in the exact scene showing the reported visual regression; record the smallest bias that reproduces or eliminates it.

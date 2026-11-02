@@ -34,6 +34,100 @@ static int gs_scale_y(int y)
 PC_GL_FUNCS(PC_GL_DEFINE)
 #undef PC_GL_DEFINE
 
+/* Decal-priority test controls. Bias is quantized to quarter-unit steps so keyboard
+ * adjustments and values saved to recvx.ini remain deterministic. */
+static float gs_decal_bias_normalize(float value)
+{
+    if (!(value == value)) /* NaN */
+        value = 1.0f;
+    if (value < -2.0f) value = -2.0f;
+    if (value > 4.0f) value = 4.0f;
+    return roundf(value * 4.0f) * 0.25f;
+}
+
+static void gs_decal_settings_init(void)
+{
+    char text[64];
+    char* end;
+    float initial_bias = 1.0f;
+
+    if (decal_priority_enabled >= 0)
+        return;
+
+    decal_priority_enabled = pcIniGetInt("decal_priority", 1) != 0;
+
+    if (pcIniGet("decal_bias", text, sizeof(text)))
+    {
+        initial_bias = strtof(text, &end);
+        if ((end == text) || (*end != '\0') || !(initial_bias == initial_bias))
+            initial_bias = 1.0f;
+    }
+
+    decal_bias = gs_decal_bias_normalize(initial_bias);
+    pcLog("gs: decal priority %s, bias=%.2f (range -2.00..4.00, step 0.25)",
+          decal_priority_enabled ? "enabled" : "disabled", decal_bias);
+}
+
+void pcGsGetDecalSettings(int* enabled, float* bias)
+{
+    gs_decal_settings_init();
+    if (enabled != NULL) *enabled = decal_priority_enabled;
+    if (bias != NULL) *bias = decal_bias;
+}
+
+void pcGsDecalPriorityToggle(void)
+{
+    gs_decal_settings_init();
+    decal_priority_enabled = !decal_priority_enabled;
+    pcLog("gs: decal priority %s (bias=%.2f)",
+          decal_priority_enabled ? "enabled" : "disabled", decal_bias);
+}
+
+void pcGsDecalBiasAdjust(int direction)
+{
+    gs_decal_settings_init();
+    if (direction == 0)
+        return;
+
+    decal_bias = gs_decal_bias_normalize(decal_bias + ((direction > 0) ? 0.25f : -0.25f));
+    pcLog("gs: decal bias=%.2f (%s)", decal_bias,
+          decal_priority_enabled ? "priority enabled" : "priority disabled");
+}
+
+int pcGsSaveDecalSettings(void)
+{
+    char text[32], verify[64];
+    char* end;
+    float saved_bias;
+    int saved_enabled;
+
+    gs_decal_settings_init();
+    snprintf(text, sizeof(text), "%.2f", decal_bias);
+    pcIniSet("decal_priority", decal_priority_enabled ? "1" : "0");
+    pcIniSet("decal_bias", text);
+
+    saved_enabled = pcIniGetInt("decal_priority", -1);
+    if (!pcIniGet("decal_bias", verify, sizeof(verify)))
+    {
+        pcLog("gs: could not verify saved decal settings");
+        return 0;
+    }
+
+    saved_bias = strtof(verify, &end);
+    if ((saved_enabled != (decal_priority_enabled ? 1 : 0)) ||
+        (end == verify) || (*end != '\0') || !(saved_bias == saved_bias) ||
+        (fabsf(saved_bias - decal_bias) > 0.001f))
+    {
+        pcLog("gs: decal settings save verification failed (expected priority=%d bias=%.2f)",
+              decal_priority_enabled, decal_bias);
+        return 0;
+    }
+
+    pcLog("gs: saved decal settings to recvx.ini (priority=%d bias=%.2f)",
+          decal_priority_enabled, decal_bias);
+    return 1;
+}
+
 int pcGlLoad(void)
 {
 #define PC_GL_LOAD(ret, name, args) \
@@ -256,6 +350,9 @@ typedef struct {
 static RenderTarget rts[MAX_RT];
 static DepthBuffer dbs[MAX_DB];
 static unsigned int frame_counter;
+static unsigned int decal_draw_order;
+static int decal_priority_enabled = -1;
+static float decal_bias = 1.0f;
 static int dump_frame;
 
 /* per-interval statistics for the periodic log */
@@ -943,6 +1040,7 @@ void gsRendererInit(void)
                         "Updating the graphics driver usually fixes this.");
     }
 
+    gs_decal_settings_init();
     decode_buf = malloc(1024 * 1024 * 4);
 
     prog = link(vs_src, fs_src);
@@ -1195,6 +1293,12 @@ void gsRendererDraw(const GsDrawState* st, const GsVertex* v, int nverts)
     int atst = GSF(st->test, 1, 3);
     GLenum mode;
     int n = 0, i;
+    int decal_depth_priority;
+
+    decal_depth_priority = decal_priority_enabled && use_depth &&
+                           (ztst == 2) && (GSF(st->zbuf, 24, 4) == 10) &&
+                           st->tme && !st->fst && st->abe &&
+                           (st->type >= 3) && (st->type <= 5);
 
     rt->last_use = frame_counter;
     stats.draws++;
@@ -1463,6 +1567,17 @@ void gsRendererDraw(const GsDrawState* st, const GsVertex* v, int nverts)
     glBindBuffer(GL_ARRAY_BUFFER, vbo);
     glBufferData(GL_ARRAY_BUFFER, n * sizeof(GlVertex), glverts, GL_STREAM_DRAW);
 
+    if (decal_depth_priority)
+    {
+        unsigned int priority = ++decal_draw_order;
+        if (priority > 4)
+            priority = 4;
+
+        /* Alpha's factor remains zero; the runtime bias scales its bounded +1..+4 units. */
+        glPolygonOffset(0.0f, (GLfloat)priority * decal_bias);
+        glEnable(GL_POLYGON_OFFSET_FILL);
+    }
+
     if (ate && (afail != 0) && (atst != 1))
     {
         /* alpha test with a fail action: pass 1 normal, pass 2 the failing pixels with the
@@ -1491,6 +1606,9 @@ void gsRendererDraw(const GsDrawState* st, const GsVertex* v, int nverts)
     {
         glDrawArrays(mode, 0, n);
     }
+
+    if (decal_depth_priority)
+        glDisable(GL_POLYGON_OFFSET_FILL);
 }
 
 /* ------------------------------------------------------------------------------------------- */
@@ -1547,6 +1665,7 @@ void gsRendererPresent(unsigned int dispfb_fbp, unsigned int dispfb_fbw)
     int i;
 
     gsRendererFlush();
+    decal_draw_order = 0;
     frame_counter++;
     stats.frames++;
 

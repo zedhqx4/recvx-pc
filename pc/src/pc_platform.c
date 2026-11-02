@@ -32,6 +32,7 @@ static void save_event(const SDL_Event* ev);
 static void save_tick(void);
 static void fps_tick(void);
 static void update_title(int force);
+static void title_notice_show(const char* text);
 
 /* SDL3 gives each window event its own event type; map the subset the platform handles. */
 enum { PC_WINDOW_EVENT_NONE=0, PC_WINDOW_EVENT_MOVED, PC_WINDOW_EVENT_SIZE_CHANGED,
@@ -830,6 +831,44 @@ static int pause_until_active(void)
 
 static Uint64 last_mouse_move;
 
+/* Numpad-only controls for the experimental decal-priority test. These keys are consumed
+ * here so they never reach the game's input layer or the input recorder. */
+static int handle_decal_control_key(SDL_Scancode key)
+{
+    char notice[128];
+    int enabled, saved = 0;
+    float bias;
+
+    switch (key)
+    {
+    case SDL_SCANCODE_KP_MULTIPLY:
+        pcGsDecalPriorityToggle();
+        break;
+    case SDL_SCANCODE_KP_PLUS:
+        pcGsDecalBiasAdjust(1);
+        break;
+    case SDL_SCANCODE_KP_MINUS:
+        pcGsDecalBiasAdjust(-1);
+        break;
+    case SDL_SCANCODE_KP_DIVIDE:
+        saved = pcGsSaveDecalSettings();
+        pcGsGetDecalSettings(&enabled, &bias);
+        snprintf(notice, sizeof(notice), "DECAL %s: %s / BIAS %.2f",
+                 saved ? "SETTINGS SAVED" : "SAVE FAILED",
+                 enabled ? "ON" : "OFF", bias);
+        title_notice_show(notice);
+        return 1;
+    default:
+        return 0;
+    }
+
+    pcGsGetDecalSettings(&enabled, &bias);
+    snprintf(notice, sizeof(notice), "DECAL PRIORITY: %s / BIAS %.2f",
+             enabled ? "ON" : "OFF", bias);
+    title_notice_show(notice);
+    return 1;
+}
+
 int pcVideoPumpEvents(void)
 {
     SDL_Event ev;
@@ -864,6 +903,13 @@ int pcVideoPumpEvents(void)
         {
             last_mouse_move = SDL_GetTicks();
             SDL_ShowCursor(SDL_ENABLE);
+        }
+
+        /* Decal experiment: *, +, - and / on the numeric keypad. */
+        if ((ev.type == SDL_EVENT_KEY_DOWN) && !ev.key.repeat &&
+            handle_decal_control_key(ev.key.scancode))
+        {
+            continue;
         }
 
         /* Alt+Enter: fullscreen on/off, like other Windows games. */

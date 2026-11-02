@@ -6,6 +6,7 @@ on:
     branches:
       - pc-port
       - experimental/gs-rebuild
+      - experimental/decals-wip
     paths-ignore:
       - '**.md'
       - 'docs/**'
