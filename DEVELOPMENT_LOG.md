@@ -696,3 +696,20 @@ fontUVbottom=-4
 - **Source review:** Confirmed the INI lookup defaults and local fallback values match the six settings above.
 - **Windows build:** Pending for this exact default change.
 - **Runtime/visual:** Pending. Test with all six keys absent, then with custom INI values and F10/R runtime controls.
+
+## 2026-11-02 — Step 13: Integrate FONTFix into GS Rebuild
+
+**Category:** Graphics correctness / font UV diagnostics and texture sampling  
+**Status:** Merged; Windows build passed on the code revision; runtime/visual validation pending  
+**Target branch:** `experimental/gs-rebuild`  
+**Source branch:** `FONTFix`  
+**Pull request:** [#5 — Merge FONTFix into experimental/gs-rebuild](https://github.com/zedhqx4/recvx-pc/pull/5)  
+**Merge commit:** `c3d94b37178156147ece620a6a0fa8af95b67ca7`  
+**Source head:** `fd6b2a2a851b699719a8ad2d0269a04e48ab37ef`
+
+- Integrated the 26 commits from `FONTFix` into `experimental/gs-rebuild` (9 changed files; 569 additions, 46 deletions).
+- Retained requested code defaults: `fontFilter=1`, `fontUVfix=0`, `fontUVleft=4`, `fontUVright=-4`, `fontUVtop=4`, `fontUVbottom=-4`.
+- Runtime R toggle remains scoped to font glyph filtering; F10 UV tuning remains opt-in behind `fontUVfix=1`.
+- Windows build commit `d24a50bcb8306ff4d1f85bd8666df165f75cafbe` passed the build, executable verification, and artifact upload steps. The merged source head adds only the development-log update after that code commit.
+- No runtime visual test has been performed yet. Check font filtering with R, enable/tune UV correction with `fontUVfix=1`, and verify unrelated GS textures remain unchanged.
+- `FONTFix` is retained as a separate branch for comparison; it was not deleted.
