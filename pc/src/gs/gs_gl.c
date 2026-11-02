@@ -260,8 +260,7 @@ static int dump_frame;
 
 /* per-interval statistics for the periodic log */
 static struct { unsigned int frames, draws, verts, rt_loads, rt_reads, tex_decodes, tex_texels; double t_load, t_read, t_decode; } stats;
-static unsigned int texture_pool_uploads;
-static double texture_pool_bytes;
+static unsigned int gs_texture_uploads;
 
 /* Normal movies keep one mutable GL representation of their GS VRAM surface.
  * This is separate from the content-addressed texture cache and from MOVIE_HD. */
@@ -278,9 +277,9 @@ void pcGsLogStats(void)
     pcLog("gs/frame: %u draws, %u verts, %.1f rt loads (%.1f ms), %.1f rt reads (%.1f ms), %.1f tex decodes (%u texels, %.1f ms)",
           stats.draws / f, stats.verts / f, (double)stats.rt_loads / f, stats.t_load * 1000 / f, (double)stats.rt_reads / f,
           stats.t_read * 1000 / f, (double)stats.tex_decodes / f, stats.tex_texels / f, stats.t_decode * 1000 / f);
-    pcLog("gs: texture pool: 3 slots, %.1f MiB allocated, %u uploads",
-          texture_pool_bytes / 1048576.0, texture_pool_uploads);
-    texture_pool_uploads = 0;
+    pcLog("gs: transient GS texture buffer: %s (4 MiB), %u uploads",
+          gs_texture_upload ? "allocated" : "not allocated", gs_texture_uploads);
+    gs_texture_uploads = 0;
     if (movie_vram_tex != 0)
     {
         pcLog("gs: movie VRAM texture: %s, %u frame updates",
@@ -414,32 +413,24 @@ static DepthBuffer* get_db(unsigned int zbp, int w, int h)
 /* texture cache (textures decoded from GS memory) */
 
 /* ------------------------------------------------------------------------------------------- */
-/* transient texture upload pool */
+/* transient GS texture upload buffer */
 
-/* GS textures are decoded from emulated VRAM for immediate use by the next draw.
- * Their content generations are not retained as historical cache entries. Three GL objects
- * are recycled in a ring so uploads have a small, fixed set of destinations. */
-#define GS_TEXTURE_POOL_SIZE 3
+/* Normal GS textures are decoded from VRAM and consumed immediately by the next draw.
+ * No historical texture identity or decoded frame is retained. One 1024x1024 RGBA8 object
+ * is reused for every normal texture request (4 MiB total). */
+#define GS_TEXTURE_UPLOAD_SIZE 1024
 
-typedef struct {
-    GLuint tex;
-    int w, h;              /* allocated capacity; slots grow but never retain old generations */
-} TexturePoolSlot;
-
-static TexturePoolSlot texture_pool[GS_TEXTURE_POOL_SIZE];
-static unsigned int texture_pool_next;
+static GLuint gs_texture_upload;
 static unsigned int* decode_buf;
 
 static GLuint get_texture(u64 tex0, u64 texa, u64 texclut, int w, int h, int rows, int cols, int* hd)
 {
-    TexturePoolSlot* slot;
-    unsigned int pool_index;
     extern GLuint gsReplaceLookup(u64 tex0, u64 texa);
     GLuint replacement;
     double t0;
 
     /* HD replacements are independent file-backed assets owned by gs_replace.c. They are not
-     * transient GS VRAM snapshots and must not be deleted or overwritten by this pool. */
+     * transient GS VRAM snapshots and must not be deleted or overwritten by this buffer. */
     replacement = gsReplaceLookup(tex0, texa);
 
     if (replacement != 0)
@@ -450,7 +441,7 @@ static GLuint get_texture(u64 tex0, u64 texa, u64 texclut, int w, int h, int row
 
     *hd = 0;
 
-    if ((w <= 0) || (h <= 0) || (w > 1024) || (h > 1024))
+    if ((w <= 0) || (h <= 0) || (w > GS_TEXTURE_UPLOAD_SIZE) || (h > GS_TEXTURE_UPLOAD_SIZE))
     {
         pcLog("gs: rejected decoded texture size %dx%d", w, h);
         return 0;
@@ -466,48 +457,25 @@ static GLuint get_texture(u64 tex0, u64 texa, u64 texclut, int w, int h, int row
         cols = w;
     }
 
-    pool_index = texture_pool_next;
-    texture_pool_next = (texture_pool_next + 1) % GS_TEXTURE_POOL_SIZE;
-    slot = &texture_pool[pool_index];
-
     t0 = pcOsTime();
     gsDecodeTexture(tex0, texa, texclut, cols, rows, decode_buf);
     stats.tex_decodes++;
     stats.tex_texels += (unsigned int)(cols * rows);
     stats.t_decode += pcOsTime() - t0;
 
-    if (slot->tex == 0)
+    if (gs_texture_upload == 0)
     {
-        slot->tex = make_texture(w, h, GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE, GL_NEAREST);
-        slot->w = w;
-        slot->h = h;
-        texture_pool_bytes += (double)slot->w * slot->h * 4;
-    }
-    else
-    {
-        int new_w = (w > slot->w) ? w : slot->w;
-        int new_h = (h > slot->h) ? h : slot->h;
-
-        glBindTexture(GL_TEXTURE_2D, slot->tex);
-
-        /* A slot only grows to the largest dimensions it has served. It never allocates a new
-         * GL object for a new frame/asset; glTexImage2D redefines this same pooled object. */
-        if ((new_w != slot->w) || (new_h != slot->h))
-        {
-            texture_pool_bytes += (double)new_w * new_h * 4 - (double)slot->w * slot->h * 4;
-
-            glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, new_w, new_h, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
-            slot->w = new_w;
-            slot->h = new_h;
-        }
+        gs_texture_upload = make_texture(GS_TEXTURE_UPLOAD_SIZE, GS_TEXTURE_UPLOAD_SIZE,
+                                         GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE, GL_NEAREST);
+        pcLog("gs: allocated one reusable GS texture upload buffer (1024x1024 RGBA8, 4 MiB)");
     }
 
-    glBindTexture(GL_TEXTURE_2D, slot->tex);
+    glBindTexture(GL_TEXTURE_2D, gs_texture_upload);
     glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
     glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, cols, rows, GL_RGBA, GL_UNSIGNED_BYTE, decode_buf);
-    texture_pool_uploads++;
+    gs_texture_uploads++;
 
-    return slot->tex;
+    return gs_texture_upload;
 }
 
 /* ------------------------------------------------------------------------------------------- */

@@ -446,3 +446,45 @@ The first Windows build of the three-slot pool failed because replacing the old 
 Restored `static unsigned int* decode_buf` beside the pool globals. This is a declaration-only correction; it does not change pool allocation, slot rotation, upload behavior, or memory limits.
 
 The initial build failed at `pc/src/gs/gs_gl.c` with five MSVC C2065 errors for `decode_buf`. The corrected commit is submitted for a fresh Windows build; runtime validation remains pending.
+
+## 2026-11-01 — Reduce the Generic GS Texture Upload Pool to One 4 MiB Buffer
+
+**Category:** GS renderer / strict transient texture memory bound  
+**Status:** Implemented; Windows build and runtime validation pending  
+**Branch:** `experimental/movie-texture-reuse`  
+**Parent:** `a08b8d299d811da6ca6bedf9c51cbdf2d72accaf`
+
+### Design Correction
+
+The three-slot pool could grow to 12 MiB (three 1024x1024 RGBA8 objects), which exceeded the intended 4 MiB ceiling. The generic GS texture path must not retain multiple decoded versions or multiple slots.
+
+### Change
+
+In `pc/src/gs/gs_gl.c`:
+
+- Replaced the three-slot ring with exactly one reusable 1024x1024 RGBA8 OpenGL texture object.
+- The object is allocated once on first use and occupies 4 MiB nominally.
+- Every normal GS texture request decodes the requested current VRAM contents into the existing CPU scratch buffer and uploads the requested rectangle into the same GL texture object.
+- No texture identity, frame history, per-address entry, generation history, or LRU state is retained.
+- The slot/pool count is now one; there is no rotating set of GL texture objects.
+- HD replacements remain on the existing independent path owned by `gs_replace.c`.
+
+### Memory Accounting
+
+- **Generic GL staging texture:** exactly 4 MiB maximum/allocated when first used.
+- **CPU decode scratch buffer:** `decode_buf` remains a separate 4 MiB CPU-side working buffer allocated by `gsRendererInit()`; it is not a retained texture cache and holds only the current decoded upload data.
+- **GS VRAM:** the emulated 4 MiB GS memory remains separate and unchanged.
+- Render targets, depth buffers, movie textures and HD replacements remain separate resource classes and are not counted as the generic GS upload buffer.
+
+This change makes the generic decoded GL staging resource one object and 4 MiB, rather than the previous three-object 12 MiB allowance. It does not claim total renderer memory is 4 MiB.
+
+### Validation
+
+- **Source review:** Confirmed the three-slot array and ring index are removed; all normal GS texture requests return the same GL texture object.
+- **Memory bound:** One 1024x1024 RGBA8 texture = 4 MiB nominal allocation.
+- **Windows build:** The previous declaration-only correction at `a08b8d2` passed Windows Actions. This one-buffer follow-up has a new build pending.
+- **Runtime:** Pending. Test scenes with consecutive texture changes, indexed textures/CLUTs, partial extents, render-target sampling, and FMVs. Verify correct draw ordering and acceptable upload/decode timing.
+
+### OpenGL Ordering
+
+Texture uploads and draws are submitted sequentially on the renderer's GL context. The design relies on GL command ordering: each draw consumes the texture contents established by the preceding upload before a later upload overwrites the same object. Runtime testing must verify that this produces correct images and does not introduce an unacceptable synchronization stall.
