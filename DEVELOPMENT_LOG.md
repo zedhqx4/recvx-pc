@@ -519,3 +519,48 @@ The decal-priority predicate, draw-order counter, and polygon-offset call had be
 - **Code review:** Confirmed the draw path supplies the active `ZBUF.PSM`.
 - **Build:** Pending GitHub Actions for this commit.
 - **Runtime:** Pending. Compare the same scene against Alpha at multiplier `1.00`; only after parity is confirmed should the multiplier be tuned.
+
+
+## 2026-11-01 — Step 9: Add an Independent Priority Multiplier Control
+
+**Category:** GS renderer / decal-priority experiments  
+**Status:** Implemented; Windows CI and runtime validation pending  
+**Branch:** `experimental/decals-wip`
+
+### Request
+
+Allow the decal priority itself to be scaled independently from the polygon-offset units, so the two effects can be tested separately while retaining the Alpha ordinal draw-order sequence.
+
+### Changes
+
+- Added `decal_priority_multiplier` (default `1.00`) alongside the existing `decal_offset_multiplier` (default `1.00`).
+- Kept Alpha's ordinal counter and cap unchanged: increment once for each qualifying draw, then clamp the ordinal to 1..4.
+- The renderer now calculates:
+  1. `priority_value = ordinal_priority * decal_priority_multiplier`.
+  2. `offset = priority_value * decal_offset_multiplier`.
+  3. `glPolygonOffset(0.0f, offset)`.
+- Added Numpad `7` to decrease the priority multiplier and Numpad `9` to increase it, both in `0.25` steps.
+- Kept Numpad `+` and `-` dedicated to the offset multiplier. Numpad `*` still toggles the effect; Numpad `/` saves the enabled state and both multipliers.
+- Priority multiplier is clamped to `0.00..4.00`; offset multiplier retains its `-2.00..4.00` range. Both are quantized to quarter steps.
+- Reserved Numpad `7` and `9` in keyboard-to-pad bindings as well as the event pump.
+- Added title-bar and log feedback for both independent values.
+
+### Files Changed
+
+- `pc/src/gs/gs_gl.c`: settings, normalization, persistence/readback verification, independent priority scaling and final offset calculation.
+- `pc/include/pc_gs.h`: expanded settings getter and declared priority-multiplier adjustment.
+- `pc/src/pc_platform.c`: Numpad 7/9 controls, display feedback and input reservation.
+- `pc/README.md`: documented the additional INI key and independent controls.
+- `DEVELOPMENT_LOG.md`: recorded rationale and behavior.
+
+### Explicitly Excluded
+
+- No changes to Alpha's decal eligibility predicate, ordinal cap, per-frame counter reset, or depth-buffer precision.
+- No changes to the polygon-offset factor (remains zero).
+- No changes to unrelated GS texture, transfer, or render-target behavior.
+
+### Validation
+
+- **Source review:** Confirm declarations, definitions and platform call sites agree; verify the ordinal cap occurs before the new priority multiplier.
+- **Build:** Pending GitHub Actions for this commit.
+- **Runtime:** Pending. Test priority multiplier with offset multiplier held at `1.00`, then test offset multiplier independently with priority multiplier held at `1.00`.

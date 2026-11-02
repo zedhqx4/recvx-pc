@@ -97,6 +97,7 @@ The settings are loaded from `recvx.ini` (next to `recvx.exe`):
 ```ini
 decal_priority=1
 decal_offset_multiplier=1.00
+decal_priority_multiplier=1.00
 ```
 
 Use the numeric keypad while playing:
@@ -106,13 +107,17 @@ Use the numeric keypad while playing:
 | `*` | Toggle decal priority on/off |
 | `+` | Increase offset multiplier by 0.25 |
 | `-` | Decrease offset multiplier by 0.25 |
-| `/` | Save both current values to `recvx.ini` |
+| `7` | Decrease priority multiplier by 0.25 |
+| `9` | Increase priority multiplier by 0.25 |
+| `/` | Save enabled state and both multipliers to `recvx.ini` |
 
-Offset multiplier is clamped to `-2.00..4.00` and quantized to 0.25 steps. Positive values
-preserve Alpha's offset direction; zero neutralizes the offset; negative values reverse it.
-Changes take effect immediately. The title bar shows the current enabled state and offset multiplier;
+Offset multiplier is clamped to `-2.00..4.00`; priority multiplier is clamped to `0.00..4.00`.
+Both use 0.25 steps. The capped Alpha ordinal priority (1..4) is multiplied by the priority
+multiplier first; that result is then multiplied by the offset multiplier before OpenGL receives
+it. Positive offset values preserve Alpha's direction; zero neutralizes it; negative values reverse it.
+Changes take effect immediately. The title bar shows the enabled state and both multipliers;
 save attempts are verified and reported in both the title bar and `recvx.log`.
-These numpad keys are reserved by the PC platform layer: they are consumed as events and ignored
+These numpad keys (`*`, `+`, `-`, `7`, `9`, `/`) are reserved by the PC platform layer: they are consumed as events and ignored
 by keyboard-to-pad bindings, even if a matching `key_*` binding exists in `recvx.ini`.
 
 ## Tools

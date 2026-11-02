@@ -837,7 +837,7 @@ static int handle_decal_control_key(SDL_Scancode key)
 {
     static char notice[128];
     int enabled, saved = 0;
-    float offset_multiplier;
+    float offset_multiplier, priority_multiplier;
 
     switch (key)
     {
@@ -850,21 +850,27 @@ static int handle_decal_control_key(SDL_Scancode key)
     case SDL_SCANCODE_KP_MINUS:
         pcGsDecalOffsetMultiplierAdjust(-1);
         break;
+    case SDL_SCANCODE_KP_7:
+        pcGsDecalPriorityMultiplierAdjust(-1);
+        break;
+    case SDL_SCANCODE_KP_9:
+        pcGsDecalPriorityMultiplierAdjust(1);
+        break;
     case SDL_SCANCODE_KP_DIVIDE:
         saved = pcGsSaveDecalSettings();
-        pcGsGetDecalSettings(&enabled, &offset_multiplier);
-        snprintf(notice, sizeof(notice), "DECAL %s: %s / OFFSET x %.2f",
+        pcGsGetDecalSettings(&enabled, &offset_multiplier, &priority_multiplier);
+        snprintf(notice, sizeof(notice), "DECAL %s: %s / PRIO x %.2f / OFFSET x %.2f",
                  saved ? "SETTINGS SAVED" : "SAVE FAILED",
-                 enabled ? "ON" : "OFF", offset_multiplier);
+                 enabled ? "ON" : "OFF", priority_multiplier, offset_multiplier);
         title_notice_show(notice);
         return 1;
     default:
         return 0;
     }
 
-    pcGsGetDecalSettings(&enabled, &offset_multiplier);
-    snprintf(notice, sizeof(notice), "DECAL PRIORITY: %s / OFFSET x %.2f",
-             enabled ? "ON" : "OFF", offset_multiplier);
+    pcGsGetDecalSettings(&enabled, &offset_multiplier, &priority_multiplier);
+    snprintf(notice, sizeof(notice), "DECAL %s / PRIO x %.2f / OFFSET x %.2f",
+             enabled ? "ON" : "OFF", priority_multiplier, offset_multiplier);
     title_notice_show(notice);
     return 1;
 }
@@ -905,7 +911,7 @@ int pcVideoPumpEvents(void)
             SDL_ShowCursor(SDL_ENABLE);
         }
 
-        /* Decal experiment: *, +, - and / on the numeric keypad. */
+        /* Decal experiment: *, +, -, 7, 9 and / on the numeric keypad. */
         if ((ev.type == SDL_EVENT_KEY_DOWN) && !ev.key.repeat &&
             handle_decal_control_key(ev.key.scancode))
         {
@@ -1449,6 +1455,8 @@ static int is_decal_control_scancode(SDL_Scancode key)
     return (key == SDL_SCANCODE_KP_MULTIPLY) ||
            (key == SDL_SCANCODE_KP_PLUS) ||
            (key == SDL_SCANCODE_KP_MINUS) ||
+           (key == SDL_SCANCODE_KP_7) ||
+           (key == SDL_SCANCODE_KP_9) ||
            (key == SDL_SCANCODE_KP_DIVIDE);
 }
 
