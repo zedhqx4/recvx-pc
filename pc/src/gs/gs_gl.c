@@ -263,6 +263,12 @@ static struct { unsigned int frames, draws, verts, rt_loads, rt_reads, tex_decod
 static int tex_cached;                     /* textures in the cache, decoded from GS memory */
 static double tex_cached_bytes;            /* their size */
 
+/* Normal movies keep one mutable GL representation of their GS VRAM surface.
+ * This is separate from the content-addressed texture cache and from MOVIE_HD. */
+static GLuint movie_vram_tex;
+static unsigned int movie_vram_tbp, movie_vram_updates;
+static int movie_vram_on;
+
 double pcOsTime(void);
 
 void pcGsLogStats(void)
@@ -273,6 +279,12 @@ void pcGsLogStats(void)
           stats.draws / f, stats.verts / f, (double)stats.rt_loads / f, stats.t_load * 1000 / f, (double)stats.rt_reads / f,
           stats.t_read * 1000 / f, (double)stats.tex_decodes / f, stats.tex_texels / f, stats.t_decode * 1000 / f);
     pcLog("gs: %d textures cached (%.0f MB)", tex_cached, tex_cached_bytes / 1048576.0);
+    if (movie_vram_tex != 0)
+    {
+        pcLog("gs: movie VRAM texture: %s, %u frame updates",
+              movie_vram_on ? "active" : "idle", movie_vram_updates);
+        movie_vram_updates = 0;
+    }
     memset(&stats, 0, sizeof(stats));
 }
 
@@ -640,6 +652,43 @@ void pcGsMovieFrame(unsigned int tbp, const unsigned char* rgba, int w, int h, i
     glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, w, h, GL_RGBA, GL_UNSIGNED_BYTE, rgba);
     movie_tbp = tbp;
     movie_on = 1;
+}
+
+/* Update the persistent OpenGL view of a normal movie's GS VRAM surface.
+ * The pixels are decoded back out of emulated GS memory, not copied from the MPEG buffer. */
+void pcGsMovieVramFrame(unsigned int tbp, unsigned int tbw, int w, int h)
+{
+    u64 tex0;
+
+    if ((w <= 0) || (h <= 0))
+    {
+        movie_vram_on = 0;
+        return;
+    }
+
+    if ((tbw == 0) || (w > 512) || (h > 512))
+    {
+        pcLog("gs: rejected movie VRAM surface %ux%u at TBP %u (TBW %u)", w, h, tbp, tbw);
+        return;
+    }
+
+    if (movie_vram_tex == 0)
+    {
+        movie_vram_tex = make_texture(512, 512, GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE, GL_NEAREST);
+        pcLog("gs: allocated persistent movie VRAM texture (512x512, 1 MiB)");
+    }
+
+    /* TEX0: TBP, TBW, PSMCT32, TW=9 and TH=9. Decode only the active movie rectangle. */
+    tex0 = (u64)tbp | ((u64)tbw << 14) | ((u64)GS_PSMCT32 << 20) | ((u64)9 << 26) | ((u64)9 << 30);
+    gsDecodeTexture(tex0, 0, 0, w, h, decode_buf);
+
+    glBindTexture(GL_TEXTURE_2D, movie_vram_tex);
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, w, h, GL_RGBA, GL_UNSIGNED_BYTE, decode_buf);
+
+    movie_vram_tbp = tbp;
+    movie_vram_on = 1;
+    movie_vram_updates++;
 }
 
 /* ------------------------------------------------------------------------------------------- */
@@ -1387,6 +1436,13 @@ void gsRendererDraw(const GsDrawState* st, const GsVertex* v, int nverts)
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
             glUniform1i(U.texrt, 0);
             glUniform1i(U.hd, 1);
+        }
+        else if (movie_vram_on && (tbp == movie_vram_tbp))
+        {
+            /* Keep normal GS sampling semantics; only the backing GL object is persistent. */
+            glBindTexture(GL_TEXTURE_2D, movie_vram_tex);
+            glUniform1i(U.texrt, 0);
+            glUniform1i(U.hd, 0);
         }
         else
         {
