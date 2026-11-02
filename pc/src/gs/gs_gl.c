@@ -1419,7 +1419,14 @@ void gsRendererDraw(const GsDrawState* st, const GsVertex* v, int nverts)
 
         glActiveTexture(GL_TEXTURE0);
 
-        if ((src != NULL) && (src != rt))
+        if (movie_vram_on && (tbp == movie_vram_tbp))
+        {
+            /* A normal movie owns this GS surface while active, even if it overlaps an RT range. */
+            glBindTexture(GL_TEXTURE_2D, movie_vram_tex);
+            glUniform1i(U.texrt, 0);
+            glUniform1i(U.hd, 0);
+        }
+        else if ((src != NULL) && (src != rt))
         {
             if (src->vram_dirty || (src->load_y1 > src->load_y0))
             {
@@ -1442,13 +1449,6 @@ void gsRendererDraw(const GsDrawState* st, const GsVertex* v, int nverts)
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
             glUniform1i(U.texrt, 0);
             glUniform1i(U.hd, 1);
-        }
-        else if (movie_vram_on && (tbp == movie_vram_tbp))
-        {
-            /* Keep normal GS sampling semantics; only the backing GL object is persistent. */
-            glBindTexture(GL_TEXTURE_2D, movie_vram_tex);
-            glUniform1i(U.texrt, 0);
-            glUniform1i(U.hd, 0);
         }
         else
         {
