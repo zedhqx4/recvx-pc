@@ -263,3 +263,30 @@ Complete the Windows build, then inspect the generated build and test representa
 scenes. Confirm that the 512x448 base does not introduce clipping, incorrect aspect mapping,
 render-target desynchronization, or screenshot regressions before starting the GS/VRAM audit.
 
+
+
+## 2026-11-01 — Reuse a Dedicated 1 MiB GS Surface for Normal FMVs
+
+**Category:** GS renderer / normal movie texture memory  
+**Status:** Implemented; Windows build and runtime validation pending  
+**Branch:** `experimental/gs-rebuild`
+
+### Change
+
+- Allocate one persistent 512x512 `GL_RGBA8` texture for normal (non-`MOVIE_HD`) movie playback.
+- After each frame is transferred into emulated GS VRAM, decode the active movie rectangle from that VRAM and update the same GL texture with `glTexSubImage2D()`.
+- While the movie is active, sample the persistent texture for its GS texture base pointer instead of creating entries in the normal GS texture cache.
+- Flush pending renderer work before replacing the movie surface and disable the special sampling path after playback.
+- Leave the generic GS texture cache, render targets, and `MOVIE_HD` path unchanged.
+
+### Memory Scope
+
+The dedicated movie texture is 512x512 RGBA8: 1,048,576 bytes (1 MiB) nominal GPU storage. It is allocated once and updated in place; no per-frame GL textures are created. The existing shared `decode_buf` remains CPU-side scratch storage and is not another video texture. The emulated GS VRAM remains its independent 4 MiB allocation.
+
+No movie-specific runtime counters, periodic debug messages, or per-frame timing instrumentation were added.
+
+### Validation
+
+- **Source review:** Confirmed the movie-only path bypasses the generic texture cache only while the normal FMV is active.
+- **Windows build:** Pending GitHub Actions.
+- **Runtime:** Pending. Verify short and long normal FMVs, transition back to menus/gameplay, and that ordinary texture cache behavior is unchanged.

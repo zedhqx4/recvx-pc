@@ -43,6 +43,7 @@ void pcMpegSetVolume(int vol);
 int pcMpegUpdate(unsigned char* rgba, int max_bytes, int* w, int* h);
 int pcMpegSize(int* w, int* h);
 void pcGsMovieFrame(unsigned int tbp, const unsigned char* rgba, int w, int h, int scale);
+void pcGsMovieVramFrame(unsigned int tbp, unsigned int tbw, int w, int h);
 void gsRendererFlush(void);
 const char* pcCdDataDir(void);
 void gsGifTransfer(const void* data, int qwc);
@@ -195,6 +196,11 @@ void termAll()
         pcGsMovieFrame(0, NULL, 0, 0, 0);
         hd = 0;
     }
+    else
+    {
+        gsRendererFlush();
+        pcGsMovieVramFrame(0, 0, 0, 0);
+    }
 }
 
 /* upload the current frame where the PS2 player put it */
@@ -220,6 +226,8 @@ void setImageTag(unsigned int* tags, void* unused)
         return;
     }
 
+    gsRendererFlush();
+
     gif[0] = SCE_GIF_SET_TAG(4, SCE_GS_TRUE, SCE_GS_FALSE, 0, SCE_GIF_PACKED, 1);
     gif[1] = SCE_GIF_PACKED_AD;
     gif[2] = SCE_GS_SET_BITBLTBUF(0, 0, 0, MOVIE_TBP, MOVIE_TBW, SCE_GS_PSMCT32);
@@ -236,6 +244,7 @@ void setImageTag(unsigned int* tags, void* unused)
     ((u_long*)image)[0] = SCE_GIF_SET_TAG(qwc, SCE_GS_TRUE, SCE_GS_FALSE, 0, SCE_GIF_IMAGE, 0);
     ((u_long*)image)[1] = 0;
     gsGifTransfer(image, 1 + qwc);
+    pcGsMovieVramFrame(MOVIE_TBP, MOVIE_TBW, image_w, image_h);
 }
 
 /* the original's sprite: decoded image (TBP 14208) stretched to the movie's display rectangle */
