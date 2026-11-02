@@ -1764,12 +1764,12 @@ int Ps2DrawOTagSub(int start_no)
             
         loop_end:
 #ifdef TARGET_PC
-            /* The first DMA tag is the OT link / optional texture-state REF. The second
-             * tag (one 16-byte DMA tag later) carries this primitive's GIF draw payload.
-             * Mark that payload only; bit 16 is reserved and does not alter QWC or ID. */
+            /* Mark the first DMA tag's reserved bit 16 after any texture-state REF setup.
+             * gsDmaChain reads this bit from the tag header and applies it to the inline GIF
+             * payload that follows the 16-byte DMA header. QWC, ID and address stay intact. */
             if (p->pad != 0)
             {
-                ((unsigned int*)p->p)[4] |= (1u << 16);
+                ((unsigned int*)p->p)[0] |= (1u << 16);
             }
 #endif
             old_p = p; 
