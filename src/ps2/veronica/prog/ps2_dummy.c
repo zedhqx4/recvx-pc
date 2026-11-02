@@ -1652,15 +1652,6 @@ int Ps2DrawOTagSub(int start_no)
                 start_addr = p->p; 
             }
 
-#ifdef TARGET_PC
-            /* Bit 16 is reserved in the DMA tag. The PC GS parser consumes it as per-entry
-             * metadata; QWC, ID and address fields remain unchanged. */
-            if (p->pad != 0)
-            {
-                ((unsigned int*)p->p)[0] |= (1u << 16);
-            }
-#endif
-            
             p_flag = 0; 
             t_flag = 0; 
             
@@ -1772,6 +1763,14 @@ int Ps2DrawOTagSub(int start_no)
             }
             
         loop_end:
+#ifdef TARGET_PC
+            /* Mark after any texture-reference rewrite of this DMA tag. Bit 16 is reserved;
+             * the PC GS parser reads it as per-entry metadata without changing QWC or ID. */
+            if (p->pad != 0)
+            {
+                ((unsigned int*)p->p)[0] |= (1u << 16);
+            }
+#endif
             old_p = p; 
             p = (PS2_OT*)p->op; 
         } 
