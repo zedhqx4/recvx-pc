@@ -668,7 +668,7 @@ void pcGsMovieVramFrame(unsigned int tbp, unsigned int tbw, int w, int h)
 
     if ((tbw == 0) || (w > 512) || (h > 512))
     {
-        pcLog("gs: rejected movie VRAM surface %ux%u at TBP %u (TBW %u)", w, h, tbp, tbw);
+        pcLog("gs: rejected movie VRAM surface %dx%d at TBP %u (TBW %u)", w, h, tbp, tbw);
         return;
     }
 
@@ -680,7 +680,13 @@ void pcGsMovieVramFrame(unsigned int tbp, unsigned int tbw, int w, int h)
 
     /* TEX0: TBP, TBW, PSMCT32, TW=9 and TH=9. Decode only the active movie rectangle. */
     tex0 = (u64)tbp | ((u64)tbw << 14) | ((u64)GS_PSMCT32 << 20) | ((u64)9 << 26) | ((u64)9 << 30);
-    gsDecodeTexture(tex0, 0, 0, w, h, decode_buf);
+    {
+        double t0 = pcOsTime();
+        gsDecodeTexture(tex0, 0, 0, w, h, decode_buf);
+        stats.tex_decodes++;
+        stats.tex_texels += (unsigned int)(w * h);
+        stats.t_decode += pcOsTime() - t0;
+    }
 
     glBindTexture(GL_TEXTURE_2D, movie_vram_tex);
     glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
