@@ -634,6 +634,8 @@ The font tuner has its own state and values. It does not call or modify the menu
   - Captures the marker in the draw state so the normal GS batch comparison keeps modes separate.
 - `pc/src/gs/gs_gl.c`
   - Forces the effective `TEX1` linear flag off only for marked font draws when nearest mode is selected.
+- `.github/workflows/build-windows.yml`
+  - Adds `FONTFix` to the Windows build workflow's push branches so this debug branch can be compiled by CI.
 - `DEVELOPMENT_LOG.md`
   - Records the configuration, runtime control, scope and pending validation.
 
@@ -649,5 +651,5 @@ The font tuner has its own state and values. It does not call or modify the menu
 - **Source review:** Confirmed the actual font call uses `njDrawPolygon2DM(..., 0x80000060)`, which is deferred through the Ordering Table. The PC-only OT sideband preserves the per-entry filter mode until the corresponding GIF segment is parsed; direct submissions retain the scoped marker path.
 - **Batch review:** Confirmed the marker participates in `GsDrawState` comparison, preventing font-nearest draws from merging with ordinary draws using the same GS registers.
 - **Filter review:** Confirmed marked font draws select nearest sampling while all unmarked draws continue to use the original `TEX1` state.
-- **Build:** Not yet run.
+- **Windows CI:** Run [41529410526](https://github.com/zedhqx4/recvx-pc/actions/runs/41529410526) is building commit `428bc231`; final result pending.
 - **Runtime/visual:** Pending. Compare the default and R-toggled modes on the same font strings, then verify that menu text outside `njDrawPolygon2DM()`, UI artwork, 3D textures and movies retain their previous filtering.
