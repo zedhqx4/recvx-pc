@@ -632,10 +632,10 @@ depth properties.
   output, and that disabling the inspector restores ordinary rendering.
 
 
-## 2026-11-02 — Step 11: Restore the Bounded GS Decal Depth-Priority Rule
+## 2026-11-02 — Step 11: Restore the Broad Alpha GS Decal Heuristic (Superseded)
 
 **Category:** GS renderer / decal depth priority  
-**Status:** Implemented in source; build and runtime validation pending  
+**Status:** Superseded by Step 12; the broad predicate was incorrect for the experimentally identified materials.  
 **Branch:** `experimental/decals-wip`  
 **Reference:** Fixed eligibility and +1..+4 polygon-offset behavior from `alpha`
 
@@ -677,3 +677,70 @@ The inspector is diagnostic only; the priority heuristic had been retained under
 - **Build:** Pending GitHub Actions.
 - **Runtime:** Pending. Confirm the log message `gs: coplanar decal priority active` appears, retest the known
   problem surfaces, and check that ordinary transparent geometry does not show unacceptable regressions.
+
+
+## 2026-11-02 — Step 12: Restrict GS Decal Priority to the 25 Marked Material Signatures
+
+**Category:** GS renderer / decal identification / depth priority  
+**Status:** Implemented in source; build and runtime validation pending  
+**Branch:** `experimental/decals-wip`  
+**Supersedes:** Step 11, which restored Alpha's broad predicate instead of using the inspector results
+
+### Problem
+
+Step 11 re-enabled the old Alpha heuristic based on Z16S, GEQUAL, perspective texturing,
+ABE and primitive type. That predicate did not use the manually marked material signatures.
+It could therefore apply polygon offset to ordinary geometry. In the latest negative-control
+capture, the marked arms and shirt were not decals, but the broad rule could select the arms.
+
+### Changes
+
+- Replaced the broad GS-state predicate with an explicit allowlist of **25 marked material
+  signatures** recovered from the earlier validation captures:
+  - Four signatures from `recvx.zip`.
+  - Twenty-one signatures from `recvx(8).log`.
+- Every allowlist entry preserves the exact TEX0 and ALPHA register values. The matcher also
+  requires the common recorded fields: primitive type, IIP/TME/FGE/ABE/FST/CTXT/FIX, TEX1,
+  CLAMP, TEST, ZBUF, TEXA, TEXCLUT and PABE.
+- Retained both observed ALPHA equations (`0x44` and `0x48`) as explicit per-signature values.
+  ALPHA is no longer implicitly treated as interchangeable just because ABE is enabled.
+- Excluded both negative-control signatures from `recvx(1).zip` (arms and shirt). Neither
+  exact signature appears in the allowlist.
+- Kept the existing per-frame draw-order behavior unchanged: increment only for a matched
+  signature, clamp the priority to +1..+4, apply `glPolygonOffset(0.0f, priority)`, and disable
+  polygon offset immediately after that draw, including the alpha-fail multipass.
+- Kept the material inspector's candidate collection, marking, selection and wireframe behavior.
+  Added AA1 to future inspector log output; the historical captures did not include that field,
+  so the allowlist compares all identity fields available in those captures.
+
+### Files Changed
+
+- `pc/src/gs/gs_gl.c`
+  - Added the 25-entry exact signature table and matcher.
+  - Replaced the Alpha broad predicate with the signature matcher.
+  - Updated the activation log and added AA1 to future marked-state log records.
+- `pc/README.md`
+  - Documented the explicit allowlist, the negative controls and the remaining GS-state limitation.
+- `DEVELOPMENT_LOG.md`
+  - Marked Step 11 superseded and recorded this correction.
+
+### Explicitly Excluded
+
+- No broad fallback based only on Z16S, GEQUAL, ABE, TME, FST or primitive class.
+- No inclusion of the arms or shirt negative-control signatures.
+- No automatic addition of newly marked candidates to the runtime allowlist.
+- No change to the +1..+4 cap, zero polygon-offset factor, frame reset or draw cleanup.
+- No changes to depth-buffer formats, blending setup, geometry, UVs, texture memory or unrelated renderer paths.
+
+### Validation
+
+- **Capture audit:** Parsed 25 marked entries across the two earlier positive captures; all 25
+  are unique by the complete set of fields recorded in those logs.
+- **Negative controls:** Compared the two newly marked arms/shirt signatures against the 25
+  allowlist entries; neither is an exact match.
+- **Source review:** Confirmed `gsRendererDraw()` only enables polygon offset when the exact
+  matcher returns true. The frame-local +1..+4 cap and cleanup remain unchanged.
+- **Build:** Pending GitHub Actions for this commit.
+- **Runtime:** Pending. Retest the same arms, shirt and decal surfaces; confirm the arms and shirt
+  no longer receive priority while the previously marked decal surfaces still do.
+

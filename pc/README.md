@@ -89,12 +89,10 @@ Environment variables for testing:
 | `RECVX_SNDLOG=1` | log sound sequence starts, rejected sequences, sequence uploads and reverb changes |
 | `RECVX_MCLOG=1` | log save-folder (memory card) calls |
 
-## Experimental GS material inspector
+## Experimental GS material inspector and decal priority
 
 On the `experimental/decals-wip` branch, the numeric keypad controls a runtime material-state
-inspector. It is disabled by default and does not alter game materials. The renderer's bounded
-decal depth-priority heuristic runs independently of the inspector; its eligibility and behavior
-are described below.
+inspector. It is disabled by default and does not alter game materials.
 
 | Key | Action |
 |---|---|
@@ -105,27 +103,30 @@ are described below.
 
 Candidates are unique GS material-state signatures gathered from triangle batches whose
 post-projection bounds intersect the 640x480 viewport, active GS scissor and normalized depth
-range. The signature includes texture, blend, alpha-test and depth registers. The selected
-batch is outlined in magenta without replacing its texture or changing its original GS state.
-The outline ignores depth so it remains useful for inspecting overlapping surfaces.
+range. The selected batch is outlined in magenta without replacing its texture or changing its
+original GS state. The outline ignores depth so it remains useful for inspecting overlapping
+surfaces.
 
-A marked sample logs the primitive type, texture enable/mode, ABE, TEX0 fields (TBP/TBW/PSM/TW/TH),
-TEX1, CLAMP, ALPHA, TEST, ZBUF, TEXA, TEXCLUT and PABE. Samples are held in memory for the
-session and written to the normal log; marking the same state twice is ignored. The inspector
-records GS state signatures, not a stable game-side material pointer: different source materials
-that produce identical GS state may share one candidate. The 512-candidate and 64-mark limits are
-fixed diagnostic bounds.
+A marked sample logs the primitive type, texture enable/mode, ABE, AA1, TEX0, TEX1, CLAMP,
+ALPHA, TEST, ZBUF, TEXA, TEXCLUT and PABE. The inspector records GS state signatures, not a
+stable game-side material pointer: distinct source objects that reuse the same GS state can share
+one candidate. The 512-candidate and 64-mark limits are fixed diagnostic bounds.
 
-The renderer separately applies an experimental bounded depth priority to blended, textured 3D
-triangle batches using perspective UVs when Z testing is GEQUAL and ZBUF uses Z16S. Later eligible
-draws receive polygon offset +1..+4 depth units (factor 0), capped at +4 and reset every frame.
-This is a broad GS-state heuristic, not a semantic CNK decal identifier; ordinary transparent
-geometry with the same state can also qualify. The ALPHA equation and texture PSM/TBP/size are not
-eligibility checks, so conventional and additive blend equations are both covered when ABE is enabled.
+The depth-priority path uses an explicit allowlist of **25 exact GS material signatures** collected
+from the earlier marked captures (four from `recvx.zip` and twenty-one from `recvx(8).log`).
+Eligibility checks the common recorded state fields and exact TEX0 and ALPHA register values.
+It does not infer decal identity from the broad Z16S/GEQUAL/ABE combination. Both recorded ALPHA
+equations (`0x44` and `0x48`) are represented in the allowlist.
 
-The inspector itself only collects and highlights GS-state signatures; it does not apply or change
-the offset. It records no source object/material identity. The numeric keypad keys above are consumed
-by the platform layer and do not reach keyboard-to-pad bindings.
+The later marked arms and shirt states from `recvx(1).zip` are negative controls and are
+deliberately not included. Their different material signatures therefore receive no polygon
+offset, even where the arms happen to share some of the old broad GS conditions. Only an exact
+allowlist match receives the bounded +1..+4 depth-unit offset (factor 0), reset every frame.
+
+The allowlist is based on GS material state, not source object identity. If another draw reuses
+one of the same exact registered signatures, it will also match; the renderer has no stable
+game-side object/material pointer at this layer. The inspector remains diagnostic: marking a
+new candidate does not automatically add it to the allowlist.
 
 ## Tools
 

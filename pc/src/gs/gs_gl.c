@@ -276,12 +276,12 @@ static int gs_debug_register_material(const GsDrawState* st, const GsVertex* v, 
 
 static void gs_debug_log_material(const char* action, int index, const GsDrawState* st)
 {
-    pcLog("gs material %s #%d: prim=%d iip=%d tme=%d fst=%d abe=%d fge=%d ctxt=%d fix=%d"
+    pcLog("gs material %s #%d: prim=%d iip=%d tme=%d fst=%d abe=%d fge=%d aa1=%d ctxt=%d fix=%d"
           " | TEX0=%016llx [TBP=%u TBW=%u PSM=%u TW=%u TH=%u TCC=%u TFX=%u]"
           " | TEX1=%016llx CLAMP=%016llx"
           " | ALPHA=%016llx TEST=%016llx ZBUF=%016llx"
           " | TEXA=%016llx TEXCLUT=%016llx PABE=%016llx",
-          action, index + 1, st->type, st->iip, st->tme, st->fst, st->abe, st->fge, st->ctxt, st->fix,
+          action, index + 1, st->type, st->iip, st->tme, st->fst, st->abe, st->fge, st->aa1, st->ctxt, st->fix,
           (unsigned long long)st->tex0,
           (unsigned int)GSF(st->tex0, 0, 14), (unsigned int)GSF(st->tex0, 14, 6),
           (unsigned int)GSF(st->tex0, 20, 6), (unsigned int)GSF(st->tex0, 26, 4),
@@ -1558,6 +1558,82 @@ static int texture_extent(const GsDrawState* st, const GsVertex* v, int nverts, 
     return (int)hi + 2;
 }
 
+/* Runtime decal allowlist collected from manually marked GS material states.
+ * Four signatures came from recvx.zip; twenty-one came from recvx(8).log.
+ *
+ * The later recvx(1).zip capture marked the arms and shirt as negative controls.
+ * Neither signature is present here. In particular, matching only the broad
+ * Z16S/GEQUAL/ABE conditions would incorrectly select ordinary geometry.
+ *
+ * The historical inspector log did not print AA1, so the matcher deliberately
+ * compares every identity field that those captures recorded. The inspector
+ * logger now prints AA1 for any future additions to this allowlist.
+ */
+typedef struct {
+    u64 tex0;
+    u64 alpha;
+} GsDecalSignature;
+
+static const GsDecalSignature gs_decal_signatures[] = {
+    /* recvx.zip */
+    { 0x4005c885dd30af80ULL, 0x0000000000000044ULL },
+    { 0x0e07fe05dd40af80ULL, 0x0000000000000044ULL },
+    { 0x4005c98621312fa0ULL, 0x0000000000000044ULL },
+    { 0x0e07fe05dd40b328ULL, 0x0000000000000044ULL },
+
+    /* recvx(8).log */
+    { 0x4005c9859930af90ULL, 0x0000000000000044ULL },
+    { 0x4005c8859930af80ULL, 0x0000000000000044ULL },
+    { 0x0007ff0621413140ULL, 0x0000000000000048ULL },
+    { 0x4005ce859930b140ULL, 0x0000000000000044ULL },
+    { 0x4005ca855530b084ULL, 0x0000000000000044ULL },
+    { 0x4005c9855530b080ULL, 0x0000000000000044ULL },
+    { 0x4005cb855530b088ULL, 0x0000000000000044ULL },
+    { 0x4005cd859930b124ULL, 0x0000000000000044ULL },
+    { 0x4005cc855530b120ULL, 0x0000000000000044ULL },
+    { 0x4005ce86213131c4ULL, 0x0000000000000044ULL },
+    { 0x4005cf85dd30b2c4ULL, 0x0000000000000044ULL },
+    { 0x4005cd86213130c4ULL, 0x0000000000000044ULL },
+    { 0x4005d085dd30b304ULL, 0x0000000000000044ULL },
+    { 0x4005c985dd30afc0ULL, 0x0000000000000044ULL },
+    { 0x4005cd85dd30b0c4ULL, 0x0000000000000044ULL },
+    { 0x4005d28621313504ULL, 0x0000000000000044ULL },
+    { 0x4005cf85dd30b3c0ULL, 0x0000000000000044ULL },
+    { 0x4005cc85dd30b2c0ULL, 0x0000000000000044ULL },
+    { 0x4005d38621313544ULL, 0x0000000000000044ULL },
+    { 0x4005ce859930ba00ULL, 0x0000000000000048ULL },
+    { 0x4005cf859930ba80ULL, 0x0000000000000048ULL }
+};
+
+#define GS_DECAL_SIGNATURE_COUNT ((int)(sizeof(gs_decal_signatures) / sizeof(gs_decal_signatures[0])))
+
+static int gs_decal_signature_match(const GsDrawState* st)
+{
+    int i;
+
+    /* Common fields shared by all 25 marked decal signatures. Compare the full
+     * recorded TEX0 and ALPHA values below; TBP/PSM/size or blend mode alone
+     * are not sufficient to identify one of these materials. */
+    if ((st->type != 4) || !st->iip || !st->tme || !st->fge || !st->abe ||
+        st->fst || st->ctxt || st->fix ||
+        (st->tex1 != 0x0000000000000060ULL) ||
+        (st->clamp != 0x00000000ff000ff5ULL) ||
+        (st->test != 0x000000000005180bULL) ||
+        (st->zbuf != 0x000000000a00012cULL) ||
+        (st->texa != 0x0000008000008000ULL) ||
+        (st->texclut != 0) || (st->pabe != 0))
+        return 0;
+
+    for (i = 0; i < GS_DECAL_SIGNATURE_COUNT; i++)
+    {
+        if ((st->tex0 == gs_decal_signatures[i].tex0) &&
+            (st->alpha == gs_decal_signatures[i].alpha))
+            return 1;
+    }
+
+    return 0;
+}
+
 void gsRendererDraw(const GsDrawState* st, const GsVertex* v, int nverts)
 {
     unsigned int fbp = GSF(st->frame, 0, 9);
@@ -1568,10 +1644,7 @@ void gsRendererDraw(const GsDrawState* st, const GsVertex* v, int nverts)
     int ztst = GSF(st->test, 17, 2);
     int zmsk = GSF(st->zbuf, 32, 1);
     int use_depth = (ztst != 1) || !zmsk;
-    int decal_depth_priority = use_depth && (ztst == 2) &&
-                               (GSF(st->zbuf, 24, 4) == 10) &&
-                               st->tme && !st->fst && st->abe &&
-                               (st->type >= 3) && (st->type <= 5);
+    int decal_depth_priority = use_depth && gs_decal_signature_match(st);
     float zs = z_scale(st->zbuf);
     int afail = GSF(st->test, 12, 2);
     int ate = GSF(st->test, 0, 1);
@@ -1855,7 +1928,7 @@ void gsRendererDraw(const GsDrawState* st, const GsVertex* v, int nverts)
         static int logged = 0;
         if (!logged)
         {
-            pcLog("gs: coplanar decal priority active (Z16S, GEQUAL, blended textured 3D): polygon offset +1..+4 depth units by draw order");
+            pcLog("gs: marked decal signature matched (%d signatures): polygon offset +1..+4 depth units by draw order", GS_DECAL_SIGNATURE_COUNT);
             logged = 1;
         }
 
