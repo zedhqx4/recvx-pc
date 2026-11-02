@@ -260,7 +260,8 @@ static int dump_frame;
 
 /* per-interval statistics for the periodic log */
 static struct { unsigned int frames, draws, verts, rt_loads, rt_reads, tex_decodes, tex_texels; double t_load, t_read, t_decode; } stats;
-static unsigned int gs_texture_uploads;
+static int tex_cached;                     /* textures in the cache, decoded from GS memory */
+static double tex_cached_bytes;            /* their size */
 
 /* Normal movies keep one mutable GL representation of their GS VRAM surface.
  * This is separate from the content-addressed texture cache and from MOVIE_HD. */
@@ -277,9 +278,7 @@ void pcGsLogStats(void)
     pcLog("gs/frame: %u draws, %u verts, %.1f rt loads (%.1f ms), %.1f rt reads (%.1f ms), %.1f tex decodes (%u texels, %.1f ms)",
           stats.draws / f, stats.verts / f, (double)stats.rt_loads / f, stats.t_load * 1000 / f, (double)stats.rt_reads / f,
           stats.t_read * 1000 / f, (double)stats.tex_decodes / f, stats.tex_texels / f, stats.t_decode * 1000 / f);
-    pcLog("gs: transient GS texture buffer: %s (4 MiB), %u uploads",
-          gs_texture_upload ? "allocated" : "not allocated", gs_texture_uploads);
-    gs_texture_uploads = 0;
+    pcLog("gs: %d textures cached (%.0f MB)", tex_cached, tex_cached_bytes / 1048576.0);
     if (movie_vram_tex != 0)
     {
         pcLog("gs: movie VRAM texture: %s, %u frame updates",
@@ -412,70 +411,212 @@ static DepthBuffer* get_db(unsigned int zbp, int w, int h)
 /* ------------------------------------------------------------------------------------------- */
 /* texture cache (textures decoded from GS memory) */
 
-/* ------------------------------------------------------------------------------------------- */
-/* transient GS texture upload buffer */
+typedef struct {
+    int used;
+    u64 key0, key1, key2;
+    int w, h;
+    int rows, cols;      /* part decoded: the draws it serves never sample outside it */
+    unsigned int page_lo, page_hi, clut_page;
+    unsigned long long gen;
+    GLuint tex;
+    int hd;              /* tex is an HD replacement (owned by gs_replace.c) */
+    unsigned int last_use;
+} CachedTex;
 
-/* Normal GS textures are decoded from VRAM and consumed immediately by the next draw.
- * No historical texture identity or decoded frame is retained. One 1024x1024 RGBA8 object
- * is reused for every normal texture request (4 MiB total). */
-#define GS_TEXTURE_UPLOAD_SIZE 1024
+#define MAX_TEX 2048
 
-static GLuint gs_texture_upload;
+static CachedTex texcache[MAX_TEX];
 static unsigned int* decode_buf;
+
+static void psm_page_size(int psm, int* pw, int* ph)
+{
+    switch (gsPsmBits(psm))
+    {
+    case 32: *pw = 64; *ph = 32; break;
+    case 16: *pw = 64; *ph = 64; break;
+    case 8:  *pw = 128; *ph = 64; break;
+    default: *pw = 128; *ph = 128; break;
+    }
+}
+
+/* Content hash of GS memory pages (8 KB), recomputed only when a page's generation moves.
+ * Textures are cached by content: the game streams many textures through the same memory every
+ * frame, so the same bytes come back again and again at the same address. */
+static unsigned long long page_hash[GS_PAGES];
+static unsigned int page_hash_gen[GS_PAGES];
+static unsigned char page_hash_valid[GS_PAGES];
+
+static unsigned long long hash_page(unsigned int p)
+{
+    p &= GS_PAGES - 1;
+
+    if (!page_hash_valid[p] || (page_hash_gen[p] != gsPageGen[p]))
+    {
+        const unsigned long long* w = (const unsigned long long*)&gsVram[p * 8192];
+        unsigned long long h = 0x9E3779B97F4A7C15ULL ^ p;
+        int i;
+
+        for (i = 0; i < 8192 / 8; i++)
+        {
+            h = (h ^ w[i]) * 0x100000001B3ULL;
+            h ^= h >> 29;
+        }
+
+        page_hash[p] = h;
+        page_hash_gen[p] = gsPageGen[p];
+        page_hash_valid[p] = 1;
+    }
+
+    return page_hash[p];
+}
+
+/* content hash of the pages holding a cols x rows corner of a texture */
+static unsigned long long gen_sum_rect(unsigned int page_lo, unsigned int stride, int bands, int page_cols)
+{
+    unsigned long long s = 0;
+    int b, c;
+
+    for (b = 0; b < bands; b++)
+    {
+        for (c = 0; c < page_cols; c++)
+        {
+            s = (s * 0x100000001B3ULL) ^ hash_page(page_lo + b * stride + c);
+        }
+    }
+
+    return s;
+}
 
 static GLuint get_texture(u64 tex0, u64 texa, u64 texclut, int w, int h, int rows, int cols, int* hd)
 {
-    extern GLuint gsReplaceLookup(u64 tex0, u64 texa);
-    GLuint replacement;
-    double t0;
+    unsigned int psm = GSF(tex0, 20, 6);
+    unsigned int tbp = GSF(tex0, 0, 14);
+    unsigned int tbw = GSF(tex0, 14, 6);
+    u64 key0 = tex0 & 0x0000001FFFFFFFFFULL & ~(0x3ULL << 35) & ~(1ULL << 34);   /* TBP..TH, drop TCC/TFX and CLUT fields */
+    u64 cpsm_key = ((u64)GSF(tex0, 51, 4) << 37);
+    u64 key1 = ((psm == GS_PSMCT24) || (gsPsmBits(psm) == 16) || (GSF(tex0, 51, 4) >= 2)) ? texa : 0;
+    u64 key2 = gsClutHash(tex0);   /* palette contents (0-entry hash for direct color) */
+    int pw, ph, i, slot = -1, oldest = 0;
+    unsigned int page_lo, page_hi, clut_page, stride;
+    unsigned long long gen;
+    CachedTex* t;
 
-    /* HD replacements are independent file-backed assets owned by gs_replace.c. They are not
-     * transient GS VRAM snapshots and must not be deleted or overwritten by this buffer. */
-    replacement = gsReplaceLookup(tex0, texa);
+    key0 |= cpsm_key;
+    psm_page_size(psm, &pw, &ph);
+    stride = (tbw * 64 + pw - 1) / pw;
 
-    if (replacement != 0)
+    if (stride == 0)
     {
-        *hd = 1;
-        return replacement;
+        stride = 1;
     }
 
-    *hd = 0;
-
-    if ((w <= 0) || (h <= 0) || (w > GS_TEXTURE_UPLOAD_SIZE) || (h > GS_TEXTURE_UPLOAD_SIZE))
-    {
-        pcLog("gs: rejected decoded texture size %dx%d", w, h);
-        return 0;
-    }
-
+    page_lo = tbp >> 5;
     if ((rows <= 0) || (rows > h))
     {
         rows = h;
+    }
+    else
+    {
+        rows = ((rows + ph - 1) / ph) * ph;   /* whole pages, so draws that need a little more share it */
+
+        if (rows > h)
+        {
+            rows = h;
+        }
     }
 
     if ((cols <= 0) || (cols > w))
     {
         cols = w;
     }
-
-    t0 = pcOsTime();
-    gsDecodeTexture(tex0, texa, texclut, cols, rows, decode_buf);
-    stats.tex_decodes++;
-    stats.tex_texels += (unsigned int)(cols * rows);
-    stats.t_decode += pcOsTime() - t0;
-
-    if (gs_texture_upload == 0)
+    else
     {
-        gs_texture_upload = make_texture(GS_TEXTURE_UPLOAD_SIZE, GS_TEXTURE_UPLOAD_SIZE,
-                                         GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE, GL_NEAREST);
-        pcLog("gs: allocated one reusable GS texture upload buffer (1024x1024 RGBA8, 4 MiB)");
+        cols = ((cols + pw - 1) / pw) * pw;
+
+        if (cols > w)
+        {
+            cols = w;
+        }
     }
 
-    glBindTexture(GL_TEXTURE_2D, gs_texture_upload);
+    page_hi = page_lo + ((rows + ph - 1) / ph - 1) * stride + (w + pw - 1) / pw;
+    clut_page = GSF(tex0, 37, 14) >> 5;
+    gen = gen_sum_rect(page_lo, stride, (rows + ph - 1) / ph, (cols + pw - 1) / pw);
+
+    for (i = 0; i < MAX_TEX; i++)
+    {
+        t = &texcache[i];
+
+        if (t->used && (t->gen == gen) && (t->key0 == key0) && (t->key1 == key1) && (t->key2 == key2) && (t->w == w) && (t->h == h) &&
+            (t->rows == rows) && (t->cols == cols))
+        {
+            t->last_use = frame_counter;
+            *hd = t->hd;
+            return t->tex;
+        }
+
+        if (!t->used && (slot < 0))
+        {
+            slot = i;
+        }
+
+        if (t->last_use < texcache[oldest].last_use)
+        {
+            oldest = i;
+        }
+    }
+
+    if (slot < 0)
+    {
+        slot = oldest;
+
+        if (!texcache[slot].hd)
+        {
+            glDeleteTextures(1, &texcache[slot].tex);
+            tex_cached--;
+            tex_cached_bytes -= (double)texcache[slot].w * texcache[slot].h * 4;
+        }
+    }
+
+    t = &texcache[slot];
+    t->used = 1;
+    t->key0 = key0;
+    t->key1 = key1;
+    t->key2 = key2;
+    t->w = w;
+    t->h = h;
+    t->rows = rows;
+    t->cols = cols;
+    t->page_lo = page_lo;
+    t->page_hi = page_hi;
+    t->clut_page = clut_page;
+    t->gen = gen;
+    t->last_use = frame_counter;
+    t->hd = 0;
+
+    {
+        extern GLuint gsReplaceLookup(u64 tex0, u64 texa);
+        GLuint r = gsReplaceLookup(tex0, texa);
+
+        if (r != 0)
+        {
+            t->tex = r;
+            t->hd = 1;
+            *hd = 1;
+            return r;
+        }
+    }
+
+    *hd = 0;
+    t->tex = make_texture(w, h, GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE, GL_NEAREST);
+    tex_cached++;
+    tex_cached_bytes += (double)w * h * 4;
+
+    { double t0 = pcOsTime(); gsDecodeTexture(tex0, texa, texclut, cols, rows, decode_buf); stats.tex_decodes++; stats.tex_texels += cols * rows; stats.t_decode += pcOsTime() - t0; }
     glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
     glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, cols, rows, GL_RGBA, GL_UNSIGNED_BYTE, decode_buf);
-    gs_texture_uploads++;
 
-    return gs_texture_upload;
+    return t->tex;
 }
 
 /* ------------------------------------------------------------------------------------------- */
