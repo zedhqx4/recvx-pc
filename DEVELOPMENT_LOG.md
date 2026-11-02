@@ -442,3 +442,51 @@ Use `vsync=0` to request unsynchronized presentation. If the key is absent, VSyn
 - **Build:** Pending GitHub Actions.
 - **Runtime:** Pending. Retest the previously marked decal surfaces and the arms/shirt negative controls in the same scene.
 
+
+
+## 2026-11-02 — Step 8: Restore GS ZBUF Precision for Decal Depth Priority
+
+**Category:** GS renderer / depth attachment format  \
+**Status:** Implemented in source; Windows build and in-game validation pending  \
+**Branch:** `experimental/gs-rebuild`  \
+**Reference:** PSM-aware `get_db()` implementation from `experimental/decals-wip`
+
+### Problem
+
+The initial decal-priority port preserved the allowlist and polygon-offset behavior but did not port the depth-buffer allocation logic. `GS-Rebuild` allocated every OpenGL depth attachment as `GL_DEPTH_COMPONENT24`, regardless of the active `ZBUF.PSM`. This was a concrete mismatch with the reference renderer: the marked decal signatures use `ZBUF=0x0A00012C`, whose PSM field is Z16S (10), but were therefore rendered against a D24 attachment.
+
+The depth attachment's format also affects the effective resolution of depth values and polygon-offset units. Matching only ZBP and dimensions could incorrectly reuse an attachment created for another GS depth format.
+
+### Changes
+
+- Added `ZBUF.PSM` to the `DepthBuffer` cache identity.
+- Restored the reference format selection:
+  - PSM 0 / Z32: `GL_DEPTH_COMPONENT32`, `GL_UNSIGNED_INT`.
+  - PSM 1 / Z24: `GL_DEPTH_COMPONENT24`, `GL_UNSIGNED_INT`.
+  - Other supported depth formats, including Z16S (PSM 10): `GL_DEPTH_COMPONENT16`, `GL_UNSIGNED_SHORT`.
+- Updated `get_db()` to require both ZBP and PSM, as well as width and height, when reusing a depth attachment.
+- Updated `gsRendererDraw()` to pass `GSF(st->zbuf, 24, 4)` into `get_db()`.
+- Added guarded definitions for the D16 and D32 OpenGL depth-format constants.
+
+### Explicitly Excluded
+
+- No changes to the 25-entry decal allowlist or its common GS-state checks.
+- No changes to the 1–4 draw-order cap, `glPolygonOffset(0.0f, priority * 0.50f)`, frame reset, or per-draw enable/disable scope.
+- No changes to `z_scale()`, depth comparison direction, geometry, UVs, texture memory, or unrelated renderer behavior.
+- The existing bounded fallback when all `MAX_DB` slots are occupied remains unchanged.
+
+### Files Changed
+
+- `pc/src/gs/gs_gl.c`
+  - Added `DepthBuffer.psm`, PSM-specific GL attachment allocation, PSM-aware lookup, and the PSM argument at the draw callsite.
+- `pc/src/gs/gl_funcs.h`
+  - Added guarded D16 and D32 depth-format constants.
+- `DEVELOPMENT_LOG.md`
+  - Recorded the format mismatch, correction, scope and validation status.
+
+### Validation
+
+- **Source comparison:** Ported the PSM-to-format selection and PSM-aware cache key from `experimental/decals-wip`.
+- **Code review:** Confirmed the decal signature's ZBUF PSM (10) now selects D16, while Z32 and Z24 select D32 and D24 respectively.
+- **Build:** Pending GitHub Actions.
+- **Runtime:** Pending. Retest the same coplanar decal scene and negative controls. This source correction is not yet considered a verified visual fix.
