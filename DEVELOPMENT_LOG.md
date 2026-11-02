@@ -302,6 +302,8 @@ The special movie surface is selected before render-target and generic texture-c
   - Read the current PSMCT32 movie rectangle back from GS VRAM and update the same GL object.
   - Bypass the generic content-addressed texture cache for the active movie TBP.
   - Add periodic logging of movie texture updates and include its decode work in GS texture-decode statistics.
+- `.github/workflows/build-windows.yml`
+  - Include this experiment branch in the Windows build workflow's push trigger.
 
 ### Explicitly Excluded
 
@@ -315,7 +317,7 @@ The special movie surface is selected before render-target and generic texture-c
 
 - **Source review:** Confirmed that the persistent texture is refreshed from emulated GS VRAM, and active normal-movie draws bypass `get_texture()`.
 - **Memory accounting:** The persistent 512x512 texture is 1 MiB and is allocated once; it is separate from `tex_cached_bytes`.
-- **Build:** Pending.
+- **Build:** Windows build workflow trigger added for this experiment branch; result pending.
 - **Runtime:** Pending. Compare long normal-movie playback with the previous log: verify stable generic texture-cache counts/bytes, continuous frame updates, no black video, and no regression after `termAll()`.
 - **Causality:** The experiment is intended to test whether the previous per-frame texture-cache accumulation caused the memory pressure and black-video failure. That conclusion remains pending runtime results.
 
