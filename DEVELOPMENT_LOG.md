@@ -611,7 +611,7 @@ The font tuner has its own state and values. It does not call or modify the menu
 
 - In `src/ps2/veronica/prog/ps2_NaDraw2D.c`, mark textured submissions from `njDrawPolygon2DM()` around the `Ps2AddPrim2D()` call.
 - Font quads use the deferred Ordering Table path (`attr=0x80000060`). The direct-draw path is synchronous, but the OT path is emitted later, so a stack-scoped marker alone would not survive until rendering.
-- For OT entries, `Ps2AddOT()` stores the nearest-filter request in the existing `PS2_OT.pad` field. When `Ps2DrawOTagSub()` assembles the PC DMA chain, it sets bit 16 of that entry's DMA tag. This bit is reserved by the DMA tag format and is consumed only as PC-side metadata; QWC, ID and address fields are unchanged.
+- For OT entries, `Ps2AddOT()` stores the nearest-filter request in the existing `PS2_OT.pad` field. The first DMA tag in an OT entry is an OT link / optional texture-state REF; the second tag, at `p->p + 16`, carries the primitive's GIF draw payload. After texture-reference setup is complete, `Ps2DrawOTagSub()` sets bit 16 on that second tag only. This bit is reserved by the DMA tag format and is consumed only as PC-side metadata; QWC, ID and address fields are unchanged.
 - `pc/src/gs/gs.c` scopes that metadata around the corresponding GIF segment and captures it in `GsDrawState`. The direct path uses the temporary font-draw marker instead.
 - The marker is part of the GS batch state, so font and non-font primitives are separated when necessary rather than applying the override to a mixed batch.
 - In `pc/src/gs/gs_gl.c`, derive the effective linear-filter flag from the original `TEX1` state, except for marked font draws while `fontFilter=0`. The existing shader then uses its nearest/texel-fetch path instead of its manual four-texel bilinear interpolation. Render-target sampling also receives the effective filter.
@@ -648,7 +648,7 @@ The font tuner has its own state and values. It does not call or modify the menu
 
 ### Validation
 
-- **Source review:** Confirmed the actual font call uses `njDrawPolygon2DM(..., 0x80000060)`, which is deferred through the Ordering Table. The PC-only OT sideband preserves the per-entry filter mode until the corresponding GIF segment is parsed; direct submissions retain the scoped marker path.
+- **Source review:** Confirmed the actual font call uses `njDrawPolygon2DM(..., 0x80000060)`, which is deferred through the Ordering Table. The PC-only OT sideband is written to the second DMA tag (`p->p + 16)) carrying the primitive's GIF draw payload—not the first link / texture-state REF tag—so the override remains active for the correct segment. Direct submissions retain the scoped marker path.
 - **Batch review:** Confirmed the marker participates in `GsDrawState` comparison, preventing font-nearest draws from merging with ordinary draws using the same GS registers.
 - **Filter review:** Confirmed marked font draws select nearest sampling while all unmarked draws continue to use the original `TEX1` state.
 - **Windows CI:** Run [41529410526](https://github.com/zedhqx4/recvx-pc/actions/runs/41529410526) is building commit `428bc231`; final result pending.
