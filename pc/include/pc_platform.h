@@ -22,6 +22,12 @@ int pcIniFileGetInt(const char* ini, const char* key, int def);
 /* Set (or with value NULL remove) "key=value" in recvx.ini, keeping every other line. */
 void pcIniSet(const char* key, const char* value);
 
+/* PC font glyph UV correction: edge order left, right, top, bottom. Values use 1/16-texel units. */
+int pcFontUvFixEnabled(void);
+void pcFontUvFixGet(int* left, int* right, int* top, int* bottom);
+void pcFontUvFixAdjust(int edge, int delta);
+void pcFontUvFixReset(int edge);  /* edge -1 restores all four correction defaults */
+
 /* First file in dir whose name ends with ext (case-insensitive); full path in out. */
 int pcPlatformFindFile(const char* dir, const char* ext, char* out, int size);
 
