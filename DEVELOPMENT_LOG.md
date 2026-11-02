@@ -327,6 +327,8 @@ The special movie surface is selected before render-target and generic texture-c
 - `f18dd6d` — Refresh persistent movie texture from GS VRAM.
 - `10ba160` — Track movie VRAM texture decode work.
 - `0323792` — Prioritize active movie VRAM surface in sampling.
+- `cdf08ae` — Bind the persistent movie texture on texture unit zero.
+- `c8300b4` — Run the Windows build workflow for this experiment branch.
 
 ### Next Checkpoint
 
