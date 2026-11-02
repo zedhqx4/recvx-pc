@@ -186,13 +186,10 @@ void njDrawPolygon2DM(NJS_POINT2COL* p, int n, float pri, unsigned int attr)
     unsigned int i;    
     unsigned long prim; 
 #ifdef TARGET_PC
-    int font_uv_fix_enabled = pcFontUvFixEnabled();
     int font_uv_left = 4, font_uv_right = -4, font_uv_top = 4, font_uv_bottom = -4;
 
-    if (font_uv_fix_enabled)
-    {
-        pcFontUvFixGet(&font_uv_left, &font_uv_right, &font_uv_top, &font_uv_bottom);
-    }
+    /* The base PC glyph correction is always active; fontUVfix gates only the F10 debug tuner. */
+    pcFontUvFixGet(&font_uv_left, &font_uv_right, &font_uv_top, &font_uv_bottom);
 #endif
 
     if (pri > -1.0f) 
@@ -207,51 +204,46 @@ void njDrawPolygon2DM(NJS_POINT2COL* p, int n, float pri, unsigned int attr)
         if ((attr & 0x80000000)) 
         {
 #ifdef TARGET_PC
-            if (font_uv_fix_enabled)
+            switch (i)
             {
-                switch (i)
-                {
-                case 0: // Top-Left: left U, top V
-                    *(int*)&bp[0][0] = (p->tex[i].tex.u * 16) + font_uv_left;
-                    *(int*)&bp[0][1] = (p->tex[i].tex.v * 16) + font_uv_top;
-                    break;
-                case 1: // Top-Right: right U, top V
-                    *(int*)&bp[0][0] = (p->tex[i].tex.u * 16) + font_uv_right;
-                    *(int*)&bp[0][1] = (p->tex[i].tex.v * 16) + font_uv_top;
-                    break;
-                case 2: // Bottom-Right: right U, bottom V
-                    *(int*)&bp[0][0] = (p->tex[i].tex.u * 16) + font_uv_right;
-                    *(int*)&bp[0][1] = (p->tex[i].tex.v * 16) + font_uv_bottom;
-                    break;
-                case 3: // Bottom-Left: left U, bottom V
-                    *(int*)&bp[0][0] = (p->tex[i].tex.u * 16) + font_uv_left;
-                    *(int*)&bp[0][1] = (p->tex[i].tex.v * 16) + font_uv_bottom;
-                    break;
-                }
+            case 0: // Top-Left: left U, top V
+                *(int*)&bp[0][0] = (p->tex[i].tex.u * 16) + font_uv_left;
+                *(int*)&bp[0][1] = (p->tex[i].tex.v * 16) + font_uv_top;
+                break;
+            case 1: // Top-Right: right U, top V
+                *(int*)&bp[0][0] = (p->tex[i].tex.u * 16) + font_uv_right;
+                *(int*)&bp[0][1] = (p->tex[i].tex.v * 16) + font_uv_top;
+                break;
+            case 2: // Bottom-Right: right U, bottom V
+                *(int*)&bp[0][0] = (p->tex[i].tex.u * 16) + font_uv_right;
+                *(int*)&bp[0][1] = (p->tex[i].tex.v * 16) + font_uv_bottom;
+                break;
+            case 3: // Bottom-Left: left U, bottom V
+                *(int*)&bp[0][0] = (p->tex[i].tex.u * 16) + font_uv_left;
+                *(int*)&bp[0][1] = (p->tex[i].tex.v * 16) + font_uv_bottom;
+                break;
             }
-            else
+#else
+            switch (i)
+            {
+            case 0:
+                *(int*)&bp[0][0] = (p->tex[i].tex.u * 16) + 8;
+                *(int*)&bp[0][1] = (p->tex[i].tex.v * 16) + 8;
+                break;
+            case 1:
+                *(int*)&bp[0][0] = (p->tex[i].tex.u * 16) + 4;
+                *(int*)&bp[0][1] = (p->tex[i].tex.v * 16) + 8;
+                break;
+            case 2:
+                *(int*)&bp[0][0] = (p->tex[i].tex.u * 16) + 4;
+                *(int*)&bp[0][1] = (p->tex[i].tex.v * 16) + 4;
+                break;
+            case 3:
+                *(int*)&bp[0][0] = (p->tex[i].tex.u * 16) + 8;
+                *(int*)&bp[0][1] = (p->tex[i].tex.v * 16) + 4;
+                break;
+            }
 #endif
-            {
-                switch (i)
-                {
-                case 0:
-                    *(int*)&bp[0][0] = (p->tex[i].tex.u * 16) + 8;
-                    *(int*)&bp[0][1] = (p->tex[i].tex.v * 16) + 8;
-                    break;
-                case 1:
-                    *(int*)&bp[0][0] = (p->tex[i].tex.u * 16) + 4;
-                    *(int*)&bp[0][1] = (p->tex[i].tex.v * 16) + 8;
-                    break;
-                case 2:
-                    *(int*)&bp[0][0] = (p->tex[i].tex.u * 16) + 4;
-                    *(int*)&bp[0][1] = (p->tex[i].tex.v * 16) + 4;
-                    break;
-                case 3:
-                    *(int*)&bp[0][0] = (p->tex[i].tex.u * 16) + 8;
-                    *(int*)&bp[0][1] = (p->tex[i].tex.v * 16) + 4;
-                    break;
-                }
-            }
             
             *(int*)&bp[0][2] = 4096;
             *(int*)&bp[0][3] = 0;
