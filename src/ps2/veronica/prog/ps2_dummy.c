@@ -1,3 +1,6 @@
+#ifdef TARGET_PC
+#include "../../../../pc/include/pc_platform.h"
+#endif
 #include "../../../ps2/veronica/prog/ps2_dummy.h"
 #include "../../../ps2/veronica/prog/ps2_loadtim2.h"
 #include "../../../ps2/veronica/prog/ps2_NaDraw2D.h"
@@ -1540,6 +1543,11 @@ void Ps2AddOT(void* p, unsigned int num, float z, unsigned long prim)
     }
         
     Ps2_ot_list[Ps2_ot_list_no].p = Ps2_PP; 
+#ifdef TARGET_PC
+    /* Preserve the font-only nearest-filter request until this deferred OT entry is emitted. */
+    Ps2_ot_list[Ps2_ot_list_no].pad =
+        (pcFontFilterDrawActive() && !pcFontFilterIsLinear()) ? 1u : 0u;
+#endif
     
     Ps2_ot_list[Ps2_ot_list_no].TEX0 = Ps2_gs_save.TEX0 & 0xE0F8001FFFFFC000; 
     Ps2_ot_list[Ps2_ot_list_no].TEX0_NEXT = Ps2_gs_save.TEX0_NEXT & 0xE0F8001FFFFFC000; 
@@ -1643,6 +1651,15 @@ int Ps2DrawOTagSub(int start_no)
             { 
                 start_addr = p->p; 
             }
+
+#ifdef TARGET_PC
+            /* Bit 16 is reserved in the DMA tag. The PC GS parser consumes it as per-entry
+             * metadata; QWC, ID and address fields remain unchanged. */
+            if (p->pad != 0)
+            {
+                ((unsigned int*)p->p)[0] |= (1u << 16);
+            }
+#endif
             
             p_flag = 0; 
             t_flag = 0; 
