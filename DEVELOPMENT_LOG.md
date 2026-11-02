@@ -593,3 +593,57 @@ The font tuner has its own state and values. It does not call or modify the menu
 - **Diff review:** Confirmed the live tuner is independent of the menu UV crop controls and only intercepts its keys while `fontUVfix=1`.
 - **Build:** Not yet run.
 - **Runtime/visual:** Pending. Compare `fontUVfix=0` and `fontUVfix=1`, verify each edge changes only its two intended corners, and check that the menu/UI UV behavior is unchanged.
+
+## 2026-11-02 — Step 11: Add Runtime Font Filtering Toggle
+
+**Category:** Graphics correctness / font texture sampling  
+**Status:** Implemented in source; Windows build and runtime validation pending  
+**Branch:** `FONTFix`
+
+### Behavior
+
+- `fontFilter=1` (default) respects the GS `TEX1` filtering state. The current font texture-loading path sets linear magnification filtering.
+- `fontFilter=0` forces nearest sampling for font glyph primitives.
+- Press `R` at runtime to toggle between the two modes. The setting is saved immediately to `recvx.ini` and restored on the next launch.
+- The title bar reports the selected mode after each toggle. The R key is reserved by this diagnostic and is not forwarded to the game; it is not one of the default game bindings.
+
+### Implementation and Scope
+
+- In `src/ps2/veronica/prog/ps2_NaDraw2D.c`, mark textured submissions from `njDrawPolygon2DM()` around the `Ps2AddPrim2D()` call.
+- The PC `loadImage()` path processes the DMA/GIF chain synchronously. `pc/src/gs/gs.c` captures the temporary font-draw marker in `GsDrawState`.
+- The marker is part of the GS batch state, so font and non-font primitives are separated when necessary rather than applying the override to a mixed batch.
+- In `pc/src/gs/gs_gl.c`, derive the effective linear-filter flag from the original `TEX1` state, except for marked font draws while `fontFilter=0`. The existing shader then uses its nearest/texel-fetch path instead of its manual four-texel bilinear interpolation. Render-target sampling also receives the effective filter.
+- The runtime filter toggle is independent of `fontUVfix`; it works whether the UV correction is enabled or disabled.
+
+### Files Changed
+
+- `pc/include/pc_platform.h`
+  - Declares the runtime filter state and font-draw scope functions.
+- `pc/src/pc_platform.c`
+  - Loads `fontFilter` with a default of `1`, toggles and saves it on R, and reports the new state in the title bar.
+  - Tracks the synchronous font-draw scope.
+- `src/ps2/veronica/prog/ps2_NaDraw2D.c`
+  - Marks only textured `njDrawPolygon2DM()` submissions.
+- `pc/src/gs/gs_internal.h`
+  - Adds the font-only nearest-sampling marker to `GsDrawState`.
+- `pc/src/gs/gs.c`
+  - Captures the marker in the draw state so the normal GS batch comparison keeps modes separate.
+- `pc/src/gs/gs_gl.c`
+  - Forces the effective `TEX1` linear flag off only for marked font draws when nearest mode is selected.
+- `DEVELOPMENT_LOG.md`
+  - Records the configuration, runtime control, scope and pending validation.
+
+### Explicitly Excluded
+
+- No global change to GS `TEX1` state or texture filtering.
+- No changes to 3D/model texture sampling, ordinary 2D UI/menu primitives, movie sampling, texture decoding, or filtering defaults for non-font draws.
+- No changes to font UV coordinates or the `fontUVfix` values and tuner.
+- No changes to the menu UV crop system.
+
+### Validation
+
+- **Source review:** Confirmed the font marker is active only around textured `njDrawPolygon2DM()` submissions and is captured synchronously before the marker is cleared.
+- **Batch review:** Confirmed the marker participates in `GsDrawState` comparison, preventing font-nearest draws from merging with ordinary draws using the same GS registers.
+- **Filter review:** Confirmed marked font draws select nearest sampling while all unmarked draws continue to use the original `TEX1` state.
+- **Build:** Not yet run.
+- **Runtime/visual:** Pending. Compare the default and R-toggled modes on the same font strings, then verify that menu text outside `njDrawPolygon2DM()`, UI artwork, 3D textures and movies retain their previous filtering.
