@@ -304,5 +304,17 @@ void njDrawPolygon2DM(NJS_POINT2COL* p, int n, float pri, unsigned int attr)
         prim |= 0x8000000000000; 
     }
     
+#ifdef TARGET_PC
+    if (attr & 0x80000000)
+    {
+        pcFontFilterDrawBegin();
+    }
+#endif
     Ps2AddPrim2D(prim, buff, n);
+#ifdef TARGET_PC
+    if (attr & 0x80000000)
+    {
+        pcFontFilterDrawEnd();
+    }
+#endif
 }
