@@ -630,3 +630,50 @@ depth properties.
 - **Build:** Not run in this environment; GitHub Actions should build the branch after push.
 - **Runtime:** Pending. Verify activation, candidate cycling, wireframe visibility, marking/log
   output, and that disabling the inspector restores ordinary rendering.
+
+
+## 2026-11-02 — Step 11: Restore the Bounded GS Decal Depth-Priority Rule
+
+**Category:** GS renderer / decal depth priority  
+**Status:** Implemented in source; build and runtime validation pending  
+**Branch:** `experimental/decals-wip`  
+**Reference:** Fixed eligibility and +1..+4 polygon-offset behavior from `alpha`
+
+### Motivation
+
+Three runtime material-inspection runs produced repeatable GS-state signatures for surfaces
+reported as decal problems. The marked states include both conventional and additive GS blend
+equations, while sharing the broad depth/texture conditions used by the previous Alpha rule.
+The inspector is diagnostic only; the priority heuristic had been retained under disabled
+`#if 0` blocks on this branch.
+
+### Changes
+
+- Restored the Alpha fixed eligibility predicate in `gsRendererDraw()`:
+  - Depth testing is active and `ZTST=GEQUAL`.
+  - `ZBUF.PSM=10` (Z16S).
+  - Texturing is enabled, texture coordinates are perspective-correct (`FST=0`), and ABE is enabled.
+  - Primitive type is a 3D triangle class (`3..5`).
+- For each eligible draw, increment a frame-local ordinal, clamp it to 1..4, and apply
+  `glPolygonOffset(0.0f, priority)` with `GL_POLYGON_OFFSET_FILL` enabled only for that draw.
+- Disable polygon offset immediately after the normal draw, including the GS alpha-fail multipass.
+- Reset the draw-order counter after flushing each presented frame.
+- Kept the material inspector, its candidate/mark tables, keyboard controls and log format unchanged.
+- Did not add checks for `ALPHA`, texture `TBP`, texture PSM or texture dimensions. Both blend-equation variants
+  observed in the logs remain eligible when the broad GS predicate matches.
+- Did not restore the old runtime multipliers or their INI/keypad controls.
+
+### Files Changed
+
+- `pc/src/gs/gs_gl.c`: active predicate, draw-order counter, bounded offset application/cleanup and per-frame reset.
+- `pc/README.md`: documented the independent runtime heuristic and its broad-match limitation.
+- `DEVELOPMENT_LOG.md`: recorded the restored rule and pending validation.
+
+### Validation
+
+- **Source comparison:** Compared the predicate, +1..+4 cap, zero factor and per-frame reset against Alpha.
+- **Log evidence:** Marked examples in the latest capture use textured perspective 3D triangles, ABE=1,
+  ZTST=GEQUAL and ZBUF.PSM=10; the captured ALPHA equations include both `0x44` and `0x48`.
+- **Build:** Pending GitHub Actions.
+- **Runtime:** Pending. Confirm the log message `gs: coplanar decal priority active` appears, retest the known
+  problem surfaces, and check that ordinary transparent geometry does not show unacceptable regressions.
