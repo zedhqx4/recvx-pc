@@ -438,3 +438,11 @@ This accounting does not include render targets, depth buffers, HD replacements,
 ### Important Performance Tradeoff
 
 Unlike the former cache, this pool does not skip decoding when an earlier texture happens to have the same identity or content. It deliberately favors bounded transient storage over retaining an unbounded set of decoded copies. Runtime profiling must determine whether repeated decoding is acceptable or whether a separate source-side optimization is needed that does not retain decoded GL snapshots.
+
+### Build Correction — Restore the Shared Decode Buffer Declaration
+
+The first Windows build of the three-slot pool failed because replacing the old cache section also removed the declaration of `decode_buf`, which remains allocated in `gsRendererInit()` and used by the pool, movie path, render-target loading, and GS transfer helpers.
+
+Restored `static unsigned int* decode_buf` beside the pool globals. This is a declaration-only correction; it does not change pool allocation, slot rotation, upload behavior, or memory limits.
+
+The initial build failed at `pc/src/gs/gs_gl.c` with five MSVC C2065 errors for `decode_buf`. The corrected commit is submitted for a fresh Windows build; runtime validation remains pending.

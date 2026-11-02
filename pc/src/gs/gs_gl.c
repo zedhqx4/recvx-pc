@@ -428,6 +428,7 @@ typedef struct {
 
 static TexturePoolSlot texture_pool[GS_TEXTURE_POOL_SIZE];
 static unsigned int texture_pool_next;
+static unsigned int* decode_buf;
 
 static GLuint get_texture(u64 tex0, u64 texa, u64 texclut, int w, int h, int rows, int cols, int* hd)
 {
