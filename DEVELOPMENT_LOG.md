@@ -387,3 +387,54 @@ The 64 MiB limit applies only to the generic decoded GS texture cache. It is not
 ### Next Checkpoint
 
 Run the Windows build, then repeat the long gameplay path that previously grew the generic cache toward 500 MB. Compare cache bytes, refreshes, evictions, texture correctness, and frame pacing. A stable byte count alone is not sufficient: inspect whether the budget causes excessive cache churn or decode spikes.
+
+## 2026-11-01 — Replace the Generic Texture Cache with a Three-Slot Upload Pool
+
+**Category:** GS renderer / bounded transient texture storage  
+**Status:** Implemented; Windows build and runtime validation pending  
+**Branch:** `experimental/movie-texture-reuse`  
+**Parent:** `6264fefe871d89d264052f9f85cbc368d000aa60`
+
+### Design Correction
+
+The preceding byte-budget cache was still the wrong lifetime model. A 64 MiB LRU is smaller than 500 MB, but it continues to preserve historical texture versions and asset identities. The goal is not to retain a smaller history; it is to retain no history of decoded GS texture snapshots.
+
+### Change
+
+In `pc/src/gs/gs_gl.c`:
+
+- Removed the generic content-addressed `CachedTex` table, its LRU policy, page-generation hash lookup, and the 64 MiB budget.
+- Added exactly three reusable OpenGL texture objects in a round-robin upload pool.
+- Each ordinary GS texture request decodes the requested current VRAM contents into the shared CPU decode buffer and uploads them into the next pool slot.
+- Pool slots retain only their allocated dimensions and GL object. A slot can grow its storage when a larger texture arrives, but it does not allocate another object for a new frame, generation, address, or asset.
+- Pool slots never shrink during a run. Since GS TEX0 dimensions are limited to 1024x1024, the nominal pool allocation has a hard upper bound of 3 × 1024 × 1024 × 4 = 12 MiB.
+- The slot advances per textured draw/upload request, not once per presented game frame. A frame may contain many draws and therefore many texture requests.
+- HD replacement textures remain on their existing file-backed path and continue to be owned by `gs_replace.c`; they are not transient GS VRAM snapshots and are not overwritten by this pool.
+- The periodic log now reports the number of pool uploads and the pool's nominal allocated bytes instead of cache entries, refreshes, and evictions.
+
+### Files Changed
+
+- `pc/src/gs/gs_gl.c`
+  - Replace historical per-texture cache entries with a fixed three-object upload pool.
+  - Remove generic cache LRU and content-generation hashing from the renderer's texture lookup path.
+  - Report pooled allocation size and upload count.
+- `DEVELOPMENT_LOG.md`
+  - Record that the preceding 64 MiB cache implementation is superseded by this pool design.
+
+### Memory Model
+
+The generic GS texture upload path owns at most three GL texture objects. Each object grows only to the largest dimensions it has needed, up to 1024x1024 RGBA8. The maximum nominal storage for the pool is therefore 12 MiB, not 64 MiB and not a history of per-frame snapshots.
+
+This accounting does not include render targets, depth buffers, HD replacements, movie textures, or driver-side overhead.
+
+### Validation
+
+- **Source review:** Confirmed that the generic `CachedTex` table, `MAX_TEX`, LRU functions, content-generation cache lookup, and 64 MiB budget are removed from `gs_gl.c`.
+- **Pool bound:** Three slots maximum; each slot is limited to 1024x1024 RGBA8 (4 MiB), for at most 12 MiB nominal allocation.
+- **OpenGL ordering:** Each upload and the draw that samples it are issued in sequence on the renderer's GL context. Slot reuse is ordered after earlier draws that referenced that slot; the driver must preserve GL command semantics when processing the update.
+- **Build:** Pending Windows Actions result.
+- **Runtime:** Pending. Test for texture corruption, upload/decode cost, frame pacing, and bounded pool allocation through the previous long gameplay path and FMVs.
+
+### Important Performance Tradeoff
+
+Unlike the former cache, this pool does not skip decoding when an earlier texture happens to have the same identity or content. It deliberately favors bounded transient storage over retaining an unbounded set of decoded copies. Runtime profiling must determine whether repeated decoding is acceptable or whether a separate source-side optimization is needed that does not retain decoded GL snapshots.
