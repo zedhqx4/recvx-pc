@@ -459,7 +459,7 @@ int pcFontUvFixEnabled(void)
 {
     if (pc_font_uv_fix_enabled < 0)
     {
-        pc_font_uv_fix_enabled = pcIniGetInt("fontUVfix", 0) != 0;
+        pc_font_uv_fix_enabled = pcIniGetInt("fontUVfix", 1) != 0;
     }
     return pc_font_uv_fix_enabled;
 }
