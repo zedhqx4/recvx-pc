@@ -835,7 +835,7 @@ static Uint64 last_mouse_move;
  * here so they never reach the game's input layer or the input recorder. */
 static int handle_decal_control_key(SDL_Scancode key)
 {
-    char notice[128];
+    static char notice[128];
     int enabled, saved = 0;
     float bias;
 

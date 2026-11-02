@@ -34,6 +34,10 @@ static int gs_scale_y(int y)
 PC_GL_FUNCS(PC_GL_DEFINE)
 #undef PC_GL_DEFINE
 
+static unsigned int decal_draw_order;
+static int decal_priority_enabled = -1;
+static float decal_bias = 1.0f;
+
 /* Decal-priority test controls. Bias is quantized to quarter-unit steps so keyboard
  * adjustments and values saved to recvx.ini remain deterministic. */
 static float gs_decal_bias_normalize(float value)
@@ -350,9 +354,6 @@ typedef struct {
 static RenderTarget rts[MAX_RT];
 static DepthBuffer dbs[MAX_DB];
 static unsigned int frame_counter;
-static unsigned int decal_draw_order;
-static int decal_priority_enabled = -1;
-static float decal_bias = 1.0f;
 static int dump_frame;
 
 /* per-interval statistics for the periodic log */
