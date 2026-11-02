@@ -533,6 +533,48 @@ void pcFontUvFixReset(int edge)
     }
 }
 
+/* The text-filter toggle is independent of fontUVfix. Default to the existing bilinear path;
+ * pressing R switches to nearest and persists the selection in recvx.ini. */
+static int pc_font_filter_linear = -1;
+static int pc_font_filter_draw_depth;
+
+int pcFontFilterIsLinear(void)
+{
+    if (pc_font_filter_linear < 0)
+    {
+        pc_font_filter_linear = (pcIniGetInt("fontFilter", 1) != 0);
+    }
+    return pc_font_filter_linear;
+}
+
+int pcFontFilterToggle(void)
+{
+    char value[8];
+
+    pc_font_filter_linear = !pcFontFilterIsLinear();
+    snprintf(value, sizeof(value), "%d", pc_font_filter_linear);
+    pcIniSet("fontFilter", value);
+    return pc_font_filter_linear;
+}
+
+int pcFontFilterDrawActive(void)
+{
+    return pc_font_filter_draw_depth > 0;
+}
+
+void pcFontFilterDrawBegin(void)
+{
+    pc_font_filter_draw_depth++;
+}
+
+void pcFontFilterDrawEnd(void)
+{
+    if (pc_font_filter_draw_depth > 0)
+    {
+        pc_font_filter_draw_depth--;
+    }
+}
+
 int pcIniFileGetInt(const char* ini, const char* key, int def)
 {
     char v[64];
@@ -928,6 +970,32 @@ static int pause_until_active(void)
 static Uint64 last_mouse_move;
 
 
+/* R toggles only the filter state captured by font glyph draws. It is not a default game binding. */
+static int font_filter_handle_event(const SDL_Event* ev)
+{
+    if ((ev->type != SDL_EVENT_KEY_DOWN) && (ev->type != SDL_EVENT_KEY_UP))
+    {
+        return 0;
+    }
+    if (ev->key.scancode != SDL_SCANCODE_R)
+    {
+        return 0;
+    }
+
+    if ((ev->type == SDL_EVENT_KEY_DOWN) && !ev->key.repeat)
+    {
+        int linear = pcFontFilterToggle();
+        const char* mode = linear ? "BILINEAR" : "NEAREST";
+        char notice[96];
+
+        snprintf(notice, sizeof(notice), "FONT FILTER: %s (R TO TOGGLE)", mode);
+        pcLog("font filtering: %s", mode);
+        title_notice_show(notice);
+    }
+
+    return 1; /* reserve both key-down and key-up; don't leak R to the game */
+}
+
 /* -------------------------------------------------------------------------------------------------
  * Live font UV edge tuner. It is deliberately separate from the menu/UI UV tuner so the two
  * systems can receive independent hotkeys and correction values in the future. */
@@ -1070,6 +1138,12 @@ int pcVideoPumpEvents(void)
         {
             last_mouse_move = SDL_GetTicks();
             SDL_ShowCursor(SDL_ENABLE);
+        }
+
+        /* R switches font glyph sampling between bilinear and nearest at runtime. */
+        if (font_filter_handle_event(&ev))
+        {
+            continue;
         }
 
         /* The font UV tuner owns its keys only while fontUVfix=1. */
