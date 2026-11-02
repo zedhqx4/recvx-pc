@@ -608,6 +608,7 @@ typedef struct {
 static RenderTarget rts[MAX_RT];
 static DepthBuffer dbs[MAX_DB];
 static unsigned int frame_counter;
+static unsigned int decal_draw_order;
 static int dump_frame;
 
 /* per-interval statistics for the periodic log */
@@ -1567,6 +1568,10 @@ void gsRendererDraw(const GsDrawState* st, const GsVertex* v, int nverts)
     int ztst = GSF(st->test, 17, 2);
     int zmsk = GSF(st->zbuf, 32, 1);
     int use_depth = (ztst != 1) || !zmsk;
+    int decal_depth_priority = use_depth && (ztst == 2) &&
+                               (GSF(st->zbuf, 24, 4) == 10) &&
+                               st->tme && !st->fst && st->abe &&
+                               (st->type >= 3) && (st->type <= 5);
     float zs = z_scale(st->zbuf);
     int afail = GSF(st->test, 12, 2);
     int ate = GSF(st->test, 0, 1);
@@ -1576,12 +1581,6 @@ void gsRendererDraw(const GsDrawState* st, const GsVertex* v, int nverts)
     int debug_material_index;
 
     debug_material_index = gs_debug_register_material(st, v, nverts, zs);
-#if 0 /* Previous broad decal eligibility predicate, retained for comparison. */
-    decal_depth_priority = decal_priority_enabled && use_depth &&
-                           (ztst == 2) && (GSF(st->zbuf, 24, 4) == 10) &&
-                           st->tme && !st->fst && st->abe &&
-                           (st->type >= 3) && (st->type <= 5);
-#endif
 
     rt->last_use = frame_counter;
     stats.draws++;
@@ -1851,20 +1850,25 @@ void gsRendererDraw(const GsDrawState* st, const GsVertex* v, int nverts)
     glBindBuffer(GL_ARRAY_BUFFER, vbo);
     glBufferData(GL_ARRAY_BUFFER, n * sizeof(GlVertex), glverts, GL_STREAM_DRAW);
 
-#if 0 /* Previous automatic polygon-offset application, retained but disabled. */
     if (decal_depth_priority)
     {
-        unsigned int priority = ++decal_draw_order;
-        if (priority > 4)
-            priority = 4;
+        static int logged = 0;
+        if (!logged)
+        {
+            pcLog("gs: coplanar decal priority active (Z16S, GEQUAL, blended textured 3D): polygon offset +1..+4 depth units by draw order");
+            logged = 1;
+        }
 
-        GLfloat priority_value = (GLfloat)priority;
-        priority_value *= decal_priority_multiplier;
-        GLfloat offset = priority_value * decal_offset_multiplier;
-        glPolygonOffset(0.0f, offset);
+        /* Give later decal draws a small depth advantage over earlier ones.
+         * Keep it bounded so render order cannot pull decals through nearby geometry. */
+        {
+            unsigned int priority = ++decal_draw_order;
+            if (priority > 4)
+                priority = 4;
+            glPolygonOffset(0.0f, (GLfloat)priority);
+        }
         glEnable(GL_POLYGON_OFFSET_FILL);
     }
-#endif
 
     if (ate && (afail != 0) && (atst != 1))
     {
@@ -1895,10 +1899,8 @@ void gsRendererDraw(const GsDrawState* st, const GsVertex* v, int nverts)
         glDrawArrays(mode, 0, n);
     }
 
-#if 0 /* Previous polygon-offset cleanup, retained but disabled. */
     if (decal_depth_priority)
         glDisable(GL_POLYGON_OFFSET_FILL);
-#endif
 
     if (gs_debug_enabled && (debug_material_index == gs_debug_selected) && (n > 0))
     {
@@ -1995,9 +1997,7 @@ void gsRendererPresent(unsigned int dispfb_fbp, unsigned int dispfb_fbw)
     if (gs_debug_selected >= gs_debug_material_count)
         gs_debug_selected = (gs_debug_material_count > 0) ? gs_debug_material_count - 1 : 0;
     gs_debug_material_count = 0;
-#if 0 /* Legacy per-frame priority counter reset. */
     decal_draw_order = 0;
-#endif
     frame_counter++;
     stats.frames++;
 
