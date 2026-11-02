@@ -623,7 +623,7 @@ The font tuner has its own state and values. It does not call or modify the menu
   - Declares the runtime filter state and font-draw scope functions.
 - `pc/src/pc_platform.c`
   - Loads `fontFilter` with a default of `1`, toggles and saves it on R, and reports the new state in the title bar.
-  - Tracks the synchronous font-draw scope.
+  - Tracks the temporary font-draw scope for direct PC submissions and OT queue insertion.
 - `src/ps2/veronica/prog/ps2_NaDraw2D.c`
   - Marks only textured `njDrawPolygon2DM()` submissions.
 - `src/ps2/veronica/prog/ps2_dummy.c`
