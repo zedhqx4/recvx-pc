@@ -49,10 +49,17 @@ static void gsTexTraceBegin(void)
     if (!gsTexTraceEnabled())
         return;
 
+    gsTexTraceCurrentId = ++gsTexTraceTransferSeq;
+    if (gsTexTraceCurrentId > 2048)
+    {
+        if (gsTexTraceCurrentId == 2049)
+            pcLog("GS_TEX_TRACE_XFER further transfer records suppressed (limit=2048)");
+        return;
+    }
+
     gsTexTraceCapture = 1;
     gsTexTracePageCount = 0;
     memset(gsTexTracePageSeen, 0, sizeof(gsTexTracePageSeen));
-    gsTexTraceCurrentId = ++gsTexTraceTransferSeq;
 }
 
 static void gsTexTraceRecordPage(unsigned int byte_addr)
