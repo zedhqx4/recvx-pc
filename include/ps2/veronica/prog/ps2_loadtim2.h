@@ -21,6 +21,9 @@ int LoadToVram(unsigned long tbp, u_long128* addr, int tbw, int psm, int pos, in
 void *UncAddr(void *val);
 int Send_1024_Clut_data(void* clt_adr, unsigned long send_clut_adr);
 int Send_Tim2_dataEx(void* tim2_top_adr, unsigned long send_image_adr, unsigned long send_clut_adr);
+#ifdef TARGET_PC
+int Send_Tim2_dataExClutOnly(void* tim2_top_adr, unsigned long send_image_adr, unsigned long send_clut_adr);
+#endif
 int Clut_Load_Func(TIM2_PICTUREHEADER* ph, unsigned long clut_addr);
 int P32_Image_Load(TIM2_PICTUREHEADER* ph, unsigned long image_addr);
 int Tim2_Image_Load(TIM2_PICTUREHEADER* ph, unsigned long image_addr);

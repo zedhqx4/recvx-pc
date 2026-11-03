@@ -51,6 +51,9 @@ typedef struct {
     int iip, tme, fge, abe, aa1, fst, ctxt, fix;
     u64 tex0, tex1, clamp, alpha, test, fba, frame, zbuf, scissor;
     u64 texa, fogcol, pabe, dthe, colclamp, texclut;
+    unsigned int texture_asset_id; /* TIM2 Gindex */
+    uint64_t texture_asset_content_hash; /* source index-plane content */
+    int texture_asset_valid;
     int font_filter_nearest; /* transient PC-only marker for njDrawPolygon2DM glyph draws */
 } GsDrawState;
 
@@ -87,3 +90,5 @@ void gsFlushLocalToLocal(unsigned int bp, unsigned int bw, unsigned int psm, uns
 u64 gsClutHash(u64 tex0);
 void gsReadClut32(u64 tex0, u64 texa, int entries, unsigned int* clut);   /* palette as the texture sees it */
 void gsDecodeTexture(u64 tex0, u64 texa, u64 texclut, int w, int h, unsigned int* rgba);
+void gsDecodeIndices(u64 tex0, int w, int h, unsigned char* indices);
+int gsTextureDiagnosticsEnabled(void);

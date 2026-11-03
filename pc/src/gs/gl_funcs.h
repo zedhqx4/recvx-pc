@@ -38,6 +38,9 @@
 #ifndef GL_TEXTURE0
 #define GL_TEXTURE0 0x84C0
 #endif
+#ifndef GL_TEXTURE1
+#define GL_TEXTURE1 0x84C1
+#endif
 #ifndef GL_FUNC_ADD
 #define GL_FUNC_ADD 0x8006
 #define GL_FUNC_SUBTRACT 0x800A
@@ -49,6 +52,12 @@
 #endif
 #ifndef GL_RGBA8
 #define GL_RGBA8 0x8058
+#endif
+#ifndef GL_R8
+#define GL_R8 0x8229
+#endif
+#ifndef GL_RED
+#define GL_RED 0x1903
 #endif
 
 #ifndef GL_NUM_EXTENSIONS

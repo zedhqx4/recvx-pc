@@ -873,3 +873,49 @@ Tab, Up/Down, Shift+Up/Down, and Backspace retain their existing edge-selection,
 - **Source review:** Confirmed a single mode state, F10 cycling only through enabled INI modes, mode-specific R handling, Escape-to-OFF behavior, removal of the menu tuner's dependency on `debug=1`, arrow-key keycode/scancode handling with repeat support, explicit before/after logging for menu adjustments, and shared profile-default arrays used by both INI fallback and Backspace reset.
 - **Windows build:** Run [41546313454](https://github.com/zedhqx4/recvx-pc/actions/runs/41546313454) passed for the preceding source revision `b9280f8` (`Build game`, `Verify executables`, and `Upload Windows build` all succeeded). This amendment changes only this comment and the development log; a fresh CI run will validate the amended commit.
 - **Runtime:** Pending. Test all four INI combinations for `fontUVfix` and `menuUVfix`, F10 cycling, R routing in each mode, and Escape exit.
+
+
+## 2026-11-03 — Port alpha's static indexed TIM2 texture cache
+
+**Category:** Renderer / texture reuse feature port  
+**Status:** Integrated into `experimental/GSps2texloadcache`; build and in-game validation pending  
+**Reference:** `alpha` at `011f54510a022d78963e9e837265fc814d2f2e6e`  
+**Destination base:** `6ea0e8d0e348b93fc96055034c756539c4e18f2a`
+
+### Scope
+
+Port alpha's existing cache behavior without merging the divergent alpha branch or replacing
+the experimental branch's GS page-generation writer, render-target synchronization, movie path,
+decal rules, or font-filter handling.
+
+### Integrated pieces
+
+- TIM2 source fingerprints (image and CLUT hashes) and the PS2 texture-bind state memo.
+- `Ps2TexLoad()` cache-hit path: re-emit GS binding state while skipping an already-cached image
+  upload; fall back to normal image upload on misses or invalidated binding state.
+- CLUT-only TIM2 reload for cached indexed images, with full `Send_Tim2_dataEx()` fallback.
+- GS asset identity carried through draw batching, TEX0/TEX2 hint invalidation, and GS texture
+  binding-generation tracking.
+- Renderer alias table keyed by TIM2 `Gindex` and source-image hash; shared indexed-atlas
+  storage, palette texture lookup, and shader-side index-to-CLUT lookup.
+- Existing experimental `gsPageGen` and page-hash machinery remains the VRAM-content cache
+  for ordinary non-asset texture entries. No second VRAM-generation system was introduced.
+
+### Files
+
+- `src/ps2/veronica/prog/ps2_dummy.c`
+- `src/ps2/veronica/prog/ps2_loadtim2.c`
+- `include/ps2/veronica/prog/ps2_dummy.h`
+- `include/ps2/veronica/prog/ps2_loadtim2.h`
+- `pc/include/pc_texture_cache.h`
+- `pc/src/gs/gs.c`
+- `pc/src/gs/gs_gl.c`
+- `pc/src/gs/gs_internal.h`
+- `pc/src/gs/gl_funcs.h`
+- `.github/workflows/build-windows.yml`
+
+### Validation boundary
+
+This step ports alpha's cache behavior rather than correcting the reported texture-assignment
+or memory-coherency failures. Those remain the next investigation after the destination branch
+builds and this baseline is exercised in-game.
