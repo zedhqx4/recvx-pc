@@ -66,6 +66,147 @@ static int pcGsTextureTraceSourceHashes(TIM2_PICTUREHEADER_EX* tim,
     return 1;
 }
 
+/* A source surface/bank is fingerprinted only on its first use in the frame.
+ * Every later use sees the same identity even if the backing buffer is edited;
+ * the new contents become a new identity at the next frame boundary. */
+#define PC_PS2_TIM2_FRAME_KEY_ENTRIES 1024
+
+typedef struct {
+    int used;
+    void* surface;
+    unsigned int bank;
+    uint64_t key0, key1;
+} PcPs2Tim2FrameKeyEntry;
+
+typedef struct {
+    uint64_t key0, key1;
+    int valid;
+} PcPs2TpCacheKey;
+
+static PcPs2Tim2FrameKeyEntry pcPs2Tim2FrameKeys[PC_PS2_TIM2_FRAME_KEY_ENTRIES];
+static PcPs2TpCacheKey pcPs2TpCacheKeys[64];
+
+static void pcPs2Tim2HashBytes(const unsigned char* data, unsigned int size,
+                               uint64_t* hash0, uint64_t* hash1)
+{
+    uint64_t a = 14695981039346656037ULL;
+    uint64_t b = 0x6A09E667F3BCC909ULL;
+    unsigned int i;
+
+    for (i = 0; i < size; i++)
+    {
+        uint64_t value = data[i];
+        a = (a ^ value) * 1099511628211ULL;
+        b ^= value + 0x9E3779B97F4A7C15ULL + (b << 6) + (b >> 2);
+        b = (b << 27) | (b >> 37);
+        b *= 0x94D049BB133111EBULL;
+    }
+
+    *hash0 = a;
+    *hash1 = b;
+}
+
+static void pcPs2Tim2HashWord(uint64_t value, uint64_t* hash0, uint64_t* hash1)
+{
+    pcPs2Tim2HashBytes((const unsigned char*)&value, sizeof(value), hash0, hash1);
+}
+
+static int pcPs2Tim2ComputeKey(TIM2_PICTUREHEADER_EX* tim, unsigned int bank,
+                               uint64_t* key0, uint64_t* key1)
+{
+    const unsigned char* file = (const unsigned char*)tim;
+    const unsigned char* image;
+    unsigned int header_bytes = (file[5] != 0) ? 128u : 16u;
+    TIM2_PICTUREHEADER* picture = (TIM2_PICTUREHEADER*)(file + header_bytes);
+    uint64_t h0 = 14695981039346656037ULL;
+    uint64_t h1 = 0x6A09E667F3BCC909ULL;
+    unsigned int payload_size;
+
+    if ((picture->HeaderSize < sizeof(TIM2_PICTUREHEADER)) ||
+        (picture->HeaderSize > picture->TotalSize) ||
+        (picture->ImageSize > picture->TotalSize - picture->HeaderSize) ||
+        (picture->ClutSize > picture->TotalSize - picture->HeaderSize - picture->ImageSize))
+        return 0;
+
+    payload_size = picture->ImageSize + picture->ClutSize;
+    if (payload_size == 0 || payload_size > 16u * 1024u * 1024u)
+        return 0;
+
+    /* Include fields that alter the GS interpretation, but exclude TpFlag/admin
+     * fields: those are runtime bookkeeping and change during OT construction. */
+    pcPs2Tim2HashWord(((uint64_t)tim->Gindex << 32) | bank, &h0, &h1);
+    pcPs2Tim2HashWord(((uint64_t)file[5] << 56) |
+                      ((uint64_t)picture->PictFormat << 48) |
+                      ((uint64_t)picture->ImageType << 40) |
+                      ((uint64_t)picture->ClutType << 32) |
+                      ((uint64_t)picture->ImageWidth << 16) |
+                      picture->ImageHeight, &h0, &h1);
+    pcPs2Tim2HashWord(((uint64_t)picture->TotalSize << 32) |
+                      picture->ImageSize, &h0, &h1);
+    pcPs2Tim2HashWord(((uint64_t)picture->ClutSize << 32) |
+                      ((uint64_t)picture->ClutColors << 16) |
+                      picture->MipMapTextures, &h0, &h1);
+    pcPs2Tim2HashWord(((uint64_t)tim->ClampFlag << 32) |
+                      picture->GsTex0.TBW, &h0, &h1);
+
+    image = (const unsigned char*)picture + picture->HeaderSize;
+    {
+        uint64_t p0, p1;
+        pcPs2Tim2HashBytes(image, payload_size, &p0, &p1);
+        h0 = (h0 ^ p0) * 1099511628211ULL;
+        h1 ^= p1 + 0x9E3779B97F4A7C15ULL + (h1 << 6) + (h1 >> 2);
+        h1 = (h1 << 27) | (h1 >> 37);
+        h1 *= 0x94D049BB133111EBULL;
+    }
+
+    *key0 = h0 ? h0 : 0xCBF29CE484222325ULL;
+    *key1 = h1 ? h1 : 0x9E3779B97F4A7C15ULL;
+    return 1;
+}
+
+static int pcPs2Tim2FrameKey(TIM2_PICTUREHEADER_EX* tim, unsigned int bank,
+                             uint64_t* key0, uint64_t* key1)
+{
+    unsigned int start, probe;
+
+    if ((tim == NULL) || (key0 == NULL) || (key1 == NULL))
+        return 0;
+
+    start = (unsigned int)(((uintptr_t)tim >> 4) ^ bank) &
+            (PC_PS2_TIM2_FRAME_KEY_ENTRIES - 1);
+
+    for (probe = 0; probe < PC_PS2_TIM2_FRAME_KEY_ENTRIES; probe++)
+    {
+        unsigned int slot = (start + probe) & (PC_PS2_TIM2_FRAME_KEY_ENTRIES - 1);
+        PcPs2Tim2FrameKeyEntry* entry = &pcPs2Tim2FrameKeys[slot];
+
+        if (entry->used)
+        {
+            if ((entry->surface == (void*)tim) && (entry->bank == bank))
+            {
+                *key0 = entry->key0;
+                *key1 = entry->key1;
+                return 1;
+            }
+            continue;
+        }
+
+        if (!pcPs2Tim2ComputeKey(tim, bank, key0, key1))
+            return 0;
+
+        entry->used = 1;
+        entry->surface = (void*)tim;
+        entry->bank = bank;
+        entry->key0 = *key0;
+        entry->key1 = *key1;
+        return 1;
+    }
+
+    /* If the bounded frame table fills, do not reuse by pointer: fall back to
+     * the ordinary upload path rather than risk aliasing different TIM2 data. */
+    return 0;
+}
+
 /* Ps2TexLoad is asked to prepare the same TP texture again for many individual
  * polygons. The deferred OT already keeps tp/bank per primitive and uploads each
  * distinct TIM2 once into its per-frame texture slots. Cache the small register
@@ -76,6 +217,7 @@ typedef struct {
     int used;
     void* surface;
     unsigned int bank;
+    uint64_t key0, key1;
     unsigned int gindex;
     unsigned int width, height, tbw;
     unsigned int image_type, pict_format, clamp_flag, format_id;
@@ -95,10 +237,11 @@ static int pcPs2Tim2LoadContext;
 
 static int pcPs2Tim2StateMatches(const PcPs2Tim2StateEntry* entry,
                                  NJS_TEXMEMLIST* addr,
-                                 TIM2_PICTUREHEADER_EX* tim)
+                                 TIM2_PICTUREHEADER_EX* tim,
+                                 uint64_t key0, uint64_t key1)
 {
     return entry->used &&
-           (entry->surface == (void*)tim) &&
+           (entry->key0 == key0) && (entry->key1 == key1) &&
            (entry->bank == addr->bank) &&
            (entry->gindex == tim->Gindex) &&
            (entry->width == tim->ImageWidth) &&
@@ -111,12 +254,13 @@ static int pcPs2Tim2StateMatches(const PcPs2Tim2StateEntry* entry,
            (entry->input_render_sub_flag == PS2_Render_tex_sub_flag);
 }
 
-static int pcPs2Tim2StateFind(NJS_TEXMEMLIST* addr, TIM2_PICTUREHEADER_EX* tim)
+static int pcPs2Tim2StateFind(NJS_TEXMEMLIST* addr, TIM2_PICTUREHEADER_EX* tim,
+                              uint64_t key0, uint64_t key1)
 {
     unsigned int i;
     for (i = 0; i < PC_PS2_TIM2_STATE_CACHE_ENTRIES; i++)
     {
-        if (pcPs2Tim2StateMatches(&pcPs2Tim2StateCache[i], addr, tim))
+        if (pcPs2Tim2StateMatches(&pcPs2Tim2StateCache[i], addr, tim, key0, key1))
             return (int)i;
     }
     return -1;
@@ -155,12 +299,15 @@ static int pcPs2TexLoadForDraw(NJS_TEXMEMLIST* addr)
     PcPs2Tim2StateEntry* entry;
     int slot;
     int result;
+    uint64_t key0 = 0, key1 = 0;
+    int key_valid;
 
     if ((addr == NULL) || (addr->texinfo.texsurface.pSurface == NULL))
         return Ps2TexLoad(addr);
 
     tim = (TIM2_PICTUREHEADER_EX*)addr->texinfo.texsurface.pSurface;
     pcPs2Tim2StateCalls++;
+    key_valid = pcPs2Tim2FrameKey(tim, addr->bank, &key0, &key1);
 
     /* Ps2_current_texbreak explicitly requests a fresh state/upload boundary. */
     if (Ps2_current_texbreak != 0)
@@ -169,7 +316,7 @@ static int pcPs2TexLoadForDraw(NJS_TEXMEMLIST* addr)
         pcPs2Tim2StateForced++;
     }
 
-    slot = pcPs2Tim2StateFind(addr, tim);
+    slot = key_valid ? pcPs2Tim2StateFind(addr, tim, key0, key1) : -1;
     if (slot >= 0)
     {
         entry = &pcPs2Tim2StateCache[slot];
@@ -195,6 +342,8 @@ static int pcPs2TexLoadForDraw(NJS_TEXMEMLIST* addr)
     entry->used = 1;
     entry->surface = (void*)tim;
     entry->bank = addr->bank;
+    entry->key0 = key0;
+    entry->key1 = key1;
     entry->gindex = tim->Gindex;
     entry->width = tim->ImageWidth;
     entry->height = tim->ImageHeight;
@@ -224,6 +373,8 @@ static void pcPs2Tim2StateEndFrame(void)
               pcPs2Tim2StateOnly, pcPs2Tim2StateForced);
 
     memset(pcPs2Tim2StateCache, 0, sizeof(pcPs2Tim2StateCache));
+    memset(pcPs2Tim2FrameKeys, 0, sizeof(pcPs2Tim2FrameKeys));
+    memset(pcPs2TpCacheKeys, 0, sizeof(pcPs2TpCacheKeys));
     pcPs2Tim2StateCalls = 0;
     pcPs2Tim2StateHits = 0;
     pcPs2Tim2StateOnly = 0;
