@@ -2567,12 +2567,14 @@ int Ps2TexLoad(NJS_TEXMEMLIST* addr)
     if (trace_enabled)
     {
         trace_seq = ++pcGsTextureTraceLoadSeq;
+        trace_hash_valid = pcGsTextureTraceSourceHashes(timp, &trace_image_hash, &trace_clut_hash);
         if (trace_seq <= 4096)
         {
-            pcLog("GS_TEX_TRACE_PS2_BEGIN seq=%u Gindex=%08x surface=%p bank=%u image=%ux%u ImageType=%u PictFormat=%u TpFlag=%u",
+            pcLog("GS_TEX_TRACE_PS2_BEGIN seq=%u Gindex=%08x surface=%p bank=%u image=%ux%u ImageType=%u PictFormat=%u TpFlag=%u hashes_valid=%u image_hash=%016llx clut_hash=%016llx",
                   trace_seq, timp->Gindex, (void*)timp, addr->bank,
                   timp->ImageWidth, timp->ImageHeight, timp->ImageType,
-                  timp->PictFormat, timp->TpFlag);
+                  timp->PictFormat, timp->TpFlag, trace_hash_valid ? 1U : 0U,
+                  trace_image_hash, trace_clut_hash);
         }
         else if (trace_seq == 4097)
         {
