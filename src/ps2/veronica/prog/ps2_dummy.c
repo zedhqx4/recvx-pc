@@ -108,7 +108,17 @@ static void pcPs2Tim2HashBytes(const unsigned char* data, unsigned int size,
 
 static void pcPs2Tim2HashWord(uint64_t value, uint64_t* hash0, uint64_t* hash1)
 {
-    pcPs2Tim2HashBytes((const unsigned char*)&value, sizeof(value), hash0, hash1);
+    unsigned int i;
+
+    /* Update the running hashes instead of reinitializing them per metadata word. */
+    for (i = 0; i < 8; i++)
+    {
+        uint64_t byte_value = (value >> (i * 8)) & 0xFFu;
+        *hash0 = (*hash0 ^ byte_value) * 1099511628211ULL;
+        *hash1 ^= byte_value + 0x9E3779B97F4A7C15ULL + (*hash1 << 6) + (*hash1 >> 2);
+        *hash1 = (*hash1 << 27) | (*hash1 >> 37);
+        *hash1 *= 0x94D049BB133111EBULL;
+    }
 }
 
 static int pcPs2Tim2ComputeKey(TIM2_PICTUREHEADER_EX* tim, unsigned int bank,
@@ -120,6 +130,7 @@ static int pcPs2Tim2ComputeKey(TIM2_PICTUREHEADER_EX* tim, unsigned int bank,
     TIM2_PICTUREHEADER* picture = (TIM2_PICTUREHEADER*)(file + header_bytes);
     uint64_t h0 = 14695981039346656037ULL;
     uint64_t h1 = 0x6A09E667F3BCC909ULL;
+    uint64_t part0, part1;
     unsigned int payload_size;
 
     if ((picture->HeaderSize < sizeof(TIM2_PICTUREHEADER)) ||
@@ -129,35 +140,38 @@ static int pcPs2Tim2ComputeKey(TIM2_PICTUREHEADER_EX* tim, unsigned int bank,
         return 0;
 
     payload_size = picture->ImageSize + picture->ClutSize;
-    if (payload_size == 0 || payload_size > 16u * 1024u * 1024u)
+    if ((payload_size == 0) || (payload_size > 16u * 1024u * 1024u))
         return 0;
 
-    /* Include fields that alter the GS interpretation, but exclude TpFlag/admin
-     * fields: those are runtime bookkeeping and change during OT construction. */
-    pcPs2Tim2HashWord(((uint64_t)tim->Gindex << 32) | bank, &h0, &h1);
-    pcPs2Tim2HashWord(((uint64_t)file[5] << 56) |
-                      ((uint64_t)picture->PictFormat << 48) |
-                      ((uint64_t)picture->ImageType << 40) |
-                      ((uint64_t)picture->ClutType << 32) |
+    /* Hash the stable TIM2 file header (Gindex, palette remap metadata, etc.).
+     * TpFlag and the admin fields lie outside this range and are runtime-only. */
+    pcPs2Tim2HashBytes(file, header_bytes, &part0, &part1);
+    h0 = (h0 ^ part0) * 1099511628211ULL;
+    h1 ^= part1 + 0x9E3779B97F4A7C15ULL + (h1 << 6) + (h1 >> 2);
+    h1 = (h1 << 27) | (h1 >> 37);
+    h1 *= 0x94D049BB133111EBULL;
+
+    pcPs2Tim2HashWord(bank, &h0, &h1);
+    pcPs2Tim2HashWord(((uint64_t)picture->TotalSize << 32) | picture->ImageSize, &h0, &h1);
+    pcPs2Tim2HashWord(((uint64_t)picture->ClutSize << 32) |
+                      ((uint64_t)picture->HeaderSize << 16) |
+                      picture->ClutColors, &h0, &h1);
+    pcPs2Tim2HashWord(((uint64_t)picture->PictFormat << 56) |
+                      ((uint64_t)picture->MipMapTextures << 48) |
+                      ((uint64_t)picture->ClutType << 40) |
+                      ((uint64_t)picture->ImageType << 32) |
                       ((uint64_t)picture->ImageWidth << 16) |
                       picture->ImageHeight, &h0, &h1);
-    pcPs2Tim2HashWord(((uint64_t)picture->TotalSize << 32) |
-                      picture->ImageSize, &h0, &h1);
-    pcPs2Tim2HashWord(((uint64_t)picture->ClutSize << 32) |
-                      ((uint64_t)picture->ClutColors << 16) |
-                      picture->MipMapTextures, &h0, &h1);
-    pcPs2Tim2HashWord(((uint64_t)tim->ClampFlag << 32) |
-                      picture->GsTex0.TBW, &h0, &h1);
+    pcPs2Tim2HashWord(tim->ClampFlag, &h0, &h1);
 
+    /* Pixel data and palette bytes are part of the identity. Deliberately exclude
+     * GsTex0: Set_GsTex updates it when the same TIM2 is prepared for another slot. */
     image = (const unsigned char*)picture + picture->HeaderSize;
-    {
-        uint64_t p0, p1;
-        pcPs2Tim2HashBytes(image, payload_size, &p0, &p1);
-        h0 = (h0 ^ p0) * 1099511628211ULL;
-        h1 ^= p1 + 0x9E3779B97F4A7C15ULL + (h1 << 6) + (h1 >> 2);
-        h1 = (h1 << 27) | (h1 >> 37);
-        h1 *= 0x94D049BB133111EBULL;
-    }
+    pcPs2Tim2HashBytes(image, payload_size, &part0, &part1);
+    h0 = (h0 ^ part0) * 1099511628211ULL;
+    h1 ^= part1 + 0x9E3779B97F4A7C15ULL + (h1 << 6) + (h1 >> 2);
+    h1 = (h1 << 27) | (h1 >> 37);
+    h1 *= 0x94D049BB133111EBULL;
 
     *key0 = h0 ? h0 : 0xCBF29CE484222325ULL;
     *key1 = h1 ? h1 : 0x9E3779B97F4A7C15ULL;
