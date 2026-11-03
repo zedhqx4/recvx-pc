@@ -2776,31 +2776,28 @@ int Ps2TexLoad(NJS_TEXMEMLIST* addr)
     }
 #endif
 
-#ifdef TARGET_PC
-    /* The draw helper caches complete per-TIM2 register state for this frame.
-     * On a miss, bypass the legacy pointer-only early-out so changed metadata is
-     * recalculated even when the source surface address was reused. */
-    if (pcPs2Tim2LoadContext && (Ps2_tex_load_tp_cancel != 0) && (timp->TpFlag != 0))
-        goto label;
-#endif
-
     if (Ps2_current_texbreak != 0)
     {
 #ifdef TARGET_PC
         trace_forced_reload = 1;
 #endif
-        for (i = 0; i < 4; i++) 
+        for (i = 0; i < 4; i++)
         {
             Ps2_tex_cache_buff[i] = NULL;
-            
             Ps2_tex_cache_beflag[i] = 0;
         }
 
         Ps2_current_texbreak = 0;
-
         goto label;
     }
-    
+
+#ifdef TARGET_PC
+    /* On a per-frame cache miss, bypass the legacy pointer-only early-out so
+     * changed TIM2 metadata is recalculated even when the source address repeats. */
+    if (pcPs2Tim2LoadContext && (Ps2_tex_load_tp_cancel != 0) && (timp->TpFlag != 0))
+        goto label;
+#endif
+
     if (timp == Ps2_tex_cache_buff[0]) 
     {
         cache_flag = 0;
