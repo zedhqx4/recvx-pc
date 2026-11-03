@@ -930,8 +930,7 @@ static int tim2_meta_has_variant(const CachedTim2Meta* meta, u64 tex0)
                                meta->texclut, meta->w, meta->h);
 }
 
-int gsRendererHasTim2Texture(u64 key0, u64 key1, u64 tex0a, u64 tex0b,
-                             u64 texa, u64 texclut, int w, int h)
+int gsRendererHasTim2Texture(u64 key0, u64 key1, u64 texa, u64 texclut)
 {
     int i;
 
@@ -940,8 +939,7 @@ int gsRendererHasTim2Texture(u64 key0, u64 key1, u64 tex0a, u64 tex0b,
         CachedTim2Meta* meta = &tim2_meta[i];
 
         if (meta->used && (meta->key0 == key0) && (meta->key1 == key1) &&
-            (meta->texa == texa) && (meta->texclut == texclut) &&
-            (meta->w == w) && (meta->h == h))
+            (meta->texa == texa) && (meta->texclut == texclut))
         {
             if (!tim2_meta_has_variant(meta, meta->tex0a))
                 return 0;
