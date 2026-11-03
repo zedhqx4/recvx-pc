@@ -381,6 +381,11 @@ static int pcPs2TexLoadForDraw(NJS_TEXMEMLIST* addr)
     result = Ps2TexLoad(addr);
     pcPs2Tim2LoadContext = 0;
 
+    /* If the TIM2 header/payload could not be fingerprinted safely, do not
+     * cache this state. Re-run the legacy setup rather than risk a false hit. */
+    if (!key_valid)
+        return result;
+
     slot = pcPs2Tim2StateAlloc(addr, tim, key0, key1, render_sub_before);
     entry = &pcPs2Tim2StateCache[slot];
     entry->used = 1;
