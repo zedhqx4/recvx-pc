@@ -560,14 +560,23 @@ static struct {
 
 void gsMemFinishTransfer(void)
 {
+    unsigned int next_x, next_y;
+    int partial_bytes, complete, changed;
+
     if (!xfer.active)
         return;
 
     /* IMAGE data is written immediately. If the game replaces the transfer registers
      * before the rectangle is complete, publish the writes already made to the renderer. */
+    complete = (xfer.y >= xfer.sy + xfer.h);
+    next_x = xfer.x;
+    next_y = xfer.y;
+    partial_bytes = xfer.partial_count;
+    changed = xfer.changed;
     xfer.active = 0;
     xfer.partial_count = 0;
-    gsXferDone(xfer.bp, xfer.bw, xfer.psm, xfer.sx, xfer.sy, xfer.w, xfer.h, xfer.changed);
+    gsXferDone(xfer.bp, xfer.bw, xfer.psm, xfer.sx, xfer.sy, xfer.w, xfer.h, changed);
+    gsTexTraceEnd(complete, changed, next_x, next_y, partial_bytes);
 }
 
 static void advance(void)
@@ -603,6 +612,15 @@ void gsMemStartTransfer(const GsRegs* r)
         xfer.active = (xfer.w != 0) && (xfer.h != 0);
         xfer.changed = 0;
         xfer.partial_count = 0;
+        gsTexTraceBegin();
+        if (gsTexTraceCapture && gsTexTraceCurrentId <= 2048)
+        {
+            pcLog("GS_TEX_TRACE_XFER_BEGIN id=%u direction=HOST_TO_LOCAL dst_BP=%u dst_8k_page=%u BW=%u PSM=%02x xy=%u,%u size=%ux%u TRXDIR=%u",
+                  gsTexTraceCurrentId, xfer.bp, xfer.bp >> 5, xfer.bw, xfer.psm,
+                  xfer.sx, xfer.sy, xfer.w, xfer.h, dir);
+        }
+        if (!xfer.active)
+            gsTexTraceEnd(1, 0, xfer.x, xfer.y, 0);
     }
     else if (dir == 2)     /* local -> local */
     {
@@ -620,6 +638,14 @@ void gsMemStartTransfer(const GsRegs* r)
         unsigned int h = (unsigned int)(r->trxreg >> 32) & 0xFFF;
         unsigned int x, y;
 
+        gsTexTraceBegin();
+        if (gsTexTraceCapture && gsTexTraceCurrentId <= 2048)
+        {
+            pcLog("GS_TEX_TRACE_XFER_BEGIN id=%u direction=LOCAL_TO_LOCAL src_BP=%u src_8k_page=%u src_BW=%u src_PSM=%02x src_xy=%u,%u dst_BP=%u dst_8k_page=%u dst_BW=%u dst_PSM=%02x dst_xy=%u,%u size=%ux%u",
+                  gsTexTraceCurrentId, sbp, sbp >> 5, sbw, spsm, ssx, ssy,
+                  dbp, dbp >> 5, dbw, dpsm, dsx, dsy, w, h);
+        }
+
         gsFlushLocalToLocal(sbp, sbw, spsm, ssx, ssy, w, h);
 
         for (y = 0; y < h; y++)
@@ -632,6 +658,7 @@ void gsMemStartTransfer(const GsRegs* r)
 
         xfer.active = 0;
         gsXferDone(dbp, dbw, dpsm, dsx, dsy, w, h, 1);
+        gsTexTraceEnd(1, 1, dsx + w, dsy + h, 0);
     }
     else                   /* local -> host: handled by gsMemReadImage */
     {
