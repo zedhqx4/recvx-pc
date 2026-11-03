@@ -55,6 +55,11 @@ static unsigned int gsTexTracePageCount;
 static unsigned char gsTexTracePageSeen[GS_PAGES];
 static unsigned int gsTexTracePages[GS_PAGES];
 static int gsTexTraceCapture;
+static int gsTexTraceTextureContext;
+static unsigned int gsTexTraceTextureSeq;
+static unsigned int gsTexTraceTextureGindex;
+static unsigned int gsTexTraceCapturePs2Seq;
+static unsigned int gsTexTraceCaptureGindex;
 
 static int gsTexTraceActive(void)
 {
@@ -69,6 +74,24 @@ void gsMemTraceArm(void)
     gsTexTraceArmed = 1;
     pcLog("GS_TEX_TRACE_ARM trigger=Ps2TexLoad transfer_limit=%u_per_direction",
           GS_TEX_TRACE_TRANSFER_LIMIT);
+}
+
+void gsMemTraceTextureLoadBegin(unsigned int seq, unsigned int gindex)
+{
+    gsMemTraceArm();
+    if (!gsTexTraceActive())
+        return;
+
+    gsTexTraceTextureContext = 1;
+    gsTexTraceTextureSeq = seq;
+    gsTexTraceTextureGindex = gindex;
+}
+
+void gsMemTraceTextureLoadEnd(void)
+{
+    gsTexTraceTextureContext = 0;
+    gsTexTraceTextureSeq = 0;
+    gsTexTraceTextureGindex = 0;
 }
 
 static const char* gsTexTraceDirectionName(int direction)
@@ -91,6 +114,8 @@ static void gsTexTraceBegin(int direction)
     gsTexTraceCapture = 0;
     gsTexTraceCurrentDirection = direction;
     gsTexTraceCurrentId = ++gsTexTraceSeq[direction];
+    gsTexTraceCapturePs2Seq = gsTexTraceTextureContext ? gsTexTraceTextureSeq : 0;
+    gsTexTraceCaptureGindex = gsTexTraceTextureContext ? gsTexTraceTextureGindex : 0;
     if (gsTexTraceCurrentId > GS_TEX_TRACE_TRANSFER_LIMIT)
     {
         if (gsTexTraceCurrentId == GS_TEX_TRACE_TRANSFER_LIMIT + 1)
@@ -144,8 +169,9 @@ static void gsTexTraceEnd(int complete, int changed, unsigned int next_x,
         used += (size_t)n;
     }
 
-    pcLog("GS_TEX_TRACE_XFER_END direction=%s id=%u complete=%u changed=%u next=%u,%u partial_bytes=%d touched_8k_pages=%u pages=[%s]%s",
+    pcLog("GS_TEX_TRACE_XFER_END direction=%s id=%u ps2_seq=%u Gindex=%08x complete=%u changed=%u next=%u,%u partial_bytes=%d touched_8k_pages=%u pages=[%s]%s",
           gsTexTraceDirectionName(gsTexTraceCurrentDirection), gsTexTraceCurrentId,
+          gsTexTraceCapturePs2Seq, gsTexTraceCaptureGindex,
           complete ? 1U : 0U, changed ? 1U : 0U,
           next_x, next_y, partial_bytes, gsTexTracePageCount, page_list,
           (gsTexTracePageCount > shown) ? ",..." : "");
@@ -659,8 +685,9 @@ void gsMemStartTransfer(const GsRegs* r)
         gsTexTraceBegin(GS_TEX_TRACE_HOST_TO_LOCAL);
         if (gsTexTraceCapture)
         {
-            pcLog("GS_TEX_TRACE_XFER_BEGIN id=%u direction=HOST_TO_LOCAL dst_BP=%u dst_8k_page=%u BW=%u PSM=%02x xy=%u,%u size=%ux%u TRXDIR=%u",
-                  gsTexTraceCurrentId, xfer.bp, xfer.bp >> 5, xfer.bw, xfer.psm,
+            pcLog("GS_TEX_TRACE_XFER_BEGIN id=%u direction=HOST_TO_LOCAL ps2_seq=%u Gindex=%08x dst_BP=%u dst_8k_page=%u BW=%u PSM=%02x xy=%u,%u size=%ux%u TRXDIR=%u",
+                  gsTexTraceCurrentId, gsTexTraceCapturePs2Seq, gsTexTraceCaptureGindex,
+                  xfer.bp, xfer.bp >> 5, xfer.bw, xfer.psm,
                   xfer.sx, xfer.sy, xfer.w, xfer.h, dir);
         }
         if (!xfer.active)
@@ -685,8 +712,9 @@ void gsMemStartTransfer(const GsRegs* r)
         gsTexTraceBegin(GS_TEX_TRACE_LOCAL_TO_LOCAL);
         if (gsTexTraceCapture)
         {
-            pcLog("GS_TEX_TRACE_XFER_BEGIN id=%u direction=LOCAL_TO_LOCAL src_BP=%u src_8k_page=%u src_BW=%u src_PSM=%02x src_xy=%u,%u dst_BP=%u dst_8k_page=%u dst_BW=%u dst_PSM=%02x dst_xy=%u,%u size=%ux%u",
-                  gsTexTraceCurrentId, sbp, sbp >> 5, sbw, spsm, ssx, ssy,
+            pcLog("GS_TEX_TRACE_XFER_BEGIN id=%u direction=LOCAL_TO_LOCAL ps2_seq=%u Gindex=%08x src_BP=%u src_8k_page=%u src_BW=%u src_PSM=%02x src_xy=%u,%u dst_BP=%u dst_8k_page=%u dst_BW=%u dst_PSM=%02x dst_xy=%u,%u size=%ux%u",
+                  gsTexTraceCurrentId, gsTexTraceCapturePs2Seq, gsTexTraceCaptureGindex,
+                  sbp, sbp >> 5, sbw, spsm, ssx, ssy,
                   dbp, dbp >> 5, dbw, dpsm, dsx, dsy, w, h);
         }
 
@@ -915,8 +943,10 @@ void gsMemReadImage(const GsRegs* r, unsigned char* out)
     {
         unsigned int seq = ++gsTexTraceSeq[GS_TEX_TRACE_LOCAL_TO_HOST];
         if (seq <= GS_TEX_TRACE_TRANSFER_LIMIT)
-            pcLog("GS_TEX_TRACE_READBACK seq=%u direction=LOCAL_TO_HOST src_BP=%u src_8k_page=%u BW=%u PSM=%02x xy=%u,%u size=%ux%u",
-                  seq, sbp, sbp >> 5, sbw, spsm, ssx, ssy, w, h);
+            pcLog("GS_TEX_TRACE_READBACK seq=%u direction=LOCAL_TO_HOST ps2_seq=%u Gindex=%08x src_BP=%u src_8k_page=%u BW=%u PSM=%02x xy=%u,%u size=%ux%u",
+                  seq, gsTexTraceTextureContext ? gsTexTraceTextureSeq : 0,
+                  gsTexTraceTextureContext ? gsTexTraceTextureGindex : 0,
+                  sbp, sbp >> 5, sbw, spsm, ssx, ssy, w, h);
         else if (seq == GS_TEX_TRACE_TRANSFER_LIMIT + 1)
             pcLog("GS_TEX_TRACE_READBACK further records suppressed (limit=%u)",
                   GS_TEX_TRACE_TRANSFER_LIMIT);
