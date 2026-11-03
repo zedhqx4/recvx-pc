@@ -897,3 +897,35 @@ The PC build force-includes `pc/include/pc_prefix.h`. It includes the host stand
 - Correction committed as `7e098ff84a380d6f7b8b6434f089b8247c93e6a2`; source verification confirms seven `uint64_t` uses and no remaining `unsigned long long` in that file.
 - A new Windows build for the corrected commit is still pending; the workflow is manually dispatched and no new build run has been started.
 - Runtime validation pending.
+
+
+## 2026-11-02 — GS Texture Trace Capture Window and Per-Direction Budgets
+
+### Problem
+The previous capture spent the shared 2,048-transfer budget on GS startup traffic before normal texture loading began. As a result, the log stopped recording host-to-local uploads before the scene under investigation. Renderer texture-read and cache-lookup records could also include pre-texture startup activity.
+
+### Change
+- Arm GS memory-transfer tracing lazily from the first `Ps2TexLoad()`, before that call can upload its TIM2 image. With `RECVX_GS_TEX_TRACE` unset, the trace remains inactive.
+- Scope a diagnostic context to each `Ps2TexLoad()` call. Transfers started during that call snapshot its `ps2_seq` and `Gindex`, so their BEGIN/END records can be tied back to the matching TIM2 pointer/hash record. The context is cleared after `loadImage()`.
+- Give `HOST_TO_LOCAL`, `LOCAL_TO_LOCAL`, and `LOCAL_TO_HOST` readbacks independent 2,048-record budgets. One transfer direction can no longer consume the others' capture allowance.
+- Gate renderer cache lookup transitions and actual sampled-texture read traces on the same armed state. Their existing physical-page and `gsPageGen` reporting remains intact, but startup draws no longer consume their capture windows.
+- Preserve transfer page collection from actual writes in `touch()`; XFER_END continues to report the changed status and resulting generation for each touched 8 KiB page.
+
+### Files Changed
+- `pc/src/gs/gs_mem.c`
+  - Adds lazy trace arming, scoped TIM2 context, per-direction counters/limits, and PS2 sequence/Gindex fields in transfer and readback records.
+- `pc/src/gs/gs_internal.h`
+  - Declares the trace lifecycle and armed-state hooks.
+- `pc/src/gs/gs_gl.c`
+  - Waits for the shared armed state before recording cache lookup and sampled-texture read transitions.
+- `src/ps2/veronica/prog/ps2_dummy.c`
+  - Begins the trace context at the first point in `Ps2TexLoad()` and closes it after `loadImage()`.
+- `DEVELOPMENT_LOG.md`
+  - Records this diagnostic capture correction.
+
+### Validation
+- **Source review:** Confirmed that H2L and L2L use separate sequence counters, readbacks use their own counter, each direction has a 2,048-record limit, and all transfer-trace paths require the armed state.
+- **Correlation review:** Confirmed transfer BEGIN/END records carry `ps2_seq` and `Gindex`; renderer lookup/read records retain TEX0/TBP0 and physical page-generation details.
+- **Compatibility review:** The previous `uint64_t` MSVC fix in `ps2_dummy.c` remains present.
+- **Build:** Not yet run for this revision. The Windows workflow is configured for manual dispatch on this experimental branch; the previous failed run validated the earlier revision only.
+- **Runtime:** Pending. Repeat the same scene/texture transition with `RECVX_GS_TEX_TRACE=1`; inspect whether the transfer pages and resulting generations match the pages reported by `GS_TEX_TRACE_LOOKUP` and `GS_TEX_TRACE_READ`.
