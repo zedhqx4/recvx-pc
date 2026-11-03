@@ -220,6 +220,7 @@ static void latch_vertex(u64 xyz, int has_f, int kick)
 /* registers */
 
 static void clut_load(u64 tex0);
+static void clut_cache_reset(void);
 
 void gsWriteReg(int reg, u64 value)
 {
@@ -618,11 +619,289 @@ static unsigned int expand24(unsigned int c, u64 texa)
 static unsigned short clut_buf[512];
 static unsigned int clut_cbp0, clut_cbp1;
 
+#define GS_CLUT_CACHE_ENTRIES 64
+
+typedef struct {
+    int valid;
+    unsigned int psm, cbp, cpsm, csm, csa;
+    u64 texclut;
+    unsigned int entries;
+    unsigned int page_count;
+    unsigned short pages[GS_PAGES];
+    unsigned int page_generations[GS_PAGES];
+    unsigned int colors[256];
+    unsigned int last_use;
+} GsClutCacheEntry;
+
+static GsClutCacheEntry gsClutCache[GS_CLUT_CACHE_ENTRIES];
+static unsigned int gsClutCacheClock;
+static unsigned int gsClutCacheRequests;
+static unsigned int gsClutCacheHits;
+static unsigned int gsClutCacheMisses;
+static unsigned int gsClutCacheEntriesRead;
+static unsigned int gsClutCacheEntriesAvoided;
+static unsigned int gsClutCacheFlushes;
+static unsigned int gsClutCacheFlushesAvoided;
+
 static int clut_entries(unsigned int psm)
 {
     if ((psm == GS_PSMT8) || (psm == GS_PSMT8H)) return 256;
     if ((psm == GS_PSMT4) || (psm == GS_PSMT4HL) || (psm == GS_PSMT4HH)) return 16;
     return 0;
+}
+
+static void clut_cache_reset(void)
+{
+    memset(gsClutCache, 0, sizeof(gsClutCache));
+    memset(clut_buf, 0, sizeof(clut_buf));
+    clut_cbp0 = clut_cbp1 = 0;
+    gsClutCacheClock = 0;
+    gsClutCacheRequests = 0;
+    gsClutCacheHits = 0;
+    gsClutCacheMisses = 0;
+    gsClutCacheEntriesRead = 0;
+    gsClutCacheEntriesAvoided = 0;
+    gsClutCacheFlushes = 0;
+    gsClutCacheFlushesAvoided = 0;
+}
+
+static int clut_cache_key_matches(const GsClutCacheEntry* entry,
+                                  unsigned int psm, unsigned int cbp,
+                                  unsigned int cpsm, unsigned int csm,
+                                  unsigned int csa, u64 texclut, int entries)
+{
+    return entry->valid &&
+           (entry->psm == psm) && (entry->cbp == cbp) &&
+           (entry->cpsm == cpsm) && (entry->csm == csm) &&
+           (entry->csa == csa) && (entry->texclut == texclut) &&
+           (entry->entries == (unsigned int)entries);
+}
+
+static int clut_cache_pages_current(const GsClutCacheEntry* entry)
+{
+    unsigned int i;
+
+    if (entry->page_count == 0)
+        return 0;
+
+    for (i = 0; i < entry->page_count; i++)
+    {
+        if (gsPageGen[entry->pages[i]] != entry->page_generations[i])
+            return 0;
+    }
+
+    return 1;
+}
+
+static GsClutCacheEntry* clut_cache_find(unsigned int psm, unsigned int cbp,
+                                         unsigned int cpsm, unsigned int csm,
+                                         unsigned int csa, u64 texclut, int entries)
+{
+    unsigned int i;
+
+    for (i = 0; i < GS_CLUT_CACHE_ENTRIES; i++)
+    {
+        if (clut_cache_key_matches(&gsClutCache[i], psm, cbp, cpsm, csm,
+                                   csa, texclut, entries))
+            return &gsClutCache[i];
+    }
+
+    return NULL;
+}
+
+static GsClutCacheEntry* clut_cache_alloc(void)
+{
+    unsigned int i, oldest = 0;
+
+    for (i = 0; i < GS_CLUT_CACHE_ENTRIES; i++)
+    {
+        if (!gsClutCache[i].valid)
+            return &gsClutCache[i];
+
+        if (gsClutCache[i].last_use < gsClutCache[oldest].last_use)
+            oldest = i;
+    }
+
+    return &gsClutCache[oldest];
+}
+
+/* Read a CLUT only on a cache miss or after a write changed one of its GS pages. */
+static int clut_cache_capture(GsClutCacheEntry* entry,
+                              unsigned int psm, unsigned int cbp,
+                              unsigned int cpsm, unsigned int csm,
+                              unsigned int csa, int entries, u64 texclut)
+{
+    unsigned char seen[GS_PAGES / 8];
+    unsigned int bw = 1;
+    unsigned int read_psm = ((cpsm == 0) || (cpsm == 1)) ? GS_PSMCT32 :
+                            ((cpsm == 10) ? GS_PSMCT16S : GS_PSMCT16);
+    int i;
+
+    memset(seen, 0, sizeof(seen));
+    entry->page_count = 0;
+
+    for (i = 0; i < entries; i++)
+    {
+        unsigned int x, y, e = ((entries == 16) ? csa * 16 : 0) + (unsigned int)i;
+        unsigned int page;
+
+        if (csm == 0)
+        {
+            if (entries == 256)
+            {
+                /* CSM1: bits 3 and 4 of the index are swapped in the 16x16 layout. */
+                unsigned int j = ((unsigned int)i & 0xE7) |
+                                 (((unsigned int)i & 0x08) << 1) |
+                                 (((unsigned int)i & 0x10) >> 1);
+                x = j & 15;
+                y = j >> 4;
+            }
+            else
+            {
+                x = (unsigned int)i & 7;
+                y = (unsigned int)i >> 3;
+            }
+        }
+        else
+        {
+            bw = GSF(texclut, 0, 6);
+            x = GSF(texclut, 6, 6) * 16 + (unsigned int)i;
+            y = GSF(texclut, 12, 10);
+        }
+
+        page = gsMemPageForPixel(read_psm, cbp, bw, x, y);
+        if (page >= GS_PAGES)
+        {
+            entry->page_count = 0;
+            return 0;
+        }
+
+        if (!(seen[page >> 3] & (1u << (page & 7))))
+        {
+            seen[page >> 3] |= (unsigned char)(1u << (page & 7));
+            entry->pages[entry->page_count++] = (unsigned short)page;
+        }
+
+        entry->colors[i] = gsMemRead(read_psm, cbp, bw, x, y);
+    }
+
+    for (i = 0; i < (int)entry->page_count; i++)
+        entry->page_generations[i] = gsPageGen[entry->pages[i]];
+
+    entry->psm = psm;
+    entry->cbp = cbp;
+    entry->cpsm = cpsm;
+    entry->csm = csm;
+    entry->csa = csa;
+    entry->texclut = texclut;
+    entry->entries = (unsigned int)entries;
+    entry->valid = 1;
+
+    return 1;
+}
+
+/* Apply the cached/raw palette snapshot. Flush queued primitives only when clut_buf
+ * actually changes; identical palette bytes cannot affect those already queued. */
+static int clut_cache_apply(const GsClutCacheEntry* entry, int entries,
+                            unsigned int cpsm, unsigned int csa)
+{
+    int i, changed = 0;
+
+    for (i = 0; i < entries; i++)
+    {
+        unsigned int e = ((entries == 16) ? csa * 16 : 0) + (unsigned int)i;
+        unsigned int c = entry->colors[i];
+
+        if ((cpsm == 0) || (cpsm == 1))
+        {
+            e &= 255;
+            if ((clut_buf[e] != (unsigned short)c) ||
+                (clut_buf[e + 256] != (unsigned short)(c >> 16)))
+                changed = 1;
+        }
+        else if (clut_buf[e & 511] != (unsigned short)c)
+        {
+            changed = 1;
+        }
+    }
+
+    if (!changed)
+        return 0;
+
+    gsFlushPrims();
+    gsClutCacheFlushes++;
+
+    for (i = 0; i < entries; i++)
+    {
+        unsigned int e = ((entries == 16) ? csa * 16 : 0) + (unsigned int)i;
+        unsigned int c = entry->colors[i];
+
+        if ((cpsm == 0) || (cpsm == 1))
+        {
+            e &= 255;
+            clut_buf[e] = (unsigned short)c;
+            clut_buf[e + 256] = (unsigned short)(c >> 16);
+        }
+        else
+        {
+            clut_buf[e & 511] = (unsigned short)c;
+        }
+    }
+
+    return 1;
+}
+
+static void clut_load_legacy(u64 tex0, int entries)
+{
+    unsigned int cbp = GSF(tex0, 37, 14);
+    unsigned int cpsm = GSF(tex0, 51, 4);
+    unsigned int csm = GSF(tex0, 55, 1);
+    unsigned int csa = GSF(tex0, 56, 5);
+    int i;
+
+    gsFlushPrims();
+
+    for (i = 0; i < entries; i++)
+    {
+        unsigned int x, y, bw = 1, e = ((entries == 16) ? csa * 16 : 0) + (unsigned int)i;
+
+        if (csm == 0)
+        {
+            if (entries == 256)
+            {
+                unsigned int j = ((unsigned int)i & 0xE7) |
+                                 (((unsigned int)i & 0x08) << 1) |
+                                 (((unsigned int)i & 0x10) >> 1);
+                x = j & 15;
+                y = j >> 4;
+            }
+            else
+            {
+                x = (unsigned int)i & 7;
+                y = (unsigned int)i >> 3;
+            }
+        }
+        else
+        {
+            bw = GSF(gsRegs.texclut, 0, 6);
+            x = GSF(gsRegs.texclut, 6, 6) * 16 + (unsigned int)i;
+            y = GSF(gsRegs.texclut, 12, 10);
+        }
+
+        if ((cpsm == 0) || (cpsm == 1))
+        {
+            unsigned int c = gsMemRead(GS_PSMCT32, cbp, bw, x, y);
+            e &= 255;
+            clut_buf[e] = (unsigned short)c;
+            clut_buf[e + 256] = (unsigned short)(c >> 16);
+        }
+        else
+        {
+            clut_buf[e & 511] =
+                (unsigned short)gsMemRead((cpsm == 10) ? GS_PSMCT16S : GS_PSMCT16,
+                                          cbp, bw, x, y);
+        }
+    }
 }
 
 static void clut_load(u64 tex0)
@@ -633,13 +912,13 @@ static void clut_load(u64 tex0)
     unsigned int csm = GSF(tex0, 55, 1);
     unsigned int csa = GSF(tex0, 56, 5);
     unsigned int cld = GSF(tex0, 61, 3);
+    u64 texclut = csm ? gsRegs.texclut : 0;
     int entries = clut_entries(psm);
     int i, load;
+    GsClutCacheEntry* entry;
 
     if (entries == 0)
-    {
         return;
-    }
 
     switch (cld)
     {
@@ -652,53 +931,58 @@ static void clut_load(u64 tex0)
     }
 
     if (!load)
+        return;
+
+    gsClutCacheRequests++;
+    entry = clut_cache_find(psm, cbp, cpsm, csm, csa, texclut, entries);
+
+    if (entry != NULL && clut_cache_pages_current(entry))
     {
+        gsClutCacheHits++;
+        gsClutCacheEntriesAvoided += (unsigned int)entries;
+        entry->last_use = ++gsClutCacheClock;
+        if (!clut_cache_apply(entry, entries, cpsm, csa))
+            gsClutCacheFlushesAvoided++;
         return;
     }
 
-    /* primitives already queued use the old palette */
-    gsFlushPrims();
+    if (entry == NULL)
+        entry = clut_cache_alloc();
 
-    for (i = 0; i < entries; i++)
+    entry->valid = 0;
+    gsClutCacheMisses++;
+
+    if (!clut_cache_capture(entry, psm, cbp, cpsm, csm, csa, entries, texclut))
     {
-        unsigned int x, y, bw = 1, e = ((entries == 16) ? csa * 16 : 0) + i;
-
-        if (csm == 0)
-        {
-            if (entries == 256)
-            {
-                /* CSM1: bits 3 and 4 of the index are swapped in the 16x16 layout */
-                unsigned int j = (i & 0xE7) | ((i & 0x08) << 1) | ((i & 0x10) >> 1);
-
-                x = j & 15;
-                y = j >> 4;
-            }
-            else
-            {
-                x = i & 7;
-                y = i >> 3;
-            }
-        }
-        else
-        {
-            bw = GSF(gsRegs.texclut, 0, 6);
-            x = GSF(gsRegs.texclut, 6, 6) * 16 + i;
-            y = GSF(gsRegs.texclut, 12, 10);
-        }
-
-        if ((cpsm == 0) || (cpsm == 1))
-        {
-            unsigned int c = gsMemRead(GS_PSMCT32, cbp, bw, x, y);
-
-            e &= 255;
-            clut_buf[e] = (unsigned short)c;
-            clut_buf[e + 256] = (unsigned short)(c >> 16);
-        }
-        else
-        {
-            clut_buf[e & 511] = (unsigned short)gsMemRead((cpsm == 10) ? GS_PSMCT16S : GS_PSMCT16, cbp, bw, x, y);
-        }
+        entry->valid = 0;
+        clut_load_legacy(tex0, entries);
+        gsClutCacheEntriesRead += (unsigned int)entries;
+        gsClutCacheFlushes++;
+        return;
     }
+
+    gsClutCacheEntriesRead += (unsigned int)entries;
+    entry->last_use = ++gsClutCacheClock;
+    clut_cache_apply(entry, entries, cpsm, csa);
+}
+
+void gsClutCacheLogStats(void)
+{
+    if (gsClutCacheRequests != 0)
+    {
+        pcLog("gs: CLUT requests=%u hits=%u misses=%u palette_entries_read=%u avoided=%u flushes=%u flushes_avoided=%u",
+              gsClutCacheRequests, gsClutCacheHits, gsClutCacheMisses,
+              gsClutCacheEntriesRead, gsClutCacheEntriesAvoided,
+              gsClutCacheFlushes, gsClutCacheFlushesAvoided);
+    }
+
+    gsClutCacheRequests = 0;
+    gsClutCacheHits = 0;
+    gsClutCacheMisses = 0;
+    gsClutCacheEntriesRead = 0;
+    gsClutCacheEntriesAvoided = 0;
+    gsClutCacheFlushes = 0;
+    gsClutCacheFlushesAvoided = 0;
 }
 
 static void read_clut(u64 tex0, u64 texa, int entries, unsigned int* clut)
@@ -813,6 +1097,7 @@ void pcGsInit(unsigned char* scratchpad)
     pcScratchpad = scratchpad;
     gsMemInit();
     gsRendererInit();
+    clut_cache_reset();
 }
 
 void pcGsSetDisplay(unsigned int fbp, unsigned int fbw)
