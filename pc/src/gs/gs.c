@@ -276,13 +276,27 @@ void gsWriteReg(int reg, u64 value)
     case 0x4d: gsRegs.frame[1] = value; break;
     case 0x4e: gsRegs.zbuf[0] = value; break;
     case 0x4f: gsRegs.zbuf[1] = value; break;
-    case 0x50: gsRegs.bitbltbuf = value; break;
-    case 0x51: gsRegs.trxpos = value; break;
-    case 0x52: gsRegs.trxreg = value; break;
+    case 0x50:
+        if (gsRegs.bitbltbuf != value) gsMemFinishTransfer();
+        gsRegs.bitbltbuf = value;
+        break;
+    case 0x51:
+        if (gsRegs.trxpos != value) gsMemFinishTransfer();
+        gsRegs.trxpos = value;
+        break;
+    case 0x52:
+        if (gsRegs.trxreg != value) gsMemFinishTransfer();
+        gsRegs.trxreg = value;
+        break;
     case 0x53:
+        gsMemFinishTransfer();
         gsRegs.trxdir = value;
         gsFlushPrims();
         gsMemStartTransfer(&gsRegs);
+        break;
+    case 0x54: /* HWREG: one 64-bit host-to-local data value */
+        if ((gsRegs.trxdir & 3) == 0)
+            gsMemTransferBytes((const unsigned char*)&value, 8);
         break;
     default:
         break;
