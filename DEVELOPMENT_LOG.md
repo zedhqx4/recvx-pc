@@ -929,3 +929,43 @@ The previous capture spent the shared 2,048-transfer budget on GS startup traffi
 - **Compatibility review:** The previous `uint64_t` MSVC fix in `ps2_dummy.c` remains present.
 - **Build:** Not yet run for this revision. The Windows workflow is configured for manual dispatch on this experimental branch; the previous failed run validated the earlier revision only.
 - **Runtime:** Pending. Repeat the same scene/texture transition with `RECVX_GS_TEX_TRACE=1`; inspect whether the transfer pages and resulting generations match the pages reported by `GS_TEX_TRACE_LOOKUP` and `GS_TEX_TRACE_READ`.
+
+
+## 2026-11-02 — GS Host-to-Local Redundant Transfer Cache
+
+**Category:** GS memory / redundant texture upload work  
+**Status:** Implemented in source; Windows build and runtime validation pending  
+**Branch:** `experimental/GS-ps2texloadcache`
+
+### Behavior
+
+- Adds an opt-in cache at the GS host-to-local transfer layer. It does **not** bypass `Ps2TexLoad()`, change its pointer-cache decisions, skip TEX0/TEX1/CLAMP/TEST writes, or modify the renderer's OpenGL texture cache.
+- Each eligible complete IMAGE transfer is identified by exact destination metadata (BP, BW, PSM, rectangle), payload size, and two independently mixed 64-bit hashes of the complete incoming payload. TIM2 pointer reuse therefore cannot make two different payloads alias.
+- On the first occurrence, the existing transfer path runs normally. During that transfer, the cache records every physical 8 KiB GS page addressed by the GS swizzle, including pages whose bytes already matched and did not increment `gsPageGen`.
+- A later exact match is skipped only when all recorded destination pages still have the same generation fingerprint. Any intervening GS write that changes a byte in one of those pages invalidates the entry.
+- The cache uses a fixed 256-entry metadata table; it does not allocate a VRAM mirror or retain source image bytes. It conservatively declines the fast path whenever the destination page band overlaps a currently rendered OpenGL render target, because those GPU writes may not yet be reflected in `gsVram`.
+- Partial, fragmented, unsupported, or non-exact-size transfers always use the original write path. A cache hit completes through the normal `gsMemFinishTransfer()` and `gsXferDone()` path with `changed=0`.
+
+### Activation
+
+```powershell
+$env:RECVX_GS_TEX_CACHE = "1"
+.\recvx.exe
+```
+
+Remove the variable to restore the original transfer behavior. `RECVX_GS_TEX_TRACE` is independent and is not required.
+
+### Files Changed
+
+- `pc/src/gs/gs_mem.c`: payload hashing, fixed transfer cache, physical-page capture in `mem_write()`, generation validation, and no-write transfer completion.
+- `pc/src/gs/gs_gl.c`: conservative render-target ownership query.
+- `pc/src/gs/gs_internal.h`: declaration of the render-target safety query.
+- `DEVELOPMENT_LOG.md`: implementation details and validation status.
+
+### Validation
+
+- **Source review:** Admission requires a complete host-to-local transfer delivered in one data chunk, with an exact byte count for the selected PSM and rectangle.
+- **Invalidation review:** Physical-page capture follows the same swizzled byte addresses used by `mem_write()`, before equality checks; generations are snapshotted after the regular transfer-finish callback.
+- **Render-target review:** The fast path declines destinations overlapping a currently rendered target using the renderer's conservative page-band overlap test.
+- **Build:** Not run; the Windows workflow is manual-dispatch only and no workflow-dispatch action is available in this session.
+- **Runtime:** Pending. Start with only `RECVX_GS_TEX_CACHE=1`, without trace, then exercise repeated camera changes, menus, scene transitions, and video playback. Check for `GS_TEX_CACHE_HIT` records and compare against the same scene with the variable removed.
