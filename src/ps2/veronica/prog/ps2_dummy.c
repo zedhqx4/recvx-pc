@@ -269,33 +269,58 @@ static int pcPs2Tim2StateMatches(const PcPs2Tim2StateEntry* entry,
            (entry->input_render_sub_flag == PS2_Render_tex_sub_flag);
 }
 
-static int pcPs2Tim2StateFind(NJS_TEXMEMLIST* addr, TIM2_PICTUREHEADER_EX* tim,
-                              uint64_t key0, uint64_t key1)
+static unsigned int pcPs2Tim2StateHash(NJS_TEXMEMLIST* addr,
+                                               TIM2_PICTUREHEADER_EX* tim,
+                                               uint64_t key0, uint64_t key1,
+                                               unsigned int render_sub_flag)
 {
-    unsigned int i;
-    for (i = 0; i < PC_PS2_TIM2_STATE_CACHE_ENTRIES; i++)
+    uint64_t hash = key0 ^ (key1 + 0x9E3779B97F4A7C15ULL);
+    hash ^= ((uint64_t)addr->bank << 32) | tim->Gindex;
+    hash ^= (uint64_t)render_sub_flag * 0xD6E8FEB86659FD93ULL;
+    hash ^= hash >> 32;
+    return (unsigned int)hash & (PC_PS2_TIM2_STATE_CACHE_ENTRIES - 1);
+}
+
+static int pcPs2Tim2StateFind(NJS_TEXMEMLIST* addr, TIM2_PICTUREHEADER_EX* tim,
+                              uint64_t key0, uint64_t key1,
+                              unsigned int render_sub_flag)
+{
+    unsigned int probe;
+    unsigned int start = pcPs2Tim2StateHash(addr, tim, key0, key1, render_sub_flag);
+
+    for (probe = 0; probe < PC_PS2_TIM2_STATE_CACHE_ENTRIES; probe++)
     {
-        if (pcPs2Tim2StateMatches(&pcPs2Tim2StateCache[i], addr, tim, key0, key1))
-            return (int)i;
+        unsigned int slot = (start + probe) & (PC_PS2_TIM2_STATE_CACHE_ENTRIES - 1);
+        PcPs2Tim2StateEntry* entry = &pcPs2Tim2StateCache[slot];
+
+        /* Entries are only inserted and the table is only cleared per frame/break;
+         * no tombstones exist, so the first empty slot ends the search. */
+        if (!entry->used)
+            return -1;
+
+        if (pcPs2Tim2StateMatches(entry, addr, tim, key0, key1))
+            return (int)slot;
     }
+
     return -1;
 }
 
-static int pcPs2Tim2StateAlloc(NJS_TEXMEMLIST* addr, TIM2_PICTUREHEADER_EX* tim)
+static int pcPs2Tim2StateAlloc(NJS_TEXMEMLIST* addr, TIM2_PICTUREHEADER_EX* tim,
+                               uint64_t key0, uint64_t key1,
+                               unsigned int render_sub_flag)
 {
-    unsigned int i;
-    unsigned int start = (unsigned int)(((uintptr_t)tim >> 4) ^ addr->bank ^ tim->Gindex) &
-                         (PC_PS2_TIM2_STATE_CACHE_ENTRIES - 1);
+    unsigned int probe;
+    unsigned int start = pcPs2Tim2StateHash(addr, tim, key0, key1, render_sub_flag);
 
-    for (i = 0; i < PC_PS2_TIM2_STATE_CACHE_ENTRIES; i++)
+    for (probe = 0; probe < PC_PS2_TIM2_STATE_CACHE_ENTRIES; probe++)
     {
-        unsigned int slot = (start + i) & (PC_PS2_TIM2_STATE_CACHE_ENTRIES - 1);
+        unsigned int slot = (start + probe) & (PC_PS2_TIM2_STATE_CACHE_ENTRIES - 1);
         if (!pcPs2Tim2StateCache[slot].used)
             return (int)slot;
     }
 
     /* More than 512 distinct TIM2 states in one frame is outside the expected OT
-     * workload; recycle the initial probe slot rather than allocate unbounded memory. */
+     * workload; recycle the first probe slot rather than allocate unbounded memory. */
     return (int)start;
 }
 
@@ -323,16 +348,18 @@ static int pcPs2TexLoadForDraw(NJS_TEXMEMLIST* addr)
 
     tim = (TIM2_PICTUREHEADER_EX*)addr->texinfo.texsurface.pSurface;
     pcPs2Tim2StateCalls++;
-    key_valid = pcPs2Tim2FrameKey(tim, addr->bank, &key0, &key1);
 
-    /* Ps2_current_texbreak explicitly requests a fresh state/upload boundary. */
+    /* Ps2_current_texbreak explicitly requests a fresh identity/state boundary. */
     if (Ps2_current_texbreak != 0)
     {
         memset(pcPs2Tim2StateCache, 0, sizeof(pcPs2Tim2StateCache));
+        memset(pcPs2Tim2FrameKeys, 0, sizeof(pcPs2Tim2FrameKeys));
         pcPs2Tim2StateForced++;
     }
 
-    slot = key_valid ? pcPs2Tim2StateFind(addr, tim, key0, key1) : -1;
+    key_valid = pcPs2Tim2FrameKey(tim, addr->bank, &key0, &key1);
+    slot = key_valid ? pcPs2Tim2StateFind(addr, tim, key0, key1,
+                                          PS2_Render_tex_sub_flag) : -1;
     if (slot >= 0)
     {
         entry = &pcPs2Tim2StateCache[slot];
@@ -354,7 +381,7 @@ static int pcPs2TexLoadForDraw(NJS_TEXMEMLIST* addr)
     result = Ps2TexLoad(addr);
     pcPs2Tim2LoadContext = 0;
 
-    slot = pcPs2Tim2StateAlloc(addr, tim);
+    slot = pcPs2Tim2StateAlloc(addr, tim, key0, key1, render_sub_before);
     entry = &pcPs2Tim2StateCache[slot];
     entry->used = 1;
     entry->surface = (void*)tim;
