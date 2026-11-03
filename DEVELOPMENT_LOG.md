@@ -878,7 +878,7 @@ Tab, Up/Down, Shift+Up/Down, and Backspace retain their existing edge-selection,
 ## 2026-11-03 — Port alpha's static indexed TIM2 texture cache
 
 **Category:** Renderer / texture reuse feature port  
-**Status:** Integrated into `experimental/GSps2texloadcache`; build and in-game validation pending  
+**Status:** Integrated into `experimental/GSps2texloadcache`; Windows CI passed for `b41901f`; in-game validation pending  
 **Reference:** `alpha` at `011f54510a022d78963e9e837265fc814d2f2e6e`  
 **Destination base:** `6ea0e8d0e348b93fc96055034c756539c4e18f2a`
 
@@ -914,8 +914,8 @@ decal rules, or font-filter handling.
 - `pc/src/gs/gl_funcs.h`
 - `.github/workflows/build-windows.yml`
 
-### Validation boundary
+### Validation
 
-This step ports alpha's cache behavior rather than correcting the reported texture-assignment
-or memory-coherency failures. Those remain the next investigation after the destination branch
-builds and this baseline is exercised in-game.
+- **Windows build:** [Run 41682237692](https://github.com/zedhqx4/recvx-pc/actions/runs/41682237692) passed for commit `b41901f`; `Build game`, `Verify executables`, and `Upload Windows build` all succeeded.
+- **Source review:** The original UV helpers (`pc_snap_uv`, rotated-UV detection, `pc_crop_uv_edges`, and `pc_wide_clip`) are unchanged from the destination base. The GS texture-state packet was retained. Indexed-shader selection is applied inside `gsRendererDraw()` before both alpha-test draw passes, never in `gsRendererPresent()`.
+- **Runtime:** Pending. Validate indexed TIM2 assignment, palette variants, UI/menu UV appearance, scene transitions, and frame-time behavior. The reported texture-assignment/coherency faults and frame drops are not claimed fixed by this port.
