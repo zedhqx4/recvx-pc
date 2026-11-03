@@ -2547,6 +2547,9 @@ int Ps2TexLoad(NJS_TEXMEMLIST* addr)
     int trace_tp_skip = 0;
     int trace_uploaded = 0;
     int trace_render_sub_skip = 0;
+    int trace_hash_valid = 0;
+    unsigned long long trace_image_hash = 0;
+    unsigned long long trace_clut_hash = 0;
 #endif
 
     cache_flag = 1;
