@@ -280,10 +280,6 @@ void pcGsLogStats(void)
           stats.draws / f, stats.verts / f, (double)stats.rt_loads / f, stats.t_load * 1000 / f, (double)stats.rt_reads / f,
           stats.t_read * 1000 / f, (double)stats.tex_decodes / f, stats.tex_texels / f, stats.t_decode * 1000 / f);
     pcLog("gs: %d textures cached (%.0f MB)", tex_cached, tex_cached_bytes / 1048576.0);
-    if (tim2_cache_captures || tim2_cache_reuses)
-        pcLog("gs: TIM2 GL snapshots captured=%u reused=%u", tim2_cache_captures, tim2_cache_reuses);
-    tim2_cache_captures = 0;
-    tim2_cache_reuses = 0;
     memset(&stats, 0, sizeof(stats));
 }
 
@@ -442,29 +438,12 @@ typedef struct {
     GLuint tex;
     int hd;              /* tex is an HD replacement (owned by gs_replace.c) */
     unsigned int last_use;
-    u64 tim2_key0, tim2_key1;
-    u64 tim2_texclut;
 } CachedTex;
 
 #define MAX_TEX 2048
 
 static CachedTex texcache[MAX_TEX];
 static unsigned int* decode_buf;
-
-#define MAX_TIM2_META 256
-typedef struct {
-    int used;
-    u64 key0, key1;
-    u64 tex0a, tex0b, texa, texclut;
-    int w, h;
-    unsigned int last_use;
-} CachedTim2Meta;
-
-static CachedTim2Meta tim2_meta[MAX_TIM2_META];
-static unsigned int tim2_meta_clock;
-static unsigned int tim2_cache_reuses;
-static unsigned int tim2_cache_captures;
-static unsigned int tim2_cache_misses;
 
 static void psm_page_size(int psm, int* pw, int* ph)
 {
@@ -475,40 +454,6 @@ static void psm_page_size(int psm, int* pw, int* ph)
     case 8:  *pw = 128; *ph = 64; break;
     default: *pw = 128; *ph = 128; break;
     }
-}
-
-static void texture_cache_keys(u64 tex0, u64 texa, u64* key0, u64* key1)
-{
-    unsigned int psm = GSF(tex0, 20, 6);
-    u64 cpsm_key = ((u64)GSF(tex0, 51, 4) << 37);
-
-    *key0 = tex0 & 0x0000001FFFFFFFFFULL & ~(0x3ULL << 35) & ~(1ULL << 34);
-    *key0 |= cpsm_key;
-    *key1 = ((psm == GS_PSMCT24) || (gsPsmBits(psm) == 16) || (GSF(tex0, 51, 4) >= 2)) ? texa : 0;
-}
-
-static int tim2_variant_cached(u64 tim2_key0, u64 tim2_key1, u64 tex0,
-                               u64 texa, u64 texclut, int w, int h)
-{
-    u64 key0, key1;
-    int i;
-
-    texture_cache_keys(tex0, texa, &key0, &key1);
-
-    for (i = 0; i < MAX_TEX; i++)
-    {
-        const CachedTex* t = &texcache[i];
-
-        if (t->used &&
-            (t->tim2_key0 == tim2_key0) && (t->tim2_key1 == tim2_key1) &&
-            (t->key0 == key0) && (t->key1 == key1) &&
-            (t->tim2_texclut == texclut) &&
-            (t->w == w) && (t->h == h) &&
-            (t->rows == h) && (t->cols == w))
-            return 1;
-    }
-
-    return 0;
 }
 
 /* Content hash of GS memory pages (8 KB), recomputed only when a page's generation moves.
@@ -740,47 +685,21 @@ static void gsTextureTraceDrawRead(u64 tex0, u64 frame, int w, int h,
           page_gen_hash, page_list, ((bands * page_cols) > shown) ? ",..." : "");
 }
 
-static GLuint get_texture(u64 tex0, u64 texa, u64 texclut, int w, int h,
-                            int rows, int cols, int* hd,
-                            u64 tim2_key0, u64 tim2_key1)
+static GLuint get_texture(u64 tex0, u64 texa, u64 texclut, int w, int h, int rows, int cols, int* hd)
 {
     unsigned int psm = GSF(tex0, 20, 6);
     unsigned int tbp = GSF(tex0, 0, 14);
     unsigned int tbw = GSF(tex0, 14, 6);
-    u64 key0, key1, key2;
+    u64 key0 = tex0 & 0x0000001FFFFFFFFFULL & ~(0x3ULL << 35) & ~(1ULL << 34);   /* TBP..TH, drop TCC/TFX and CLUT fields */
+    u64 cpsm_key = ((u64)GSF(tex0, 51, 4) << 37);
+    u64 key1 = ((psm == GS_PSMCT24) || (gsPsmBits(psm) == 16) || (GSF(tex0, 51, 4) >= 2)) ? texa : 0;
+    u64 key2 = gsClutHash(tex0);   /* palette contents (0-entry hash for direct color) */
     int pw, ph, i, slot = -1, oldest = 0;
     unsigned int page_lo, page_hi, clut_page, stride;
     unsigned long long gen;
     CachedTex* t;
 
-    texture_cache_keys(tex0, texa, &key0, &key1);
-
-    /* A TIM2 snapshot is decoded in full on capture. Its GL copy is independent of
-     * the shared PS2 upload slot, so it remains valid after another TIM2 overwrites GS VRAM. */
-    if (tim2_key0 || tim2_key1)
-    {
-        for (i = 0; i < MAX_TEX; i++)
-        {
-            t = &texcache[i];
-            if (t->used &&
-                (t->tim2_key0 == tim2_key0) && (t->tim2_key1 == tim2_key1) &&
-                (t->key0 == key0) && (t->key1 == key1) &&
-                (t->tim2_texclut == texclut) &&
-                (t->w == w) && (t->h == h) &&
-                (t->rows == h) && (t->cols == w))
-            {
-                t->last_use = frame_counter;
-                tim2_cache_reuses++;
-                *hd = t->hd;
-                return t->tex;
-            }
-        }
-
-        rows = h;
-        cols = w;
-    }
-
-    key2 = gsClutHash(tex0);   /* palette contents (0-entry hash for direct color) */
+    key0 |= cpsm_key;
     psm_page_size(psm, &pw, &ph);
     stride = (tbw * 64 + pw - 1) / pw;
 
@@ -833,12 +752,6 @@ static GLuint get_texture(u64 tex0, u64 texa, u64 texclut, int w, int h,
                 gsTextureTraceLookup(tex0, key0, key1, key2, w, h, rows, cols,
                                      page_lo, stride, (rows + ph - 1) / ph,
                                      (cols + pw - 1) / pw, gen, 1);
-            if (tim2_key0 || tim2_key1)
-            {
-                t->tim2_key0 = tim2_key0;
-                t->tim2_key1 = tim2_key1;
-                t->tim2_texclut = texclut;
-            }
             t->last_use = frame_counter;
             *hd = t->hd;
             return t->tex;
@@ -887,9 +800,6 @@ static GLuint get_texture(u64 tex0, u64 texa, u64 texclut, int w, int h,
     t->gen = gen;
     t->last_use = frame_counter;
     t->hd = 0;
-    t->tim2_key0 = tim2_key0;
-    t->tim2_key1 = tim2_key1;
-    t->tim2_texclut = texclut;
 
     {
         extern GLuint gsReplaceLookup(u64 tex0, u64 texa);
@@ -914,95 +824,6 @@ static GLuint get_texture(u64 tex0, u64 texa, u64 texclut, int w, int h,
     glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, cols, rows, GL_RGBA, GL_UNSIGNED_BYTE, decode_buf);
 
     return t->tex;
-}
-
-/* The game streams TIM2 pictures through one GS upload slot. Keep a bounded
- * lookup from source-content identity to the GL snapshots captured before that slot
- * was reused by another TIM2. */
-unsigned int gsRendererFrameSerial(void)
-{
-    return frame_counter;
-}
-
-static int tim2_meta_has_variant(const CachedTim2Meta* meta, u64 tex0)
-{
-    return tim2_variant_cached(meta->key0, meta->key1, tex0, meta->texa,
-                               meta->texclut, meta->w, meta->h);
-}
-
-int gsRendererHasTim2Texture(u64 key0, u64 key1, u64 texa, u64 texclut)
-{
-    int i;
-
-    for (i = 0; i < MAX_TIM2_META; i++)
-    {
-        CachedTim2Meta* meta = &tim2_meta[i];
-
-        if (meta->used && (meta->key0 == key0) && (meta->key1 == key1) &&
-            (meta->texa == texa) && (meta->texclut == texclut))
-        {
-            if (!tim2_meta_has_variant(meta, meta->tex0a))
-                return 0;
-            if ((meta->tex0b != meta->tex0a) &&
-                !tim2_meta_has_variant(meta, meta->tex0b))
-                return 0;
-
-            meta->last_use = ++tim2_meta_clock;
-            return 1;
-        }
-    }
-
-    return 0;
-}
-
-void gsRendererCaptureTim2Texture(u64 key0, u64 key1, u64 tex0a, u64 tex0b,
-                                  u64 texa, u64 texclut, int w, int h)
-{
-    int hd;
-    int i, slot = -1, oldest = 0;
-    CachedTim2Meta* meta;
-
-    if (!key0 && !key1)
-        return;
-    if (w <= 0 || h <= 0 || w > 1024 || h > 1024)
-        return;
-
-    if (get_texture(tex0a, texa, texclut, w, h, h, w, &hd, key0, key1) == 0)
-        return;
-
-    if ((tex0b != tex0a) &&
-        (get_texture(tex0b, texa, texclut, w, h, h, w, &hd, key0, key1) == 0))
-        return;
-
-    for (i = 0; i < MAX_TIM2_META; i++)
-    {
-        if (tim2_meta[i].used && (tim2_meta[i].key0 == key0) &&
-            (tim2_meta[i].key1 == key1))
-        {
-            slot = i;
-            break;
-        }
-        if (!tim2_meta[i].used && (slot < 0))
-            slot = i;
-        if (tim2_meta[i].last_use < tim2_meta[oldest].last_use)
-            oldest = i;
-    }
-
-    if (slot < 0)
-        slot = oldest;
-
-    meta = &tim2_meta[slot];
-    meta->used = 1;
-    meta->key0 = key0;
-    meta->key1 = key1;
-    meta->tex0a = tex0a;
-    meta->tex0b = tex0b;
-    meta->texa = texa;
-    meta->texclut = texclut;
-    meta->w = w;
-    meta->h = h;
-    meta->last_use = ++tim2_meta_clock;
-    tim2_cache_captures++;
 }
 
 /* ------------------------------------------------------------------------------------------- */
@@ -1906,8 +1727,7 @@ void gsRendererDraw(const GsDrawState* st, const GsVertex* v, int nverts)
         {
             int hd = 0;
             GLuint gt = get_texture(st->tex0, st->texa, st->texclut, tw, th, texture_extent(st, v, nverts, th, 1),
-                                    texture_extent(st, v, nverts, tw, 0), &hd,
-                                    st->tim2_key0, st->tim2_key1);
+                                    texture_extent(st, v, nverts, tw, 0), &hd);
 
             if (hd) trace_source_kind = 5;
             glBindTexture(GL_TEXTURE_2D, gt);
