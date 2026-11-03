@@ -17,6 +17,160 @@
 unsigned char gsVram[GS_VRAM_SIZE];
 unsigned int gsPageGen[GS_PAGES];
 
+/* A TIM2 upload is resident only while every physical GS page it wrote remains
+ * at the same generation. The OpenGL texture cache keeps the decoded image;
+ * this table only records which TIM2 is represented by current GS VRAM. */
+#define GS_TIM2_CACHE_ENTRIES 64
+#define GS_TIM2_CACHE_PAGE_BYTES (GS_PAGES / 8)
+
+typedef struct {
+    int valid;
+    uint64_t key0, key1;
+    uint64_t page_generation_hash;
+    unsigned char pages[GS_TIM2_CACHE_PAGE_BYTES];
+} GsTim2ResidentEntry;
+
+static GsTim2ResidentEntry gsTim2Resident[GS_TIM2_CACHE_ENTRIES];
+static unsigned char gsTim2CapturePages[GS_TIM2_CACHE_PAGE_BYTES];
+static unsigned int gsTim2CapturePageCount;
+static uint64_t gsTim2CaptureKey0, gsTim2CaptureKey1;
+static int gsTim2CaptureActive;
+static unsigned int gsTim2Requests, gsTim2Hits, gsTim2Misses;
+static unsigned int gsTim2Invalidations, gsTim2Uploads, gsTim2CapturedPages;
+static unsigned int gsTim2UnsafeSkips, gsTim2FailedUploads;
+
+static unsigned int gsTim2CacheSlot(uint64_t key0, uint64_t key1)
+{
+    uint64_t key = key0 ^ (key1 + 0x9E3779B97F4A7C15ULL);
+    key ^= key >> 33;
+    key *= 0xff51afd7ed558ccdULL;
+    key ^= key >> 33;
+    return (unsigned int)key & (GS_TIM2_CACHE_ENTRIES - 1);
+}
+
+static uint64_t gsTim2PageGenerationHash(const unsigned char* pages)
+{
+    uint64_t hash = 14695981039346656037ULL;
+    unsigned int page;
+
+    for (page = 0; page < GS_PAGES; page++)
+    {
+        if (pages[page >> 3] & (1u << (page & 7)))
+        {
+            uint64_t value = ((uint64_t)page << 32) | gsPageGen[page];
+            hash = (hash ^ value) * 1099511628211ULL;
+        }
+    }
+
+    return hash;
+}
+
+static void gsTim2CacheRecordAddress(unsigned int byte_addr)
+{
+    unsigned int page;
+
+    if (!gsTim2CaptureActive)
+        return;
+
+    page = (byte_addr >> 13) & (GS_PAGES - 1);
+    if (!(gsTim2CapturePages[page >> 3] & (1u << (page & 7))))
+    {
+        gsTim2CapturePages[page >> 3] |= (unsigned char)(1u << (page & 7));
+        gsTim2CapturePageCount++;
+    }
+}
+
+int gsMemTim2CacheIsCurrent(uint64_t key0, uint64_t key1)
+{
+    GsTim2ResidentEntry* entry;
+    unsigned int slot;
+
+    gsTim2Requests++;
+    if (!gsTextureTim2CacheSafe())
+    {
+        gsTim2UnsafeSkips++;
+        gsTim2Misses++;
+        return 0;
+    }
+
+    slot = gsTim2CacheSlot(key0, key1);
+    entry = &gsTim2Resident[slot];
+
+    if (!entry->valid || entry->key0 != key0 || entry->key1 != key1)
+    {
+        gsTim2Misses++;
+        return 0;
+    }
+
+    if (entry->page_generation_hash != gsTim2PageGenerationHash(entry->pages))
+    {
+        entry->valid = 0;
+        gsTim2Invalidations++;
+        gsTim2Misses++;
+        return 0;
+    }
+
+    gsTim2Hits++;
+    return 1;
+}
+
+void gsMemTim2CacheBegin(uint64_t key0, uint64_t key1)
+{
+    gsTim2CaptureKey0 = key0;
+    gsTim2CaptureKey1 = key1;
+    gsTim2CapturePageCount = 0;
+    memset(gsTim2CapturePages, 0, sizeof(gsTim2CapturePages));
+    gsTim2CaptureActive = 1;
+}
+
+void gsMemTim2CacheEnd(int success)
+{
+    unsigned int slot;
+    GsTim2ResidentEntry* entry;
+
+    if (!gsTim2CaptureActive)
+        return;
+
+    gsTim2CaptureActive = 0;
+
+    if (!success || (gsTim2CapturePageCount == 0))
+    {
+        gsTim2FailedUploads++;
+        return;
+    }
+
+    slot = gsTim2CacheSlot(gsTim2CaptureKey0, gsTim2CaptureKey1);
+    entry = &gsTim2Resident[slot];
+    entry->valid = 0;
+    entry->key0 = gsTim2CaptureKey0;
+    entry->key1 = gsTim2CaptureKey1;
+    memcpy(entry->pages, gsTim2CapturePages, sizeof(entry->pages));
+    entry->page_generation_hash = gsTim2PageGenerationHash(entry->pages);
+    entry->valid = 1;
+
+    gsTim2Uploads++;
+    gsTim2CapturedPages += gsTim2CapturePageCount;
+}
+
+void gsMemTim2CacheLogStats(void)
+{
+    if (gsTim2Requests || gsTim2Uploads)
+    {
+        pcLog("gs: TIM2 VRAM cache requests=%u hits=%u misses=%u invalidated=%u unsafe=%u uploads=%u failed=%u captured_pages=%u",
+              gsTim2Requests, gsTim2Hits, gsTim2Misses, gsTim2Invalidations,
+              gsTim2UnsafeSkips, gsTim2Uploads, gsTim2FailedUploads, gsTim2CapturedPages);
+    }
+
+    gsTim2Requests = 0;
+    gsTim2Hits = 0;
+    gsTim2Misses = 0;
+    gsTim2Invalidations = 0;
+    gsTim2UnsafeSkips = 0;
+    gsTim2Uploads = 0;
+    gsTim2CapturedPages = 0;
+    gsTim2FailedUploads = 0;
+}
+
 /* Page generations invalidate cached textures; one bump per touched page per IMAGE
  * packet is sufficient, rather than incrementing the same counter for every pixel. */
 static unsigned int pageTouchEpoch[GS_PAGES];
@@ -335,6 +489,14 @@ void gsMemInit(void)
     }
 
     memset(gsVram, 0, sizeof(gsVram));
+    memset(gsPageGen, 0, sizeof(gsPageGen));
+    memset(gsTim2Resident, 0, sizeof(gsTim2Resident));
+    memset(gsTim2CapturePages, 0, sizeof(gsTim2CapturePages));
+    gsTim2CapturePageCount = 0;
+    gsTim2CaptureActive = 0;
+    gsTim2Requests = gsTim2Hits = gsTim2Misses = 0;
+    gsTim2Invalidations = gsTim2Uploads = gsTim2CapturedPages = 0;
+    gsTim2UnsafeSkips = gsTim2FailedUploads = 0;
 }
 
 /* ---- address functions: return a byte (or nibble for 4-bit) offset into gsVram ---- */
@@ -504,6 +666,7 @@ static int mem_write(int psm, unsigned int bp, unsigned int bw, unsigned int x, 
     case GS_PSMCT32:
     case GS_PSMZ32:
         a = addr32(bp, bw, x, y, (psm == GS_PSMZ32) ? blockTable32Z : blockTable32);
+        gsTim2CacheRecordAddress(a);
         old = *(unsigned int*)&gsVram[a & ~3u];
         *(unsigned int*)&gsVram[a] = v;
         if (*(unsigned int*)&gsVram[a & ~3u] == old)
@@ -516,6 +679,7 @@ static int mem_write(int psm, unsigned int bp, unsigned int bw, unsigned int x, 
     case GS_PSMCT24:
     case GS_PSMZ24:
         a = addr32(bp, bw, x, y, (psm == GS_PSMZ24) ? blockTable32Z : blockTable32);
+        gsTim2CacheRecordAddress(a);
         old = *(unsigned int*)&gsVram[a & ~3u];
         *(unsigned int*)&gsVram[a] = (*(unsigned int*)&gsVram[a] & 0xFF000000) | (v & 0xFFFFFF);
         if (*(unsigned int*)&gsVram[a & ~3u] == old)
@@ -527,6 +691,7 @@ static int mem_write(int psm, unsigned int bp, unsigned int bw, unsigned int x, 
         break;
     case GS_PSMCT16:
         a = addr16(bp, bw, x, y, blockTable16);
+        gsTim2CacheRecordAddress(a);
         old = *(unsigned int*)&gsVram[a & ~3u];
         *(unsigned short*)&gsVram[a] = (unsigned short)v;
         if (*(unsigned int*)&gsVram[a & ~3u] == old)
@@ -538,6 +703,7 @@ static int mem_write(int psm, unsigned int bp, unsigned int bw, unsigned int x, 
         break;
     case GS_PSMCT16S:
         a = addr16(bp, bw, x, y, blockTable16S);
+        gsTim2CacheRecordAddress(a);
         old = *(unsigned int*)&gsVram[a & ~3u];
         *(unsigned short*)&gsVram[a] = (unsigned short)v;
         if (*(unsigned int*)&gsVram[a & ~3u] == old)
@@ -549,6 +715,7 @@ static int mem_write(int psm, unsigned int bp, unsigned int bw, unsigned int x, 
         break;
     case GS_PSMZ16:
         a = addr16(bp, bw, x, y, blockTable16Z);
+        gsTim2CacheRecordAddress(a);
         old = *(unsigned int*)&gsVram[a & ~3u];
         *(unsigned short*)&gsVram[a] = (unsigned short)v;
         if (*(unsigned int*)&gsVram[a & ~3u] == old)
@@ -560,6 +727,7 @@ static int mem_write(int psm, unsigned int bp, unsigned int bw, unsigned int x, 
         break;
     case GS_PSMZ16S:
         a = addr16(bp, bw, x, y, blockTable16SZ);
+        gsTim2CacheRecordAddress(a);
         old = *(unsigned int*)&gsVram[a & ~3u];
         *(unsigned short*)&gsVram[a] = (unsigned short)v;
         if (*(unsigned int*)&gsVram[a & ~3u] == old)
@@ -571,6 +739,7 @@ static int mem_write(int psm, unsigned int bp, unsigned int bw, unsigned int x, 
         break;
     case GS_PSMT8:
         a = addr8(bp, bw, x, y);
+        gsTim2CacheRecordAddress(a);
         old = *(unsigned int*)&gsVram[a & ~3u];
         gsVram[a] = (unsigned char)v;
         if (*(unsigned int*)&gsVram[a & ~3u] == old)
@@ -582,6 +751,7 @@ static int mem_write(int psm, unsigned int bp, unsigned int bw, unsigned int x, 
         break;
     case GS_PSMT4:
         a = addr4(bp, bw, x, y);
+        gsTim2CacheRecordAddress(a >> 1);
         old = gsVram[a >> 1];
         gsVram[a >> 1] = (unsigned char)((gsVram[a >> 1] & (0xF0 >> ((a & 1) * 4))) | ((v & 15) << ((a & 1) * 4)));
 
@@ -594,6 +764,7 @@ static int mem_write(int psm, unsigned int bp, unsigned int bw, unsigned int x, 
         return 1;
     case GS_PSMT8H:
         a = addr32(bp, bw, x, y, blockTable32) + 3;
+        gsTim2CacheRecordAddress(a);
         old = *(unsigned int*)&gsVram[a & ~3u];
         gsVram[a] = (unsigned char)v;
         if (*(unsigned int*)&gsVram[a & ~3u] == old)
@@ -605,6 +776,7 @@ static int mem_write(int psm, unsigned int bp, unsigned int bw, unsigned int x, 
         break;
     case GS_PSMT4HL:
         a = addr32(bp, bw, x, y, blockTable32) + 3;
+        gsTim2CacheRecordAddress(a);
         old = *(unsigned int*)&gsVram[a & ~3u];
         gsVram[a] = (unsigned char)((gsVram[a] & 0xF0) | (v & 15));
         if (*(unsigned int*)&gsVram[a & ~3u] == old)
@@ -616,6 +788,7 @@ static int mem_write(int psm, unsigned int bp, unsigned int bw, unsigned int x, 
         break;
     case GS_PSMT4HH:
         a = addr32(bp, bw, x, y, blockTable32) + 3;
+        gsTim2CacheRecordAddress(a);
         old = *(unsigned int*)&gsVram[a & ~3u];
         gsVram[a] = (unsigned char)((gsVram[a] & 0x0F) | ((v & 15) << 4));
         if (*(unsigned int*)&gsVram[a & ~3u] == old)
@@ -805,6 +978,7 @@ static void transfer32Run(const unsigned char* data, int bytes, const unsigned c
         {
             unsigned int block[64];
             unsigned int a = addr32(xfer.bp, xfer.bw, xfer.sx + bx, xfer.y, bt);
+            gsTim2CacheRecordAddress(a);
 
             for (yy = 0; yy < 8u; yy++)
             {
@@ -858,6 +1032,7 @@ static void transfer32Run(const unsigned char* data, int bytes, const unsigned c
             unsigned int a = (block_base +
                               (unsigned int)columnTable32[xfer.y & 7][x & 7] * 4u) &
                              (GS_VRAM_SIZE - 1);
+            gsTim2CacheRecordAddress(a);
             unsigned int v = *(const unsigned int*)&data[i + j * 4];
             unsigned int* dst = (unsigned int*)&gsVram[a];
 
