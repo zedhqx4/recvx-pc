@@ -523,7 +523,7 @@ static int gsTextureTraceEnabled(void)
         const char* value = getenv("RECVX_GS_TEX_TRACE");
         enabled = (value != NULL && value[0] == '1' && value[1] == '\0') ? 1 : 0;
     }
-    return enabled;
+    return enabled && gsMemTraceIsArmed();
 }
 
 static void gsTextureTraceLookup(u64 tex0, u64 key0, u64 key1, u64 key2,
