@@ -1,5 +1,19 @@
 #ifdef TARGET_PC
+#include <stdlib.h>
 #include "../../../../pc/include/pc_platform.h"
+
+static int pcGsTextureTraceEnabled(void)
+{
+    static int enabled = -1;
+    if (enabled < 0)
+    {
+        const char* value = getenv("RECVX_GS_TEX_TRACE");
+        enabled = (value != NULL && value[0] == '1' && value[1] == '\0') ? 1 : 0;
+    }
+    return enabled;
+}
+
+static unsigned int pcGsTextureTraceLoadSeq;
 #endif
 #include "../../../ps2/veronica/prog/ps2_dummy.h"
 #include "../../../ps2/veronica/prog/ps2_loadtim2.h"
@@ -2487,6 +2501,15 @@ int Ps2TexLoad(NJS_TEXMEMLIST* addr)
     TIM2_PICTUREHEADER_EX* timp; 
     unsigned int cache_flag;  
     unsigned int temp; // not from the debugging symbols
+#ifdef TARGET_PC
+    unsigned int trace_seq = 0;
+    int trace_enabled = pcGsTextureTraceEnabled();
+    int trace_forced_reload = 0;
+    int trace_same_surface = 0;
+    int trace_tp_skip = 0;
+    int trace_uploaded = 0;
+    int trace_render_sub_skip = 0;
+#endif
 
     cache_flag = 1;
 
@@ -2499,8 +2522,29 @@ int Ps2TexLoad(NJS_TEXMEMLIST* addr)
 
     timp = (TIM2_PICTUREHEADER_EX*)addr->texinfo.texsurface.pSurface;
 
+#ifdef TARGET_PC
+    if (trace_enabled)
+    {
+        trace_seq = ++pcGsTextureTraceLoadSeq;
+        if (trace_seq <= 4096)
+        {
+            pcLog("GS_TEX_TRACE_PS2_BEGIN seq=%u Gindex=%08x surface=%p bank=%u image=%ux%u ImageType=%u PictFormat=%u TpFlag=%u",
+                  trace_seq, timp->Gindex, (void*)timp, addr->bank,
+                  timp->ImageWidth, timp->ImageHeight, timp->ImageType,
+                  timp->PictFormat, timp->TpFlag);
+        }
+        else if (trace_seq == 4097)
+        {
+            pcLog("GS_TEX_TRACE_PS2 further load records suppressed (limit=4096)");
+        }
+    }
+#endif
+
     if (Ps2_current_texbreak != 0) 
     {
+#ifdef TARGET_PC
+        trace_forced_reload = 1;
+#endif
         for (i = 0; i < 4; i++) 
         {
             Ps2_tex_cache_buff[i] = NULL;
@@ -2516,10 +2560,16 @@ int Ps2TexLoad(NJS_TEXMEMLIST* addr)
     if (timp == Ps2_tex_cache_buff[0]) 
     {
         cache_flag = 0;
+#ifdef TARGET_PC
+        trace_same_surface = 1;
+#endif
     } 
     else if ((Ps2_tex_load_tp_cancel == 0) && (timp->TpFlag != 0)) 
     {
         cache_flag = 0;
+#ifdef TARGET_PC
+        trace_tp_skip = 1;
+#endif
     } 
     else 
     {
@@ -2529,7 +2579,16 @@ label:
         if ((PS2_Render_tex_sub_flag == 0) || ((timp->PictFormat >= 5) && (timp->PictFormat <= 8)) || ((timp->ImageType == 4) || (timp->ImageType == 5)))
         {
             Send_Tim2_dataEx(Ps2_tex_cache_buff[0], 190 * 64, 254 * 64);
+#ifdef TARGET_PC
+            trace_uploaded = 1;
+#endif
         }
+#ifdef TARGET_PC
+        else
+        {
+            trace_render_sub_skip = 1;
+        }
+#endif
     }
 
     p = (unsigned long*)WORKBASE;
@@ -2610,6 +2669,24 @@ label:
 
     *p++ = Ps2_gs_save.TEST = SCE_GS_SET_TEST_1(1, SCE_GS_ALPHA_GREATER, 0, SCE_GS_AFAIL_KEEP, 0, 0, 1, SCE_GS_DEPTH_GEQUAL);
     *p++ = SCE_GS_TEST_1;
+
+#ifdef TARGET_PC
+    if (trace_enabled && (trace_seq <= 4096))
+    {
+        const char* reason = trace_forced_reload ? "forced_reload" :
+                             trace_same_surface ? "same_surface" :
+                             trace_tp_skip ? "tp_skip" :
+                             trace_render_sub_skip ? "render_sub_skip" : "normal";
+        pcLog("GS_TEX_TRACE_PS2_END seq=%u Gindex=%08x cache_flag=%u reason=%s upload=%u TEX0=%016llx TBP0=%u TBW=%u PSM=%02x TW=%u TH=%u",
+              trace_seq, timp->Gindex, cache_flag, reason, trace_uploaded,
+              (unsigned long long)Ps2_gs_save.TEX0,
+              (unsigned int)(Ps2_gs_save.TEX0 & 0x3FFF),
+              (unsigned int)((Ps2_gs_save.TEX0 >> 14) & 0x3F),
+              (unsigned int)((Ps2_gs_save.TEX0 >> 20) & 0x3F),
+              (unsigned int)((Ps2_gs_save.TEX0 >> 26) & 0xF),
+              (unsigned int)((Ps2_gs_save.TEX0 >> 30) & 0xF));
+    }
+#endif
 
     loadImage((void*)0xF0000000);
 
