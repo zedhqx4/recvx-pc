@@ -72,6 +72,8 @@ void gsMemFinishTransfer(void);
 void gsMemTransferBytes(const unsigned char* data, int bytes);
 void gsMemTransferData(const unsigned char* data, int qwc);
 void gsMemReadImage(const GsRegs* r, unsigned char* out);
+int gsTextureTransferCacheSafe(unsigned int bp, unsigned int bw, unsigned int psm,
+                               unsigned int y, unsigned int h);
 
 /* gs.c */
 void gsWriteReg(int reg, u64 value);
