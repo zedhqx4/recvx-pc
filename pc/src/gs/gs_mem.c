@@ -76,6 +76,11 @@ void gsMemTraceArm(void)
           GS_TEX_TRACE_TRANSFER_LIMIT);
 }
 
+int gsMemTraceIsArmed(void)
+{
+    return gsTexTraceActive();
+}
+
 void gsMemTraceTextureLoadBegin(unsigned int seq, unsigned int gindex)
 {
     gsMemTraceArm();
