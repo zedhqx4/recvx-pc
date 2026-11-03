@@ -60,6 +60,8 @@ extern unsigned int gsPageGen[GS_PAGES];
 
 void gsMemInit(void);
 void gsMemTraceArm(void);
+void gsMemTraceTextureLoadBegin(unsigned int seq, unsigned int gindex);
+void gsMemTraceTextureLoadEnd(void);
 unsigned int gsMemRead(int psm, unsigned int bp, unsigned int bw, unsigned int x, unsigned int y);
 void gsMemWrite(int psm, unsigned int bp, unsigned int bw, unsigned int x, unsigned int y, unsigned int v);
 int  gsPsmBits(int psm);
