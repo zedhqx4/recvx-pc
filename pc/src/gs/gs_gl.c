@@ -261,7 +261,7 @@ static unsigned int decal_draw_order;
 static int dump_frame;
 
 /* per-interval statistics for the periodic log */
-static struct { unsigned int frames, draws, verts, rt_loads, rt_reads, tex_decodes, tex_texels, tex_superset_hits; double t_load, t_read, t_decode; } stats;
+static struct { unsigned int frames, draws, verts, rt_loads, rt_reads, tex_decodes, tex_texels; double t_load, t_read, t_decode; } stats;
 static int tex_cached;                     /* textures in the cache, decoded from GS memory */
 static double tex_cached_bytes;            /* their size */
 
@@ -276,13 +276,10 @@ void pcGsLogStats(void)
 {
     unsigned int f = stats.frames ? stats.frames : 1;
 
-    pcLog("gs/frame: %u draws, %u verts, %.1f rt loads (%.1f ms), %.1f rt reads (%.1f ms), %.1f tex decodes (%u texels, %.1f ms), %.1f texture-coverage reuses",
+    pcLog("gs/frame: %u draws, %u verts, %.1f rt loads (%.1f ms), %.1f rt reads (%.1f ms), %.1f tex decodes (%u texels, %.1f ms)",
           stats.draws / f, stats.verts / f, (double)stats.rt_loads / f, stats.t_load * 1000 / f, (double)stats.rt_reads / f,
-          stats.t_read * 1000 / f, (double)stats.tex_decodes / f, stats.tex_texels / f, stats.t_decode * 1000 / f,
-          (double)stats.tex_superset_hits / f);
+          stats.t_read * 1000 / f, (double)stats.tex_decodes / f, stats.tex_texels / f, stats.t_decode * 1000 / f);
     pcLog("gs: %d textures cached (%.0f MB)", tex_cached, tex_cached_bytes / 1048576.0);
-    gsClutCacheLogStats();
-    gsMemTim2CacheLogStats();
     memset(&stats, 0, sizeof(stats));
 }
 
@@ -700,10 +697,7 @@ static GLuint get_texture(u64 tex0, u64 texa, u64 texclut, int w, int h, int row
     int pw, ph, i, slot = -1, oldest = 0;
     unsigned int page_lo, page_hi, clut_page, stride;
     unsigned long long gen;
-    unsigned long long superset_area = 0;
-    unsigned long long candidate_gen;
     CachedTex* t;
-    CachedTex* superset = NULL;
 
     key0 |= cpsm_key;
     psm_page_size(psm, &pw, &ph);
@@ -763,30 +757,6 @@ static GLuint get_texture(u64 tex0, u64 texa, u64 texclut, int w, int h, int row
             return t->tex;
         }
 
-        /* The cached OpenGL image may cover more texels than this draw samples. Reuse it
-         * when its full decoded coverage is still identical in GS memory; this collapses
-         * the many partial-rectangle entries created by different geometry/UV extents. */
-        if (t->used && (t->key0 == key0) && (t->key1 == key1) && (t->key2 == key2) &&
-            (t->w == w) && (t->h == h) && (t->rows >= rows) && (t->cols >= cols))
-        {
-            {
-                unsigned long long area = (unsigned long long)t->rows * (unsigned long long)t->cols;
-
-                /* Only validate candidates that improve the current smallest superset. */
-                if ((superset == NULL) || (area < superset_area))
-                {
-                    candidate_gen = gen_sum_rect(page_lo, stride,
-                                                 (t->rows + ph - 1) / ph,
-                                                 (t->cols + pw - 1) / pw);
-                    if (candidate_gen == t->gen)
-                    {
-                        superset = t;
-                        superset_area = area;
-                    }
-                }
-            }
-        }
-
         if (!t->used && (slot < 0))
         {
             slot = i;
@@ -796,18 +766,6 @@ static GLuint get_texture(u64 tex0, u64 texa, u64 texclut, int w, int h, int row
         {
             oldest = i;
         }
-    }
-
-    if (superset != NULL)
-    {
-        if (gsTextureTraceEnabled())
-            gsTextureTraceLookup(tex0, key0, key1, key2, w, h, rows, cols,
-                                 page_lo, stride, (rows + ph - 1) / ph,
-                                 (cols + pw - 1) / pw, gen, 1);
-        superset->last_use = frame_counter;
-        stats.tex_superset_hits++;
-        *hd = superset->hd;
-        return superset->tex;
     }
 
     if (gsTextureTraceEnabled())
@@ -951,34 +909,6 @@ static int rt_overlaps(const RenderTarget* rt, unsigned int bp, unsigned int bw,
     (void)psm;
 
     return (lo < rt_hi) && (hi > rt_lo);
-}
-
-/* TIM2 images are streamed through the reserved GS range starting at BP 190*64;
- * their CLUTs use BP 254*64. Do not skip a reload while an OpenGL render target
- * has newer pixels in any part of that range that have not been flushed to gsVram. */
-int gsTextureTim2CacheSafe(void)
-{
-    const unsigned int tim2_lo = 190u * 64u;
-    const unsigned int tim2_hi = GS_VRAM_SIZE / 256u;
-    int i;
-
-    for (i = 0; i < MAX_RT; i++)
-    {
-        const RenderTarget* rt = &rts[i];
-        unsigned int rt_lo, rt_hi;
-
-        if (!rt->used || !rt->rendered)
-            continue;
-
-        rt_lo = rt->fbp * 32u;
-        rt_hi = rt_lo + (unsigned int)(rt->w / 64) *
-                        (unsigned int)(rt->h / 32) * 32u;
-
-        if ((rt_lo < tim2_hi) && (rt_hi > tim2_lo))
-            return 0;
-    }
-
-    return 1;
 }
 
 /* copies rows y0..y1-1 of GS memory into the render target */
