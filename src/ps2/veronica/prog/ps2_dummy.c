@@ -65,6 +65,167 @@ static int pcGsTextureTraceSourceHashes(TIM2_PICTUREHEADER_EX* tim,
     *clut_hash = pcGsTextureTraceHashBytes(clut, picture->ClutSize);
     return 1;
 }
+
+/* Ps2TexLoad is asked to prepare the same TP texture again for many individual
+ * polygons. The deferred OT already keeps tp/bank per primitive and uploads each
+ * distinct TIM2 once into its per-frame texture slots. Cache the small register
+ * state needed by those primitives; do not repeat the full Ps2TexLoad path. */
+#define PC_PS2_TIM2_STATE_CACHE_ENTRIES 512
+
+typedef struct {
+    int used;
+    void* surface;
+    unsigned int bank;
+    unsigned int gindex;
+    unsigned int width, height, tbw;
+    unsigned int image_type, pict_format, clamp_flag, format_id;
+    unsigned long tex0, tex0_next, tex1, clamp, test;
+    unsigned int now_bank;
+    unsigned int render_tex_sub_flag;
+    int cache_flag;
+} PcPs2Tim2StateEntry;
+
+static PcPs2Tim2StateEntry pcPs2Tim2StateCache[PC_PS2_TIM2_STATE_CACHE_ENTRIES];
+static unsigned int pcPs2Tim2StateCalls;
+static unsigned int pcPs2Tim2StateHits;
+static unsigned int pcPs2Tim2StateOnly;
+static unsigned int pcPs2Tim2StateForced;
+static int pcPs2Tim2LoadContext;
+
+static int pcPs2Tim2StateMatches(const PcPs2Tim2StateEntry* entry,
+                                 NJS_TEXMEMLIST* addr,
+                                 TIM2_PICTUREHEADER_EX* tim)
+{
+    return entry->used &&
+           (entry->surface == (void*)tim) &&
+           (entry->bank == addr->bank) &&
+           (entry->gindex == tim->Gindex) &&
+           (entry->width == tim->ImageWidth) &&
+           (entry->height == tim->ImageHeight) &&
+           (entry->tbw == tim->GsTex0.TBW) &&
+           (entry->image_type == tim->ImageType) &&
+           (entry->pict_format == tim->PictFormat) &&
+           (entry->clamp_flag == tim->ClampFlag) &&
+           (entry->format_id == tim->FormatId);
+}
+
+static int pcPs2Tim2StateFind(NJS_TEXMEMLIST* addr, TIM2_PICTUREHEADER_EX* tim)
+{
+    unsigned int i;
+    for (i = 0; i < PC_PS2_TIM2_STATE_CACHE_ENTRIES; i++)
+    {
+        if (pcPs2Tim2StateMatches(&pcPs2Tim2StateCache[i], addr, tim))
+            return (int)i;
+    }
+    return -1;
+}
+
+static int pcPs2Tim2StateAlloc(NJS_TEXMEMLIST* addr, TIM2_PICTUREHEADER_EX* tim)
+{
+    unsigned int i;
+    unsigned int start = (unsigned int)(((uintptr_t)tim >> 4) ^ addr->bank ^ tim->Gindex) &
+                         (PC_PS2_TIM2_STATE_CACHE_ENTRIES - 1);
+
+    for (i = 0; i < PC_PS2_TIM2_STATE_CACHE_ENTRIES; i++)
+    {
+        unsigned int slot = (start + i) & (PC_PS2_TIM2_STATE_CACHE_ENTRIES - 1);
+        if (!pcPs2Tim2StateCache[slot].used)
+            return (int)slot;
+    }
+
+    /* More than 512 distinct TIM2 states in one frame is outside the expected OT
+     * workload; recycle the initial probe slot rather than allocate unbounded memory. */
+    return (int)start;
+}
+
+static void pcPs2Tim2SetGsTex(TIM2_PICTUREHEADER_EX* tim)
+{
+    unsigned char* file = (unsigned char*)tim;
+    TIM2_PICTUREHEADER* picture =
+        (TIM2_PICTUREHEADER*)(file + ((file[5] != 0) ? 128 : 16));
+
+    Set_GsTex(picture, 190 * 64, 254 * 64);
+}
+
+static int pcPs2TexLoadForDraw(NJS_TEXMEMLIST* addr)
+{
+    TIM2_PICTUREHEADER_EX* tim;
+    PcPs2Tim2StateEntry* entry;
+    int slot;
+    int result;
+
+    if ((addr == NULL) || (addr->texinfo.texsurface.pSurface == NULL))
+        return Ps2TexLoad(addr);
+
+    tim = (TIM2_PICTUREHEADER_EX*)addr->texinfo.texsurface.pSurface;
+    pcPs2Tim2StateCalls++;
+
+    /* Ps2_current_texbreak explicitly requests a fresh state/upload boundary. */
+    if (Ps2_current_texbreak != 0)
+    {
+        memset(pcPs2Tim2StateCache, 0, sizeof(pcPs2Tim2StateCache));
+        pcPs2Tim2StateForced++;
+    }
+
+    slot = pcPs2Tim2StateFind(addr, tim);
+    if (slot >= 0)
+    {
+        entry = &pcPs2Tim2StateCache[slot];
+        Ps2_now_tex = addr;
+        Ps2_now_bank = entry->now_bank;
+        Ps2_tex_cache_buff[0] = (void*)tim;
+        Ps2_gs_save.TEX0 = entry->tex0;
+        Ps2_gs_save.TEX0_NEXT = entry->tex0_next;
+        Ps2_gs_save.TEX1 = entry->tex1;
+        Ps2_gs_save.CLAMP = entry->clamp;
+        Ps2_gs_save.TEST = entry->test;
+        PS2_Render_tex_sub_flag = entry->render_tex_sub_flag;
+        pcPs2Tim2StateHits++;
+        return entry->cache_flag;
+    }
+
+    pcPs2Tim2LoadContext = 1;
+    result = Ps2TexLoad(addr);
+    pcPs2Tim2LoadContext = 0;
+
+    slot = pcPs2Tim2StateAlloc(addr, tim);
+    entry = &pcPs2Tim2StateCache[slot];
+    entry->used = 1;
+    entry->surface = (void*)tim;
+    entry->bank = addr->bank;
+    entry->gindex = tim->Gindex;
+    entry->width = tim->ImageWidth;
+    entry->height = tim->ImageHeight;
+    entry->tbw = tim->GsTex0.TBW;
+    entry->image_type = tim->ImageType;
+    entry->pict_format = tim->PictFormat;
+    entry->clamp_flag = tim->ClampFlag;
+    entry->format_id = tim->FormatId;
+    entry->tex0 = Ps2_gs_save.TEX0;
+    entry->tex0_next = Ps2_gs_save.TEX0_NEXT;
+    entry->tex1 = Ps2_gs_save.TEX1;
+    entry->clamp = Ps2_gs_save.CLAMP;
+    entry->test = Ps2_gs_save.TEST;
+    entry->now_bank = Ps2_now_bank;
+    entry->render_tex_sub_flag = PS2_Render_tex_sub_flag;
+    entry->cache_flag = result;
+    return result;
+}
+
+static void pcPs2Tim2StateEndFrame(void)
+{
+    if (pcGsTextureTraceEnabled())
+        pcLog("GS_TIM2_FRAME_STATE calls=%u hits=%u Ps2TexLoad=%u state_only=%u forced_breaks=%u",
+              pcPs2Tim2StateCalls, pcPs2Tim2StateHits,
+              pcPs2Tim2StateCalls - pcPs2Tim2StateHits,
+              pcPs2Tim2StateOnly, pcPs2Tim2StateForced);
+
+    memset(pcPs2Tim2StateCache, 0, sizeof(pcPs2Tim2StateCache));
+    pcPs2Tim2StateCalls = 0;
+    pcPs2Tim2StateHits = 0;
+    pcPs2Tim2StateOnly = 0;
+    pcPs2Tim2StateForced = 0;
+}
 #endif
 
 // the three vars below were originally defined as unsigned int in ps2_NaFog.c, and redeclared as unsigned long here
@@ -1133,7 +1294,11 @@ void Ps2AddPrim(unsigned long prim, void* dp, unsigned int num, unsigned int cli
         { 
             Ps2_tex_load_tp_cancel = 1; 
             
+            #ifdef TARGET_PC
+            pcPs2TexLoadForDraw(Ps2_now_tex);
+#else
             Ps2TexLoad(Ps2_now_tex);
+#endif
             
             Ps2_tex_load_tp_cancel = 0; 
         }
@@ -1441,7 +1606,11 @@ void Ps2AddPrim3D(unsigned long prim, void* dp, unsigned int num)
             {
                 Ps2_tex_load_tp_cancel = 1;
                 
-                Ps2TexLoad(Ps2_now_tex);
+                #ifdef TARGET_PC
+            pcPs2TexLoadForDraw(Ps2_now_tex);
+#else
+            Ps2TexLoad(Ps2_now_tex);
+#endif
                 
                 Ps2_tex_load_tp_cancel = 0;
             }
@@ -1616,7 +1785,11 @@ void Ps2AddPrim3DEx(unsigned long prim, void* dp, unsigned int num)
             {
                 Ps2_tex_load_tp_cancel = 1;
                 
-                Ps2TexLoad(Ps2_now_tex);
+                #ifdef TARGET_PC
+            pcPs2TexLoadForDraw(Ps2_now_tex);
+#else
+            Ps2TexLoad(Ps2_now_tex);
+#endif
                 
                 Ps2_tex_load_tp_cancel = 0;
             }
@@ -1793,7 +1966,11 @@ void Ps2AddPrim3DEx1P(unsigned long prim, void* dp, unsigned int num)
             {
                 Ps2_tex_load_tp_cancel = 1;
                 
-                Ps2TexLoad(Ps2_now_tex);
+                #ifdef TARGET_PC
+            pcPs2TexLoadForDraw(Ps2_now_tex);
+#else
+            Ps2TexLoad(Ps2_now_tex);
+#endif
                 
                 Ps2_tex_load_tp_cancel = 0;
             }
@@ -1802,7 +1979,11 @@ void Ps2AddPrim3DEx1P(unsigned long prim, void* dp, unsigned int num)
         {
             Ps2_tex_load_tp_cancel = 1;
                 
+            #ifdef TARGET_PC
+            pcPs2TexLoadForDraw(Ps2_now_tex);
+#else
             Ps2TexLoad(Ps2_now_tex);
+#endif
             
             Ps2_tex_load_tp_cancel = 0;
         }
@@ -3426,7 +3607,11 @@ void Ps2AddPrim3DExI(unsigned long prim, void* dp, unsigned int num)
             {
                 Ps2_tex_load_tp_cancel = 1;
                 
-                Ps2TexLoad(Ps2_now_tex);
+                #ifdef TARGET_PC
+            pcPs2TexLoadForDraw(Ps2_now_tex);
+#else
+            Ps2TexLoad(Ps2_now_tex);
+#endif
                 
                 Ps2_tex_load_tp_cancel = 0;
             }
