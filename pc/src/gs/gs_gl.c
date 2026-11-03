@@ -657,6 +657,9 @@ static GLuint get_texture(u64 tex0, u64 texa, u64 texclut, int w, int h, int row
         if (t->used && (t->gen == gen) && (t->key0 == key0) && (t->key1 == key1) && (t->key2 == key2) && (t->w == w) && (t->h == h) &&
             (t->rows == rows) && (t->cols == cols))
         {
+            gsTextureTraceLookup(tex0, key0, key1, key2, w, h, rows, cols,
+                                 page_lo, stride, (rows + ph - 1) / ph,
+                                 (cols + pw - 1) / pw, gen, 1);
             t->last_use = frame_counter;
             *hd = t->hd;
             return t->tex;
@@ -672,6 +675,10 @@ static GLuint get_texture(u64 tex0, u64 texa, u64 texclut, int w, int h, int row
             oldest = i;
         }
     }
+
+    gsTextureTraceLookup(tex0, key0, key1, key2, w, h, rows, cols,
+                         page_lo, stride, (rows + ph - 1) / ph,
+                         (cols + pw - 1) / pw, gen, 0);
 
     if (slot < 0)
     {
