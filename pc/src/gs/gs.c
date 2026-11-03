@@ -26,8 +26,6 @@ static int out_count;
 static GsDrawState out_state;
 static int out_valid;
 static int gs_font_filter_nearest;
-static u64 gs_tim2_key0, gs_tim2_key1;
-static int gs_tim2_skip_clut_writes;
 
 static void current_state(GsDrawState* st)
 {
@@ -61,8 +59,6 @@ static void current_state(GsDrawState* st)
     st->dthe = gsRegs.dthe;
     st->colclamp = gsRegs.colclamp;
     st->texclut = gsRegs.texclut;
-    st->tim2_key0 = gs_tim2_key0;
-    st->tim2_key1 = gs_tim2_key1;
     st->font_filter_nearest = gs_font_filter_nearest ||
                               (pcFontFilterDrawActive() && !pcFontFilterIsLinear());
 }
@@ -235,20 +231,8 @@ void gsWriteReg(int reg, u64 value)
     case 0x03: gsRegs.uv = value; break;
     case 0x04: latch_vertex(value, 1, 1); break;
     case 0x05: latch_vertex(value, 0, 1); break;
-    case 0x06:
-        gsRegs.tex0[0] = value;
-        if (gs_tim2_skip_clut_writes > 0)
-            gs_tim2_skip_clut_writes--;
-        else
-            clut_load(value);
-        break;
-    case 0x07:
-        gsRegs.tex0[1] = value;
-        if (gs_tim2_skip_clut_writes > 0)
-            gs_tim2_skip_clut_writes--;
-        else
-            clut_load(value);
-        break;
+    case 0x06: gsRegs.tex0[0] = value; clut_load(value); break;
+    case 0x07: gsRegs.tex0[1] = value; clut_load(value); break;
     case 0x08: gsRegs.clamp[0] = value; break;
     case 0x09: gsRegs.clamp[1] = value; break;
     case 0x0a: gsRegs.fog = value; break;
@@ -633,42 +617,6 @@ static unsigned int expand24(unsigned int c, u64 texa)
  * palette loaded earlier at another CSA offset. */
 static unsigned short clut_buf[512];
 static unsigned int clut_cbp0, clut_cbp1;
-
-/* A cached TIM2 image is already color-expanded in OpenGL. On that path its
- * palette must not be reloaded from the shared GS upload slot. Invalidate the
- * CLD 4/5 shortcuts so the next uncached indexed texture performs a real CLUT load. */
-void pcGsSetTim2Identity(uint64_t key0, uint64_t key1, int cached_image)
-{
-    if ((gs_tim2_key0 != key0) || (gs_tim2_key1 != key1))
-        gsFlushPrims();
-
-    gs_tim2_key0 = key0;
-    gs_tim2_key1 = key1;
-    gs_tim2_skip_clut_writes = cached_image ? 2 : 0;
-
-    if (cached_image)
-    {
-        clut_cbp0 = 0xFFFFFFFFu;
-        clut_cbp1 = 0xFFFFFFFFu;
-    }
-}
-
-uint32_t pcGsFrameSerial(void)
-{
-    return gsRendererFrameSerial();
-}
-
-int pcGsHasTim2Texture(uint64_t key0, uint64_t key1)
-{
-    return gsRendererHasTim2Texture(key0, key1, gsRegs.texa, gsRegs.texclut);
-}
-
-void pcGsCaptureTim2Texture(uint64_t key0, uint64_t key1,
-                            uint64_t tex0a, uint64_t tex0b, int w, int h)
-{
-    gsRendererCaptureTim2Texture(key0, key1, tex0a, tex0b,
-                                 gsRegs.texa, gsRegs.texclut, w, h);
-}
 
 static int clut_entries(unsigned int psm)
 {
