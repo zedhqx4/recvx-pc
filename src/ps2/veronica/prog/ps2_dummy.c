@@ -26,6 +26,44 @@ static unsigned int pcGsTextureTraceLoadSeq;
 #include "../../../ps2/veronica/prog/sdfunc.h"
 #include "../../../ps2/veronica/prog/main.h"
 
+#ifdef TARGET_PC
+/* Trace-only content hashes: recompute on every traced load to detect changing bytes
+ * behind a reused TIM2 address. */
+static unsigned long long pcGsTextureTraceHashBytes(const unsigned char* data, unsigned int size)
+{
+    unsigned long long hash = 14695981039346656037ULL;
+    unsigned int i;
+    for (i = 0; i < size; i++)
+        hash = (hash ^ data[i]) * 1099511628211ULL;
+    return hash;
+}
+
+static int pcGsTextureTraceSourceHashes(TIM2_PICTUREHEADER_EX* tim,
+                                        unsigned long long* image_hash,
+                                        unsigned long long* clut_hash)
+{
+    TIM2_PICTUREHEADER* picture;
+    const unsigned char* image;
+    const unsigned char* clut;
+
+    if ((tim == NULL) || (image_hash == NULL) || (clut_hash == NULL) || (tim->FormatId == 0))
+        return 0;
+
+    picture = (TIM2_PICTUREHEADER*)((unsigned char*)tim + 128);
+    if ((picture->HeaderSize < sizeof(TIM2_PICTUREHEADER)) ||
+        (picture->HeaderSize > picture->TotalSize) ||
+        (picture->ImageSize > picture->TotalSize - picture->HeaderSize) ||
+        (picture->ClutSize > picture->TotalSize - picture->HeaderSize - picture->ImageSize))
+        return 0;
+
+    image = (const unsigned char*)picture + picture->HeaderSize;
+    clut = image + picture->ImageSize;
+    *image_hash = pcGsTextureTraceHashBytes(image, picture->ImageSize);
+    *clut_hash = pcGsTextureTraceHashBytes(clut, picture->ClutSize);
+    return 1;
+}
+#endif
+
 // the three vars below were originally defined as unsigned int in ps2_NaFog.c, and redeclared as unsigned long here
 extern unsigned long ulNaFogR;
 extern unsigned long ulNaFogG;
