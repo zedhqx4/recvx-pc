@@ -609,7 +609,8 @@ static void gsTextureTraceDrawRead(u64 tex0, u64 frame, int w, int h,
     unsigned int tbw = GSF(tex0, 14, 6);
     unsigned int psm = GSF(tex0, 20, 6);
     unsigned int page_lo = tbp >> 5;
-    unsigned int stride, page_cols, bands, pw, ph;
+    unsigned int stride, page_cols, bands;
+    int pw, ph;
     unsigned long long page_gen_hash = 14695981039346656037ULL;
     unsigned int b, c, shown = 0;
     unsigned int bucket;
@@ -621,7 +622,7 @@ static void gsTextureTraceDrawRead(u64 tex0, u64 frame, int w, int h,
     if (!gsTextureTraceEnabled())
         return;
 
-    psm_page_size(psm, (int*)&pw, (int*)&ph);
+    psm_page_size(psm, &pw, &ph);
     stride = (tbw * 64 + pw - 1) / pw;
     if (stride == 0) stride = 1;
     page_cols = (w + pw - 1) / pw;
