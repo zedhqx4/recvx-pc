@@ -911,6 +911,19 @@ static int rt_overlaps(const RenderTarget* rt, unsigned int bp, unsigned int bw,
     return (lo < rt_hi) && (hi > rt_lo);
 }
 
+int gsTextureTransferCacheSafe(unsigned int bp, unsigned int bw, unsigned int psm,
+                               unsigned int y, unsigned int h)
+{
+    int i;
+    for (i = 0; i < MAX_RT; i++)
+    {
+        const RenderTarget* rt = &rts[i];
+        if (rt->used && rt->rendered && rt_overlaps(rt, bp, bw, psm, y, h))
+            return 0;
+    }
+    return 1;
+}
+
 /* copies rows y0..y1-1 of GS memory into the render target */
 static void rt_load_rows(RenderTarget* rt, int y0, int y1)
 {
