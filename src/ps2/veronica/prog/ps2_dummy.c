@@ -1,5 +1,6 @@
 #ifdef TARGET_PC
 #include <stdlib.h>
+#include <stdint.h>
 #include "../../../../pc/include/pc_platform.h"
 
 static int pcGsTextureTraceEnabled(void)
@@ -29,9 +30,9 @@ static unsigned int pcGsTextureTraceLoadSeq;
 #ifdef TARGET_PC
 /* Trace-only content hashes: recompute on every traced load to detect changing bytes
  * behind a reused TIM2 address. */
-static unsigned long long pcGsTextureTraceHashBytes(const unsigned char* data, unsigned int size)
+static uint64_t pcGsTextureTraceHashBytes(const unsigned char* data, unsigned int size)
 {
-    unsigned long long hash = 14695981039346656037ULL;
+    uint64_t hash = 14695981039346656037ULL;
     unsigned int i;
     for (i = 0; i < size; i++)
         hash = (hash ^ data[i]) * 1099511628211ULL;
@@ -39,8 +40,8 @@ static unsigned long long pcGsTextureTraceHashBytes(const unsigned char* data, u
 }
 
 static int pcGsTextureTraceSourceHashes(TIM2_PICTUREHEADER_EX* tim,
-                                        unsigned long long* image_hash,
-                                        unsigned long long* clut_hash)
+                                        uint64_t* image_hash,
+                                        uint64_t* clut_hash)
 {
     TIM2_PICTUREHEADER* picture;
     const unsigned char* image;
@@ -2548,8 +2549,8 @@ int Ps2TexLoad(NJS_TEXMEMLIST* addr)
     int trace_uploaded = 0;
     int trace_render_sub_skip = 0;
     int trace_hash_valid = 0;
-    unsigned long long trace_image_hash = 0;
-    unsigned long long trace_clut_hash = 0;
+    uint64_t trace_image_hash = 0;
+    uint64_t trace_clut_hash = 0;
 #endif
 
     cache_flag = 1;
@@ -2722,7 +2723,7 @@ label:
                              trace_render_sub_skip ? "render_sub_skip" : "normal";
         pcLog("GS_TEX_TRACE_PS2_END seq=%u Gindex=%08x cache_flag=%u reason=%s upload=%u TEX0=%016llx TBP0=%u TBW=%u PSM=%02x TW=%u TH=%u",
               trace_seq, timp->Gindex, cache_flag, reason, trace_uploaded,
-              (unsigned long long)Ps2_gs_save.TEX0,
+              (uint64_t)Ps2_gs_save.TEX0,
               (unsigned int)(Ps2_gs_save.TEX0 & 0x3FFF),
               (unsigned int)((Ps2_gs_save.TEX0 >> 14) & 0x3F),
               (unsigned int)((Ps2_gs_save.TEX0 >> 20) & 0x3F),
