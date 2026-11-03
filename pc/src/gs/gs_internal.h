@@ -65,7 +65,6 @@ void gsMemTraceTextureLoadBegin(unsigned int seq, unsigned int gindex);
 void gsMemTraceTextureLoadEnd(void);
 unsigned int gsMemRead(int psm, unsigned int bp, unsigned int bw, unsigned int x, unsigned int y);
 void gsMemWrite(int psm, unsigned int bp, unsigned int bw, unsigned int x, unsigned int y, unsigned int v);
-unsigned int gsMemPageForPixel(int psm, unsigned int bp, unsigned int bw, unsigned int x, unsigned int y);
 int  gsPsmBits(int psm);
 int  gsBlockNumber(int psm, unsigned int bp, unsigned int bw, unsigned int x, unsigned int y);
 void gsMemStartTransfer(const GsRegs* r);
@@ -73,10 +72,6 @@ void gsMemFinishTransfer(void);
 void gsMemTransferBytes(const unsigned char* data, int bytes);
 void gsMemTransferData(const unsigned char* data, int qwc);
 void gsMemReadImage(const GsRegs* r, unsigned char* out);
-int gsMemTim2CacheIsCurrent(uint64_t key0, uint64_t key1);
-void gsMemTim2CacheBegin(uint64_t key0, uint64_t key1);
-void gsMemTim2CacheEnd(int success);
-void gsMemTim2CacheLogStats(void);
 
 /* gs.c */
 void gsWriteReg(int reg, u64 value);
@@ -88,8 +83,6 @@ void gsRendererInit(void);
 void gsRendererDraw(const GsDrawState* st, const GsVertex* v, int nverts);   /* triangle list / line list / points */
 void gsRendererPresent(unsigned int dispfb_fbp, unsigned int dispfb_fbw);
 void gsRendererFlush(void);
-int gsTextureTim2CacheSafe(void);
-void gsClutCacheLogStats(void);
 
 /* VRAM <-> render target coherency */
 /* changed: the transfer altered GS memory (render targets that were drawn into are invalidated either way) */
