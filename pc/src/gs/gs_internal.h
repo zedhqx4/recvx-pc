@@ -64,6 +64,8 @@ void gsMemWrite(int psm, unsigned int bp, unsigned int bw, unsigned int x, unsig
 int  gsPsmBits(int psm);
 int  gsBlockNumber(int psm, unsigned int bp, unsigned int bw, unsigned int x, unsigned int y);
 void gsMemStartTransfer(const GsRegs* r);
+void gsMemFinishTransfer(void);
+void gsMemTransferBytes(const unsigned char* data, int bytes);
 void gsMemTransferData(const unsigned char* data, int qwc);
 void gsMemReadImage(const GsRegs* r, unsigned char* out);
 
