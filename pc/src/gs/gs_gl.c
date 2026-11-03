@@ -282,6 +282,7 @@ void pcGsLogStats(void)
           (double)stats.tex_superset_hits / f);
     pcLog("gs: %d textures cached (%.0f MB)", tex_cached, tex_cached_bytes / 1048576.0);
     gsClutCacheLogStats();
+    gsMemTim2CacheLogStats();
     memset(&stats, 0, sizeof(stats));
 }
 
@@ -950,6 +951,34 @@ static int rt_overlaps(const RenderTarget* rt, unsigned int bp, unsigned int bw,
     (void)psm;
 
     return (lo < rt_hi) && (hi > rt_lo);
+}
+
+/* TIM2 images are streamed through the reserved GS range starting at BP 190*64;
+ * their CLUTs use BP 254*64. Do not skip a reload while an OpenGL render target
+ * has newer pixels in any part of that range that have not been flushed to gsVram. */
+int gsTextureTim2CacheSafe(void)
+{
+    const unsigned int tim2_lo = 190u * 64u;
+    const unsigned int tim2_hi = GS_VRAM_SIZE / 256u;
+    int i;
+
+    for (i = 0; i < MAX_RT; i++)
+    {
+        const RenderTarget* rt = &rts[i];
+        unsigned int rt_lo, rt_hi;
+
+        if (!rt->used || !rt->rendered)
+            continue;
+
+        rt_lo = rt->fbp * 32u;
+        rt_hi = rt_lo + (unsigned int)(rt->w / 64) *
+                        (unsigned int)(rt->h / 32) * 32u;
+
+        if ((rt_lo < tim2_hi) && (rt_hi > tim2_lo))
+            return 0;
+    }
+
+    return 1;
 }
 
 /* copies rows y0..y1-1 of GS memory into the render target */
