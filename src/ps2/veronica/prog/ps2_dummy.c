@@ -314,6 +314,7 @@ static int pcPs2TexLoadForDraw(NJS_TEXMEMLIST* addr)
     PcPs2Tim2StateEntry* entry;
     int slot;
     int result;
+    unsigned int render_sub_before;
     uint64_t key0 = 0, key1 = 0;
     int key_valid;
 
@@ -348,6 +349,7 @@ static int pcPs2TexLoadForDraw(NJS_TEXMEMLIST* addr)
         return entry->cache_flag;
     }
 
+    render_sub_before = PS2_Render_tex_sub_flag;
     pcPs2Tim2LoadContext = 1;
     result = Ps2TexLoad(addr);
     pcPs2Tim2LoadContext = 0;
@@ -367,7 +369,7 @@ static int pcPs2TexLoadForDraw(NJS_TEXMEMLIST* addr)
     entry->pict_format = tim->PictFormat;
     entry->clamp_flag = tim->ClampFlag;
     entry->format_id = tim->FormatId;
-    entry->input_render_sub_flag = PS2_Render_tex_sub_flag;
+    entry->input_render_sub_flag = render_sub_before;
     entry->tex0 = Ps2_gs_save.TEX0;
     entry->tex0_next = Ps2_gs_save.TEX0_NEXT;
     entry->tex1 = Ps2_gs_save.TEX1;
