@@ -2,7 +2,8 @@
 #include <stdlib.h>
 #include <stdint.h>
 #include "../../../../pc/include/pc_platform.h"
-extern void gsMemTraceArm(void);
+extern void gsMemTraceTextureLoadBegin(unsigned int seq, unsigned int gindex);
+extern void gsMemTraceTextureLoadEnd(void);
 
 static int pcGsTextureTraceEnabled(void)
 {
@@ -2568,8 +2569,8 @@ int Ps2TexLoad(NJS_TEXMEMLIST* addr)
 #ifdef TARGET_PC
     if (trace_enabled)
     {
-        gsMemTraceArm();
         trace_seq = ++pcGsTextureTraceLoadSeq;
+        gsMemTraceTextureLoadBegin(trace_seq, timp->Gindex);
         if (trace_seq <= 4096)
         {
             trace_hash_valid = pcGsTextureTraceSourceHashes(timp, &trace_image_hash, &trace_clut_hash);
@@ -2735,6 +2736,11 @@ label:
 #endif
 
     loadImage((void*)0xF0000000);
+
+#ifdef TARGET_PC
+    if (trace_enabled)
+        gsMemTraceTextureLoadEnd();
+#endif
 
     return cache_flag;
 }
