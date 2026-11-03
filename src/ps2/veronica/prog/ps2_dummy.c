@@ -2595,8 +2595,12 @@ int Ps2DrawOTagSub(int start_no)
     unsigned int np_no; 
     unsigned int tex_addr;
     unsigned int clt_addr;
-    unsigned int exit_no; 
+    unsigned int exit_no;
     void* start_addr;
+#ifdef TARGET_PC
+    uint64_t tim2_key0, tim2_key1;
+    int tim2_key_valid;
+#endif
     
     old_p = NULL;
     
@@ -2610,10 +2614,11 @@ int Ps2DrawOTagSub(int start_no)
     
     exit_no = 4096; 
     
-    for (i = 0; i < 64; i++) 
-    { 
+    for (i = 0; i < 64; i++)
+    {
 #ifdef TARGET_PC
         memset(&ps2_tp_cache[i], 0, 16);
+        memset(&pcPs2TpCacheKeys[i], 0, sizeof(pcPs2TpCacheKeys[i]));
 #else
         *(u_long128*)&ps2_tp_cache[i] = 0; 
 #endif
@@ -2653,26 +2658,33 @@ int Ps2DrawOTagSub(int start_no)
                     exit(0); 
                 }
 
-                timp = (TIM2_PICTUREHEADER_EX*)p->tp->texinfo.texsurface.pSurface; 
-                
-                if (timp != NULL) 
-                { 
-                    for (j = 0; j < tex_cache_num; j++) 
-                    { 
-                        if (ps2_tp_cache[j].tp == p->tp->texinfo.texsurface.pSurface) 
-                        { 
-                            t_flag = 1; 
-                            
+                timp = (TIM2_PICTUREHEADER_EX*)p->tp->texinfo.texsurface.pSurface;
+
+                if (timp != NULL)
+                {
+#ifdef TARGET_PC
+                    tim2_key_valid = pcPs2Tim2FrameKey(timp, p->bank, &tim2_key0, &tim2_key1);
+#endif
+                    for (j = 0; j < tex_cache_num; j++)
+                    {
+#ifdef TARGET_PC
+                        if (tim2_key_valid && pcPs2TpCacheKeys[j].valid &&
+                            (pcPs2TpCacheKeys[j].key0 == tim2_key0) &&
+                            (pcPs2TpCacheKeys[j].key1 == tim2_key1))
+#else
+                        if (ps2_tp_cache[j].tp == p->tp->texinfo.texsurface.pSurface)
+#endif
+                        {
+                            t_flag = 1;
                             np_no = j;
-                            
-                            if (ps2_tp_cache[j].bank == p->bank) 
-                            { 
+
+                            if (ps2_tp_cache[j].bank == p->bank)
+                            {
                                 p_flag = 1;
-                                
-                                t_no = j; 
+                                t_no = j;
                             }
                         }
-                    } 
+                    }
                     
                     if (t_flag != 0)
                     { 
@@ -2710,9 +2722,14 @@ int Ps2DrawOTagSub(int start_no)
                         clt_addr += 8; 
                     }
                     
-                    ps2_tp_cache[tex_cache_num].tp = timp; 
-                    ps2_tp_cache[tex_cache_num].bank = p->bank; 
-                    
+                    ps2_tp_cache[tex_cache_num].tp = timp;
+                    ps2_tp_cache[tex_cache_num].bank = p->bank;
+#ifdef TARGET_PC
+                    pcPs2TpCacheKeys[tex_cache_num].valid = tim2_key_valid;
+                    pcPs2TpCacheKeys[tex_cache_num].key0 = tim2_key_valid ? tim2_key0 : 0;
+                    pcPs2TpCacheKeys[tex_cache_num].key1 = tim2_key_valid ? tim2_key1 : 0;
+#endif
+
                     Ps2_tp_tag[tex_cache_num].GIF_TAG[0] = SCE_GIF_SET_TAG(3, SCE_GS_FALSE, SCE_GS_FALSE, 0, SCE_GIF_PACKED, 1); 
                     Ps2_tp_tag[tex_cache_num].GIF_TAG[1] = SCE_GIF_PACKED_AD; 
                     
