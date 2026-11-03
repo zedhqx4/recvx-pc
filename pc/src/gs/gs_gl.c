@@ -261,7 +261,7 @@ static unsigned int decal_draw_order;
 static int dump_frame;
 
 /* per-interval statistics for the periodic log */
-static struct { unsigned int frames, draws, verts, rt_loads, rt_reads, tex_decodes, tex_texels; double t_load, t_read, t_decode; } stats;
+static struct { unsigned int frames, draws, verts, rt_loads, rt_reads, tex_decodes, tex_texels, tex_superset_hits; double t_load, t_read, t_decode; } stats;
 static int tex_cached;                     /* textures in the cache, decoded from GS memory */
 static double tex_cached_bytes;            /* their size */
 
@@ -276,9 +276,10 @@ void pcGsLogStats(void)
 {
     unsigned int f = stats.frames ? stats.frames : 1;
 
-    pcLog("gs/frame: %u draws, %u verts, %.1f rt loads (%.1f ms), %.1f rt reads (%.1f ms), %.1f tex decodes (%u texels, %.1f ms)",
+    pcLog("gs/frame: %u draws, %u verts, %.1f rt loads (%.1f ms), %.1f rt reads (%.1f ms), %.1f tex decodes (%u texels, %.1f ms), %.1f texture-coverage reuses",
           stats.draws / f, stats.verts / f, (double)stats.rt_loads / f, stats.t_load * 1000 / f, (double)stats.rt_reads / f,
-          stats.t_read * 1000 / f, (double)stats.tex_decodes / f, stats.tex_texels / f, stats.t_decode * 1000 / f);
+          stats.t_read * 1000 / f, (double)stats.tex_decodes / f, stats.tex_texels / f, stats.t_decode * 1000 / f,
+          (double)stats.tex_superset_hits / f);
     pcLog("gs: %d textures cached (%.0f MB)", tex_cached, tex_cached_bytes / 1048576.0);
     gsClutCacheLogStats();
     memset(&stats, 0, sizeof(stats));
@@ -767,16 +768,20 @@ static GLuint get_texture(u64 tex0, u64 texa, u64 texclut, int w, int h, int row
         if (t->used && (t->key0 == key0) && (t->key1 == key1) && (t->key2 == key2) &&
             (t->w == w) && (t->h == h) && (t->rows >= rows) && (t->cols >= cols))
         {
-            candidate_gen = gen_sum_rect(page_lo, stride,
-                                         (t->rows + ph - 1) / ph,
-                                         (t->cols + pw - 1) / pw);
-            if (candidate_gen == t->gen)
             {
                 unsigned long long area = (unsigned long long)t->rows * (unsigned long long)t->cols;
+
+                /* Only validate candidates that improve the current smallest superset. */
                 if ((superset == NULL) || (area < superset_area))
                 {
-                    superset = t;
-                    superset_area = area;
+                    candidate_gen = gen_sum_rect(page_lo, stride,
+                                                 (t->rows + ph - 1) / ph,
+                                                 (t->cols + pw - 1) / pw);
+                    if (candidate_gen == t->gen)
+                    {
+                        superset = t;
+                        superset_area = area;
+                    }
                 }
             }
         }
@@ -799,6 +804,7 @@ static GLuint get_texture(u64 tex0, u64 texa, u64 texclut, int w, int h, int row
                                  page_lo, stride, (rows + ph - 1) / ph,
                                  (cols + pw - 1) / pw, gen, 1);
         superset->last_use = frame_counter;
+        stats.tex_superset_hits++;
         *hd = superset->hd;
         return superset->tex;
     }
