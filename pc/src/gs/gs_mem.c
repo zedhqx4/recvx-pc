@@ -7,9 +7,12 @@
  * layouts must match the real hardware; gsMemSelfTest() checks them against the game's own
  * conversion routines (ps2_pxlconv.c).
  */
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "gs_internal.h"
+#include "../../include/pc_platform.h"
 
 unsigned char gsVram[GS_VRAM_SIZE];
 unsigned int gsPageGen[GS_PAGES];
@@ -19,6 +22,90 @@ unsigned int gsPageGen[GS_PAGES];
 static unsigned int pageTouchEpoch[GS_PAGES];
 static unsigned int currentPageTouchEpoch;
 static int coalescePageTouches;
+
+/* Opt-in VRAM transfer trace. Page numbers here are physical 8 KiB byte pages,
+ * matching gsPageGen[] (not 256-byte GS block numbers). */
+static int gsTexTraceEnabled(void)
+{
+    static int enabled = -1;
+    if (enabled < 0)
+    {
+        const char* value = getenv("RECVX_GS_TEX_TRACE");
+        enabled = (value != NULL && value[0] == '1' && value[1] == '\0') ? 1 : 0;
+    }
+    return enabled;
+}
+
+static unsigned int gsTexTraceTransferSeq;
+static unsigned int gsTexTraceReadSeq;
+static unsigned int gsTexTraceCurrentId;
+static unsigned int gsTexTracePageCount;
+static unsigned char gsTexTracePageSeen[GS_PAGES];
+static unsigned int gsTexTracePages[GS_PAGES];
+static int gsTexTraceCapture;
+
+static void gsTexTraceBegin(void)
+{
+    if (!gsTexTraceEnabled())
+        return;
+
+    gsTexTraceCapture = 1;
+    gsTexTracePageCount = 0;
+    memset(gsTexTracePageSeen, 0, sizeof(gsTexTracePageSeen));
+    gsTexTraceCurrentId = ++gsTexTraceTransferSeq;
+}
+
+static void gsTexTraceRecordPage(unsigned int byte_addr)
+{
+    unsigned int page;
+
+    if (!gsTexTraceCapture)
+        return;
+
+    page = (byte_addr >> 13) & (GS_PAGES - 1);
+    if (!gsTexTracePageSeen[page])
+    {
+        gsTexTracePageSeen[page] = 1;
+        gsTexTracePages[gsTexTracePageCount++] = page;
+    }
+}
+
+static void gsTexTraceEnd(int complete, int changed, unsigned int next_x,
+                          unsigned int next_y, int partial_bytes)
+{
+    char page_list[768];
+    size_t used = 0;
+    unsigned int i, shown;
+    int n;
+
+    if (!gsTexTraceCapture)
+        return;
+
+    gsTexTraceCapture = 0;
+    if (gsTexTraceCurrentId > 2048)
+    {
+        if (gsTexTraceCurrentId == 2049)
+            pcLog("GS_TEX_TRACE_XFER further transfer records suppressed (limit=2048)");
+        return;
+    }
+
+    page_list[0] = '\0';
+    shown = (gsTexTracePageCount < 32) ? gsTexTracePageCount : 32;
+    for (i = 0; i < shown && used < sizeof(page_list) - 1; i++)
+    {
+        unsigned int page = gsTexTracePages[i];
+        n = snprintf(page_list + used, sizeof(page_list) - used,
+                     "%s%u:%u", (i == 0) ? "" : ",", page, gsPageGen[page]);
+        if (n < 0 || (size_t)n >= sizeof(page_list) - used)
+            break;
+        used += (size_t)n;
+    }
+
+    pcLog("GS_TEX_TRACE_XFER_END id=%u complete=%u changed=%u next=%u,%u partial_bytes=%d touched_8k_pages=%u pages=[%s]%s",
+          gsTexTraceCurrentId, complete ? 1U : 0U, changed ? 1U : 0U,
+          next_x, next_y, partial_bytes, gsTexTracePageCount, page_list,
+          (gsTexTracePageCount > shown) ? ",..." : "");
+}
 
 static const unsigned char blockTable32[4][8] = {
     {  0,  1,  4,  5, 16, 17, 20, 21 },
@@ -241,6 +328,9 @@ int gsBlockNumber(int psm, unsigned int bp, unsigned int bw, unsigned int x, uns
 static void touch(unsigned int byte_addr)
 {
     unsigned int page = (byte_addr >> 13) & (GS_PAGES - 1);
+
+    if (gsTexTraceCapture)
+        gsTexTraceRecordPage(byte_addr);
 
     if (coalescePageTouches)
     {
