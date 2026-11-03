@@ -17,27 +17,6 @@
 unsigned char gsVram[GS_VRAM_SIZE];
 unsigned int gsPageGen[GS_PAGES];
 
-#define GS_XFER_CACHE_ENTRIES 256
-#define GS_XFER_CACHE_PAGE_BYTES (GS_PAGES / 8)
-
-typedef struct {
-    int valid;
-    unsigned int bp, bw, psm, sx, sy, w, h, bytes;
-    uint64_t source_hash_a, source_hash_b;
-    uint64_t page_generation_hash;
-    unsigned char pages[GS_XFER_CACHE_PAGE_BYTES];
-} GsXferCacheEntry;
-
-static GsXferCacheEntry gsXferCache[GS_XFER_CACHE_ENTRIES];
-static unsigned char gsXferCachePendingPages[GS_XFER_CACHE_PAGE_BYTES];
-static unsigned int gsXferCachePendingSlot;
-static unsigned int gsXferCachePendingPageCount;
-static unsigned int gsXferCacheHits;
-static unsigned int gsXferCacheHitLogs;
-static int gsXferCachePending;
-static int gsXferCacheCapturePages;
-static int gsXferCacheAnnounced;
-
 /* Page generations invalidate cached textures; one bump per touched page per IMAGE
  * packet is sufficient, rather than incrementing the same counter for every pixel. */
 static unsigned int pageTouchEpoch[GS_PAGES];
@@ -56,68 +35,6 @@ enum {
 };
 
 #define GS_TEX_TRACE_TRANSFER_LIMIT 2048
-
-static int gsXferCacheEnabled(void)
-{
-    static int enabled = -1;
-    if (enabled < 0)
-    {
-        const char* value = getenv("RECVX_GS_TEX_CACHE");
-        enabled = (value != NULL && value[0] == '1' && value[1] == '\0') ? 1 : 0;
-    }
-    return enabled;
-}
-
-static void gsXferCacheHashBytes(const unsigned char* data, int bytes,
-                                 uint64_t* hash_a, uint64_t* hash_b)
-{
-    uint64_t a = 14695981039346656037ULL;
-    uint64_t b = 0x6A09E667F3BCC909ULL;
-    int i;
-
-    for (i = 0; i < bytes; i++)
-    {
-        a = (a ^ data[i]) * 1099511628211ULL;
-        b ^= (uint64_t)data[i] + 0x9E3779B97F4A7C15ULL + (b << 6) + (b >> 2);
-        b = (b << 27) | (b >> 37);
-        b *= 0x94D049BB133111EBULL;
-    }
-
-    *hash_a = a;
-    *hash_b = b;
-}
-
-static uint64_t gsXferCachePageGenerationHash(const unsigned char* pages)
-{
-    uint64_t hash = 14695981039346656037ULL;
-    unsigned int page;
-
-    for (page = 0; page < GS_PAGES; page++)
-    {
-        if (pages[page >> 3] & (1u << (page & 7)))
-        {
-            uint64_t value = ((uint64_t)page << 32) | gsPageGen[page];
-            hash = (hash ^ value) * 1099511628211ULL;
-        }
-    }
-
-    return hash;
-}
-
-static void gsXferCacheRecordAddress(unsigned int byte_addr)
-{
-    unsigned int page;
-
-    if (!gsXferCacheCapturePages)
-        return;
-
-    page = (byte_addr >> 13) & (GS_PAGES - 1);
-    if (!(gsXferCachePendingPages[page >> 3] & (1u << (page & 7))))
-    {
-        gsXferCachePendingPages[page >> 3] |= (unsigned char)(1u << (page & 7));
-        gsXferCachePendingPageCount++;
-    }
-}
 
 static int gsTexTraceEnabled(void)
 {
@@ -418,16 +335,6 @@ void gsMemInit(void)
     }
 
     memset(gsVram, 0, sizeof(gsVram));
-    memset(gsPageGen, 0, sizeof(gsPageGen));
-    memset(pageTouchEpoch, 0, sizeof(pageTouchEpoch));
-    memset(gsXferCache, 0, sizeof(gsXferCache));
-    memset(gsXferCachePendingPages, 0, sizeof(gsXferCachePendingPages));
-    gsXferCachePending = 0;
-    gsXferCacheCapturePages = 0;
-    gsXferCachePendingPageCount = 0;
-    gsXferCacheHits = 0;
-    gsXferCacheHitLogs = 0;
-    gsXferCacheAnnounced = 0;
 }
 
 /* ---- address functions: return a byte (or nibble for 4-bit) offset into gsVram ---- */
@@ -464,6 +371,42 @@ static unsigned int addr4(unsigned int bp, unsigned int bw, unsigned int x, unsi
     unsigned int block = bp + page * 32 + blockTable4[(y >> 4) & 7][(x >> 5) & 3];
 
     return (block * 512 + columnTable4[y & 15][x & 31]) & (GS_VRAM_SIZE * 2 - 1);
+}
+
+/* Physical 8 KiB page containing a GS pixel. The CLUT cache uses the
+ * same swizzle as gsMemRead(), so writes through any PSM alias invalidate it. */
+unsigned int gsMemPageForPixel(int psm, unsigned int bp, unsigned int bw,
+                               unsigned int x, unsigned int y)
+{
+    unsigned int address;
+
+    switch (psm)
+    {
+    case GS_PSMCT32:
+    case GS_PSMCT24:
+        address = addr32(bp, bw, x, y, blockTable32);
+        break;
+    case GS_PSMZ32:
+    case GS_PSMZ24:
+        address = addr32(bp, bw, x, y, blockTable32Z);
+        break;
+    case GS_PSMCT16:
+        address = addr16(bp, bw, x, y, blockTable16);
+        break;
+    case GS_PSMCT16S:
+        address = addr16(bp, bw, x, y, blockTable16S);
+        break;
+    case GS_PSMZ16:
+        address = addr16(bp, bw, x, y, blockTable16Z);
+        break;
+    case GS_PSMZ16S:
+        address = addr16(bp, bw, x, y, blockTable16SZ);
+        break;
+    default:
+        return GS_PAGES;
+    }
+
+    return (address >> 13) & (GS_PAGES - 1);
 }
 
 /* GS block (256 bytes) holding pixel (x, y) of a buffer, for the texture formats the HD texture
@@ -561,7 +504,6 @@ static int mem_write(int psm, unsigned int bp, unsigned int bw, unsigned int x, 
     case GS_PSMCT32:
     case GS_PSMZ32:
         a = addr32(bp, bw, x, y, (psm == GS_PSMZ32) ? blockTable32Z : blockTable32);
-        gsXferCacheRecordAddress(a);
         old = *(unsigned int*)&gsVram[a & ~3u];
         *(unsigned int*)&gsVram[a] = v;
         if (*(unsigned int*)&gsVram[a & ~3u] == old)
@@ -574,7 +516,6 @@ static int mem_write(int psm, unsigned int bp, unsigned int bw, unsigned int x, 
     case GS_PSMCT24:
     case GS_PSMZ24:
         a = addr32(bp, bw, x, y, (psm == GS_PSMZ24) ? blockTable32Z : blockTable32);
-        gsXferCacheRecordAddress(a);
         old = *(unsigned int*)&gsVram[a & ~3u];
         *(unsigned int*)&gsVram[a] = (*(unsigned int*)&gsVram[a] & 0xFF000000) | (v & 0xFFFFFF);
         if (*(unsigned int*)&gsVram[a & ~3u] == old)
@@ -586,7 +527,6 @@ static int mem_write(int psm, unsigned int bp, unsigned int bw, unsigned int x, 
         break;
     case GS_PSMCT16:
         a = addr16(bp, bw, x, y, blockTable16);
-        gsXferCacheRecordAddress(a);
         old = *(unsigned int*)&gsVram[a & ~3u];
         *(unsigned short*)&gsVram[a] = (unsigned short)v;
         if (*(unsigned int*)&gsVram[a & ~3u] == old)
@@ -598,7 +538,6 @@ static int mem_write(int psm, unsigned int bp, unsigned int bw, unsigned int x, 
         break;
     case GS_PSMCT16S:
         a = addr16(bp, bw, x, y, blockTable16S);
-        gsXferCacheRecordAddress(a);
         old = *(unsigned int*)&gsVram[a & ~3u];
         *(unsigned short*)&gsVram[a] = (unsigned short)v;
         if (*(unsigned int*)&gsVram[a & ~3u] == old)
@@ -610,7 +549,6 @@ static int mem_write(int psm, unsigned int bp, unsigned int bw, unsigned int x, 
         break;
     case GS_PSMZ16:
         a = addr16(bp, bw, x, y, blockTable16Z);
-        gsXferCacheRecordAddress(a);
         old = *(unsigned int*)&gsVram[a & ~3u];
         *(unsigned short*)&gsVram[a] = (unsigned short)v;
         if (*(unsigned int*)&gsVram[a & ~3u] == old)
@@ -622,7 +560,6 @@ static int mem_write(int psm, unsigned int bp, unsigned int bw, unsigned int x, 
         break;
     case GS_PSMZ16S:
         a = addr16(bp, bw, x, y, blockTable16SZ);
-        gsXferCacheRecordAddress(a);
         old = *(unsigned int*)&gsVram[a & ~3u];
         *(unsigned short*)&gsVram[a] = (unsigned short)v;
         if (*(unsigned int*)&gsVram[a & ~3u] == old)
@@ -634,7 +571,6 @@ static int mem_write(int psm, unsigned int bp, unsigned int bw, unsigned int x, 
         break;
     case GS_PSMT8:
         a = addr8(bp, bw, x, y);
-        gsXferCacheRecordAddress(a);
         old = *(unsigned int*)&gsVram[a & ~3u];
         gsVram[a] = (unsigned char)v;
         if (*(unsigned int*)&gsVram[a & ~3u] == old)
@@ -646,7 +582,6 @@ static int mem_write(int psm, unsigned int bp, unsigned int bw, unsigned int x, 
         break;
     case GS_PSMT4:
         a = addr4(bp, bw, x, y);
-        gsXferCacheRecordAddress(a >> 1);
         old = gsVram[a >> 1];
         gsVram[a >> 1] = (unsigned char)((gsVram[a >> 1] & (0xF0 >> ((a & 1) * 4))) | ((v & 15) << ((a & 1) * 4)));
 
@@ -659,7 +594,6 @@ static int mem_write(int psm, unsigned int bp, unsigned int bw, unsigned int x, 
         return 1;
     case GS_PSMT8H:
         a = addr32(bp, bw, x, y, blockTable32) + 3;
-        gsXferCacheRecordAddress(a);
         old = *(unsigned int*)&gsVram[a & ~3u];
         gsVram[a] = (unsigned char)v;
         if (*(unsigned int*)&gsVram[a & ~3u] == old)
@@ -671,7 +605,6 @@ static int mem_write(int psm, unsigned int bp, unsigned int bw, unsigned int x, 
         break;
     case GS_PSMT4HL:
         a = addr32(bp, bw, x, y, blockTable32) + 3;
-        gsXferCacheRecordAddress(a);
         old = *(unsigned int*)&gsVram[a & ~3u];
         gsVram[a] = (unsigned char)((gsVram[a] & 0xF0) | (v & 15));
         if (*(unsigned int*)&gsVram[a & ~3u] == old)
@@ -683,7 +616,6 @@ static int mem_write(int psm, unsigned int bp, unsigned int bw, unsigned int x, 
         break;
     case GS_PSMT4HH:
         a = addr32(bp, bw, x, y, blockTable32) + 3;
-        gsXferCacheRecordAddress(a);
         old = *(unsigned int*)&gsVram[a & ~3u];
         gsVram[a] = (unsigned char)((gsVram[a] & 0x0F) | ((v & 15) << 4));
         if (*(unsigned int*)&gsVram[a & ~3u] == old)
@@ -737,101 +669,6 @@ static struct {
     int partial_count;
 } xfer;
 
-static int gsXferCacheExpectedBytes(void)
-{
-    uint64_t pixels = (uint64_t)xfer.w * (uint64_t)xfer.h;
-    uint64_t bytes;
-
-    switch (xfer.psm)
-    {
-    case GS_PSMCT32: case GS_PSMZ32: bytes = pixels * 4; break;
-    case GS_PSMCT24: case GS_PSMZ24: bytes = pixels * 3; break;
-    case GS_PSMCT16: case GS_PSMCT16S: case GS_PSMZ16: case GS_PSMZ16S: bytes = pixels * 2; break;
-    case GS_PSMT8: case GS_PSMT8H: bytes = pixels; break;
-    case GS_PSMT4: case GS_PSMT4HL: case GS_PSMT4HH: bytes = (pixels + 1) / 2; break;
-    default: return 0;
-    }
-
-    return (bytes > 0 && bytes <= 0x7FFFFFFFULL) ? (int)bytes : 0;
-}
-
-static unsigned int gsXferCacheSlot(uint64_t hash_a, uint64_t hash_b)
-{
-    uint64_t key = hash_a ^ (hash_b + 0x9E3779B97F4A7C15ULL +
-                             ((uint64_t)xfer.bp << 6) + ((uint64_t)xfer.bw << 17) +
-                             ((uint64_t)xfer.psm << 29) + ((uint64_t)xfer.sx << 37) +
-                             ((uint64_t)xfer.sy << 43) + ((uint64_t)xfer.w << 49) +
-                             ((uint64_t)xfer.h << 55));
-    key ^= key >> 32;
-    return (unsigned int)key & (GS_XFER_CACHE_ENTRIES - 1);
-}
-
-static int gsXferCacheTrySkip(const unsigned char* data, int bytes)
-{
-    uint64_t hash_a, hash_b;
-    unsigned int slot;
-    GsXferCacheEntry* entry;
-    int expected;
-
-    if (!gsXferCacheEnabled() || !xfer.active || (xfer.dir != 0) ||
-        (xfer.x != xfer.sx) || (xfer.y != xfer.sy) || (xfer.partial_count != 0) || (data == NULL))
-        return 0;
-
-    expected = gsXferCacheExpectedBytes();
-    if ((expected == 0) || (expected != bytes))
-        return 0;
-
-    if (!gsTextureTransferCacheSafe(xfer.bp, xfer.bw, xfer.psm, xfer.sy, xfer.h))
-        return 0;
-
-    if (!gsXferCacheAnnounced)
-    {
-        pcLog("GS_TEX_CACHE enabled=1 entries=%u scope=complete_host_to_local_transfers",
-              GS_XFER_CACHE_ENTRIES);
-        gsXferCacheAnnounced = 1;
-    }
-
-    gsXferCacheHashBytes(data, bytes, &hash_a, &hash_b);
-    slot = gsXferCacheSlot(hash_a, hash_b);
-    entry = &gsXferCache[slot];
-
-    if (entry->valid &&
-        (entry->bp == xfer.bp) && (entry->bw == xfer.bw) && (entry->psm == xfer.psm) &&
-        (entry->sx == xfer.sx) && (entry->sy == xfer.sy) &&
-        (entry->w == xfer.w) && (entry->h == xfer.h) && (entry->bytes == (unsigned int)bytes) &&
-        (entry->source_hash_a == hash_a) && (entry->source_hash_b == hash_b) &&
-        (entry->page_generation_hash == gsXferCachePageGenerationHash(entry->pages)))
-    {
-        gsXferCacheHits++;
-        if (gsXferCacheHitLogs < 128)
-            pcLog("GS_TEX_CACHE_HIT count=%u bytes=%d dst_BP=%u BW=%u PSM=%02x xy=%u,%u size=%ux%u slot=%u",
-                  gsXferCacheHits, bytes, xfer.bp, xfer.bw, xfer.psm,
-                  xfer.sx, xfer.sy, xfer.w, xfer.h, slot);
-        else if (gsXferCacheHitLogs == 128)
-            pcLog("GS_TEX_CACHE further hit records suppressed (limit=128)");
-        gsXferCacheHitLogs++;
-
-        xfer.changed = 0;
-        xfer.x = xfer.sx;
-        xfer.y = xfer.sy + xfer.h;
-        gsMemFinishTransfer();
-        return 1;
-    }
-
-    entry->valid = 0;
-    entry->bp = xfer.bp; entry->bw = xfer.bw; entry->psm = xfer.psm;
-    entry->sx = xfer.sx; entry->sy = xfer.sy; entry->w = xfer.w; entry->h = xfer.h;
-    entry->bytes = (unsigned int)bytes;
-    entry->source_hash_a = hash_a; entry->source_hash_b = hash_b;
-
-    memset(gsXferCachePendingPages, 0, sizeof(gsXferCachePendingPages));
-    gsXferCachePendingPageCount = 0;
-    gsXferCachePendingSlot = slot;
-    gsXferCachePending = 1;
-    gsXferCacheCapturePages = 1;
-    return 0;
-}
-
 void gsMemFinishTransfer(void)
 {
     unsigned int next_x, next_y;
@@ -850,25 +687,6 @@ void gsMemFinishTransfer(void)
     xfer.active = 0;
     xfer.partial_count = 0;
     gsXferDone(xfer.bp, xfer.bw, xfer.psm, xfer.sx, xfer.sy, xfer.w, xfer.h, changed);
-
-    if (gsXferCachePending)
-    {
-        GsXferCacheEntry* entry = &gsXferCache[gsXferCachePendingSlot];
-        if (complete && (gsXferCachePendingPageCount != 0))
-        {
-            memcpy(entry->pages, gsXferCachePendingPages, sizeof(entry->pages));
-            entry->page_generation_hash = gsXferCachePageGenerationHash(entry->pages);
-            entry->valid = 1;
-        }
-        else
-        {
-            entry->valid = 0;
-        }
-        gsXferCachePending = 0;
-        gsXferCacheCapturePages = 0;
-        gsXferCachePendingPageCount = 0;
-    }
-
     gsTexTraceEnd(complete, changed, next_x, next_y, partial_bytes);
 }
 
@@ -1071,9 +889,6 @@ void gsMemTransferBytes(const unsigned char* data, int bytes)
     int i;
 
     if (!xfer.active || bytes <= 0)
-        return;
-
-    if (gsXferCacheTrySkip(data, bytes))
         return;
 
     /* One generation bump per touched GS page per incoming data chunk. */
