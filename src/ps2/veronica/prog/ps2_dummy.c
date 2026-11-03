@@ -30,6 +30,12 @@ static unsigned int pcGsTextureTraceLoadSeq;
 #include "../../../ps2/veronica/prog/main.h"
 
 #ifdef TARGET_PC
+/* Forward declarations: the storage is defined later in this translation unit. */
+extern unsigned int Ps2_now_bank;
+extern void* Ps2_tex_cache_buff[4];
+#endif
+
+#ifdef TARGET_PC
 /* Trace-only content hashes: recompute on every traced load to detect changing bytes
  * behind a reused TIM2 address. */
 static uint64_t pcGsTextureTraceHashBytes(const unsigned char* data, unsigned int size)
