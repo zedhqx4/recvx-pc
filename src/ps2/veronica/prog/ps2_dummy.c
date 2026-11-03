@@ -80,6 +80,7 @@ typedef struct {
 
 typedef struct {
     uint64_t key0, key1;
+    uint64_t tex0, tex0_next;
     int valid;
 } PcPs2TpCacheKey;
 
@@ -2684,7 +2685,9 @@ int Ps2DrawOTagSub(int start_no)
 #ifdef TARGET_PC
                         if (tim2_key_valid && pcPs2TpCacheKeys[j].valid &&
                             (pcPs2TpCacheKeys[j].key0 == tim2_key0) &&
-                            (pcPs2TpCacheKeys[j].key1 == tim2_key1))
+                            (pcPs2TpCacheKeys[j].key1 == tim2_key1) &&
+                            (pcPs2TpCacheKeys[j].tex0 == (uint64_t)p->TEX0) &&
+                            (pcPs2TpCacheKeys[j].tex0_next == (uint64_t)p->TEX0_NEXT))
 #else
                         if (ps2_tp_cache[j].tp == p->tp->texinfo.texsurface.pSurface)
 #endif
@@ -2742,6 +2745,8 @@ int Ps2DrawOTagSub(int start_no)
                     pcPs2TpCacheKeys[tex_cache_num].valid = tim2_key_valid;
                     pcPs2TpCacheKeys[tex_cache_num].key0 = tim2_key_valid ? tim2_key0 : 0;
                     pcPs2TpCacheKeys[tex_cache_num].key1 = tim2_key_valid ? tim2_key1 : 0;
+                    pcPs2TpCacheKeys[tex_cache_num].tex0 = (uint64_t)p->TEX0;
+                    pcPs2TpCacheKeys[tex_cache_num].tex0_next = (uint64_t)p->TEX0_NEXT;
 #endif
 
                     Ps2_tp_tag[tex_cache_num].GIF_TAG[0] = SCE_GIF_SET_TAG(3, SCE_GS_FALSE, SCE_GS_FALSE, 0, SCE_GIF_PACKED, 1); 
