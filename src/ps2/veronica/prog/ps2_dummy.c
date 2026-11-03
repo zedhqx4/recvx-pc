@@ -79,6 +79,7 @@ typedef struct {
     unsigned int gindex;
     unsigned int width, height, tbw;
     unsigned int image_type, pict_format, clamp_flag, format_id;
+    unsigned int input_render_sub_flag;
     unsigned long tex0, tex0_next, tex1, clamp, test;
     unsigned int now_bank;
     unsigned int render_tex_sub_flag;
@@ -106,7 +107,8 @@ static int pcPs2Tim2StateMatches(const PcPs2Tim2StateEntry* entry,
            (entry->image_type == tim->ImageType) &&
            (entry->pict_format == tim->PictFormat) &&
            (entry->clamp_flag == tim->ClampFlag) &&
-           (entry->format_id == tim->FormatId);
+           (entry->format_id == tim->FormatId) &&
+           (entry->input_render_sub_flag == PS2_Render_tex_sub_flag);
 }
 
 static int pcPs2Tim2StateFind(NJS_TEXMEMLIST* addr, TIM2_PICTUREHEADER_EX* tim)
@@ -201,6 +203,7 @@ static int pcPs2TexLoadForDraw(NJS_TEXMEMLIST* addr)
     entry->pict_format = tim->PictFormat;
     entry->clamp_flag = tim->ClampFlag;
     entry->format_id = tim->FormatId;
+    entry->input_render_sub_flag = PS2_Render_tex_sub_flag;
     entry->tex0 = Ps2_gs_save.TEX0;
     entry->tex0_next = Ps2_gs_save.TEX0_NEXT;
     entry->tex1 = Ps2_gs_save.TEX1;
@@ -2416,7 +2419,11 @@ void Ps2DrawOTag()
     } 
     
     Ps2ZbuffOn();
-    
+
+#ifdef TARGET_PC
+    pcPs2Tim2StateEndFrame();
+#endif
+
     Ps2_current_texbreak = 1;
 }
 
@@ -2729,6 +2736,7 @@ int Ps2TexLoad(NJS_TEXMEMLIST* addr)
     int trace_forced_reload = 0;
     int trace_same_surface = 0;
     int trace_tp_skip = 0;
+    int trace_tp_state_only = 0;
     int trace_uploaded = 0;
     int trace_render_sub_skip = 0;
     int trace_hash_valid = 0;
@@ -2768,7 +2776,15 @@ int Ps2TexLoad(NJS_TEXMEMLIST* addr)
     }
 #endif
 
-    if (Ps2_current_texbreak != 0) 
+#ifdef TARGET_PC
+    /* The draw helper caches complete per-TIM2 register state for this frame.
+     * On a miss, bypass the legacy pointer-only early-out so changed metadata is
+     * recalculated even when the source surface address was reused. */
+    if (pcPs2Tim2LoadContext && (Ps2_tex_load_tp_cancel != 0) && (timp->TpFlag != 0))
+        goto label;
+#endif
+
+    if (Ps2_current_texbreak != 0)
     {
 #ifdef TARGET_PC
         trace_forced_reload = 1;
@@ -2804,6 +2820,18 @@ int Ps2TexLoad(NJS_TEXMEMLIST* addr)
 label:
         Ps2_tex_cache_buff[0] = addr->texinfo.texsurface.pSurface;
         
+#ifdef TARGET_PC
+        if (pcPs2Tim2LoadContext && (Ps2_tex_load_tp_cancel != 0) && (timp->TpFlag != 0))
+        {
+            /* Ps2DrawOTagSub uploads this TIM2 into its per-frame slot cache.
+             * Here only refresh the header fields used to build this primitive's
+             * TEX0/TEX0_NEXT; uploading the image again to the shared slot is redundant. */
+            pcPs2Tim2SetGsTex(timp);
+            pcPs2Tim2StateOnly++;
+            trace_tp_state_only = 1;
+        }
+        else
+#endif
         if ((PS2_Render_tex_sub_flag == 0) || ((timp->PictFormat >= 5) && (timp->PictFormat <= 8)) || ((timp->ImageType == 4) || (timp->ImageType == 5)))
         {
             Send_Tim2_dataEx(Ps2_tex_cache_buff[0], 190 * 64, 254 * 64);
@@ -2904,9 +2932,10 @@ label:
         const char* reason = trace_forced_reload ? "forced_reload" :
                              trace_same_surface ? "same_surface" :
                              trace_tp_skip ? "tp_skip" :
+                             trace_tp_state_only ? "tp_state_only" :
                              trace_render_sub_skip ? "render_sub_skip" : "normal";
-        pcLog("GS_TEX_TRACE_PS2_END seq=%u Gindex=%08x cache_flag=%u reason=%s upload=%u TEX0=%016llx TBP0=%u TBW=%u PSM=%02x TW=%u TH=%u",
-              trace_seq, timp->Gindex, cache_flag, reason, trace_uploaded,
+        pcLog("GS_TEX_TRACE_PS2_END seq=%u Gindex=%08x cache_flag=%u reason=%s upload=%u state_only=%u TEX0=%016llx TBP0=%u TBW=%u PSM=%02x TW=%u TH=%u",
+              trace_seq, timp->Gindex, cache_flag, reason, trace_uploaded, trace_tp_state_only ? 1U : 0U,
               (uint64_t)Ps2_gs_save.TEX0,
               (unsigned int)(Ps2_gs_save.TEX0 & 0x3FFF),
               (unsigned int)((Ps2_gs_save.TEX0 >> 14) & 0x3F),
