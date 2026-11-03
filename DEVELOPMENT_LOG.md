@@ -1027,3 +1027,13 @@ Avoid calling the full `Ps2TexLoad()` path repeatedly for the same TIM2 during o
 7. `60919bea0f83a33543a338b6e70f7aeb38378ac3` — stores the input render-sub state separately from the post-load value.
 8. `dc946236072d4c31683ad9506205965bb3e4e018` — changes state lookups to bounded open-addressed probing and invalidates frame identities on forced breaks.
 9. `41f166319a59c189b7717645d24f14ea18011978` — bypasses state-cache insertion when a TIM2 identity cannot be validated.
+
+
+### 2026-11-02 — Windows build fix for per-frame TIM2 state cache
+
+- **Failed build:** Windows workflow run #438 at `5a498058bbc0039e09a1bd47b6e1afab03f41c90` compiled 221 files and failed on `src/ps2/veronica/prog/ps2_dummy.c`.
+- **Compiler diagnostics:** MSVC C2065 for `Ps2_now_bank` and `Ps2_tex_cache_buff` in the new PC cache helpers; C2109 was a consequence of the undeclared array symbol.
+- **Root cause:** Both globals are defined later in the same translation unit, after the PC helper functions that use them. The declarations were not visible at those earlier use sites.
+- **Fix:** Added PC-only forward declarations for `extern unsigned int Ps2_now_bank` and `extern void* Ps2_tex_cache_buff[4]` immediately after the includes. The existing storage definitions remain unchanged. No cache behavior or PS2-target code was changed.
+- **Validation:** The failed run confirms the issue. The source fix is committed separately; a successful post-fix Windows build is still required before treating the branch as buildable.
+- **Build limitation:** The workflow is manually dispatched. This session has read access to workflow logs but no workflow-dispatch action, so no post-fix run was triggered here.
