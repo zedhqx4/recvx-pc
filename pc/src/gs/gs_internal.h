@@ -85,7 +85,7 @@ void gsRendererDraw(const GsDrawState* st, const GsVertex* v, int nverts);   /* 
 void gsRendererPresent(unsigned int dispfb_fbp, unsigned int dispfb_fbw);
 void gsRendererFlush(void);
 unsigned int gsRendererFrameSerial(void);
-int gsRendererHasTim2Texture(u64 key0, u64 key1, u64 tex0a, u64 tex0b, u64 texa, u64 texclut, int w, int h);
+int gsRendererHasTim2Texture(u64 key0, u64 key1, u64 texa, u64 texclut);
 void gsRendererCaptureTim2Texture(u64 key0, u64 key1, u64 tex0a, u64 tex0b, u64 texa, u64 texclut, int w, int h);
 
 /* VRAM <-> render target coherency */
