@@ -873,3 +873,27 @@ Tab, Up/Down, Shift+Up/Down, and Backspace retain their existing edge-selection,
 - **Source review:** Confirmed a single mode state, F10 cycling only through enabled INI modes, mode-specific R handling, Escape-to-OFF behavior, removal of the menu tuner's dependency on `debug=1`, arrow-key keycode/scancode handling with repeat support, explicit before/after logging for menu adjustments, and shared profile-default arrays used by both INI fallback and Backspace reset.
 - **Windows build:** Run [41546313454](https://github.com/zedhqx4/recvx-pc/actions/runs/41546313454) passed for the preceding source revision `b9280f8` (`Build game`, `Verify executables`, and `Upload Windows build` all succeeded). This amendment changes only this comment and the development log; a fresh CI run will validate the amended commit.
 - **Runtime:** Pending. Test all four INI combinations for `fontUVfix` and `menuUVfix`, F10 cycling, R routing in each mode, and Escape exit.
+
+
+## 2026-11-02 — GS-PS2texload Trace Build Compatibility Correction
+
+### Problem
+The Windows build on `experimental/GS-ps2texloadcache` failed while compiling `src/ps2/veronica/prog/ps2_dummy.c`, with MSVC C2632 errors at the trace hash declarations. SDL3 itself built successfully.
+
+### Cause
+The PC build force-includes `pc/include/pc_prefix.h`. It includes the host standard headers first, then remaps the game's `long` type to a 64-bit type for EE compatibility. The newly added `unsigned long long` declarations in the trace helpers were therefore macro-expanded into an invalid type sequence.
+
+### Change
+- Replaced all seven `unsigned long long` type uses in the trace-only code with `uint64_t`, which is declared by the standard headers before the EE `long` remapping.
+- Added an explicit `stdint.h` include under `TARGET_PC`.
+- Kept the trace hashes, format strings, cache decisions, GS transfers, and runtime behavior otherwise unchanged.
+
+### Files Changed
+- `src/ps2/veronica/prog/ps2_dummy.c`: `pcGsTextureTraceHashBytes()`, `pcGsTextureTraceSourceHashes()`, and the trace-local hash variables/cast.
+- `DEVELOPMENT_LOG.md`: this correction record.
+
+### Validation
+- Original Windows workflow run [41561178975](https://github.com/zedhqx4/recvx-pc/actions/runs/41561178975) failed only in the game compilation step, with five reported C2632 diagnostics in `ps2_dummy.c`.
+- Correction committed as `7e098ff84a380d6f7b8b6434f089b8247c93e6a2`; source verification confirms seven `uint64_t` uses and no remaining `unsigned long long` in that file.
+- A new Windows build for the corrected commit is still pending; the workflow is manually dispatched and no new build run has been started.
+- Runtime validation pending.
