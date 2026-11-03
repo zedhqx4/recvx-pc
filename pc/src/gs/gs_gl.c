@@ -2331,13 +2331,13 @@ void gsRendererDraw(const GsDrawState* st, const GsVertex* v, int nverts)
         glEnable(GL_POLYGON_OFFSET_FILL);
     }
 
+    /* Select indexed palette lookup per GS draw, including both alpha-test passes. */
+    glUniform1i(U.indexed, indexed_texture);
+
     if (ate && (afail != 0) && (atst != 1))
     {
         /* alpha test with a fail action: pass 1 normal, pass 2 the failing pixels with the
          * buffers AFAIL still allows (FB_ONLY: color, ZB_ONLY: depth, RGB_ONLY: rgb) */
-        /* Indexed palette lookup is a per-draw GS texture mode, not a present pass. */
-        glUniform1i(U.indexed, indexed_texture);
-
         glDrawArrays(mode, 0, n);
 
         glUniform1i(U.atinv, 1);
