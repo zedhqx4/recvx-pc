@@ -464,7 +464,21 @@ static struct {
     unsigned int sx, sy, w, h;
     unsigned int x, y;
     int changed;
+    unsigned char partial[3];
+    int partial_count;
 } xfer;
+
+void gsMemFinishTransfer(void)
+{
+    if (!xfer.active)
+        return;
+
+    /* IMAGE data is written immediately. If the game replaces the transfer registers
+     * before the rectangle is complete, publish the writes already made to the renderer. */
+    xfer.active = 0;
+    xfer.partial_count = 0;
+    gsXferDone(xfer.bp, xfer.bw, xfer.psm, xfer.sx, xfer.sy, xfer.w, xfer.h, xfer.changed);
+}
 
 static void advance(void)
 {
@@ -473,17 +487,15 @@ static void advance(void)
         xfer.x = xfer.sx;
 
         if (++xfer.y >= xfer.sy + xfer.h)
-        {
-            xfer.active = 0;
-
-            gsXferDone(xfer.bp, xfer.bw, xfer.psm, xfer.sx, xfer.sy, xfer.w, xfer.h, xfer.changed);
-        }
+            gsMemFinishTransfer();
     }
 }
 
 void gsMemStartTransfer(const GsRegs* r)
 {
     unsigned int dir = r->trxdir & 3;
+
+    gsMemFinishTransfer();
 
     xfer.dir = dir;
 
@@ -500,6 +512,7 @@ void gsMemStartTransfer(const GsRegs* r)
         xfer.y = xfer.sy;
         xfer.active = (xfer.w != 0) && (xfer.h != 0);
         xfer.changed = 0;
+        xfer.partial_count = 0;
     }
     else if (dir == 2)     /* local -> local */
     {
@@ -645,18 +658,14 @@ static void transfer32Run(const unsigned char* data, int bytes, const unsigned c
     }
 }
 
-void gsMemTransferData(const unsigned char* data, int qwc)
+void gsMemTransferBytes(const unsigned char* data, int bytes)
 {
-    int bytes = qwc * 16;
     int i;
 
-    if (!xfer.active)
-    {
+    if (!xfer.active || bytes <= 0)
         return;
-    }
 
-    /* gsPageGen is a cache invalidation token, not a write count. During one IMAGE
-     * packet, bump each affected 8 KB page only once even if thousands of pixels change. */
+    /* One generation bump per touched GS page per incoming data chunk. */
     currentPageTouchEpoch++;
     if (currentPageTouchEpoch == 0)
     {
@@ -674,10 +683,20 @@ void gsMemTransferData(const unsigned char* data, int qwc)
         break;
     case GS_PSMCT24:
     case GS_PSMZ24:
-        for (i = 0; (i + 3 <= bytes) && xfer.active; i += 3)
+        /* GIF IMAGE chunks are quadword-sized, not pixel-sized. Carry the one or
+         * two trailing bytes of a 24-bit pixel across chunks instead of dropping them. */
+        for (i = 0; i < bytes && xfer.active; i++)
         {
-            xfer.changed |= mem_write(xfer.psm, xfer.bp, xfer.bw, xfer.x, xfer.y, data[i] | (data[i + 1] << 8) | (data[i + 2] << 16));
-            advance();
+            xfer.partial[xfer.partial_count++] = data[i];
+            if (xfer.partial_count == 3)
+            {
+                unsigned int v = (unsigned int)xfer.partial[0] |
+                                 ((unsigned int)xfer.partial[1] << 8) |
+                                 ((unsigned int)xfer.partial[2] << 16);
+                xfer.changed |= mem_write(xfer.psm, xfer.bp, xfer.bw, xfer.x, xfer.y, v);
+                xfer.partial_count = 0;
+                advance();
+            }
         }
         break;
     case GS_PSMCT16:
@@ -692,7 +711,7 @@ void gsMemTransferData(const unsigned char* data, int qwc)
         break;
     case GS_PSMT8:
     case GS_PSMT8H:
-        for (i = 0; (i < bytes) && xfer.active; i++)
+        for (i = 0; i < bytes && xfer.active; i++)
         {
             xfer.changed |= mem_write(xfer.psm, xfer.bp, xfer.bw, xfer.x, xfer.y, data[i]);
             advance();
@@ -701,11 +720,10 @@ void gsMemTransferData(const unsigned char* data, int qwc)
     case GS_PSMT4:
     case GS_PSMT4HL:
     case GS_PSMT4HH:
-        for (i = 0; (i < bytes) && xfer.active; i++)
+        for (i = 0; i < bytes && xfer.active; i++)
         {
             xfer.changed |= mem_write(xfer.psm, xfer.bp, xfer.bw, xfer.x, xfer.y, data[i] & 15);
             advance();
-
             if (xfer.active)
             {
                 xfer.changed |= mem_write(xfer.psm, xfer.bp, xfer.bw, xfer.x, xfer.y, data[i] >> 4);
@@ -715,6 +733,12 @@ void gsMemTransferData(const unsigned char* data, int qwc)
         break;
     }
     coalescePageTouches = 0;
+}
+
+void gsMemTransferData(const unsigned char* data, int qwc)
+{
+    if (qwc > 0)
+        gsMemTransferBytes(data, qwc * 16);
 }
 
 /* local -> host (sceGsExecStoreImage) */
