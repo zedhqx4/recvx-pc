@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <stdint.h>
 #include "../../../../pc/include/pc_platform.h"
+extern void gsMemTraceArm(void);
 
 static int pcGsTextureTraceEnabled(void)
 {
@@ -2567,6 +2568,7 @@ int Ps2TexLoad(NJS_TEXMEMLIST* addr)
 #ifdef TARGET_PC
     if (trace_enabled)
     {
+        gsMemTraceArm();
         trace_seq = ++pcGsTextureTraceLoadSeq;
         if (trace_seq <= 4096)
         {
