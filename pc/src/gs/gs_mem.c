@@ -24,7 +24,18 @@ static unsigned int currentPageTouchEpoch;
 static int coalescePageTouches;
 
 /* Opt-in VRAM transfer trace. Page numbers here are physical 8 KiB byte pages,
- * matching gsPageGen[] (not 256-byte GS block numbers). */
+ * matching gsPageGen[] (not 256-byte GS block numbers). Transfer tracing is armed by the
+ * first Ps2TexLoad(), after GS startup traffic has finished. Each transfer direction gets
+ * its own record budget so initialization, uploads and readbacks cannot starve one another. */
+enum {
+    GS_TEX_TRACE_HOST_TO_LOCAL = 0,
+    GS_TEX_TRACE_LOCAL_TO_LOCAL = 1,
+    GS_TEX_TRACE_LOCAL_TO_HOST = 2,
+    GS_TEX_TRACE_DIRECTION_COUNT = 3
+};
+
+#define GS_TEX_TRACE_TRANSFER_LIMIT 2048
+
 static int gsTexTraceEnabled(void)
 {
     static int enabled = -1;
@@ -36,24 +47,55 @@ static int gsTexTraceEnabled(void)
     return enabled;
 }
 
-static unsigned int gsTexTraceTransferSeq;
-static unsigned int gsTexTraceReadSeq;
+static int gsTexTraceArmed;
+static unsigned int gsTexTraceSeq[GS_TEX_TRACE_DIRECTION_COUNT];
 static unsigned int gsTexTraceCurrentId;
+static int gsTexTraceCurrentDirection;
 static unsigned int gsTexTracePageCount;
 static unsigned char gsTexTracePageSeen[GS_PAGES];
 static unsigned int gsTexTracePages[GS_PAGES];
 static int gsTexTraceCapture;
 
-static void gsTexTraceBegin(void)
+static int gsTexTraceActive(void)
 {
-    if (!gsTexTraceEnabled())
+    return gsTexTraceEnabled() && gsTexTraceArmed;
+}
+
+void gsMemTraceArm(void)
+{
+    if (!gsTexTraceEnabled() || gsTexTraceArmed)
         return;
 
-    gsTexTraceCurrentId = ++gsTexTraceTransferSeq;
-    if (gsTexTraceCurrentId > 2048)
+    gsTexTraceArmed = 1;
+    pcLog("GS_TEX_TRACE_ARM trigger=Ps2TexLoad transfer_limit=%u_per_direction",
+          GS_TEX_TRACE_TRANSFER_LIMIT);
+}
+
+static const char* gsTexTraceDirectionName(int direction)
+{
+    switch (direction)
     {
-        if (gsTexTraceCurrentId == 2049)
-            pcLog("GS_TEX_TRACE_XFER further transfer records suppressed (limit=2048)");
+    case GS_TEX_TRACE_HOST_TO_LOCAL: return "HOST_TO_LOCAL";
+    case GS_TEX_TRACE_LOCAL_TO_LOCAL: return "LOCAL_TO_LOCAL";
+    case GS_TEX_TRACE_LOCAL_TO_HOST: return "LOCAL_TO_HOST";
+    default: return "UNKNOWN";
+    }
+}
+
+static void gsTexTraceBegin(int direction)
+{
+    if (!gsTexTraceActive() ||
+        direction < 0 || direction >= GS_TEX_TRACE_LOCAL_TO_HOST)
+        return;
+
+    gsTexTraceCapture = 0;
+    gsTexTraceCurrentDirection = direction;
+    gsTexTraceCurrentId = ++gsTexTraceSeq[direction];
+    if (gsTexTraceCurrentId > GS_TEX_TRACE_TRANSFER_LIMIT)
+    {
+        if (gsTexTraceCurrentId == GS_TEX_TRACE_TRANSFER_LIMIT + 1)
+            pcLog("GS_TEX_TRACE_XFER direction=%s further records suppressed (limit=%u)",
+                  gsTexTraceDirectionName(direction), GS_TEX_TRACE_TRANSFER_LIMIT);
         return;
     }
 
@@ -89,12 +131,6 @@ static void gsTexTraceEnd(int complete, int changed, unsigned int next_x,
         return;
 
     gsTexTraceCapture = 0;
-    if (gsTexTraceCurrentId > 2048)
-    {
-        if (gsTexTraceCurrentId == 2049)
-            pcLog("GS_TEX_TRACE_XFER further transfer records suppressed (limit=2048)");
-        return;
-    }
 
     page_list[0] = '\0';
     shown = (gsTexTracePageCount < 32) ? gsTexTracePageCount : 32;
@@ -108,8 +144,9 @@ static void gsTexTraceEnd(int complete, int changed, unsigned int next_x,
         used += (size_t)n;
     }
 
-    pcLog("GS_TEX_TRACE_XFER_END id=%u complete=%u changed=%u next=%u,%u partial_bytes=%d touched_8k_pages=%u pages=[%s]%s",
-          gsTexTraceCurrentId, complete ? 1U : 0U, changed ? 1U : 0U,
+    pcLog("GS_TEX_TRACE_XFER_END direction=%s id=%u complete=%u changed=%u next=%u,%u partial_bytes=%d touched_8k_pages=%u pages=[%s]%s",
+          gsTexTraceDirectionName(gsTexTraceCurrentDirection), gsTexTraceCurrentId,
+          complete ? 1U : 0U, changed ? 1U : 0U,
           next_x, next_y, partial_bytes, gsTexTracePageCount, page_list,
           (gsTexTracePageCount > shown) ? ",..." : "");
 }
@@ -619,8 +656,8 @@ void gsMemStartTransfer(const GsRegs* r)
         xfer.active = (xfer.w != 0) && (xfer.h != 0);
         xfer.changed = 0;
         xfer.partial_count = 0;
-        gsTexTraceBegin();
-        if (gsTexTraceCapture && gsTexTraceCurrentId <= 2048)
+        gsTexTraceBegin(GS_TEX_TRACE_HOST_TO_LOCAL);
+        if (gsTexTraceCapture)
         {
             pcLog("GS_TEX_TRACE_XFER_BEGIN id=%u direction=HOST_TO_LOCAL dst_BP=%u dst_8k_page=%u BW=%u PSM=%02x xy=%u,%u size=%ux%u TRXDIR=%u",
                   gsTexTraceCurrentId, xfer.bp, xfer.bp >> 5, xfer.bw, xfer.psm,
@@ -645,8 +682,8 @@ void gsMemStartTransfer(const GsRegs* r)
         unsigned int h = (unsigned int)(r->trxreg >> 32) & 0xFFF;
         unsigned int x, y;
 
-        gsTexTraceBegin();
-        if (gsTexTraceCapture && gsTexTraceCurrentId <= 2048)
+        gsTexTraceBegin(GS_TEX_TRACE_LOCAL_TO_LOCAL);
+        if (gsTexTraceCapture)
         {
             pcLog("GS_TEX_TRACE_XFER_BEGIN id=%u direction=LOCAL_TO_LOCAL src_BP=%u src_8k_page=%u src_BW=%u src_PSM=%02x src_xy=%u,%u dst_BP=%u dst_8k_page=%u dst_BW=%u dst_PSM=%02x dst_xy=%u,%u size=%ux%u",
                   gsTexTraceCurrentId, sbp, sbp >> 5, sbw, spsm, ssx, ssy,
@@ -874,14 +911,15 @@ void gsMemReadImage(const GsRegs* r, unsigned char* out)
     unsigned int x, y;
     int bits = gsPsmBits(spsm);
 
-    if (gsTexTraceEnabled())
+    if (gsTexTraceActive())
     {
-        unsigned int seq = ++gsTexTraceReadSeq;
-        if (seq <= 2048)
+        unsigned int seq = ++gsTexTraceSeq[GS_TEX_TRACE_LOCAL_TO_HOST];
+        if (seq <= GS_TEX_TRACE_TRANSFER_LIMIT)
             pcLog("GS_TEX_TRACE_READBACK seq=%u direction=LOCAL_TO_HOST src_BP=%u src_8k_page=%u BW=%u PSM=%02x xy=%u,%u size=%ux%u",
                   seq, sbp, sbp >> 5, sbw, spsm, ssx, ssy, w, h);
-        else if (seq == 2049)
-            pcLog("GS_TEX_TRACE_READBACK further records suppressed (limit=2048)");
+        else if (seq == GS_TEX_TRACE_TRANSFER_LIMIT + 1)
+            pcLog("GS_TEX_TRACE_READBACK further records suppressed (limit=%u)",
+                  GS_TEX_TRACE_TRANSFER_LIMIT);
     }
 
     gsFlushLocalToLocal(sbp, sbw, spsm, ssx, ssy, w, h);
