@@ -591,6 +591,99 @@ static void gsTextureTraceLookup(u64 tex0, u64 key0, u64 key1, u64 key2,
           ((unsigned int)(bands * page_cols) > shown) ? ",..." : "");
 }
 
+typedef struct {
+    int used;
+    u64 tex0, frame;
+    unsigned int source_fbp;
+    int source_kind;
+    unsigned long long page_gen_hash;
+} GsTextureTraceDraw;
+
+static GsTextureTraceDraw gsTextureTraceDraws[512];
+static unsigned int gsTextureTraceDrawLogs;
+
+static void gsTextureTraceDrawRead(u64 tex0, u64 frame, int w, int h,
+                                   int source_kind, unsigned int source_fbp)
+{
+    unsigned int tbp = GSF(tex0, 0, 14);
+    unsigned int tbw = GSF(tex0, 14, 6);
+    unsigned int psm = GSF(tex0, 20, 6);
+    unsigned int page_lo = tbp >> 5;
+    unsigned int stride, page_cols, bands, pw, ph;
+    unsigned long long page_gen_hash = 14695981039346656037ULL;
+    unsigned int b, c, shown = 0;
+    unsigned int bucket;
+    GsTextureTraceDraw* entry;
+    char page_list[768];
+    size_t used = 0;
+    int n;
+
+    if (!gsTextureTraceEnabled())
+        return;
+
+    psm_page_size(psm, (int*)&pw, (int*)&ph);
+    stride = (tbw * 64 + pw - 1) / pw;
+    if (stride == 0) stride = 1;
+    page_cols = (w + pw - 1) / pw;
+    bands = (h + ph - 1) / ph;
+
+    for (b = 0; b < bands; b++)
+    {
+        for (c = 0; c < page_cols; c++)
+        {
+            unsigned int page = (page_lo + b * stride + c) & (GS_PAGES - 1);
+            page_gen_hash = (page_gen_hash ^ gsPageGen[page]) * 1099511628211ULL;
+        }
+    }
+
+    bucket = (unsigned int)(tex0 ^ (tex0 >> 32) ^ frame ^ (frame >> 32) ^
+                            source_fbp ^ (unsigned int)source_kind) & 511;
+    entry = &gsTextureTraceDraws[bucket];
+    if (entry->used && entry->tex0 == tex0 && entry->frame == frame &&
+        entry->source_fbp == source_fbp && entry->source_kind == source_kind &&
+        entry->page_gen_hash == page_gen_hash)
+        return;
+
+    entry->used = 1;
+    entry->tex0 = tex0;
+    entry->frame = frame;
+    entry->source_fbp = source_fbp;
+    entry->source_kind = source_kind;
+    entry->page_gen_hash = page_gen_hash;
+
+    if (++gsTextureTraceDrawLogs > 2048)
+    {
+        if (gsTextureTraceDrawLogs == 2049)
+            pcLog("GS_TEX_TRACE_READ further draw-read records suppressed (limit=2048)");
+        return;
+    }
+
+    page_list[0] = '\0';
+    for (b = 0; b < bands && shown < 32 && used < sizeof(page_list) - 1; b++)
+    {
+        for (c = 0; c < page_cols && shown < 32 && used < sizeof(page_list) - 1; c++)
+        {
+            unsigned int page = (page_lo + b * stride + c) & (GS_PAGES - 1);
+            n = snprintf(page_list + used, sizeof(page_list) - used,
+                         "%s%u:%u", shown ? "," : "", page, gsPageGen[page]);
+            if (n < 0 || (size_t)n >= sizeof(page_list) - used)
+                break;
+            used += (size_t)n;
+            shown++;
+        }
+    }
+
+    pcLog("GS_TEX_TRACE_READ TEX0=%016llx TBP0=%u TBW=%u PSM=%02x TW=%u TH=%u source=%s source_FBP=%u FRAME_FBP=%u pages=%u*%u stride=%u page_gen_hash=%016llx page_gen=[%s]%s",
+          (unsigned long long)tex0, tbp, tbw, psm,
+          (unsigned int)(tex0 >> 26) & 15, (unsigned int)(tex0 >> 30) & 15,
+          (source_kind == 1) ? "movie_vram" :
+          (source_kind == 2) ? "render_target" :
+          (source_kind == 3) ? "movie" :
+          (source_kind == 5) ? "hd_replacement" : "gs_memory",
+          source_fbp, GSF(frame, 0, 9), bands, page_cols, stride,
+          page_gen_hash, page_list, ((bands * page_cols) > shown) ? ",..." : "");
+}
+
 static GLuint get_texture(u64 tex0, u64 texa, u64 texclut, int w, int h, int rows, int cols, int* hd)
 {
     unsigned int psm = GSF(tex0, 20, 6);
@@ -1575,6 +1668,8 @@ void gsRendererDraw(const GsDrawState* st, const GsVertex* v, int nverts)
         unsigned int tpsm = GSF(st->tex0, 20, 6);
         RenderTarget* src = NULL;
         int linear = GSF(st->tex1, 5, 1) && !st->font_filter_nearest;
+        int trace_source_kind = 4;
+        unsigned int trace_source_fbp = 0;
 
         if (tw > 1024) tw = 1024;
         if (th > 1024) th = 1024;
@@ -1595,12 +1690,15 @@ void gsRendererDraw(const GsDrawState* st, const GsVertex* v, int nverts)
 
         if (movie_vram_on && (tbp == movie_vram_tbp))
         {
+            trace_source_kind = 1;
             glBindTexture(GL_TEXTURE_2D, movie_vram_tex);
             glUniform1i(U.texrt, 0);
             glUniform1i(U.hd, 0);
         }
         else if ((src != NULL) && (src != rt))
         {
+            trace_source_kind = 2;
+            trace_source_fbp = src->fbp;
             if (src->vram_dirty || (src->load_y1 > src->load_y0))
             {
                 rt_sync(src);
@@ -1617,6 +1715,7 @@ void gsRendererDraw(const GsDrawState* st, const GsVertex* v, int nverts)
         }
         else if (movie_on && (GSF(st->tex0, 0, 14) == movie_tbp))
         {
+            trace_source_kind = 3;
             glBindTexture(GL_TEXTURE_2D, movie_tex);
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
@@ -1629,6 +1728,7 @@ void gsRendererDraw(const GsDrawState* st, const GsVertex* v, int nverts)
             GLuint gt = get_texture(st->tex0, st->texa, st->texclut, tw, th, texture_extent(st, v, nverts, th, 1),
                                     texture_extent(st, v, nverts, tw, 0), &hd);
 
+            if (hd) trace_source_kind = 5;
             glBindTexture(GL_TEXTURE_2D, gt);
             glUniform1i(U.texrt, 0);
             glUniform1i(U.hd, hd);
@@ -1639,6 +1739,9 @@ void gsRendererDraw(const GsDrawState* st, const GsVertex* v, int nverts)
                 glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, (GSF(st->clamp, 2, 2) == 0) ? GL_REPEAT : GL_CLAMP_TO_EDGE);
             }
         }
+
+        gsTextureTraceDrawRead(st->tex0, st->frame, tw, th,
+                               trace_source_kind, trace_source_fbp);
 
         glUniform2f(U.texsize, (float)tw, (float)th);
         glUniform1i(U.tfx, GSF(st->tex0, 35, 2));
