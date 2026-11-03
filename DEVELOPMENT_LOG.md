@@ -969,3 +969,11 @@ Remove the variable to restore the original transfer behavior. `RECVX_GS_TEX_TRA
 - **Render-target review:** The fast path declines destinations overlapping a currently rendered target using the renderer's conservative page-band overlap test.
 - **Build:** Not run; the Windows workflow is manual-dispatch only and no workflow-dispatch action is available in this session.
 - **Runtime:** Pending. Start with only `RECVX_GS_TEX_CACHE=1`, without trace, then exercise repeated camera changes, menus, scene transitions, and video playback. Check for `GS_TEX_CACHE_HIT` records and compare against the same scene with the variable removed.
+
+
+### Commit sequence
+
+1. `06e021a63bfbb9c87346255387d07ec544eb6c5d` — `pc/src/gs/gs_mem.c`: adds `gsXferCacheEnabled()`, `gsXferCacheHashBytes()`, `gsXferCachePageGenerationHash()`, `gsXferCacheRecordAddress()`, `gsXferCacheExpectedBytes()`, `gsXferCacheSlot()`, and `gsXferCacheTrySkip()`; wires capture into all supported `mem_write()` formats and publication into `gsMemFinishTransfer()`.
+2. `7a9f5f1a56272a05f20cc82d2dd588a8eefe7734` — `pc/src/gs/gs_internal.h`: declares `gsTextureTransferCacheSafe()`.
+3. `314948884ff10047aeb24c520addabb0b7dce6f0` — `pc/src/gs/gs_gl.c`: implements `gsTextureTransferCacheSafe()` using the existing conservative `rt_overlaps()` page-band test.
+4. `30fc7ed3917e29510cfaefdaaf16d11dceb34a5e` — `DEVELOPMENT_LOG.md`: records this implementation and pending validation.
