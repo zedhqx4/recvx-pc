@@ -280,6 +280,7 @@ void pcGsLogStats(void)
           stats.draws / f, stats.verts / f, (double)stats.rt_loads / f, stats.t_load * 1000 / f, (double)stats.rt_reads / f,
           stats.t_read * 1000 / f, (double)stats.tex_decodes / f, stats.tex_texels / f, stats.t_decode * 1000 / f);
     pcLog("gs: %d textures cached (%.0f MB)", tex_cached, tex_cached_bytes / 1048576.0);
+    gsClutCacheLogStats();
     memset(&stats, 0, sizeof(stats));
 }
 
@@ -697,7 +698,10 @@ static GLuint get_texture(u64 tex0, u64 texa, u64 texclut, int w, int h, int row
     int pw, ph, i, slot = -1, oldest = 0;
     unsigned int page_lo, page_hi, clut_page, stride;
     unsigned long long gen;
+    unsigned long long superset_area = 0;
+    unsigned long long candidate_gen;
     CachedTex* t;
+    CachedTex* superset = NULL;
 
     key0 |= cpsm_key;
     psm_page_size(psm, &pw, &ph);
@@ -757,6 +761,26 @@ static GLuint get_texture(u64 tex0, u64 texa, u64 texclut, int w, int h, int row
             return t->tex;
         }
 
+        /* The cached OpenGL image may cover more texels than this draw samples. Reuse it
+         * when its full decoded coverage is still identical in GS memory; this collapses
+         * the many partial-rectangle entries created by different geometry/UV extents. */
+        if (t->used && (t->key0 == key0) && (t->key1 == key1) && (t->key2 == key2) &&
+            (t->w == w) && (t->h == h) && (t->rows >= rows) && (t->cols >= cols))
+        {
+            candidate_gen = gen_sum_rect(page_lo, stride,
+                                         (t->rows + ph - 1) / ph,
+                                         (t->cols + pw - 1) / pw);
+            if (candidate_gen == t->gen)
+            {
+                unsigned long long area = (unsigned long long)t->rows * (unsigned long long)t->cols;
+                if ((superset == NULL) || (area < superset_area))
+                {
+                    superset = t;
+                    superset_area = area;
+                }
+            }
+        }
+
         if (!t->used && (slot < 0))
         {
             slot = i;
@@ -766,6 +790,17 @@ static GLuint get_texture(u64 tex0, u64 texa, u64 texclut, int w, int h, int row
         {
             oldest = i;
         }
+    }
+
+    if (superset != NULL)
+    {
+        if (gsTextureTraceEnabled())
+            gsTextureTraceLookup(tex0, key0, key1, key2, w, h, rows, cols,
+                                 page_lo, stride, (rows + ph - 1) / ph,
+                                 (cols + pw - 1) / pw, gen, 1);
+        superset->last_use = frame_counter;
+        *hd = superset->hd;
+        return superset->tex;
     }
 
     if (gsTextureTraceEnabled())
@@ -909,19 +944,6 @@ static int rt_overlaps(const RenderTarget* rt, unsigned int bp, unsigned int bw,
     (void)psm;
 
     return (lo < rt_hi) && (hi > rt_lo);
-}
-
-int gsTextureTransferCacheSafe(unsigned int bp, unsigned int bw, unsigned int psm,
-                               unsigned int y, unsigned int h)
-{
-    int i;
-    for (i = 0; i < MAX_RT; i++)
-    {
-        const RenderTarget* rt = &rts[i];
-        if (rt->used && rt->rendered && rt_overlaps(rt, bp, bw, psm, y, h))
-            return 0;
-    }
-    return 1;
 }
 
 /* copies rows y0..y1-1 of GS memory into the render target */
