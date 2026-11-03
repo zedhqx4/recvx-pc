@@ -931,7 +931,9 @@ The previous capture spent the shared 2,048-transfer budget on GS startup traffi
 - **Runtime:** Pending. Repeat the same scene/texture transition with `RECVX_GS_TEX_TRACE=1`; inspect whether the transfer pages and resulting generations match the pages reported by `GS_TEX_TRACE_LOOKUP` and `GS_TEX_TRACE_READ`.
 
 
-## 2026-11-02 — GS Host-to-Local Redundant Transfer Cache
+## 2026-11-02 — GS Host-to-Local Redundant Transfer Cache (WITHDRAWN)
+
+> Historical experiment only. The transfer-layer cache described below was removed from the current branch; its activation instructions do not apply to the current source.
 
 **Category:** GS memory / redundant texture upload work  
 **Status:** Implemented in source; Windows build and runtime validation pending  
