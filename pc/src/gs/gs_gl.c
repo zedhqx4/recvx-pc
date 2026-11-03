@@ -9,6 +9,7 @@
  * alpha holds As / 128 so the GS blend factor As maps to GL_SRC_ALPHA.
  */
 #include <math.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -501,6 +502,96 @@ static unsigned long long gen_sum_rect(unsigned int page_lo, unsigned int stride
     }
 
     return s;
+}
+
+typedef struct {
+    int used;
+    u64 key0, key1, key2;
+    int w, h, rows, cols;
+    unsigned long long gen;
+    int hit;
+} GsTextureTraceLookup;
+
+static GsTextureTraceLookup gsTextureTraceLookups[512];
+static unsigned int gsTextureTraceLookupLogs;
+
+static int gsTextureTraceEnabled(void)
+{
+    static int enabled = -1;
+    if (enabled < 0)
+    {
+        const char* value = getenv("RECVX_GS_TEX_TRACE");
+        enabled = (value != NULL && value[0] == '1' && value[1] == '\0') ? 1 : 0;
+    }
+    return enabled;
+}
+
+static void gsTextureTraceLookup(u64 tex0, u64 key0, u64 key1, u64 key2,
+                                 int w, int h, int rows, int cols,
+                                 unsigned int page_lo, unsigned int stride,
+                                 int bands, int page_cols,
+                                 unsigned long long gen, int hit)
+{
+    unsigned int bucket;
+    GsTextureTraceLookup* entry;
+    unsigned int b, c, shown = 0;
+    char page_list[768];
+    size_t used = 0;
+    int n;
+
+    if (!gsTextureTraceEnabled())
+        return;
+
+    bucket = (unsigned int)(key0 ^ (key0 >> 32) ^ key1 ^ key2 ^
+                            (unsigned int)w ^ ((unsigned int)h << 8)) & 511;
+    entry = &gsTextureTraceLookups[bucket];
+
+    if (entry->used && entry->key0 == key0 && entry->key1 == key1 && entry->key2 == key2 &&
+        entry->w == w && entry->h == h && entry->rows == rows && entry->cols == cols &&
+        entry->gen == gen && entry->hit == hit)
+        return;
+
+    entry->used = 1;
+    entry->key0 = key0;
+    entry->key1 = key1;
+    entry->key2 = key2;
+    entry->w = w;
+    entry->h = h;
+    entry->rows = rows;
+    entry->cols = cols;
+    entry->gen = gen;
+    entry->hit = hit;
+
+    if (++gsTextureTraceLookupLogs > 2048)
+    {
+        if (gsTextureTraceLookupLogs == 2049)
+            pcLog("GS_TEX_TRACE_LOOKUP further cache-transition records suppressed (limit=2048)");
+        return;
+    }
+
+    page_list[0] = '\0';
+    for (b = 0; b < (unsigned int)bands && shown < 32 && used < sizeof(page_list) - 1; b++)
+    {
+        for (c = 0; c < (unsigned int)page_cols && shown < 32 && used < sizeof(page_list) - 1; c++)
+        {
+            unsigned int page = (page_lo + b * stride + c) & (GS_PAGES - 1);
+            n = snprintf(page_list + used, sizeof(page_list) - used,
+                         "%s%u:%u", (shown == 0) ? "" : ",", page, gsPageGen[page]);
+            if (n < 0 || (size_t)n >= sizeof(page_list) - used)
+                break;
+            used += (size_t)n;
+            shown++;
+        }
+    }
+
+    pcLog("GS_TEX_TRACE_LOOKUP result=%s TEX0=%016llx TBP0=%u TBW=%u PSM=%02x TW=%u TH=%u size=%dx%d sample=%dx%d pages=%u*%u stride=%u gen=%016llx page_gen=[%s]%s",
+          hit ? "HIT" : "MISS", (unsigned long long)tex0,
+          (unsigned int)(tex0 & 0x3FFF), (unsigned int)((tex0 >> 14) & 0x3F),
+          (unsigned int)((tex0 >> 20) & 0x3F),
+          (unsigned int)((tex0 >> 26) & 0xF), (unsigned int)((tex0 >> 30) & 0xF),
+          w, h, cols, rows, bands, page_cols, stride,
+          gen, page_list,
+          ((unsigned int)(bands * page_cols) > shown) ? ",..." : "");
 }
 
 static GLuint get_texture(u64 tex0, u64 texa, u64 texclut, int w, int h, int rows, int cols, int* hd)
