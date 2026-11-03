@@ -977,3 +977,51 @@ Remove the variable to restore the original transfer behavior. `RECVX_GS_TEX_TRA
 2. `7a9f5f1a56272a05f20cc82d2dd588a8eefe7734` — `pc/src/gs/gs_internal.h`: declares `gsTextureTransferCacheSafe()`.
 3. `314948884ff10047aeb24c520addabb0b7dce6f0` — `pc/src/gs/gs_gl.c`: implements `gsTextureTransferCacheSafe()` using the existing conservative `rt_overlaps()` page-band test.
 4. `30fc7ed3917e29510cfaefdaaf16d11dceb34a5e` — `DEVELOPMENT_LOG.md`: records this implementation and pending validation.
+
+
+## 2026-11-02 — Per-Frame TIM2 State and Deferred Upload Deduplication
+
+**Status:** Implemented in source; Windows build and runtime validation pending  
+**Branch:** `experimental/GS-ps2texloadcache`
+
+### Correction to the previous GS transfer-cache experiment
+
+The preceding section, **GS Host-to-Local Redundant Transfer Cache**, is historical and is no longer the active implementation. Its transfer-layer cache was removed from `pc/src/gs/gs_mem.c`, `pc/src/gs/gs_gl.c`, `pc/src/gs/gs_internal.h`, and `pc/src/gs/gs.c`. There is no `RECVX_GS_TEX_CACHE` switch in the current source. The existing OpenGL texture cache was restored unchanged.
+
+### Goal
+
+Avoid calling the full `Ps2TexLoad()` path repeatedly for the same TIM2 during one rendered frame. Keep distinct TIM2 images and per-primitive texture state correct. A TIM2 content change is observed at the next frame boundary; a mid-frame edit does not create a second version of that same source surface in the current frame.
+
+### Implementation
+
+- `src/ps2/veronica/prog/ps2_dummy.c`
+  - Adds a bounded, PC-only per-frame TIM2 identity table. The first use of a surface/bank in a frame hashes the stable TIM2 header, dimensions/format metadata, image bytes, and CLUT bytes. Later uses of that surface/bank reuse the same identity until the frame ends. Runtime-only `TpFlag` and admin bookkeeping are excluded.
+  - Wraps the six repeated draw-time `Ps2TexLoad(Ps2_now_tex)` call sites with `pcPs2TexLoadForDraw()` on PC. A bounded open-addressed state cache reuses the generated texture state for the same TIM2 identity and render-sub state. Cache hits restore the values used by the deferred OT entries (`TEX0`, `TEX0_NEXT`, `TEX1`, `CLAMP`, `TEST`, bank, and render-sub flag) without re-entering `Ps2TexLoad()`.
+  - On a state-cache miss for a TP texture, `Ps2TexLoad()` still prepares `GsTex0` and the state used to build the primitive, but the PC-only path does not call `Send_Tim2_dataEx()` again. The actual image upload remains in `Ps2DrawOTagSub()`, where the per-segment TP slot cache prepares the texture data needed by the deferred draw.
+  - Changes the PC-side `ps2_tp_cache[64]` lookup from pointer-only matching to the per-frame TIM2 content identity, also matching each primitive's `TEX0` and `TEX0_NEXT` variant. Reused pointers with different content on a later frame therefore do not inherit the previous frame's slot.
+  - Keeps the tables bounded (1,024 per-frame source identities and 512 prepared states); an invalid or un-fingerprintable TIM2 falls back to normal preparation instead of being treated as a cache hit.
+  - Clears the per-frame state and identity tables after `Ps2DrawOTag()`, and also on `Ps2_current_texbreak`.
+  - Adds opt-in `GS_TIM2_FRAME_STATE` diagnostics under `RECVX_GS_TEX_TRACE=1` with helper calls, cache hits, full `Ps2TexLoad` executions, state-only preparations, and forced breaks.
+- `pc/src/gs/gs_gl.c`: unchanged. The existing OpenGL texture cache continues to keep decoded GS textures by their GS content/page-generation identity; it is not replaced with a pointer-based TIM2 cache.
+- PS2/non-PC paths: retain their original direct `Ps2TexLoad()` calls and pointer-based logic.
+
+### Validation
+
+- **Source review:** Confirmed six PC draw-time call sites use the per-frame helper and retain their original non-PC `Ps2TexLoad()` fallback.
+- **State review:** Cache hits restore the per-TIM2 values consumed by deferred OT construction. `Ps2AddPrim()` continues to write its primitive TEST state, and `Ps2DrawOTagSub()` continues to build the per-primitive TEX0/TEX0_NEXT/CLAMP tag.
+- **Identity review:** The source key includes image and CLUT bytes plus interpretation metadata; it is computed once per surface/bank per frame. The deferred TP cache additionally distinguishes TEX0/TEX0_NEXT variants. Invalid keys do not enter the state cache.
+- **Frame-boundary review:** The identity/state tables are cleared after the complete OT draw, so changed bytes are re-hashed on the next frame. `Ps2_current_texbreak` also clears the current-frame identity.
+- **Build:** Not run for this revision. The Windows workflow is manually dispatched; no workflow-dispatch action was available in this session.
+- **Runtime:** Pending. First test without `RECVX_GS_TEX_TRACE` to measure overhead. For a separate diagnostic run, enable tracing and check `GS_TIM2_FRAME_STATE`; a healthy repeated-texture case should show helper calls substantially above cache hits plus full `Ps2TexLoad` executions.
+
+### Commit sequence
+
+1. `b862e9a31e174e6ee2a531ed1e666ac180b66771` — adds the bounded per-frame state cache and routes the six repeated PC draw-time call sites through it.
+2. `77d2fadeaf0f08569fd35dc79b6bdc98bd74498d` — skips duplicate TP image transfers in the state-only PC path while retaining TIM2 header/register preparation.
+3. `45024fa184c6c80b19d2eff1b2464c16a8a7c6e6` — preserves forced `Ps2_current_texbreak` handling ahead of the pointer-cache shortcut.
+4. `79b45bf6254dd3aed6e31502e0c24b4cb008f9dc` — adds per-frame content identity and uses it for the PC deferred TP cache.
+5. `aac0efe05ffdc62dc775efbed86c58b81f17de18` — corrects cumulative TIM2 fingerprint mixing and excludes mutable `GsTex0` fields.
+6. `fce1bbf5ee8e48bec66f72bfaef3c1764138966f` — includes TEX0/TEX0_NEXT variants in deferred-cache matching.
+7. `60919bea0f83a33543a338b6e70f7aeb38378ac3` — stores the input render-sub state separately from the post-load value.
+8. `dc946236072d4c31683ad9506205965bb3e4e018` — changes state lookups to bounded open-addressed probing and invalidates frame identities on forced breaks.
+9. `41f166319a59c189b7717645d24f14ea18011978` — bypasses state-cache insertion when a TIM2 identity cannot be validated.
