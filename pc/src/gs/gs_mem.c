@@ -718,9 +718,7 @@ static void transfer32Run(const unsigned char* data, int bytes, const unsigned c
 
         if (xfer.y >= xfer.sy + xfer.h)
         {
-            xfer.active = 0;
-            gsXferDone(xfer.bp, xfer.bw, xfer.psm, xfer.sx, xfer.sy,
-                       xfer.w, xfer.h, xfer.changed);
+            gsMemFinishTransfer();
         }
     }
 
@@ -767,9 +765,7 @@ static void transfer32Run(const unsigned char* data, int bytes, const unsigned c
 
             if (++xfer.y >= xfer.sy + xfer.h)
             {
-                xfer.active = 0;
-                gsXferDone(xfer.bp, xfer.bw, xfer.psm, xfer.sx, xfer.sy,
-                           xfer.w, xfer.h, xfer.changed);
+                gsMemFinishTransfer();
             }
         }
     }
@@ -870,6 +866,16 @@ void gsMemReadImage(const GsRegs* r, unsigned char* out)
     unsigned int h = (unsigned int)(r->trxreg >> 32) & 0xFFF;
     unsigned int x, y;
     int bits = gsPsmBits(spsm);
+
+    if (gsTexTraceEnabled())
+    {
+        unsigned int seq = ++gsTexTraceReadSeq;
+        if (seq <= 2048)
+            pcLog("GS_TEX_TRACE_READBACK seq=%u direction=LOCAL_TO_HOST src_BP=%u src_8k_page=%u BW=%u PSM=%02x xy=%u,%u size=%ux%u",
+                  seq, sbp, sbp >> 5, sbw, spsm, ssx, ssy, w, h);
+        else if (seq == 2049)
+            pcLog("GS_TEX_TRACE_READBACK further records suppressed (limit=2048)");
+    }
 
     gsFlushLocalToLocal(sbp, sbw, spsm, ssx, ssy, w, h);
 
