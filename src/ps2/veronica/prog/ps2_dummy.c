@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <stdint.h>
 #include "../../../../pc/include/pc_platform.h"
+#include "../../../../pc/include/pc_gs.h"
 extern void gsMemTraceTextureLoadBegin(unsigned int seq, unsigned int gindex);
 extern void gsMemTraceTextureLoadEnd(void);
 
@@ -65,6 +66,136 @@ static int pcGsTextureTraceSourceHashes(TIM2_PICTUREHEADER_EX* tim,
     *clut_hash = pcGsTextureTraceHashBytes(clut, picture->ClutSize);
     return 1;
 }
+
+/* Keep one immutable TIM2 version per source surface and frame. If the game
+ * modifies that buffer halfway through a frame, every later draw in that frame
+ * keeps using the first version; the new bytes are observed at the next present. */
+#define PC_TIM2_FRAME_CACHE_ENTRIES 512
+
+typedef struct {
+    int used;
+    void* surface;
+    unsigned int bank;
+    uint32_t frame;
+    uint32_t age;
+    uint64_t key0, key1;
+} PcTim2FrameEntry;
+
+static PcTim2FrameEntry pcTim2FrameCache[PC_TIM2_FRAME_CACHE_ENTRIES];
+static uint32_t pcTim2FrameAge;
+static unsigned int pcTim2FrameHashCount;
+static unsigned int pcTim2FrameReuseCount;
+
+static int pcGsTim2Hash(TIM2_PICTUREHEADER_EX* tim, unsigned int bank,
+                        uint64_t* key0, uint64_t* key1)
+{
+    const unsigned char* file = (const unsigned char*)tim;
+    const unsigned char* bytes;
+    unsigned int header_bytes;
+    unsigned int total_size;
+    unsigned int i;
+    TIM2_PICTUREHEADER* picture;
+    uint64_t a = 14695981039346656037ULL;
+    uint64_t b = 0x6A09E667F3BCC909ULL;
+    uint64_t metadata;
+
+    if ((tim == NULL) || (key0 == NULL) || (key1 == NULL))
+        return 0;
+
+    header_bytes = (file[5] != 0) ? 128u : 16u;
+    picture = (TIM2_PICTUREHEADER*)(file + header_bytes);
+
+    if ((picture->HeaderSize < sizeof(TIM2_PICTUREHEADER)) ||
+        (picture->HeaderSize > picture->TotalSize) ||
+        (picture->ImageSize > picture->TotalSize - picture->HeaderSize) ||
+        (picture->ClutSize > picture->TotalSize - picture->HeaderSize - picture->ImageSize))
+        return 0;
+
+    total_size = header_bytes + picture->TotalSize;
+    if ((total_size < header_bytes + sizeof(TIM2_PICTUREHEADER)) ||
+        (total_size > 16u * 1024u * 1024u))
+        return 0;
+
+    bytes = file;
+    for (i = 0; i < total_size; i++)
+    {
+        uint64_t value = bytes[i];
+        a = (a ^ value) * 1099511628211ULL;
+        b ^= value + 0x9E3779B97F4A7C15ULL + (b << 6) + (b >> 2);
+        b = (b << 27) | (b >> 37);
+        b *= 0x94D049BB133111EBULL;
+    }
+
+    metadata = ((uint64_t)tim->Gindex << 32) | bank;
+    a ^= metadata;
+    a *= 1099511628211ULL;
+    b ^= metadata + 0x517CC1B727220A95ULL + (b << 6) + (b >> 2);
+    b = (b << 31) | (b >> 33);
+    b *= 0x9E3779B185EBCA87ULL;
+
+    *key0 = a ? a : 0xCBF29CE484222325ULL;
+    *key1 = b ? b : 0x9E3779B97F4A7C15ULL;
+    return 1;
+}
+
+static int pcGsTim2FrameKey(TIM2_PICTUREHEADER_EX* tim, unsigned int bank,
+                            uint64_t* key0, uint64_t* key1)
+{
+    void* surface = (void*)tim;
+    uint32_t frame = pcGsFrameSerial();
+    int i, slot = -1, oldest = 0;
+
+    for (i = 0; i < PC_TIM2_FRAME_CACHE_ENTRIES; i++)
+    {
+        PcTim2FrameEntry* entry = &pcTim2FrameCache[i];
+
+        if (entry->used && (entry->surface == surface) && (entry->bank == bank))
+        {
+            slot = i;
+            if (entry->frame == frame)
+            {
+                entry->age = ++pcTim2FrameAge;
+                *key0 = entry->key0;
+                *key1 = entry->key1;
+                pcTim2FrameReuseCount++;
+                return 1;
+            }
+            break;
+        }
+
+        if (!entry->used && (slot < 0))
+            slot = i;
+        if (entry->age < pcTim2FrameCache[oldest].age)
+            oldest = i;
+    }
+
+    if (!pcGsTim2Hash(tim, bank, key0, key1))
+        return 0;
+
+    if (slot < 0)
+        slot = oldest;
+
+    pcTim2FrameCache[slot].used = 1;
+    pcTim2FrameCache[slot].surface = surface;
+    pcTim2FrameCache[slot].bank = bank;
+    pcTim2FrameCache[slot].frame = frame;
+    pcTim2FrameCache[slot].age = ++pcTim2FrameAge;
+    pcTim2FrameCache[slot].key0 = *key0;
+    pcTim2FrameCache[slot].key1 = *key1;
+    pcTim2FrameHashCount++;
+    return 1;
+}
+
+static void pcPs2Tim2Prepare(TIM2_PICTUREHEADER_EX* tim)
+{
+    unsigned char* file = (unsigned char*)tim;
+    TIM2_PICTUREHEADER* picture =
+        (TIM2_PICTUREHEADER*)(file + ((file[5] != 0) ? 128 : 16));
+
+    Set_GsTex(picture, 190 * 64, 254 * 64);
+}
+
+static int pcPs2TexLoadForDraw(NJS_TEXMEMLIST* addr);
 #endif
 
 // the three vars below were originally defined as unsigned int in ps2_NaFog.c, and redeclared as unsigned long here
