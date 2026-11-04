@@ -2776,6 +2776,7 @@ int Ps2GlobalIndexTexLoad(unsigned int index)
 	int no;
 
 	no = SearchNumber(index, -1);
+    pcTextureTraceEvent("TEXTURE_GLOBAL_SELECT", "gindex=%u found_index=%d", index, no);
 
     if (no >= 0) 
 	{
@@ -2950,7 +2951,10 @@ int Ps2TexLoad(NJS_TEXMEMLIST* addr)
 
     cache_flag = 1;
     if ((addr == NULL) || (addr->texinfo.texsurface.pSurface == NULL))
+    {
+        pcTextureTraceEvent("TEX_INVALID", "memlist=%p", addr);
         return printf("Ps2CurrentTexLoad ERROR!!!!\n");
+    }
 
     Ps2_now_tex = addr;
     timp = (TIM2_PICTUREHEADER_EX*)addr->texinfo.texsurface.pSurface;
@@ -3061,6 +3065,15 @@ int Ps2TexLoad(NJS_TEXMEMLIST* addr)
         pc_ps2_texture_bind_cache.render_sub_flag = PS2_Render_tex_sub_flag;
     }
 #endif
+    pcTextureTraceEvent("TEX_RESULT",
+                        "gindex=%u ps2_pointer_cache_flag=%u asset_cache_eligible=%d asset_cache_hit=%d",
+                        timp->Gindex, cache_flag,
+#ifdef TARGET_PC
+                        asset_cache_eligible, asset_cache_hit
+#else
+                        0, 0
+#endif
+                        );
     return cache_flag;
 }
 
