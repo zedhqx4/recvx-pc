@@ -486,26 +486,16 @@ void pcTextureTraceCamera(const char* source, int console_if_changed,
 void pcTextureTraceModelBegin(const void* model, const void* vlist,
                               const void* plist, float radius)
 {
-    if (!pc_texture_trace_is_enabled())
-        return;
-
-    if (pc_texture_trace_model_depth < 32)
-        pc_texture_trace_model_stack[pc_texture_trace_model_depth++] = model;
-
     (void)model;
     (void)vlist;
     (void)plist;
     (void)radius;
-    pcTextureTraceEvent("MODEL_BEGIN", "");
 }
 
 void pcTextureTraceModelEnd(int result, const char* reason)
 {
-    pcTextureTraceEvent("MODEL_END", "result=%d reason=%s",
-                        result, (reason != NULL) ? reason : "drawn");
-
-    if (pc_texture_trace_model_depth != 0)
-        pc_texture_trace_model_depth--;
+    (void)result;
+    (void)reason;
 }
 #endif
 
@@ -2990,8 +2980,8 @@ static int Ps2EnsureTextureImage(NJS_TEXMEMLIST* addr, TIM2_PICTUREHEADER_EX* ti
     (void)asset_cache_hit;
 #endif
 
-    pcTextureTraceEvent("IMAGE_DECISION", "gindex=%u source=%p break=%d tpflag=%u asset_eligible=%d asset_hit=%d",
-                        timp->Gindex, timp, Ps2_current_texbreak, timp->TpFlag,
+    pcTextureTraceEvent("IMAGE_DECISION", "gindex=%u break=%d tpflag=%u asset_eligible=%d asset_hit=%d",
+                        timp->Gindex, Ps2_current_texbreak, timp->TpFlag,
                         asset_cache_eligible, asset_cache_hit);
 
     if (Ps2_current_texbreak != 0)
@@ -3140,15 +3130,15 @@ int Ps2TexLoad(NJS_TEXMEMLIST* addr)
     cache_flag = 1;
     if ((addr == NULL) || (addr->texinfo.texsurface.pSurface == NULL))
     {
-        pcTextureTraceEvent("TEX_INVALID", "memlist=%p", addr);
+        pcTextureTraceEvent("TEX_INVALID", "null_texture_memlist_or_surface");
         return printf("Ps2CurrentTexLoad ERROR!!!!\n");
     }
 
     Ps2_now_tex = addr;
     timp = (TIM2_PICTUREHEADER_EX*)addr->texinfo.texsurface.pSurface;
     pcTextureTraceEvent("TEX_REQUEST",
-                        "gindex=%u bank=%u surface=%p image=%ux%u image_type=%u pict=%u clut=%u tpflag=%u clamp=%u",
-                        addr->globalIndex, addr->bank, timp, timp->ImageWidth, timp->ImageHeight,
+                        "gindex=%u bank=%u image=%ux%u image_type=%u pict=%u clut=%u tpflag=%u clamp=%u",
+                        addr->globalIndex, addr->bank, timp->ImageWidth, timp->ImageHeight,
                         timp->ImageType, timp->PictFormat, timp->ClutType, timp->TpFlag, timp->ClampFlag);
 
     tbw = timp->GsTex0.TBW;
