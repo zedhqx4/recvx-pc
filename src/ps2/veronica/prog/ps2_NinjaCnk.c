@@ -1,4 +1,7 @@
 #include "../../../ps2/veronica/prog/ps2_NinjaCnk.h"
+#ifdef TARGET_PC
+#include "../../../../pc/include/pc_texture_trace.h"
+#endif
 #include "../../../ps2/veronica/prog/objitm.h"
 #include "../../../ps2/veronica/prog/ps2_dummy.h"
 #include "../../../ps2/veronica/prog/ps2_NaDraw2D.h"
@@ -681,6 +684,9 @@ int njCnkDrawModelLocal(NJS_CNK_MODEL* pModel)
     unsigned int modelclipflag; 
     float temp, temp2; // not from the debugging symbols
 
+#ifdef TARGET_PC
+    pcTextureTraceModelBegin(pModel, pModel->vlist, pModel->plist, pModel->r);
+#endif
     modelclipflag = 0;
     
     if (ulNaCnkFlagModelClip != 0) 
@@ -693,11 +699,17 @@ int njCnkDrawModelLocal(NJS_CNK_MODEL* pModel)
             
             if ((Center.z + temp) < _fNaViwClipNear) 
             {
+                #ifdef TARGET_PC
+                pcTextureTraceModelEnd(0, "near_clip");
+#endif
                 return 0;
             }
             
             if (_fNaViwClipFar < (Center.z - temp))
             {
+                #ifdef TARGET_PC
+                pcTextureTraceModelEnd(0, "far_clip");
+#endif
                 return 0;
             }
             
@@ -720,17 +732,26 @@ int njCnkDrawModelLocal(NJS_CNK_MODEL* pModel)
 
                 if (((fSX + fRW) < -halfw) || (halfw < (fSX - fRW)))
                 {
-                    return 0;
+                    #ifdef TARGET_PC
+                pcTextureTraceModelEnd(0, "horizontal_clip");
+#endif
+                return 0;
                 }
             }
 #else
             if ((fSX + fRW) < -fNaViwHalfW) 
             {
+                #ifdef TARGET_PC
+                pcTextureTraceModelEnd(0, "left_clip");
+#endif
                 return 0;
             }
             
             if (fNaViwHalfW < (fSX - fRW)) 
             {
+                #ifdef TARGET_PC
+                pcTextureTraceModelEnd(0, "right_clip");
+#endif
                 return 0;
             }
 #endif
@@ -739,11 +760,17 @@ int njCnkDrawModelLocal(NJS_CNK_MODEL* pModel)
             
             if ((fSY + fRH) < -fNaViwHalfH) 
             {
+                #ifdef TARGET_PC
+                pcTextureTraceModelEnd(0, "vertical_low_clip");
+#endif
                 return 0;
             }
             
             if (fNaViwHalfH < (fSY - fRH)) 
             {
+                #ifdef TARGET_PC
+                pcTextureTraceModelEnd(0, "vertical_high_clip");
+#endif
                 return 0;
             }
         }
@@ -767,6 +794,9 @@ int njCnkDrawModelLocal(NJS_CNK_MODEL* pModel)
     
     if ((modelclipflag != 0) && (Vu0ClipFlag != 0)) 
     {
+#ifdef TARGET_PC
+        pcTextureTraceModelEnd(1, "vu0_clip_path");
+#endif
         return 1;  
     } 
     
@@ -784,7 +814,10 @@ int njCnkDrawModelLocal(NJS_CNK_MODEL* pModel)
             pCnk = pCnkFuncTbl[pCnk->ucType](pCnk);
         }
     }
-    
+
+#ifdef TARGET_PC
+    pcTextureTraceModelEnd(1, "drawn");
+#endif
     return 1;
 }
 
@@ -921,6 +954,12 @@ CHUNK_HEAD* njCnkCbExp(CHUNK_HEAD* pCnk)
 // 100% matching!
 CHUNK_HEAD* njCnkCtTid(CHUNK_HEAD* pCnk) 
 {
+#ifdef TARGET_PC
+    pcTextureTraceEvent("CNK_TEXTURE_ID",
+                        "chunk=%p local_tid=%u raw_size=%04x head_bits=%02x filter=%u",
+                        pCnk, (unsigned int)(pCnk->usSize & 0xFFF), pCnk->usSize,
+                        pCnk->ucHeadBits, (unsigned int)((pCnk->usSize / 16384) & 0x3));
+#endif
     if (((pCnk->ucHeadBits >> 6) & 0x3)) 
     {
         printf("'Texture Flip' Exist in 'CNK-DATA' !!\n");
