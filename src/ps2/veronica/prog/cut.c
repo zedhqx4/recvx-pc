@@ -304,7 +304,11 @@ void bhSetCut(int cno, int flg)
     LGT_WORK* lp; 
     NJS_CNK_OBJECT* obj; 
     unsigned int attr; 
-    int i; 
+    int i;
+#ifdef TARGET_PC
+    int trace_hidden_count = 0;
+    int trace_visible_count = 0;
+#endif 
 
     if ((sys->ts_flg & 0x200)) 
     {
@@ -343,15 +347,27 @@ void bhSetCut(int cno, int flg)
         {
             if (bhCkFlg(ci->hidobj, i) != 0)
             {
+#ifdef TARGET_PC
+                trace_hidden_count++;
+#endif
                 obj->evalflags |= 0x8;
             }
             else
             {
+#ifdef TARGET_PC
+                trace_visible_count++;
+#endif
                 obj->evalflags &= ~0x8;
             }
         }
     }
 
+#ifdef TARGET_PC
+    pcTextureTraceEvent("CUT_OBJECT_VISIBILITY",
+                        "source=bhSetCut id=%d hidden=%d visible=%d total=%d",
+                        cno, trace_hidden_count, trace_visible_count,
+                        trace_hidden_count + trace_visible_count);
+#endif
     lp = (LGT_WORK*)&rom->lgtp[4];
     
     for (i = 4; i < rom->lgt_n; i++, lp++)
@@ -605,6 +621,10 @@ void bhSetHideObjLgt(int cno)
     LGT_WORK* lp;
     NJS_CNK_OBJECT* obj;
     int i;
+#ifdef TARGET_PC
+    int trace_hidden_count = 0;
+    int trace_visible_count = 0;
+#endif
 
     ci = (CAM_WRK*)&rom->cutp[cno].cam[cam.camver];
 
@@ -616,15 +636,27 @@ void bhSetHideObjLgt(int cno)
         {
             if (bhCkFlg(ci->hidobj, i) != 0)
             {
+#ifdef TARGET_PC
+                trace_hidden_count++;
+#endif
                 obj->evalflags |= 0x8;
             }
             else
             {
+#ifdef TARGET_PC
+                trace_visible_count++;
+#endif
                 obj->evalflags &= ~0x8;
             }
         }
     }
 
+#ifdef TARGET_PC
+    pcTextureTraceEvent("CUT_OBJECT_VISIBILITY",
+                        "source=bhSetHideObjLgt id=%d hidden=%d visible=%d total=%d",
+                        cno, trace_hidden_count, trace_visible_count,
+                        trace_hidden_count + trace_visible_count);
+#endif
     lp = (LGT_WORK*)&rom->lgtp[4];
     
     for (i = 4; i < rom->lgt_n; i++, lp++)
@@ -1849,7 +1881,11 @@ void bhSetEventHideObjLgt(int cno, int kno)
     NJS_CNK_OBJECT* obj;
     CAM_KEYF_WORK* kfp;
     LGT_WORK* lp;
-    int i; 
+    int i;
+#ifdef TARGET_PC
+    int trace_hidden_count = 0;
+    int trace_visible_count = 0;
+#endif 
 
     kfp = &rom->evcp[cno].keyf[kno];
 
@@ -1861,15 +1897,27 @@ void bhSetEventHideObjLgt(int cno, int kno)
         {
             if (bhCkFlg(kfp->hidobj, i) != 0)
             {
+#ifdef TARGET_PC
+                trace_hidden_count++;
+#endif
                 obj->evalflags |= 0x8;
             }
             else
             {
+#ifdef TARGET_PC
+                trace_visible_count++;
+#endif
                 obj->evalflags &= ~0x8;
             }
         }
     }
 
+#ifdef TARGET_PC
+    pcTextureTraceEvent("CUT_OBJECT_VISIBILITY",
+                        "source=bhSetEventHideObjLgt id=%d hidden=%d visible=%d total=%d",
+                        cno, trace_hidden_count, trace_visible_count,
+                        trace_hidden_count + trace_visible_count);
+#endif
     lp = rom->evlp;
     
     for (i = 0; i < rom->evl_n; i++, lp++)
