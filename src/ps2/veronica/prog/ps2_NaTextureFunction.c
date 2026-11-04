@@ -581,13 +581,13 @@ unsigned int Ps2GetTim2Size(void* p)
 // 100% matching!
 int Ps2TextureMalloc(NJS_TEXMEMLIST* p)
 {
-    pcTextureTraceEvent("TEXTURE_MALLOC_REQUEST", "gindex=%u texaddr=%p surface=%p type=%u",
-                        p->globalIndex, p->texinfo.texaddr, p->texinfo.texsurface.pSurface,
-                        (unsigned int)(p->texinfo.texsurface.Type >> 24));
-
 	unsigned int size; 
     TIM2_PICTUREHEADER_EX* timp; 
     TIM2_PICTUREHEADER_EX* last2; 
+
+    pcTextureTraceEvent("TEXTURE_MALLOC_REQUEST", "gindex=%u texaddr=%p surface=%p type=%u",
+                        p->globalIndex, p->texinfo.texaddr, p->texinfo.texsurface.pSurface,
+                        (unsigned int)(p->texinfo.texsurface.Type >> 24));
 
     if ((p->texinfo.texsurface.Type >> 24) == 11) 
     {
