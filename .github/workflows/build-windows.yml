@@ -7,7 +7,6 @@ on:
       - pc-port
       - experimental/gs-rebuild
       - experimental/GSps2texloadcache
-      - experiment/camera-texture-trace
       - FONTFix
     paths-ignore:
       - '**.md'

@@ -1,5 +1,4 @@
 #include "../../../ps2/veronica/prog/ps2_NaTextureFunction.h"
-#include "../../../../pc/include/pc_texture_trace.h"
 #include "../../../ps2/veronica/prog/ps2_dummy.h"
 #include "../../../ps2/veronica/prog/ps2_loadtim2.h"
 #include "../../../ps2/veronica/prog/ps2_texture.h"
@@ -359,7 +358,6 @@ Sint32	njSetTextureNum(Uint32 n)
     }
     
     Ps2_current_texno = n;
-    pcTextureTraceSetCurrentTid(n);
     
     Ps2_current_texmemlist = (NJS_TEXMEMLIST*)Ps2_current_texlist->textures[n].texaddr;
     
@@ -380,7 +378,6 @@ Sint32	njSetTextureNumG(Uint32 globalIndex)
     
     if (no >= 0) 
     {
-        pcTextureTraceSetCurrentTid(0xFFFFFFFFU);
         Ps2_current_gindex = globalIndex;
         Ps2_current_texmemlist = &Ps2_tex_info[no];
         
@@ -400,7 +397,6 @@ Sint32	njSetTextureNumG(Uint32 globalIndex)
 // 100% matching!
 int njSetTextureNumSys(unsigned int n)
 {
-    pcTextureTraceSetCurrentTid(n);
     Ps2TexLoad((NJS_TEXMEMLIST*)Ps2_current_texlist->textures[n].texaddr);
 #ifdef TARGET_PC /* the PS2 build returned whatever was left in the return register */
     return 0;
@@ -577,18 +573,12 @@ int Ps2TextureMalloc(NJS_TEXMEMLIST* p)
     TIM2_PICTUREHEADER_EX* timp; 
     TIM2_PICTUREHEADER_EX* last2; 
 
-    pcTextureTraceEvent("TEXTURE_MALLOC_REQUEST", "gindex=%u texaddr=%p surface=%p type=%u",
-                        p->globalIndex, p->texinfo.texaddr, p->texinfo.texsurface.pSurface,
-                        (unsigned int)(p->texinfo.texsurface.Type >> 24));
-
     if ((p->texinfo.texsurface.Type >> 24) == 11) 
     {
         size = 1048832;
         
         if ((unsigned int)((int)Ps2_now_free + size) >= (unsigned int)Ps2_free_last)
         {
-            pcTextureTraceEvent("TEXTURE_MALLOC_FAIL", "gindex=%u requested=%u free=%u reason=arena_limit",
-                                p->globalIndex, size, Ps2_free_texmemsize);
             return -1;
         }
         
@@ -620,8 +610,6 @@ int Ps2TextureMalloc(NJS_TEXMEMLIST* p)
         Ps2_free_texmemsize -= size;
         
         Ps2_now_free = (void*)((char*)Ps2_now_free + size);
-        pcTextureTraceEvent("TEXTURE_MALLOC_OK", "gindex=%u address=%p size=%u free_after=%u type=render_target",
-                            p->globalIndex, timp, size, Ps2_free_texmemsize);
         
         return 1;
     }
@@ -632,8 +620,6 @@ int Ps2TextureMalloc(NJS_TEXMEMLIST* p)
     
     if ((unsigned int)((int)Ps2_now_free + size) >= (unsigned int)Ps2_free_last) 
     {
-        pcTextureTraceEvent("TEXTURE_MALLOC_FAIL", "gindex=%u requested=%u free=%u reason=arena_limit",
-                            p->globalIndex, size, Ps2_free_texmemsize);
         return -1;
     }
     
@@ -661,8 +647,6 @@ int Ps2TextureMalloc(NJS_TEXMEMLIST* p)
     Ps2_free_texmemsize -= size;
     
     Ps2_now_free = (void*)((int)Ps2_now_free + size);
-    pcTextureTraceEvent("TEXTURE_MALLOC_OK", "gindex=%u address=%p source=%p size=%u free_after=%u type=tim2",
-                        p->globalIndex, p->texinfo.texsurface.pSurface, timp, size, Ps2_free_texmemsize);
     
     return 1;
 }
@@ -690,8 +674,6 @@ int Ps2TextureFree(NJS_TEXMEMLIST* p)
     temp2 = &timp->admin.count;
     
     size = p->texinfo.texsurface.TextureSize;
-    pcTextureTraceEvent("TEXTURE_FREE_BEGIN", "gindex=%u address=%p size=%u refcount=%u",
-                        p->globalIndex, timp, size, *temp2);
     
     if (*temp2 == 0) 
     {
@@ -720,8 +702,6 @@ int Ps2TextureFree(NJS_TEXMEMLIST* p)
     }
     
     ring_check();
-    pcTextureTraceEvent("TEXTURE_FREE_END", "gindex=%u address=%p free_after=%u",
-                        p->globalIndex, timp, Ps2_free_texmemsize);
     
     return 1;
 }
@@ -756,16 +736,12 @@ int Ps2ReplaceTexAddr(unsigned int gindex, void* rep_addr)
 // 100% matching!
 int Ps2TextureGarbageCollectionAll()
 {
-    unsigned int moved_blocks = 0;
-    unsigned int moved_bytes = 0;
-
     TIM2_PICTUREHEADER_EX* p; 
     TIM2_PICTUREHEADER_EX* after2; 
     unsigned int size; 
     unsigned char* real_p; 
     TIM2_PICTUREHEADER_EX* temp; // not from the debugging symbols
     
-    pcTextureTraceEvent("TEXTURE_GC_BEGIN", "free_before=%u", Ps2_free_texmemsize);
     ring_check();
     
     for (p = &Ps2_tm_list_1st; p->admin.after != &Ps2_tm_list_last; p = (TIM2_PICTUREHEADER_EX*)real_p)
@@ -794,8 +770,6 @@ int Ps2TextureGarbageCollectionAll()
             size = temp->admin.size / 4;
 
             Ps2MemCopy4(real_p, temp, size);
-            moved_blocks++;
-            moved_bytes += size * 4;
         
             Ps2ReplaceTexAddr(after2->admin.gindex, real_p);
         }
@@ -808,8 +782,6 @@ int Ps2TextureGarbageCollectionAll()
     size = p->admin.size;
     
     Ps2_now_free = (void*)((int)p->admin.addr + size);
-    pcTextureTraceEvent("TEXTURE_GC_END", "moved_blocks=%u moved_bytes=%u free_after=%u",
-                        moved_blocks, moved_bytes, Ps2_free_texmemsize);
 
     return 1;
 }

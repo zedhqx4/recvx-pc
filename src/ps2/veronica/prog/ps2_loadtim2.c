@@ -1,5 +1,4 @@
 #include "../../../ps2/veronica/prog/ps2_loadtim2.h"
-#include "../../../../pc/include/pc_texture_trace.h"
 #include "../../../ps2/veronica/prog/ps2_dummy.h"
 #include "../../../ps2/veronica/prog/ps2_pxlconv.h"
 
@@ -353,18 +352,11 @@ int Send_Tim2_dataEx(void* tim2_top_adr, unsigned long send_image_adr, unsigned 
     {
         pPhead = (TIM2_PICTUREHEADER*)((int)tim2_top_adr + 16);
     }
-
-    pcTextureTraceEvent("TIM2_SEND_BEGIN",
-                        "source=%p image_dst=%lu clut_dst=%lu size=%u image=%ux%u image_type=%u pict=%u clut_type=%u image_bytes=%u clut_bytes=%u",
-                        tim2_top_adr, send_image_adr, send_clut_adr,
-                        pPhead->TotalSize, pPhead->ImageWidth, pPhead->ImageHeight,
-                        pPhead->ImageType, pPhead->PictFormat, pPhead->ClutType,
-                        pPhead->ImageSize, pPhead->ClutSize);
     
     if ((pPhead->ClutType != 0) && (Clut_Load_Func(pPhead, send_clut_adr) < 0)) 
     {
         printf("Can't Load Clut\n");
-        pcTextureTraceEvent("TIM2_SEND_END", "source=%p result=-1 reason=clut_load_failed", tim2_top_adr);
+        
         return -1;
     }
     else if (((pPhead->ImageWidth < 1024) && (pPhead->ImageHeight < 1024)) && ((pPhead->ImageWidth > 128) && (pPhead->ImageHeight > 128)) && ((pPhead->ImageType == 4) || (pPhead->ImageType == 5))) 
@@ -372,14 +364,14 @@ int Send_Tim2_dataEx(void* tim2_top_adr, unsigned long send_image_adr, unsigned 
         P32_Image_Load(pPhead, send_image_adr);
         
         Set_GsTex(pPhead, send_image_adr, send_clut_adr);
-        pcTextureTraceEvent("TIM2_SEND_END", "source=%p result=1 path=p32_image", tim2_top_adr);
+        
         return 1;
     }
     
     Tim2_Image_Load(pPhead, send_image_adr);
     
     Set_GsTex(pPhead, send_image_adr, send_clut_adr);
-    pcTextureTraceEvent("TIM2_SEND_END", "source=%p result=2 path=tim2_image", tim2_top_adr);
+    
     return 2;
 }
 
@@ -429,20 +421,10 @@ int Send_Tim2_dataExClutOnly(void* tim2_top_adr, unsigned long send_image_adr, u
         (TIM2_PICTUREHEADER*)((int)tim2_top_adr + 128) :
         (TIM2_PICTUREHEADER*)((int)tim2_top_adr + 16);
 
-    pcTextureTraceEvent("TIM2_CLUT_ONLY_BEGIN",
-                        "source=%p image_dst=%lu clut_dst=%lu image=%ux%u image_type=%u clut_type=%u clut_bytes=%u",
-                        tim2_top_adr, send_image_adr, send_clut_adr,
-                        picture->ImageWidth, picture->ImageHeight,
-                        picture->ImageType, picture->ClutType, picture->ClutSize);
-
     if ((picture->ClutType != 0) && (Clut_Load_Func(picture, send_clut_adr) < 0))
-    {
-        pcTextureTraceEvent("TIM2_CLUT_ONLY_END", "source=%p result=-1 reason=clut_load_failed", tim2_top_adr);
         return -1;
-    }
 
     Set_GsTex(picture, send_image_adr, send_clut_adr);
-    pcTextureTraceEvent("TIM2_CLUT_ONLY_END", "source=%p result=0 image_transfer=skipped", tim2_top_adr);
     return 0;
 }
 #endif
