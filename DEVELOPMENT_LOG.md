@@ -886,3 +886,6 @@ Tab, Up/Down, Shift+Up/Down, and Backspace retain their existing edge-selection,
 - Added per-room profile counters for `Ps2TexLoad()` and `njCnkCtTid()`, reported as average calls per rendered frame for rooms 8 and 66 in the periodic profile log.
 - No calls in the GS/game texture state flow are skipped by this experiment.
 - Validation status at commit creation: compile, host test, CI, and runtime/visual validation pending.
+
+- Follow-up validation setup: the Windows build workflow now includes this experiment branch, and an Ubuntu job compiles/runs the fast-path and per-pixel reference test builds and compares their VRAM, generation, and transfer-completion fingerprints.
+- Profile output reports both interval totals and per-rendered-frame averages for rooms 8 and 66.

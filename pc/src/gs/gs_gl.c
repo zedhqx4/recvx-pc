@@ -292,6 +292,9 @@ void pcGsLogStats(void)
           stats.draws / f, stats.verts / f, (double)stats.rt_loads / f, stats.t_load * 1000 / f, (double)stats.rt_reads / f,
           stats.t_read * 1000 / f, (double)stats.tex_decodes / f, stats.tex_texels / f, stats.t_decode * 1000 / f);
     pcLog("gs: %d textures cached (%.0f MB)", tex_cached, tex_cached_bytes / 1048576.0);
+    pcLog("profile/interval: room 8 Ps2TexLoad %u CnkTid %u | room 66 Ps2TexLoad %u CnkTid %u",
+          profile_tex_calls.texload8, profile_tex_calls.cnktid8,
+          profile_tex_calls.texload66, profile_tex_calls.cnktid66);
     pcLog("profile/frame: room 8 Ps2TexLoad %.1f CnkTid %.1f | room 66 Ps2TexLoad %.1f CnkTid %.1f",
           (double)profile_tex_calls.texload8 / f, (double)profile_tex_calls.cnktid8 / f,
           (double)profile_tex_calls.texload66 / f, (double)profile_tex_calls.cnktid66 / f);

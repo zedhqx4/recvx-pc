@@ -6,6 +6,7 @@ on:
     branches:
       - pc-port
       - experimental/gs-rebuild
+      - experiment/gs-rebuild-psmt-block256
       - FONTFix
     paths-ignore:
       - '**.md'
@@ -87,3 +88,19 @@ jobs:
             build_pc/SDL3.dll
             build_pc/libusb-1.0.dll
           if-no-files-found: error
+
+  gs-blockpath-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Compare block fast path with per-pixel reference
+        run: |
+          cc -O2 -DGS_BLOCK_FASTPATH=1 pc/tests/gs_mem_blockpath_test.c -o /tmp/gs-block-fast
+          cc -O2 -DGS_BLOCK_FASTPATH=0 pc/tests/gs_mem_blockpath_test.c -o /tmp/gs-block-reference
+          /tmp/gs-block-fast > /tmp/gs-block-fast.txt
+          /tmp/gs-block-reference > /tmp/gs-block-reference.txt
+          diff -u /tmp/gs-block-reference.txt /tmp/gs-block-fast.txt
+          cat /tmp/gs-block-fast.txt
