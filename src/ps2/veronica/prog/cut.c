@@ -8,6 +8,17 @@
 #include "../../../ps2/veronica/prog/ps2_NaView.h"
 #include "../../../ps2/veronica/prog/main.h"
 
+#ifdef TARGET_PC
+#include "../../../../pc/include/pc_texture_trace.h"
+#define PC_TRACE_CAMERA_UPDATE(source, console_event) \
+    pcTextureTraceCamera((source), (console_event), \
+        sys->stg_no, sys->rom_no, sys->rcase, sys->pos_no, \
+        cam.ncut, cam.ocut, cam.camver, (unsigned int)cam.flg, \
+        cam.evc_no, cam.keyf_no, cam.mode0, \
+        cam.px, cam.py, cam.pz, cam.ax, cam.ay, cam.az, cam.pers, cam.ln)
+#endif
+
+
 // 100% matching!
 void bhCheckCut(int flg)
 {
@@ -88,6 +99,10 @@ void bhCheckCut(int flg)
                         cam.ncut = pp;
                     }
                     
+#ifdef TARGET_PC
+                    pcTextureTraceEvent("CAMERA_CUT_DECISION", "caller=bhCheckCut mode=forced previous=%d candidate=%d selected=%d player=(%.3f,%.3f) floor=%d flags=%08x",
+                                        cam.ocut, pp, cam.ncut, plp->gpx, plp->gpz, plp->flr_no, flg);
+#endif
                     bhSetCut(cam.ncut, 1);
                     
                     cam.ocflg = rom->cutp[cam.ncut].cam[cam.camver].flg;
@@ -122,6 +137,11 @@ void bhCheckCut(int flg)
                             
                             cam.ncut = pp;
                             
+#ifdef TARGET_PC
+                            pcTextureTraceEvent("CAMERA_CUT_DECISION", "caller=bhCheckCut mode=area_transition previous=%d candidate=%d selected=%d player=(%.3f,%.3f) sampled=(%.3f,%.3f) alternatives=%d,%d,%d,%d floor=%d flags=%08x",
+                                                cam.ocut, pp, cam.ncut, plp->gpx, plp->gpz, gpx, gpz,
+                                                p0, p1, p2, p3, plp->flr_no, flg);
+#endif
                             bhSetCut(cam.ncut, 0);
                         }
                     }
@@ -284,7 +304,11 @@ void bhSetCut(int cno, int flg)
     LGT_WORK* lp; 
     NJS_CNK_OBJECT* obj; 
     unsigned int attr; 
-    int i; 
+    int i;
+#ifdef TARGET_PC
+    int trace_hidden_count = 0;
+    int trace_visible_count = 0;
+#endif 
 
     if ((sys->ts_flg & 0x200)) 
     {
@@ -323,15 +347,27 @@ void bhSetCut(int cno, int flg)
         {
             if (bhCkFlg(ci->hidobj, i) != 0)
             {
+#ifdef TARGET_PC
+                trace_hidden_count++;
+#endif
                 obj->evalflags |= 0x8;
             }
             else
             {
+#ifdef TARGET_PC
+                trace_visible_count++;
+#endif
                 obj->evalflags &= ~0x8;
             }
         }
     }
 
+#ifdef TARGET_PC
+    pcTextureTraceEvent("CUT_OBJECT_VISIBILITY",
+                        "source=bhSetCut id=%d hidden=%d visible=%d total=%d",
+                        cno, trace_hidden_count, trace_visible_count,
+                        trace_hidden_count + trace_visible_count);
+#endif
     lp = (LGT_WORK*)&rom->lgtp[4];
     
     for (i = 4; i < rom->lgt_n; i++, lp++)
@@ -442,6 +478,10 @@ void bhSetCut(int cno, int flg)
     bhInitActiveCamera(flg);
     
     bhMakeCameraVector();
+
+#ifdef TARGET_PC
+    PC_TRACE_CAMERA_UPDATE("bhSetCut", 1);
+#endif
 }
 
 // 100% matching! 
@@ -538,6 +578,10 @@ void bhSetFixedCut(int cno)
         bhChangeClipVolumeRM();
         bhChangeBackColor();
     }
+
+#ifdef TARGET_PC
+    PC_TRACE_CAMERA_UPDATE("bhSetFixedCut", 1);
+#endif
 }
 
 // 100% matching!
@@ -564,6 +608,10 @@ void bhSetRenderCut(int cno)
     cam.pers = ci->pers;
     
     cam.ln = ci->ln;
+
+#ifdef TARGET_PC
+    PC_TRACE_CAMERA_UPDATE("bhSetRenderCut", 1);
+#endif
 }
 
 // 100% matching!
@@ -573,6 +621,10 @@ void bhSetHideObjLgt(int cno)
     LGT_WORK* lp;
     NJS_CNK_OBJECT* obj;
     int i;
+#ifdef TARGET_PC
+    int trace_hidden_count = 0;
+    int trace_visible_count = 0;
+#endif
 
     ci = (CAM_WRK*)&rom->cutp[cno].cam[cam.camver];
 
@@ -584,15 +636,27 @@ void bhSetHideObjLgt(int cno)
         {
             if (bhCkFlg(ci->hidobj, i) != 0)
             {
+#ifdef TARGET_PC
+                trace_hidden_count++;
+#endif
                 obj->evalflags |= 0x8;
             }
             else
             {
+#ifdef TARGET_PC
+                trace_visible_count++;
+#endif
                 obj->evalflags &= ~0x8;
             }
         }
     }
 
+#ifdef TARGET_PC
+    pcTextureTraceEvent("CUT_OBJECT_VISIBILITY",
+                        "source=bhSetHideObjLgt id=%d hidden=%d visible=%d total=%d",
+                        cno, trace_hidden_count, trace_visible_count,
+                        trace_hidden_count + trace_visible_count);
+#endif
     lp = (LGT_WORK*)&rom->lgtp[4];
     
     for (i = 4; i < rom->lgt_n; i++, lp++)
@@ -614,6 +678,10 @@ void bhSetHideObject(int offset)
     NJS_CNK_OBJECT* obj; 
     int i;               
     unsigned int* flg; // not from DWARF
+#ifdef TARGET_PC
+    int trace_hidden_count = 0;
+    int trace_visible_count = 0;
+#endif
 
     if (((sys->st_flg & 0x1)) && ((cam.flg & 0x2)))
     {
@@ -627,10 +695,16 @@ void bhSetHideObject(int offset)
             {
                 if (bhCkFlg(flg, i) != 0)
                 {
+#ifdef TARGET_PC
+                    trace_hidden_count++;
+#endif
                     obj->evalflags |= 0x8;
                 }
                 else
                 {
+#ifdef TARGET_PC
+                    trace_visible_count++;
+#endif
                     obj->evalflags &= ~0x8;
                 }
             }
@@ -648,15 +722,29 @@ void bhSetHideObject(int offset)
             {
                 if (bhCkFlg(flg, i) != 0)
                 {
+#ifdef TARGET_PC
+                    trace_hidden_count++;
+#endif
                     obj->evalflags |= 0x8;
                 }
                 else
                 {
+#ifdef TARGET_PC
+                    trace_visible_count++;
+#endif
                     obj->evalflags &= ~0x8;
                 }
             }
         }
     }
+
+#ifdef TARGET_PC
+    pcTextureTraceEvent("CUT_OBJECT_VISIBILITY",
+                        "source=bhSetHideObject offset=%d evc=%d key=%d cut=%d camver=%d hidden=%d visible=%d total=%d",
+                        offset, cam.evc_no, cam.keyf_no, cam.ncut, cam.camver,
+                        trace_hidden_count, trace_visible_count,
+                        trace_hidden_count + trace_visible_count);
+#endif
 }
 
 // 99.76% matching 
@@ -1638,6 +1726,10 @@ void bhControlActiveCamera()
             cam.fog_fr = ci->fog_fr + (len * inn); 
         }
     }
+
+#ifdef TARGET_PC
+    PC_TRACE_CAMERA_UPDATE("bhControlActiveCamera", 0);
+#endif
 }
 
 // 100% matching! 
@@ -1720,6 +1812,10 @@ void bhSetEventCamera(int evc_no, int key_no)
     cam.flg &= ~0x38;
     
     bhChangeBackColorEvt();
+
+#ifdef TARGET_PC
+    PC_TRACE_CAMERA_UPDATE("bhSetEventCamera", 1);
+#endif
 }
 
 // 100% matching!
@@ -1797,6 +1893,10 @@ void bhSetEventFixedCut(int cno, int kno)
     bhChangeClipVolume(sys->stg_no, sys->rom_no, sys->rcase, cam.evc_no);
     
     bhChangeBackColorEvt();
+
+#ifdef TARGET_PC
+    PC_TRACE_CAMERA_UPDATE("bhSetEventFixedCut", 1);
+#endif
 }
 
 // 100% matching!
@@ -1805,7 +1905,11 @@ void bhSetEventHideObjLgt(int cno, int kno)
     NJS_CNK_OBJECT* obj;
     CAM_KEYF_WORK* kfp;
     LGT_WORK* lp;
-    int i; 
+    int i;
+#ifdef TARGET_PC
+    int trace_hidden_count = 0;
+    int trace_visible_count = 0;
+#endif 
 
     kfp = &rom->evcp[cno].keyf[kno];
 
@@ -1817,15 +1921,27 @@ void bhSetEventHideObjLgt(int cno, int kno)
         {
             if (bhCkFlg(kfp->hidobj, i) != 0)
             {
+#ifdef TARGET_PC
+                trace_hidden_count++;
+#endif
                 obj->evalflags |= 0x8;
             }
             else
             {
+#ifdef TARGET_PC
+                trace_visible_count++;
+#endif
                 obj->evalflags &= ~0x8;
             }
         }
     }
 
+#ifdef TARGET_PC
+    pcTextureTraceEvent("CUT_OBJECT_VISIBILITY",
+                        "source=bhSetEventHideObjLgt event=%d key=%d hidden=%d visible=%d total=%d",
+                        cno, kno, trace_hidden_count, trace_visible_count,
+                        trace_hidden_count + trace_visible_count);
+#endif
     lp = rom->evlp;
     
     for (i = 0; i < rom->evl_n; i++, lp++)
@@ -2215,6 +2331,10 @@ void bhControlEventCamera()
         
         break;
     }
+
+#ifdef TARGET_PC
+    PC_TRACE_CAMERA_UPDATE("bhControlEventCamera", 0);
+#endif
 }
 
 // 100% matching!
@@ -2613,6 +2733,10 @@ void bhControlPlEyeCamera(unsigned int attr)
         
         break;
     }
+
+#ifdef TARGET_PC
+    PC_TRACE_CAMERA_UPDATE("bhControlPlEyeCamera", 0);
+#endif
 }
 
 #pragma divbyzerocheck off 
@@ -2639,6 +2763,9 @@ void bhInitPlEyeCamera()
         sys->gm_flg &= ~0x80000;
         
         sys->pt_flg |= 0x1;
+#ifdef TARGET_PC
+        PC_TRACE_CAMERA_UPDATE("bhInitPlEyeCamera/early-return", 1);
+#endif
         return;
     }
     
@@ -2713,6 +2840,10 @@ void bhInitPlEyeCamera()
     {
         njClipZ(-1.0f, -20000.0f);
     }
+
+#ifdef TARGET_PC
+    PC_TRACE_CAMERA_UPDATE("bhInitPlEyeCamera", 1);
+#endif
 }
 
 // 100% matching! 
@@ -2796,6 +2927,10 @@ void bhSetPlEyeCamera()
             cam.pers = axn;
         }
     }
+
+#ifdef TARGET_PC
+    PC_TRACE_CAMERA_UPDATE("bhSetPlEyeCamera", 0);
+#endif
 }
 
 // 100% matching!

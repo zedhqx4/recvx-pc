@@ -11,12 +11,15 @@
 #include "../../../ps2/veronica/prog/ps2_texture.h"
 #include "../../../ps2/veronica/prog/sdfunc.h"
 #include "../../../ps2/veronica/prog/main.h"
+#include "../../../../pc/include/pc_texture_trace.h"
 
 #ifdef TARGET_PC
 #include <stdio.h>
 #include <string.h>
 #include <stdint.h>
 #include "../../../../pc/include/pc_texture_cache.h"
+#include <stdarg.h>
+#include <stdlib.h>
 extern int Send_Tim2_dataExClutOnly(void* tim2_top_adr, unsigned long send_image_adr, unsigned long send_clut_adr);
 #endif
 #include "../../../ps2/veronica/prog/ps2_dummy.h"
@@ -138,6 +141,371 @@ void Ps2PcTextureSourceCacheReset(void)
     Ps2_current_texbreak = 1;
 }
 #endif
+
+#ifdef TARGET_PC
+typedef struct
+{
+    int valid;
+    int stg, rom, rcase, pos;
+    int ncut, ocut, camver, evc_no, keyf_no, mode0;
+    unsigned int camflg;
+    float px, py, pz, ln;
+    int ax, ay, az, pers;
+} PcTextureTraceCameraState;
+
+#define PC_TEXTURE_TRACE_MAX_BYTES (8U * 1024U * 1024U)
+#define PC_TEXTURE_TRACE_WINDOW_FRAMES 60U
+#define PC_TEXTURE_TRACE_MAX_EVENTS 512
+#define PC_TEXTURE_TRACE_TEXT_SIZE 384
+
+typedef struct
+{
+    uint32_t hash;
+    uint32_t count;
+    char kind[32];
+    char message[PC_TEXTURE_TRACE_TEXT_SIZE];
+} PcTextureTraceAggregate;
+
+static FILE* pc_texture_trace_file;
+static int pc_texture_trace_enabled = -1;
+static uint32_t pc_texture_trace_sequence;
+static unsigned int pc_texture_trace_current_tid = 0xFFFFFFFFU;
+static PcTextureTraceCameraState pc_texture_trace_camera_state;
+static PcTextureTraceAggregate pc_texture_trace_events[PC_TEXTURE_TRACE_MAX_EVENTS];
+static uint32_t pc_texture_trace_window_first;
+static uint32_t pc_texture_trace_window_last;
+static uint32_t pc_texture_trace_window_count;
+static uint32_t pc_texture_trace_window_overflow;
+static uint32_t pc_texture_trace_file_bytes;
+static uint32_t pc_texture_trace_last_camera_sample;
+static int pc_texture_trace_window_active;
+static int pc_texture_trace_limit_reached;
+extern unsigned int Ps2_sys_cnt;
+
+static int pc_texture_trace_is_enabled(void)
+{
+    const char* value;
+
+    if (pc_texture_trace_enabled >= 0)
+        return pc_texture_trace_enabled;
+
+    value = getenv("RECVX_TEXTURE_TRACE");
+    pc_texture_trace_enabled = (value != NULL) && (value[0] != '\0') &&
+                                (strcmp(value, "0") != 0);
+    return pc_texture_trace_enabled;
+}
+
+static void pc_texture_trace_open(void)
+{
+    char dir[1024];
+    char path[1200];
+    int n;
+
+    if (!pc_texture_trace_is_enabled() || (pc_texture_trace_file != NULL))
+        return;
+
+    pcPlatformExeDir(dir, sizeof(dir));
+    snprintf(path, sizeof(path), "%s/recvx_texture_trace.log", dir);
+    pc_texture_trace_file = fopen(path, "wb");
+    if (pc_texture_trace_file != NULL)
+    {
+        setvbuf(pc_texture_trace_file, NULL, _IOFBF, 65536);
+        n = fprintf(pc_texture_trace_file,
+                    "# recvx texture/camera trace v2; aggregated in 60-frame windows; "
+                    "hard limit=8MiB; camera transitions split windows\n");
+        if (n > 0)
+            pc_texture_trace_file_bytes = (uint32_t)n;
+    }
+}
+
+static int pc_texture_trace_write(const char* line)
+{
+    size_t length;
+
+    if ((pc_texture_trace_file == NULL) || pc_texture_trace_limit_reached)
+        return 0;
+
+    length = strlen(line);
+    if (pc_texture_trace_file_bytes + (uint32_t)length > PC_TEXTURE_TRACE_MAX_BYTES)
+    {
+        static const char limit_line[] =
+            "TRACE_LIMIT_REACHED max_bytes=8388608; detail logging stopped\n";
+        fwrite(limit_line, 1, sizeof(limit_line) - 1, pc_texture_trace_file);
+        fflush(pc_texture_trace_file);
+        pc_texture_trace_limit_reached = 1;
+        return 0;
+    }
+
+    if (fwrite(line, 1, length, pc_texture_trace_file) != length)
+    {
+        pc_texture_trace_limit_reached = 1;
+        return 0;
+    }
+
+    pc_texture_trace_file_bytes += (uint32_t)length;
+    return 1;
+}
+
+static uint32_t pc_texture_trace_hash(const char* kind, const char* message)
+{
+    uint32_t hash = 2166136261U;
+    const unsigned char* p;
+
+    for (p = (const unsigned char*)kind; *p != 0; p++)
+        hash = (hash ^ *p) * 16777619U;
+    hash = (hash ^ (unsigned char)0xFF) * 16777619U;
+    for (p = (const unsigned char*)message; *p != 0; p++)
+        hash = (hash ^ *p) * 16777619U;
+
+    return (hash == 0) ? 1 : hash;
+}
+
+static void pc_texture_trace_flush_window(void)
+{
+    char line[1200];
+    unsigned int i;
+    int n;
+
+    if (!pc_texture_trace_window_active || (pc_texture_trace_file == NULL))
+        return;
+
+    n = snprintf(line, sizeof(line),
+                 "WINDOW F=%u..%u S=%d/%d/%d/%d CUT=%d OCUT=%d VER=%d "
+                 "EVC=%d KEY=%d MODE=%d EVENTS=%u\n",
+                 pc_texture_trace_window_first, pc_texture_trace_window_last,
+                 pc_texture_trace_camera_state.stg, pc_texture_trace_camera_state.rom,
+                 pc_texture_trace_camera_state.rcase, pc_texture_trace_camera_state.pos,
+                 pc_texture_trace_camera_state.ncut, pc_texture_trace_camera_state.ocut,
+                 pc_texture_trace_camera_state.camver, pc_texture_trace_camera_state.evc_no,
+                 pc_texture_trace_camera_state.keyf_no, pc_texture_trace_camera_state.mode0,
+                 pc_texture_trace_window_count);
+    if ((n > 0) && ((size_t)n < sizeof(line)))
+        pc_texture_trace_write(line);
+
+    for (i = 0; i < PC_TEXTURE_TRACE_MAX_EVENTS && !pc_texture_trace_limit_reached; i++)
+    {
+        PcTextureTraceAggregate* event = &pc_texture_trace_events[i];
+        if (event->count == 0)
+            continue;
+
+        n = snprintf(line, sizeof(line), "  N=%u %s %s\n",
+                     event->count, event->kind, event->message);
+        if ((n > 0) && ((size_t)n < sizeof(line)))
+            pc_texture_trace_write(line);
+    }
+
+    if ((pc_texture_trace_window_overflow != 0) && !pc_texture_trace_limit_reached)
+    {
+        n = snprintf(line, sizeof(line), "  AGGREGATE_OVERFLOW unique_events_dropped=%u\n",
+                     pc_texture_trace_window_overflow);
+        if ((n > 0) && ((size_t)n < sizeof(line)))
+            pc_texture_trace_write(line);
+    }
+
+    fflush(pc_texture_trace_file);
+    memset(pc_texture_trace_events, 0, sizeof(pc_texture_trace_events));
+    pc_texture_trace_window_first = 0;
+    pc_texture_trace_window_last = 0;
+    pc_texture_trace_window_count = 0;
+    pc_texture_trace_window_overflow = 0;
+    pc_texture_trace_window_active = 0;
+}
+
+static void pc_texture_trace_add(const char* kind, const char* message)
+{
+    uint32_t hash;
+    uint32_t slot;
+    unsigned int probe;
+    PcTextureTraceAggregate* event;
+
+    hash = pc_texture_trace_hash(kind, message);
+    slot = hash % PC_TEXTURE_TRACE_MAX_EVENTS;
+
+    for (probe = 0; probe < PC_TEXTURE_TRACE_MAX_EVENTS; probe++)
+    {
+        event = &pc_texture_trace_events[(slot + probe) % PC_TEXTURE_TRACE_MAX_EVENTS];
+        if (event->count == 0)
+        {
+            event->hash = hash;
+            event->count = 1;
+            strncpy(event->kind, kind, sizeof(event->kind) - 1);
+            event->kind[sizeof(event->kind) - 1] = '\0';
+            strncpy(event->message, message, sizeof(event->message) - 1);
+            event->message[sizeof(event->message) - 1] = '\0';
+            pc_texture_trace_window_count++;
+            return;
+        }
+
+        if ((event->hash == hash) && (strcmp(event->kind, kind) == 0) &&
+            (strcmp(event->message, message) == 0))
+        {
+            if (event->count != 0xFFFFFFFFU)
+                event->count++;
+            return;
+        }
+    }
+
+    pc_texture_trace_window_overflow++;
+}
+
+void pcTextureTraceSetCurrentTid(unsigned int tid)
+{
+    pc_texture_trace_current_tid = tid;
+}
+
+void pcTextureTraceEvent(const char* kind, const char* fmt, ...)
+{
+    char message[PC_TEXTURE_TRACE_TEXT_SIZE];
+    char line[1600];
+    va_list args;
+    uint32_t frame;
+    int n;
+
+    if (!pc_texture_trace_is_enabled())
+        return;
+
+    pc_texture_trace_open();
+    if ((pc_texture_trace_file == NULL) || pc_texture_trace_limit_reached)
+        return;
+
+    message[0] = '\0';
+    va_start(args, fmt);
+    if (fmt != NULL)
+        vsnprintf(message, sizeof(message), fmt, args);
+    va_end(args);
+
+    frame = Ps2_sys_cnt;
+
+    /* Camera and visibility decisions are sparse, causal boundaries.
+     * Flush preceding texture/model aggregates before recording them. */
+    if ((kind != NULL) &&
+        ((strcmp(kind, "CAMERA") == 0) ||
+         (strcmp(kind, "CAMERA_CUT_DECISION") == 0) ||
+         (strcmp(kind, "CUT_OBJECT_VISIBILITY") == 0)))
+    {
+        pc_texture_trace_flush_window();
+        n = snprintf(line, sizeof(line),
+                     "EVENT E=%u F=%u S=%d/%d/%d/%d CUT=%d OCUT=%d VER=%d "
+                     "EVC=%d KEY=%d MODE=%d %s %s\n",
+                     ++pc_texture_trace_sequence, frame,
+                     pc_texture_trace_camera_state.stg, pc_texture_trace_camera_state.rom,
+                     pc_texture_trace_camera_state.rcase, pc_texture_trace_camera_state.pos,
+                     pc_texture_trace_camera_state.ncut, pc_texture_trace_camera_state.ocut,
+                     pc_texture_trace_camera_state.camver, pc_texture_trace_camera_state.evc_no,
+                     pc_texture_trace_camera_state.keyf_no, pc_texture_trace_camera_state.mode0,
+                     kind, message);
+        if ((n > 0) && ((size_t)n < sizeof(line)))
+            pc_texture_trace_write(line);
+        fflush(pc_texture_trace_file);
+        return;
+    }
+
+    if (pc_texture_trace_window_active &&
+        ((uint32_t)(frame - pc_texture_trace_window_first) >= PC_TEXTURE_TRACE_WINDOW_FRAMES))
+        pc_texture_trace_flush_window();
+
+    if (!pc_texture_trace_window_active)
+    {
+        pc_texture_trace_window_active = 1;
+        pc_texture_trace_window_first = frame;
+        pc_texture_trace_window_last = frame;
+    }
+    pc_texture_trace_window_last = frame;
+    pc_texture_trace_add((kind != NULL) ? kind : "EVENT", message);
+}
+
+void pcTextureTraceCamera(const char* source, int console_if_changed,
+                          int stg, int rom, int rcase, int pos,
+                          int ncut, int ocut, int camver, unsigned int camflg,
+                          int evc_no, int keyf_no, int mode0,
+                          float px, float py, float pz,
+                          int ax, int ay, int az, int pers, float ln)
+{
+    PcTextureTraceCameraState old = pc_texture_trace_camera_state;
+    PcTextureTraceCameraState now;
+    int changed;
+    int identity_changed;
+    int should_trace;
+
+    if (!pc_texture_trace_is_enabled())
+        return;
+
+    memset(&now, 0, sizeof(now));
+    now.valid = 1;
+    now.stg = stg; now.rom = rom; now.rcase = rcase; now.pos = pos;
+    now.ncut = ncut; now.ocut = ocut; now.camver = camver; now.camflg = camflg;
+    now.evc_no = evc_no; now.keyf_no = keyf_no; now.mode0 = mode0;
+    now.px = px; now.py = py; now.pz = pz; now.ax = ax; now.ay = ay; now.az = az;
+    now.pers = pers; now.ln = ln;
+
+    changed = !old.valid ||
+        (old.stg != now.stg) || (old.rom != now.rom) || (old.rcase != now.rcase) ||
+        (old.pos != now.pos) || (old.ncut != now.ncut) || (old.ocut != now.ocut) ||
+        (old.camver != now.camver) || (old.camflg != now.camflg) ||
+        (old.evc_no != now.evc_no) || (old.keyf_no != now.keyf_no) ||
+        (old.mode0 != now.mode0) || (old.ax != now.ax) || (old.ay != now.ay) ||
+        (old.az != now.az) || (old.pers != now.pers) ||
+        (fabsf(old.px - now.px) > 0.001f) || (fabsf(old.py - now.py) > 0.001f) ||
+        (fabsf(old.pz - now.pz) > 0.001f) || (fabsf(old.ln - now.ln) > 0.001f);
+
+    identity_changed = !old.valid || (old.ncut != now.ncut) || (old.ocut != now.ocut) ||
+        (old.camver != now.camver) || (old.camflg != now.camflg) ||
+        (old.evc_no != now.evc_no) || (old.keyf_no != now.keyf_no) ||
+        (old.mode0 != now.mode0);
+
+    if (!changed)
+        return;
+
+    should_trace = !old.valid || identity_changed || console_if_changed ||
+        ((uint32_t)(Ps2_sys_cnt - pc_texture_trace_last_camera_sample) >= 30U);
+    pc_texture_trace_camera_state = now;
+    if (!should_trace)
+        return;
+
+    pc_texture_trace_flush_window();
+    pc_texture_trace_last_camera_sample = Ps2_sys_cnt;
+    pcTextureTraceEvent("CAMERA",
+        "source=%s old_cut=%d old_ocut=%d old_ver=%d old_evc=%d old_key=%d "
+        "old_pos=(%.3f,%.3f,%.3f) old_rot=(%d,%d,%d) new_pos=(%.3f,%.3f,%.3f) "
+        "new_rot=(%d,%d,%d) new_cut=%d new_ocut=%d new_ver=%d new_evc=%d new_key=%d",
+        (source != NULL) ? source : "unknown",
+        old.ncut, old.ocut, old.camver, old.evc_no, old.keyf_no,
+        old.px, old.py, old.pz, old.ax, old.ay, old.az,
+        now.px, now.py, now.pz, now.ax, now.ay, now.az,
+        now.ncut, now.ocut, now.camver, now.evc_no, now.keyf_no);
+    if (pc_texture_trace_file != NULL)
+        fflush(pc_texture_trace_file);
+
+    if (console_if_changed && (identity_changed || !old.valid ||
+        (fabsf(old.px - now.px) > 0.001f) || (fabsf(old.py - now.py) > 0.001f) ||
+        (fabsf(old.pz - now.pz) > 0.001f) || (old.ax != now.ax) ||
+        (old.ay != now.ay) || (old.az != now.az)))
+    {
+        printf("[CAM] F=%u %s cut=%d->%d ev=%d/%d ver=%d mode=%d pos=(%.2f,%.2f,%.2f) rot=(%d,%d,%d)\n",
+               Ps2_sys_cnt, (source != NULL) ? source : "camera",
+               old.ncut, now.ncut, now.evc_no, now.keyf_no, now.camver, now.mode0,
+               now.px, now.py, now.pz, now.ax, now.ay, now.az);
+        fflush(stdout);
+    }
+}
+
+void pcTextureTraceModelBegin(const void* model, const void* vlist,
+                              const void* plist, float radius)
+{
+    (void)model;
+    (void)vlist;
+    (void)plist;
+    (void)radius;
+}
+
+void pcTextureTraceModelEnd(int result, const char* reason)
+{
+    (void)result;
+    (void)reason;
+}
+#endif
+
+
 // the three vars below were originally defined as unsigned int in ps2_NaFog.c, and redeclared as unsigned long here
 extern unsigned long ulNaFogR;
 extern unsigned long ulNaFogG;
@@ -2592,6 +2960,7 @@ int Ps2GlobalIndexTexLoad(unsigned int index)
 	int no;
 
 	no = SearchNumber(index, -1);
+    pcTextureTraceEvent("TEXTURE_GLOBAL_SELECT", "gindex=%u found_index=%d", index, no);
 
     if (no >= 0) 
 	{
@@ -2617,8 +2986,13 @@ static int Ps2EnsureTextureImage(NJS_TEXMEMLIST* addr, TIM2_PICTUREHEADER_EX* ti
     (void)asset_cache_hit;
 #endif
 
+    pcTextureTraceEvent("IMAGE_DECISION", "gindex=%u break=%d tpflag=%u asset_eligible=%d asset_hit=%d",
+                        timp->Gindex, Ps2_current_texbreak, timp->TpFlag,
+                        asset_cache_eligible, asset_cache_hit);
+
     if (Ps2_current_texbreak != 0)
     {
+        pcTextureTraceEvent("IMAGE_PATH", "gindex=%u action=upload reason=texture_break", timp->Gindex);
         for (i = 0; i < 4; i++)
         {
             Ps2_tex_cache_buff[i] = NULL;
@@ -2631,18 +3005,25 @@ static int Ps2EnsureTextureImage(NJS_TEXMEMLIST* addr, TIM2_PICTUREHEADER_EX* ti
     if (timp == Ps2_tex_cache_buff[0])
     {
         cache_flag = 0;
+        pcTextureTraceEvent("IMAGE_PATH", "gindex=%u action=skip reason=same_tim2_pointer", timp->Gindex);
 #ifdef TARGET_PC
         if (asset_cache_eligible && asset_cache_hit)
+        {
+            pcTextureTraceEvent("IMAGE_PATH", "gindex=%u action=rebind reason=native_asset_cache_hit", timp->Gindex);
             goto upload_image;
+        }
 #endif
     }
     else if ((Ps2_tex_load_tp_cancel == 0) && (timp->TpFlag != 0))
     {
         cache_flag = 0;
+        pcTextureTraceEvent("IMAGE_PATH", "gindex=%u action=skip reason=dynamic_tpflag", timp->Gindex);
     }
     else
     {
+        pcTextureTraceEvent("IMAGE_PATH", "gindex=%u action=upload reason=new_tim2_pointer", timp->Gindex);
 upload_image:
+        pcTextureTraceEvent("IMAGE_PATH", "gindex=%u action=transfer_entry", timp->Gindex);
         Ps2_tex_cache_buff[0] = addr->texinfo.texsurface.pSurface;
         if ((PS2_Render_tex_sub_flag == 0) ||
             ((timp->PictFormat >= 5) && (timp->PictFormat <= 8)) ||
@@ -2668,6 +3049,10 @@ static void Ps2BindTextureState(NJS_TEXMEMLIST* addr, TIM2_PICTUREHEADER_EX* tim
 {
     unsigned long* p;
     unsigned int temp;
+#ifdef TARGET_PC
+    unsigned int trace_tbp0, trace_cbp, trace_psm0, trace_psm_next;
+    unsigned int trace_csa, trace_route, trace_render_sub;
+#endif
 
     p = (unsigned long*)WORKBASE;
 
@@ -2683,11 +3068,29 @@ static void Ps2BindTextureState(NJS_TEXMEMLIST* addr, TIM2_PICTUREHEADER_EX* tim
     *p++ = SCE_GS_TEXFLUSH;
 
     temp = 190;
+#ifdef TARGET_PC
+    trace_tbp0 = 0;
+    trace_cbp = 0;
+    trace_psm0 = 0;
+    trace_psm_next = 0;
+    trace_csa = 0;
+    trace_route = 0;
+    trace_render_sub = PS2_Render_tex_sub_flag;
+#endif
 
     if ((timp->PictFormat >= 5) && (timp->PictFormat <= 8)) 
     {
         Ps2_now_bank = addr->bank;
      
+#ifdef TARGET_PC
+        trace_tbp0 = temp * 64;
+        trace_cbp = ((addr->bank & 0x30) / 4) + 16368;
+        trace_psm0 = SCE_GS_PSMT8;
+        trace_psm_next = psm;
+        trace_csa = addr->bank & 0xF;
+        trace_route = 1;
+#endif
+
         *p++ = Ps2_gs_save.TEX0 = SCE_GS_SET_TEX0_1(temp * 64, tbw, SCE_GS_PSMT8, tw, th, 1, SCE_GS_MODULATE, ((addr->bank & 0x30) / 4) + 16368, SCE_GS_PSMCT32, 0, 0, 2);
         *p++ = SCE_GS_TEX0_1;
 
@@ -2696,6 +3099,14 @@ static void Ps2BindTextureState(NJS_TEXMEMLIST* addr, TIM2_PICTUREHEADER_EX* tim
     } 
     else if (psm != 0) 
     {
+#ifdef TARGET_PC
+        trace_tbp0 = temp * 64;
+        trace_cbp = 254 * 64;
+        trace_psm0 = psm;
+        trace_psm_next = psm;
+        trace_csa = 0;
+        trace_route = 2;
+#endif
         *p++ = Ps2_gs_save.TEX0 = SCE_GS_SET_TEX0_1(temp * 64, tbw, psm, tw, th, 1, SCE_GS_MODULATE, 254 * 64, SCE_GS_PSMCT32, 0, 0, 2);
         *p++ = SCE_GS_TEX0_1;
 
@@ -2704,6 +3115,14 @@ static void Ps2BindTextureState(NJS_TEXMEMLIST* addr, TIM2_PICTUREHEADER_EX* tim
     } 
     else if (PS2_Render_tex_sub_flag == 0)
     {
+#ifdef TARGET_PC
+        trace_tbp0 = temp * 64;
+        trace_cbp = 254 * 64;
+        trace_psm0 = psm;
+        trace_psm_next = psm;
+        trace_csa = 0;
+        trace_route = 3;
+#endif
         *p++ = Ps2_gs_save.TEX0 = SCE_GS_SET_TEX0_1(temp * 64, tbw, psm, tw, th, 0, SCE_GS_MODULATE, 254 * 64, SCE_GS_PSMCT32, 0, 0, 2);
         *p++ = SCE_GS_TEX0_1;
 
@@ -2712,6 +3131,14 @@ static void Ps2BindTextureState(NJS_TEXMEMLIST* addr, TIM2_PICTUREHEADER_EX* tim
     } 
     else 
     {
+#ifdef TARGET_PC
+        trace_tbp0 = (temp * 64) + (48 * 64);
+        trace_cbp = 0;
+        trace_psm0 = SCE_GS_PSMCT32;
+        trace_psm_next = SCE_GS_PSMCT32;
+        trace_csa = 0;
+        trace_route = 4;
+#endif
         *p++ = Ps2_gs_save.TEX0 = SCE_GS_SET_TEX0_1((temp * 64) + (48 * 64), 4, SCE_GS_PSMCT32, 8, 8, 0, SCE_GS_MODULATE, 0, SCE_GS_PSMCT32, 0, 0, 0);
         *p++ = SCE_GS_TEX0_1;
 
@@ -2731,6 +3158,13 @@ static void Ps2BindTextureState(NJS_TEXMEMLIST* addr, TIM2_PICTUREHEADER_EX* tim
     *p++ = SCE_GS_TEST_1;
 
     loadImage((void*)0xF0000000);
+#ifdef TARGET_PC
+    pcTextureTraceEvent("GS_PAGE_MAP",
+                        "tid=%u gindex=%u bank=%u route=%u tbp0=%u cbp=%u csa=%u psm0=%u psm_next=%u tbw=%u tw=%u th=%u render_sub=%u pict=%u",
+                        pc_texture_trace_current_tid, timp->Gindex, addr->bank, trace_route,
+                        trace_tbp0, trace_cbp, trace_csa, trace_psm0, trace_psm_next,
+                        tbw, tw, th, trace_render_sub, timp->PictFormat);
+#endif
 }
 
 // 97.17% matching
@@ -2752,10 +3186,18 @@ int Ps2TexLoad(NJS_TEXMEMLIST* addr)
 
     cache_flag = 1;
     if ((addr == NULL) || (addr->texinfo.texsurface.pSurface == NULL))
+    {
+        pcTextureTraceEvent("TEX_INVALID", "null_texture_memlist_or_surface");
         return printf("Ps2CurrentTexLoad ERROR!!!!\n");
+    }
 
     Ps2_now_tex = addr;
     timp = (TIM2_PICTUREHEADER_EX*)addr->texinfo.texsurface.pSurface;
+    pcTextureTraceEvent("TEX_REQUEST",
+                        "tid=%u gindex=%u bank=%u image=%ux%u image_type=%u pict=%u clut=%u tpflag=%u clamp=%u",
+                        pc_texture_trace_current_tid, addr->globalIndex, addr->bank,
+                        timp->ImageWidth, timp->ImageHeight,
+                        timp->ImageType, timp->PictFormat, timp->ClutType, timp->TpFlag, timp->ClampFlag);
 
     tbw = timp->GsTex0.TBW;
     tw = Ps2BitCount(timp->ImageWidth);
@@ -2810,6 +3252,8 @@ int Ps2TexLoad(NJS_TEXMEMLIST* addr)
             Ps2BindTextureState(addr, timp, psm, tbw, tw, th);
             pcGsSetTextureAssetIdentity(timp->Gindex, asset_cache_eligible, image_content_hash);
             pc_ps2_texture_bind_cache.state_generation = pcGsGetTextureBindingGeneration();
+            pcTextureTraceEvent("TEX_RESULT", "gindex=%u asset_cache=hit bind_cache=hit image_transfer=skipped state_rebind=done",
+                                timp->Gindex);
             return 0;
         }
     }
@@ -2823,6 +3267,14 @@ int Ps2TexLoad(NJS_TEXMEMLIST* addr)
                                        0, 0
 #endif
                                        );
+    pcTextureTraceEvent("TEX_CACHE_RESULT", "gindex=%u ps2_pointer_cache_flag=%u asset_cache_eligible=%d asset_cache_hit=%d",
+                        timp->Gindex, cache_flag,
+#ifdef TARGET_PC
+                        asset_cache_eligible, asset_cache_hit
+#else
+                        0, 0
+#endif
+                        );
     Ps2BindTextureState(addr, timp, psm, tbw, tw, th);
 
 #ifdef TARGET_PC
@@ -2849,6 +3301,15 @@ int Ps2TexLoad(NJS_TEXMEMLIST* addr)
         pc_ps2_texture_bind_cache.render_sub_flag = PS2_Render_tex_sub_flag;
     }
 #endif
+    pcTextureTraceEvent("TEX_RESULT",
+                        "gindex=%u ps2_pointer_cache_flag=%u asset_cache_eligible=%d asset_cache_hit=%d",
+                        timp->Gindex, cache_flag,
+#ifdef TARGET_PC
+                        asset_cache_eligible, asset_cache_hit
+#else
+                        0, 0
+#endif
+                        );
     return cache_flag;
 }
 
