@@ -3049,6 +3049,10 @@ static void Ps2BindTextureState(NJS_TEXMEMLIST* addr, TIM2_PICTUREHEADER_EX* tim
 {
     unsigned long* p;
     unsigned int temp;
+#ifdef TARGET_PC
+    unsigned int trace_tbp0, trace_cbp, trace_psm0, trace_psm_next;
+    unsigned int trace_csa, trace_route, trace_render_sub;
+#endif
 
     p = (unsigned long*)WORKBASE;
 
@@ -3064,11 +3068,29 @@ static void Ps2BindTextureState(NJS_TEXMEMLIST* addr, TIM2_PICTUREHEADER_EX* tim
     *p++ = SCE_GS_TEXFLUSH;
 
     temp = 190;
+#ifdef TARGET_PC
+    trace_tbp0 = 0;
+    trace_cbp = 0;
+    trace_psm0 = 0;
+    trace_psm_next = 0;
+    trace_csa = 0;
+    trace_route = 0;
+    trace_render_sub = PS2_Render_tex_sub_flag;
+#endif
 
     if ((timp->PictFormat >= 5) && (timp->PictFormat <= 8)) 
     {
         Ps2_now_bank = addr->bank;
      
+#ifdef TARGET_PC
+        trace_tbp0 = temp * 64;
+        trace_cbp = ((addr->bank & 0x30) / 4) + 16368;
+        trace_psm0 = SCE_GS_PSMT8;
+        trace_psm_next = psm;
+        trace_csa = addr->bank & 0xF;
+        trace_route = 1;
+#endif
+
         *p++ = Ps2_gs_save.TEX0 = SCE_GS_SET_TEX0_1(temp * 64, tbw, SCE_GS_PSMT8, tw, th, 1, SCE_GS_MODULATE, ((addr->bank & 0x30) / 4) + 16368, SCE_GS_PSMCT32, 0, 0, 2);
         *p++ = SCE_GS_TEX0_1;
 
@@ -3077,6 +3099,14 @@ static void Ps2BindTextureState(NJS_TEXMEMLIST* addr, TIM2_PICTUREHEADER_EX* tim
     } 
     else if (psm != 0) 
     {
+#ifdef TARGET_PC
+        trace_tbp0 = temp * 64;
+        trace_cbp = 254 * 64;
+        trace_psm0 = psm;
+        trace_psm_next = psm;
+        trace_csa = 0;
+        trace_route = 2;
+#endif
         *p++ = Ps2_gs_save.TEX0 = SCE_GS_SET_TEX0_1(temp * 64, tbw, psm, tw, th, 1, SCE_GS_MODULATE, 254 * 64, SCE_GS_PSMCT32, 0, 0, 2);
         *p++ = SCE_GS_TEX0_1;
 
@@ -3085,6 +3115,14 @@ static void Ps2BindTextureState(NJS_TEXMEMLIST* addr, TIM2_PICTUREHEADER_EX* tim
     } 
     else if (PS2_Render_tex_sub_flag == 0)
     {
+#ifdef TARGET_PC
+        trace_tbp0 = temp * 64;
+        trace_cbp = 254 * 64;
+        trace_psm0 = psm;
+        trace_psm_next = psm;
+        trace_csa = 0;
+        trace_route = 3;
+#endif
         *p++ = Ps2_gs_save.TEX0 = SCE_GS_SET_TEX0_1(temp * 64, tbw, psm, tw, th, 0, SCE_GS_MODULATE, 254 * 64, SCE_GS_PSMCT32, 0, 0, 2);
         *p++ = SCE_GS_TEX0_1;
 
@@ -3093,6 +3131,14 @@ static void Ps2BindTextureState(NJS_TEXMEMLIST* addr, TIM2_PICTUREHEADER_EX* tim
     } 
     else 
     {
+#ifdef TARGET_PC
+        trace_tbp0 = (temp * 64) + (48 * 64);
+        trace_cbp = 0;
+        trace_psm0 = SCE_GS_PSMCT32;
+        trace_psm_next = SCE_GS_PSMCT32;
+        trace_csa = 0;
+        trace_route = 4;
+#endif
         *p++ = Ps2_gs_save.TEX0 = SCE_GS_SET_TEX0_1((temp * 64) + (48 * 64), 4, SCE_GS_PSMCT32, 8, 8, 0, SCE_GS_MODULATE, 0, SCE_GS_PSMCT32, 0, 0, 0);
         *p++ = SCE_GS_TEX0_1;
 
@@ -3112,8 +3158,13 @@ static void Ps2BindTextureState(NJS_TEXMEMLIST* addr, TIM2_PICTUREHEADER_EX* tim
     *p++ = SCE_GS_TEST_1;
 
     loadImage((void*)0xF0000000);
-    pcTextureTraceEvent("GS_STATE_BIND", "gindex=%u bank=%u psm=%u tbw=%u tw=%u th=%u",
-                        timp->Gindex, addr->bank, psm, tbw, tw, th);
+#ifdef TARGET_PC
+    pcTextureTraceEvent("GS_PAGE_MAP",
+                        "tid=%u gindex=%u bank=%u route=%u tbp0=%u cbp=%u csa=%u psm0=%u psm_next=%u tbw=%u tw=%u th=%u render_sub=%u pict=%u",
+                        pc_texture_trace_current_tid, timp->Gindex, addr->bank, trace_route,
+                        trace_tbp0, trace_cbp, trace_csa, trace_psm0, trace_psm_next,
+                        tbw, tw, th, trace_render_sub, timp->PictFormat);
+#endif
 }
 
 // 97.17% matching
