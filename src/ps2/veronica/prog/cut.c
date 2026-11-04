@@ -8,6 +8,17 @@
 #include "../../../ps2/veronica/prog/ps2_NaView.h"
 #include "../../../ps2/veronica/prog/main.h"
 
+#ifdef TARGET_PC
+#include "../../../../pc/include/pc_texture_trace.h"
+#define PC_TRACE_CAMERA_UPDATE(source, console_event) \
+    pcTextureTraceCamera((source), (console_event), \
+        sys->stg_no, sys->rom_no, sys->rcase, sys->pos_no, \
+        cam.ncut, cam.ocut, cam.camver, (unsigned int)cam.flg, \
+        cam.evc_no, cam.keyf_no, cam.mode0, \
+        cam.px, cam.py, cam.pz, cam.ax, cam.ay, cam.az, cam.pers, cam.ln)
+#endif
+
+
 // 100% matching!
 void bhCheckCut(int flg)
 {
@@ -442,6 +453,10 @@ void bhSetCut(int cno, int flg)
     bhInitActiveCamera(flg);
     
     bhMakeCameraVector();
+
+#ifdef TARGET_PC
+    PC_TRACE_CAMERA_UPDATE("bhSetCut", 1);
+#endif
 }
 
 // 100% matching! 
@@ -538,6 +553,10 @@ void bhSetFixedCut(int cno)
         bhChangeClipVolumeRM();
         bhChangeBackColor();
     }
+
+#ifdef TARGET_PC
+    PC_TRACE_CAMERA_UPDATE("bhSetFixedCut", 1);
+#endif
 }
 
 // 100% matching!
@@ -564,6 +583,10 @@ void bhSetRenderCut(int cno)
     cam.pers = ci->pers;
     
     cam.ln = ci->ln;
+
+#ifdef TARGET_PC
+    PC_TRACE_CAMERA_UPDATE("bhSetRenderCut", 1);
+#endif
 }
 
 // 100% matching!
@@ -1638,6 +1661,10 @@ void bhControlActiveCamera()
             cam.fog_fr = ci->fog_fr + (len * inn); 
         }
     }
+
+#ifdef TARGET_PC
+    PC_TRACE_CAMERA_UPDATE("bhControlActiveCamera", 0);
+#endif
 }
 
 // 100% matching! 
@@ -1720,6 +1747,10 @@ void bhSetEventCamera(int evc_no, int key_no)
     cam.flg &= ~0x38;
     
     bhChangeBackColorEvt();
+
+#ifdef TARGET_PC
+    PC_TRACE_CAMERA_UPDATE("bhSetEventCamera", 1);
+#endif
 }
 
 // 100% matching!
@@ -1797,6 +1828,10 @@ void bhSetEventFixedCut(int cno, int kno)
     bhChangeClipVolume(sys->stg_no, sys->rom_no, sys->rcase, cam.evc_no);
     
     bhChangeBackColorEvt();
+
+#ifdef TARGET_PC
+    PC_TRACE_CAMERA_UPDATE("bhSetEventFixedCut", 1);
+#endif
 }
 
 // 100% matching!
@@ -2215,6 +2250,10 @@ void bhControlEventCamera()
         
         break;
     }
+
+#ifdef TARGET_PC
+    PC_TRACE_CAMERA_UPDATE("bhControlEventCamera", 0);
+#endif
 }
 
 // 100% matching!
@@ -2613,6 +2652,10 @@ void bhControlPlEyeCamera(unsigned int attr)
         
         break;
     }
+
+#ifdef TARGET_PC
+    PC_TRACE_CAMERA_UPDATE("bhControlPlEyeCamera", 0);
+#endif
 }
 
 #pragma divbyzerocheck off 
@@ -2639,6 +2682,9 @@ void bhInitPlEyeCamera()
         sys->gm_flg &= ~0x80000;
         
         sys->pt_flg |= 0x1;
+#ifdef TARGET_PC
+        PC_TRACE_CAMERA_UPDATE("bhInitPlEyeCamera/early-return", 1);
+#endif
         return;
     }
     
@@ -2713,6 +2759,10 @@ void bhInitPlEyeCamera()
     {
         njClipZ(-1.0f, -20000.0f);
     }
+
+#ifdef TARGET_PC
+    PC_TRACE_CAMERA_UPDATE("bhInitPlEyeCamera", 1);
+#endif
 }
 
 // 100% matching! 
@@ -2796,6 +2846,10 @@ void bhSetPlEyeCamera()
             cam.pers = axn;
         }
     }
+
+#ifdef TARGET_PC
+    PC_TRACE_CAMERA_UPDATE("bhSetPlEyeCamera", 0);
+#endif
 }
 
 // 100% matching!
