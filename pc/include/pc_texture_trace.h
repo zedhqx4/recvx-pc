@@ -3,6 +3,7 @@
 
 #ifdef TARGET_PC
 void pcTextureTraceEvent(const char* kind, const char* fmt, ...);
+void pcTextureTraceSetCurrentTid(unsigned int tid);
 void pcTextureTraceCamera(const char* source, int console_if_changed,
                           int stg, int rom, int rcase, int pos,
                           int ncut, int ocut, int camver, unsigned int camflg,
@@ -14,6 +15,7 @@ void pcTextureTraceModelBegin(const void* model, const void* vlist,
 void pcTextureTraceModelEnd(int result, const char* reason);
 #else
 #define pcTextureTraceEvent(...) ((void)0)
+#define pcTextureTraceSetCurrentTid(tid) ((void)(tid))
 #define pcTextureTraceCamera(...) ((void)0)
 #define pcTextureTraceModelBegin(...) ((void)0)
 #define pcTextureTraceModelEnd(...) ((void)0)
