@@ -669,8 +669,8 @@ int Ps2TextureMalloc(NJS_TEXMEMLIST* p)
     Ps2_free_texmemsize -= size;
     
     Ps2_now_free = (void*)((int)Ps2_now_free + size);
-    pcTextureTraceEvent("TEXTURE_MALLOC_OK", "gindex=%u address=%p size=%u free_after=%u type=tim2",
-                        p->globalIndex, timp, size, Ps2_free_texmemsize);
+    pcTextureTraceEvent("TEXTURE_MALLOC_OK", "gindex=%u address=%p source=%p size=%u free_after=%u type=tim2",
+                        p->globalIndex, p->texinfo.texsurface.pSurface, timp, size, Ps2_free_texmemsize);
     
     return 1;
 }
