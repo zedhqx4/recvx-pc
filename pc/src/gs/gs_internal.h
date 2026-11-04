@@ -88,6 +88,7 @@ void gsFlushLocalToLocal(unsigned int bp, unsigned int bw, unsigned int psm, uns
 /* texture decoding for the renderer: fills rgba (w*h) from VRAM per TEX0/TEXA/TEXCLUT */
 u64 gsClutHash(u64 tex0);
 void gsReadClut32(u64 tex0, u64 texa, int entries, unsigned int* clut);   /* palette as the texture sees it */
+void gsReadClutFromVram(u64 tex0, u64 texa, u64 texclut, int entries, unsigned int* clut);
 void gsDecodeTexture(u64 tex0, u64 texa, u64 texclut, int w, int h, unsigned int* rgba);
 void gsDecodeIndices(u64 tex0, int w, int h, unsigned char* indices);
 int gsTextureDiagnosticsEnabled(void);

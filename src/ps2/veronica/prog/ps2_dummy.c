@@ -3077,33 +3077,50 @@ static void Ps2BindTextureState(NJS_TEXMEMLIST* addr, TIM2_PICTUREHEADER_EX* tim
 // 97.17% matching
 int Ps2TexLoad(NJS_TEXMEMLIST* addr)
 {
-    unsigned int tbw;
-    unsigned int psm;
-    unsigned int tw;
-    unsigned int th;
+    unsigned int tbw, psm, tw, th;
     TIM2_PICTUREHEADER_EX* timp;
     unsigned int cache_flag;
 #ifdef TARGET_PC
-    uint64_t asset_handle = 0;
+    uint64_t asset_handle;
     uint64_t asset_cache_tex0 = 0;
-    int asset_cache_eligible = 0;
-    int asset_cache_hit = 0;
+    int asset_cache_eligible = 0, asset_cache_hit = 0;
+    PcGsTextureAssetState asset_state;
 #endif
 
     cache_flag = 1;
-    if ((addr == NULL) || (addr->texinfo.texsurface.pSurface == NULL))
+    if (addr == NULL)
     {
-        pcTextureTraceEvent("TEX_INVALID", "null_texture_memlist_or_surface");
+        pcTextureTraceEvent("TEX_INVALID", "null_texture_memlist");
         return printf("Ps2CurrentTexLoad ERROR!!!!\n");
     }
-
     Ps2_now_tex = addr;
+
+#ifdef TARGET_PC
+    asset_handle = (uint64_t)(uintptr_t)addr;
+    if (pcGsGetTextureAssetState(asset_handle, &asset_state))
+    {
+        /* Direct registry hit: no TIM2 dereference, no Ensure helper, no GIF/DMA, no GS transfer. */
+        Ps2_gs_save.TEX0 = (unsigned long)asset_state.tex0;
+        Ps2_gs_save.TEX0_NEXT = (unsigned long)asset_state.tex0;
+        Ps2_gs_save.TEX1 = (unsigned long)asset_state.tex1;
+        Ps2_gs_save.CLAMP = (unsigned long)asset_state.clamp;
+        Ps2_gs_save.TEST = (unsigned long)asset_state.test;
+        pcGsApplyTextureAssetState(asset_handle, &asset_state);
+        return 0;
+    }
+#endif
+
+    if (addr->texinfo.texsurface.pSurface == NULL)
+    {
+        pcTextureTraceEvent("TEX_INVALID", "null_texture_surface");
+        return printf("Ps2CurrentTexLoad ERROR!!!!\n");
+    }
     timp = (TIM2_PICTUREHEADER_EX*)addr->texinfo.texsurface.pSurface;
     pcTextureTraceEvent("TEX_REQUEST",
                         "tid=%u gindex=%u bank=%u image=%ux%u image_type=%u pict=%u clut=%u tpflag=%u clamp=%u",
                         pc_texture_trace_current_tid, addr->globalIndex, addr->bank,
-                        timp->ImageWidth, timp->ImageHeight,
-                        timp->ImageType, timp->PictFormat, timp->ClutType, timp->TpFlag, timp->ClampFlag);
+                        timp->ImageWidth, timp->ImageHeight, timp->ImageType,
+                        timp->PictFormat, timp->ClutType, timp->TpFlag, timp->ClampFlag);
 
     tbw = timp->GsTex0.TBW;
     tw = Ps2BitCount(timp->ImageWidth);
@@ -3116,7 +3133,6 @@ int Ps2TexLoad(NJS_TEXMEMLIST* addr)
     }
 
 #ifdef TARGET_PC
-    asset_handle = (uint64_t)(uintptr_t)addr;
     asset_cache_eligible = pcGsTextureAssetCacheEnabled() &&
                            (timp->TpFlag == 0) && (timp->ClutType != 0) &&
                            (PS2_Render_tex_sub_flag == 0) &&
@@ -3126,53 +3142,35 @@ int Ps2TexLoad(NJS_TEXMEMLIST* addr)
                            !((timp->ImageWidth > 128) && (timp->ImageHeight > 128) &&
                              (timp->ImageWidth < 1024) && (timp->ImageHeight < 1024));
     if (asset_cache_eligible)
-    {
         asset_cache_tex0 = SCE_GS_SET_TEX0_1(190 * 64, tbw, psm, tw, th, 1,
                                              SCE_GS_MODULATE, 254 * 64,
                                              SCE_GS_PSMCT32, 0, 0, 2);
-        asset_cache_hit = pcGsTextureAssetCacheContains(
-            asset_handle, asset_cache_tex0, (int)(1U << tw), (int)(1U << th));
-    }
 #endif
 
     cache_flag = Ps2EnsureTextureImage(addr, timp,
 #ifdef TARGET_PC
-                                       asset_cache_eligible, asset_cache_hit
+                                       asset_cache_eligible, 0
 #else
                                        0, 0
 #endif
                                        );
-    pcTextureTraceEvent("TEX_CACHE_RESULT", "gindex=%u ps2_pointer_cache_flag=%u asset_cache_eligible=%d asset_cache_hit=%d",
-                        timp->Gindex, cache_flag,
-#ifdef TARGET_PC
-                        asset_cache_eligible, asset_cache_hit
-#else
-                        0, 0
-#endif
-                        );
     Ps2BindTextureState(addr, timp, psm, tbw, tw, th);
 
 #ifdef TARGET_PC
-    /* Normal room loading registers assets in Ps2TextureMalloc. If the renderer was not ready
-     * then, capture this first uploaded copy and use the registry on subsequent requests. */
-    if (asset_cache_eligible && !asset_cache_hit)
+    if (asset_cache_eligible)
     {
+        asset_state.tex0 = asset_cache_tex0;
+        asset_state.tex1 = Ps2_gs_save.TEX1;
+        asset_state.clamp = Ps2_gs_save.CLAMP;
+        asset_state.test = Ps2_gs_save.TEST;
+        asset_state.texa = 0;
+        asset_state.texclut = 0;
         asset_cache_hit = pcGsPreloadTextureAsset(
-            asset_handle, asset_cache_tex0, (int)(1U << tw), (int)(1U << th));
+            asset_handle, &asset_state, (int)(1U << tw), (int)(1U << th));
     }
     pcGsSetTextureAssetIdentity(asset_handle, asset_cache_hit);
 #endif
 
-    pcTextureTraceEvent("TEX_RESULT",
-                        "gindex=%u handle=%p ps2_pointer_cache_flag=%u gpu_asset=%s",
-                        timp->Gindex,
-#ifdef TARGET_PC
-                        (const void*)addr, cache_flag,
-                        asset_cache_hit ? "hit" : "fallback"
-#else
-                        (const void*)0, cache_flag, "fallback"
-#endif
-                        );
     return cache_flag;
 }
 void Ps2SetFogColor()

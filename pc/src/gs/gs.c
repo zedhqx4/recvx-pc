@@ -34,6 +34,30 @@ void pcGsSetTextureAssetIdentity(uint64_t asset_id, int valid)
     gsTextureAssetValid[0] = valid != 0;
 }
 
+/* Directly select a prepared resource: update emulated state without GIF/DMA packets. */
+void pcGsApplyTextureAssetState(uint64_t asset_id, const PcGsTextureAssetState* state)
+{
+    int changed;
+    if (asset_id == 0 || state == NULL)
+        return;
+    changed = !gsTextureAssetValid[0] || gsTextureAssetId[0] != asset_id ||
+              gsRegs.tex0[0] != state->tex0 || gsRegs.tex1[0] != state->tex1 ||
+              gsRegs.clamp[0] != state->clamp || gsRegs.test[0] != state->test ||
+              gsRegs.texa != state->texa || gsRegs.texclut != state->texclut;
+    if (!changed)
+        return;
+    gsFlushPrims();
+    gsTextureBindingGeneration++;
+    gsRegs.tex0[0] = state->tex0;
+    gsRegs.tex1[0] = state->tex1;
+    gsRegs.clamp[0] = state->clamp;
+    gsRegs.test[0] = state->test;
+    gsRegs.texa = state->texa;
+    gsRegs.texclut = state->texclut;
+    gsTextureAssetId[0] = asset_id;
+    gsTextureAssetValid[0] = 1;
+}
+
 uint64_t pcGsGetTextureBindingGeneration(void)
 {
     return gsTextureBindingGeneration;
@@ -768,6 +792,50 @@ static void read_clut(u64 tex0, u64 texa, int entries, unsigned int* clut)
 void gsReadClut32(u64 tex0, u64 texa, int entries, unsigned int* clut)
 {
     read_clut(tex0, texa, entries, clut);
+}
+
+/* Snapshot palette bytes from the TIM2 GS-VRAM destination without changing live CLUT state. */
+void gsReadClutFromVram(u64 tex0, u64 texa, u64 texclut, int entries, unsigned int* clut)
+{
+    unsigned int cbp = GSF(tex0, 37, 14), cpsm = GSF(tex0, 51, 4);
+    unsigned int csm = GSF(tex0, 55, 1);
+    unsigned int bw = csm ? GSF(texclut, 0, 6) : 1;
+    int i;
+    if (clut == NULL || entries <= 0 || entries > 256)
+        return;
+    for (i = 0; i < entries; i++)
+    {
+        unsigned int x, y, c;
+        if (!csm)
+        {
+            if (entries == 256)
+            {
+                unsigned int j = ((unsigned int)i & 0xE7) |
+                                 (((unsigned int)i & 0x08) << 1) |
+                                 (((unsigned int)i & 0x10) >> 1);
+                x = j & 15; y = j >> 4;
+            }
+            else
+            {
+                x = (unsigned int)i & 7; y = (unsigned int)i >> 3;
+            }
+        }
+        else
+        {
+            x = GSF(texclut, 6, 6) * 16 + (unsigned int)i;
+            y = GSF(texclut, 12, 10);
+        }
+        if (cpsm == GS_PSMCT32 || cpsm == GS_PSMCT24)
+        {
+            c = gsMemRead(GS_PSMCT32, cbp, bw, x, y);
+            clut[i] = cpsm == GS_PSMCT24 ? expand24(c, texa) : c;
+        }
+        else
+        {
+            c = gsMemRead(cpsm == GS_PSMCT16S ? GS_PSMCT16S : GS_PSMCT16, cbp, bw, x, y);
+            clut[i] = expand16(c, texa);
+        }
+    }
 }
 
 /* hash of the palette entries a texture would use (texture cache key) */

@@ -881,10 +881,11 @@ Tab, Up/Down, Shift+Up/Down, and Backspace retain their existing edge-selection,
 **Base:** `experiment/camera-texture-trace` at `d9953e5`  
 **Goal:** Replace per-request TIM2 image-content hashing with a stable `NJS_TEXMEMLIST*` handle mapped to a GPU-resident index texture.
 
-- Static indexed TIM2 assets are transferred once during `Ps2TextureMalloc()` when the renderer is ready. The existing GS transfer path is reused so the game's conversion and swizzling remain authoritative.
-- The resulting GS index plane is decoded once into a persistent OpenGL `GL_R8` texture. A renderer-side alias table maps the stable texture-memlist handle directly to that GPU texture; lookup no longer compares image hashes.
-- `Ps2TexLoad()` still reapplies GS texture state and refreshes the CLUT through the existing CLUT-only path. If an asset was not preloaded or its GPU entry was evicted, the original transfer/decode path remains the fallback and can register the asset on first use.
-- Final texture release removes the handle alias so a recycled `NJS_TEXMEMLIST` slot cannot point at its previous GPU resource.
+- Static indexed TIM2 assets are transferred once during `Ps2TextureMalloc()`; the original GS transfer path remains authoritative for swizzling and format conversion.
+- Registration creates a persistent GPU index texture and a per-asset GPU palette texture, and stores the sampling state under the stable `NJS_TEXMEMLIST*` identity.
+- On a registry hit, `Ps2TexLoad()` returns immediately after the ID lookup. It does not dereference the TIM2 surface, call our PC-only `Ps2EnsureTextureImage()`, call `Ps2BindTextureState()`, transfer image/CLUT data, or construct/interpret GIF/DMA packets.
+- The renderer resolves the same asset ID before CLUT hashing or GS-page/content hashing and binds the saved GPU image and palette directly. Hash fallback remains only for non-registered assets.
+- Final texture release removes the ID mapping and its owned GPU palette so a recycled `NJS_TEXMEMLIST` slot cannot inherit the previous asset.
 - Dynamic TP textures, render targets, VQ/special PictFormat paths, non-indexed textures and render-substitution paths remain on the original fallback.
 - This experiment does not redesign the 4 MB GS-VRAM emulation.
 

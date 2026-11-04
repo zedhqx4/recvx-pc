@@ -40,7 +40,7 @@ static void pcPs2PreloadTextureAsset(NJS_TEXMEMLIST* p)
     TIM2_PICTUREHEADER_EX* timp;
     unsigned int psm;
     unsigned int tw, th, tbw;
-    uint64_t tex0;
+    PcGsTextureAssetState state;
 
     if ((p == NULL) || !pcGsTextureAssetCacheEnabled() || !pcGsTextureRendererReady() ||
         (p->texinfo.texsurface.pSurface == NULL))
@@ -60,16 +60,22 @@ static void pcPs2PreloadTextureAsset(NJS_TEXMEMLIST* p)
         return;
 
     tbw = timp->GsTex0.TBW;
-    tw = timp->GsTex0.TW;
-    th = timp->GsTex0.TH;
+    tw = Ps2BitCount(timp->ImageWidth);
+    th = Ps2BitCount(timp->ImageHeight);
     if ((tw > 10) || (th > 10))
         return;
 
     psm = (timp->ImageType == 4) ? SCE_GS_PSMT4 : SCE_GS_PSMT8;
-    tex0 = SCE_GS_SET_TEX0_1(190 * 64, tbw, psm, tw, th, 1,
-                             SCE_GS_MODULATE, 254 * 64,
-                             SCE_GS_PSMCT32, 0, 0, 2);
-    pcGsPreloadTextureAsset((uint64_t)(uintptr_t)p, tex0,
+    state.tex0 = SCE_GS_SET_TEX0_1(190 * 64, tbw, psm, tw, th, 1,
+                                  SCE_GS_MODULATE, 254 * 64,
+                                  SCE_GS_PSMCT32, 0, 0, 2);
+    state.tex1 = SCE_GS_SET_TEX1_1(0, 0, SCE_GS_LINEAR, SCE_GS_LINEAR, 0, 0, 0);
+    state.clamp = SCE_GS_SET_CLAMP_1(timp->ClampFlag, SCE_GS_REPEAT, 255, 0, 255, 0);
+    state.test = SCE_GS_SET_TEST_1(1, SCE_GS_ALPHA_GREATER, 0,
+                                   SCE_GS_AFAIL_KEEP, 0, 0, 1, SCE_GS_DEPTH_GEQUAL);
+    state.texa = 0;
+    state.texclut = 0;
+    pcGsPreloadTextureAsset((uint64_t)(uintptr_t)p, &state,
                             (int)(1U << tw), (int)(1U << th));
 }
 #endif
