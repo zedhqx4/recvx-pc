@@ -157,7 +157,7 @@ static FILE* pc_texture_trace_file;
 static int pc_texture_trace_enabled = -1;
 static unsigned long long pc_texture_trace_sequence;
 static PcTextureTraceCameraState pc_texture_trace_camera_state;
-static const void* pc_texture_trace_model_stack[32];
+static const void* pc_texture_trace_model_stack[128];
 static unsigned int pc_texture_trace_model_depth;
 extern unsigned int Ps2_sys_cnt;
 
@@ -228,6 +228,8 @@ void pcTextureTraceEvent(const char* kind, const char* fmt, ...)
         vfprintf(pc_texture_trace_file, fmt, args);
     va_end(args);
     fputc('\n', pc_texture_trace_file);
+    if ((pc_texture_trace_sequence & 0xFF) == 0)
+        fflush(pc_texture_trace_file);
 }
 
 void pcTextureTraceCamera(const char* source, int console_if_changed,
@@ -281,6 +283,8 @@ void pcTextureTraceCamera(const char* source, int console_if_changed,
         old.px, old.py, old.pz, old.ax, old.ay, old.az,
         now.px, now.py, now.pz, now.ax, now.ay, now.az,
         now.ncut, now.ocut, now.camver, now.evc_no, now.keyf_no);
+    if (pc_texture_trace_file != NULL)
+        fflush(pc_texture_trace_file);
 
     if (console_if_changed && (identity_changed || !old.valid ||
         (fabsf(old.px - now.px) > 0.001f) || (fabsf(old.py - now.py) > 0.001f) ||
