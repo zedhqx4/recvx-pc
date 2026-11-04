@@ -353,6 +353,7 @@ Sint32	njSetTexture(NJS_TEXLIST *texlist)
 // 100% matching! 
 Sint32	njSetTextureNum(Uint32 n)
 {
+    unsigned int requested_index = n;
     if (Ps2_current_texlist->nbTexture <= n) 
     {
         n = 0;
@@ -361,6 +362,9 @@ Sint32	njSetTextureNum(Uint32 n)
     Ps2_current_texno = n;
     
     Ps2_current_texmemlist = (NJS_TEXMEMLIST*)Ps2_current_texlist->textures[n].texaddr;
+    pcTextureTraceEvent("TEXTURE_LIST_SELECT",
+                        "api=njSetTextureNum list=%p requested_index=%u selected_index=%u global_memlist=%p",
+                        Ps2_current_texlist, requested_index, n, Ps2_current_texmemlist);
     
     Ps2_current_gindex = ((TIM2_PICTUREHEADER_EX*)(Ps2_current_texmemlist->texinfo.texsurface.pSurface))->Gindex; 
     
@@ -381,6 +385,9 @@ Sint32	njSetTextureNumG(Uint32 globalIndex)
     {
         Ps2_current_gindex = globalIndex;
         Ps2_current_texmemlist = &Ps2_tex_info[no];
+        pcTextureTraceEvent("TEXTURE_LIST_SELECT",
+                            "api=njSetTextureNumG gindex=%u memlist=%p",
+                            globalIndex, Ps2_current_texmemlist);
         
         Ps2TexLoad(Ps2_current_texmemlist);
     }
@@ -399,7 +406,7 @@ Sint32	njSetTextureNumG(Uint32 globalIndex)
 int njSetTextureNumSys(unsigned int n)
 {
     pcTextureTraceEvent("TEXTURE_LIST_SELECT",
-                        "list=%p local_index=%u memlist=%p",
+                        "api=njSetTextureNumSys list=%p local_index=%u memlist=%p",
                         Ps2_current_texlist, n,
                         Ps2_current_texlist->textures[n].texaddr);
     Ps2TexLoad((NJS_TEXMEMLIST*)Ps2_current_texlist->textures[n].texaddr);
