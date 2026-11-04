@@ -3164,13 +3164,13 @@ int Ps2TexLoad(NJS_TEXMEMLIST* addr)
 #endif
 
     pcTextureTraceEvent("TEX_RESULT",
-                        "gindex=%u handle=%llx ps2_pointer_cache_flag=%u gpu_asset=%s",
+                        "gindex=%u handle=%p ps2_pointer_cache_flag=%u gpu_asset=%s",
                         timp->Gindex,
 #ifdef TARGET_PC
-                        (unsigned long long)asset_handle, cache_flag,
+                        (const void*)addr, cache_flag,
                         asset_cache_hit ? "hit" : "fallback"
 #else
-                        0ULL, cache_flag, "fallback"
+                        (const void*)0, cache_flag, "fallback"
 #endif
                         );
     return cache_flag;
