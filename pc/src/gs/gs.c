@@ -9,9 +9,37 @@
 
 #include "gs_internal.h"
 #include "../../include/pc_platform.h"
+#include "../../include/pc_texture_cache.h"
 
 GsRegs gsRegs;
+static unsigned int gsTextureAssetId[2];
+static uint64_t gsTextureAssetContentHash[2];
+static int gsTextureAssetValid[2];
+static uint64_t gsTextureBindingGeneration;
 int gsDumpFrame;
+
+int gsTextureDiagnosticsEnabled(void)
+{
+    static int enabled = -1;
+    if (enabled < 0)
+    {
+        const char* value = getenv("RECVX_GS_TEX_DIAG");
+        enabled = (value != NULL && value[0] == '1' && value[1] == '\0') ? 1 : 0;
+    }
+    return enabled;
+}
+
+void pcGsSetTextureAssetIdentity(unsigned int asset_id, int valid, uint64_t content_hash)
+{
+    gsTextureAssetId[0] = asset_id;
+    gsTextureAssetContentHash[0] = valid ? content_hash : 0;
+    gsTextureAssetValid[0] = valid != 0;
+}
+
+uint64_t pcGsGetTextureBindingGeneration(void)
+{
+    return gsTextureBindingGeneration;
+}
 static int kicks;
 
 /* ------------------------------------------------------------------------------------------- */
@@ -59,6 +87,9 @@ static void current_state(GsDrawState* st)
     st->dthe = gsRegs.dthe;
     st->colclamp = gsRegs.colclamp;
     st->texclut = gsRegs.texclut;
+    st->texture_asset_id = gsTextureAssetId[c];
+    st->texture_asset_content_hash = gsTextureAssetContentHash[c];
+    st->texture_asset_valid = gsTextureAssetValid[c];
     st->font_filter_nearest = gs_font_filter_nearest ||
                               (pcFontFilterDrawActive() && !pcFontFilterIsLinear());
 }
@@ -223,6 +254,29 @@ static void clut_load(u64 tex0);
 
 void gsWriteReg(int reg, u64 value)
 {
+    if (reg == 0x00)
+    {
+        if (gsRegs.prmodecont && (GSF(gsRegs.prim, 9, 1) != GSF(value, 9, 1)))
+            gsTextureBindingGeneration++;
+    }
+    else if (reg == 0x1a)
+    {
+        if (gsRegs.prmodecont != value)
+            gsTextureBindingGeneration++;
+    }
+    else if (reg == 0x1b)
+    {
+        if (!gsRegs.prmodecont && (GSF(gsRegs.prmode, 9, 1) != GSF(value, 9, 1)))
+            gsTextureBindingGeneration++;
+    }
+    else if ((reg == 0x06) || (reg == 0x07) || (reg == 0x08) || (reg == 0x09) ||
+             (reg == 0x14) || (reg == 0x15) || (reg == 0x16) || (reg == 0x17) ||
+             (reg == 0x1c) || (reg == 0x3b) || (reg == 0x3f) ||
+             (reg == 0x47) || (reg == 0x48))
+    {
+        gsTextureBindingGeneration++;
+    }
+
     switch (reg)
     {
     case 0x00: gsRegs.prim = value; vq_count = 0; break;
@@ -231,8 +285,8 @@ void gsWriteReg(int reg, u64 value)
     case 0x03: gsRegs.uv = value; break;
     case 0x04: latch_vertex(value, 1, 1); break;
     case 0x05: latch_vertex(value, 0, 1); break;
-    case 0x06: gsRegs.tex0[0] = value; clut_load(value); break;
-    case 0x07: gsRegs.tex0[1] = value; clut_load(value); break;
+    case 0x06: gsRegs.tex0[0] = value; gsTextureAssetId[0] = 0; gsTextureAssetContentHash[0] = 0; gsTextureAssetValid[0] = 0; clut_load(value); break;
+    case 0x07: gsRegs.tex0[1] = value; gsTextureAssetId[1] = 0; gsTextureAssetContentHash[1] = 0; gsTextureAssetValid[1] = 0; clut_load(value); break;
     case 0x08: gsRegs.clamp[0] = value; break;
     case 0x09: gsRegs.clamp[1] = value; break;
     case 0x0a: gsRegs.fog = value; break;
@@ -246,6 +300,9 @@ void gsWriteReg(int reg, u64 value)
         int c = reg - 0x16;
         u64 mask = (0x3FULL << 20) | (0xFFFFFFFULL << 37);
 
+        gsTextureAssetId[c] = 0;
+        gsTextureAssetContentHash[c] = 0;
+        gsTextureAssetValid[c] = 0;
         gsRegs.tex2[c] = value;
         gsRegs.tex0[c] = (gsRegs.tex0[c] & ~mask) | (value & mask);
         clut_load(gsRegs.tex0[c] | (value & (7ULL << 61)));
@@ -734,6 +791,18 @@ u64 gsClutHash(u64 tex0)
     }
 
     return h;
+}
+
+void gsDecodeIndices(u64 tex0, int w, int h, unsigned char* indices)
+{
+    unsigned int tbp = GSF(tex0, 0, 14);
+    unsigned int tbw = GSF(tex0, 14, 6);
+    unsigned int psm = GSF(tex0, 20, 6);
+    int x, y;
+
+    for (y = 0; y < h; y++)
+        for (x = 0; x < w; x++)
+            indices[y * w + x] = (unsigned char)gsMemRead(psm, tbp, tbw, (unsigned int)x, (unsigned int)y);
 }
 
 void gsDecodeTexture(u64 tex0, u64 texa, u64 texclut, int w, int h, unsigned int* rgba)
