@@ -535,7 +535,7 @@ int pcGsTextureAssetCacheEnabled(void)
     if (enabled < 0)
     {
         const char* value = getenv("RECVX_PS2_TEX_CACHE");
-        enabled = (value != NULL && value[0] == '0' && value[1] == '\\0') ? 0 : 1;
+        enabled = (value != NULL && value[0] == '0' && value[1] == '\0') ? 0 : 1;
         if (enabled)
             pcLog("gs: static indexed TIM2 asset cache enabled (default)");
         else
