@@ -51,8 +51,7 @@ typedef struct {
     int iip, tme, fge, abe, aa1, fst, ctxt, fix;
     u64 tex0, tex1, clamp, alpha, test, fba, frame, zbuf, scissor;
     u64 texa, fogcol, pabe, dthe, colclamp, texclut;
-    unsigned int texture_asset_id; /* TIM2 Gindex */
-    uint64_t texture_asset_content_hash; /* source index-plane content */
+    uint64_t texture_asset_id; /* stable NJS_TEXMEMLIST handle */
     int texture_asset_valid;
     int font_filter_nearest; /* transient PC-only marker for njDrawPolygon2DM glyph draws */
 } GsDrawState;

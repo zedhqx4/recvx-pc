@@ -875,6 +875,21 @@ Tab, Up/Down, Shift+Up/Down, and Backspace retain their existing edge-selection,
 - **Runtime:** Pending. Test all four INI combinations for `fontUVfix` and `menuUVfix`, F10 cycling, R routing in each mode, and Escape exit.
 
 
+## 2026-11-04 — GPU-resident static TIM2 asset registry (experimental)
+
+**Branch:** `experiment/gpu-asset-registry`  
+**Base:** `experiment/camera-texture-trace` at `d9953e5`  
+**Goal:** Replace per-request TIM2 image-content hashing with a stable `NJS_TEXMEMLIST*` handle mapped to a GPU-resident index texture.
+
+- Static indexed TIM2 assets are transferred once during `Ps2TextureMalloc()` when the renderer is ready. The existing GS transfer path is reused so the game's conversion and swizzling remain authoritative.
+- The resulting GS index plane is decoded once into a persistent OpenGL `GL_R8` texture. A renderer-side alias table maps the stable texture-memlist handle directly to that GPU texture; lookup no longer compares image hashes.
+- `Ps2TexLoad()` still reapplies GS texture state and refreshes the CLUT through the existing CLUT-only path. If an asset was not preloaded or its GPU entry was evicted, the original transfer/decode path remains the fallback and can register the asset on first use.
+- Final texture release removes the handle alias so a recycled `NJS_TEXMEMLIST` slot cannot point at its previous GPU resource.
+- Dynamic TP textures, render targets, VQ/special PictFormat paths, non-indexed textures and render-substitution paths remain on the original fallback.
+- This experiment does not redesign the 4 MB GS-VRAM emulation.
+
+**Validation pending:** Windows build and in-game texture consistency / room-transition test. If OpenGL was not ready during allocation, the first eligible request registers the resource after its normal upload.
+
 ## 2026-11-03 — Port alpha's static indexed TIM2 texture cache
 
 **Category:** Renderer / texture reuse feature port  

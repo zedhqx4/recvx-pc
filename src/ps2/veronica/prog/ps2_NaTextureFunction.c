@@ -1,5 +1,8 @@
 #include "../../../ps2/veronica/prog/ps2_NaTextureFunction.h"
 #include "../../../../pc/include/pc_texture_trace.h"
+#ifdef TARGET_PC
+#include "../../../../pc/include/pc_texture_cache.h"
+#endif
 #include "../../../ps2/veronica/prog/ps2_dummy.h"
 #include "../../../ps2/veronica/prog/ps2_loadtim2.h"
 #include "../../../ps2/veronica/prog/ps2_texture.h"
@@ -28,6 +31,45 @@ void* Ps2_now_free;
 void* Ps2_free_last;
 unsigned int Ps2_free_texmemsize;
 unsigned int Ps2_texcontinue_no;
+
+#ifdef TARGET_PC
+/* Transfer a static indexed TIM2 once while its resource is prepared, then snapshot the GS
+ * index plane into a persistent OpenGL texture. Gameplay requests only carry the stable handle. */
+static void pcPs2PreloadTextureAsset(NJS_TEXMEMLIST* p)
+{
+    TIM2_PICTUREHEADER_EX* timp;
+    unsigned int psm;
+    unsigned int tw, th, tbw;
+    uint64_t tex0;
+
+    if ((p == NULL) || !pcGsTextureAssetCacheEnabled() || !pcGsTextureRendererReady() ||
+        (p->texinfo.texsurface.pSurface == NULL))
+        return;
+
+    timp = (TIM2_PICTUREHEADER_EX*)p->texinfo.texsurface.pSurface;
+    if ((timp->TpFlag != 0) || (timp->ClutType == 0) ||
+        ((timp->PictFormat >= 5) && (timp->PictFormat <= 8)) ||
+        ((timp->ImageType != 4) && (timp->ImageType != 5)) ||
+        (timp->ImageWidth == 0) || (timp->ImageHeight == 0))
+        return;
+
+    if (Send_Tim2_dataEx(timp, 190 * 64, 254 * 64) < 0)
+        return;
+
+    tbw = timp->GsTex0.TBW;
+    tw = timp->GsTex0.TW;
+    th = timp->GsTex0.TH;
+    if ((tw > 10) || (th > 10))
+        return;
+
+    psm = (timp->ImageType == 4) ? SCE_GS_PSMT4 : SCE_GS_PSMT8;
+    tex0 = SCE_GS_SET_TEX0_1(190 * 64, tbw, psm, tw, th, 1,
+                             SCE_GS_MODULATE, 254 * 64,
+                             SCE_GS_PSMCT32, 0, 0, 2);
+    pcGsPreloadTextureAsset((uint64_t)(uintptr_t)p, tex0,
+                            (int)(1U << tw), (int)(1U << th));
+}
+#endif
 unsigned int Ps2_current_gindex;
 NJS_TEXMEMLIST* Ps2_current_texmemlist __attribute__((aligned(64)));
 unsigned int Ps2_render_width;
@@ -657,6 +699,9 @@ int Ps2TextureMalloc(NJS_TEXMEMLIST* p)
     Ps2MemCopy4(Ps2_now_free, p->texinfo.texaddr, size >> 2);
     
     p->tspparambuffer = Ps2CheckTextureAlpha(Ps2_now_free);
+#ifdef TARGET_PC
+    pcPs2PreloadTextureAsset(p);
+#endif
     
     Ps2_free_texmemsize -= size;
     
@@ -695,6 +740,9 @@ int Ps2TextureFree(NJS_TEXMEMLIST* p)
     
     if (*temp2 == 0) 
     {
+#ifdef TARGET_PC
+        pcGsInvalidateTextureAsset((uint64_t)(uintptr_t)p);
+#endif
         before = timp->admin.before;
         after = timp->admin.after;
         
