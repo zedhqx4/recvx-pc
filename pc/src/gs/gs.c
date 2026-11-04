@@ -17,6 +17,9 @@ static int gsTextureAssetValid[2];
 static uint64_t gsTextureBindingGeneration;
 int gsDumpFrame;
 
+/* Direct asset selection can flush an already queued primitive batch. */
+void gsFlushPrims(void);
+
 int gsTextureDiagnosticsEnabled(void)
 {
     static int enabled = -1;
@@ -332,9 +335,17 @@ void gsWriteReg(int reg, u64 value)
     case 0x19: gsRegs.xyoffset[1] = value; break;
     case 0x1a: gsRegs.prmodecont = value; break;
     case 0x1b: gsRegs.prmode = value; break;
-    case 0x1c: gsRegs.texclut = value; break;
+    case 0x1c:
+        gsRegs.texclut = value;
+        gsTextureAssetId[0] = gsTextureAssetId[1] = 0;
+        gsTextureAssetValid[0] = gsTextureAssetValid[1] = 0;
+        break;
     case 0x22: gsRegs.scanmsk = value; break;
-    case 0x3b: gsRegs.texa = value; break;
+    case 0x3b:
+        gsRegs.texa = value;
+        gsTextureAssetId[0] = gsTextureAssetId[1] = 0;
+        gsTextureAssetValid[0] = gsTextureAssetValid[1] = 0;
+        break;
     case 0x3d: gsRegs.fogcol = value; break;
     case 0x3f: break; /* TEXFLUSH */
     case 0x40: gsRegs.scissor[0] = value; break;
