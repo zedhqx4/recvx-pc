@@ -678,6 +678,10 @@ void bhSetHideObject(int offset)
     NJS_CNK_OBJECT* obj; 
     int i;               
     unsigned int* flg; // not from DWARF
+#ifdef TARGET_PC
+    int trace_hidden_count = 0;
+    int trace_visible_count = 0;
+#endif
 
     if (((sys->st_flg & 0x1)) && ((cam.flg & 0x2)))
     {
@@ -691,10 +695,16 @@ void bhSetHideObject(int offset)
             {
                 if (bhCkFlg(flg, i) != 0)
                 {
+#ifdef TARGET_PC
+                    trace_hidden_count++;
+#endif
                     obj->evalflags |= 0x8;
                 }
                 else
                 {
+#ifdef TARGET_PC
+                    trace_visible_count++;
+#endif
                     obj->evalflags &= ~0x8;
                 }
             }
@@ -712,15 +722,29 @@ void bhSetHideObject(int offset)
             {
                 if (bhCkFlg(flg, i) != 0)
                 {
+#ifdef TARGET_PC
+                    trace_hidden_count++;
+#endif
                     obj->evalflags |= 0x8;
                 }
                 else
                 {
+#ifdef TARGET_PC
+                    trace_visible_count++;
+#endif
                     obj->evalflags &= ~0x8;
                 }
             }
         }
     }
+
+#ifdef TARGET_PC
+    pcTextureTraceEvent("CUT_OBJECT_VISIBILITY",
+                        "source=bhSetHideObject offset=%d evc=%d key=%d cut=%d camver=%d hidden=%d visible=%d total=%d",
+                        offset, cam.evc_no, cam.keyf_no, cam.ncut, cam.camver,
+                        trace_hidden_count, trace_visible_count,
+                        trace_hidden_count + trace_visible_count);
+#endif
 }
 
 // 99.76% matching 
@@ -1914,8 +1938,8 @@ void bhSetEventHideObjLgt(int cno, int kno)
 
 #ifdef TARGET_PC
     pcTextureTraceEvent("CUT_OBJECT_VISIBILITY",
-                        "source=bhSetEventHideObjLgt id=%d hidden=%d visible=%d total=%d",
-                        cno, trace_hidden_count, trace_visible_count,
+                        "source=bhSetEventHideObjLgt event=%d key=%d hidden=%d visible=%d total=%d",
+                        cno, kno, trace_hidden_count, trace_visible_count,
                         trace_hidden_count + trace_visible_count);
 #endif
     lp = rom->evlp;
