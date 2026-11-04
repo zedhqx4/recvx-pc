@@ -889,7 +889,7 @@ Tab, Up/Down, Shift+Up/Down, and Backspace retain their existing edge-selection,
 - Dynamic TP textures, render targets, VQ/special PictFormat paths, non-indexed textures and render-substitution paths remain on the original fallback.
 - This experiment does not redesign the 4 MB GS-VRAM emulation.
 
-**Validation pending:** Windows build and in-game texture consistency / room-transition test. If OpenGL was not ready during allocation, the first eligible request registers the resource after its normal upload.
+**Validation pending:** Windows build and in-game texture consistency / room-transition test. The ID fast path now bypasses TIM2 reads, the custom Ensure helper, GS transfer packets, and CLUT hashing; verify the `gs assets/interval` hit counters in the next runtime log. If OpenGL was not ready during allocation, the first eligible request registers the resource after its normal upload.
 
 ## 2026-11-03 — Port alpha's static indexed TIM2 texture cache
 
