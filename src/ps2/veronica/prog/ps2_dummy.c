@@ -169,6 +169,7 @@ typedef struct
 static FILE* pc_texture_trace_file;
 static int pc_texture_trace_enabled = -1;
 static uint32_t pc_texture_trace_sequence;
+static unsigned int pc_texture_trace_current_tid = 0xFFFFFFFFU;
 static PcTextureTraceCameraState pc_texture_trace_camera_state;
 static PcTextureTraceAggregate pc_texture_trace_events[PC_TEXTURE_TRACE_MAX_EVENTS];
 static uint32_t pc_texture_trace_window_first;
@@ -345,6 +346,11 @@ static void pc_texture_trace_add(const char* kind, const char* message)
     }
 
     pc_texture_trace_window_overflow++;
+}
+
+void pcTextureTraceSetCurrentTid(unsigned int tid)
+{
+    pc_texture_trace_current_tid = tid;
 }
 
 void pcTextureTraceEvent(const char* kind, const char* fmt, ...)
@@ -3137,8 +3143,9 @@ int Ps2TexLoad(NJS_TEXMEMLIST* addr)
     Ps2_now_tex = addr;
     timp = (TIM2_PICTUREHEADER_EX*)addr->texinfo.texsurface.pSurface;
     pcTextureTraceEvent("TEX_REQUEST",
-                        "gindex=%u bank=%u image=%ux%u image_type=%u pict=%u clut=%u tpflag=%u clamp=%u",
-                        addr->globalIndex, addr->bank, timp->ImageWidth, timp->ImageHeight,
+                        "tid=%u gindex=%u bank=%u image=%ux%u image_type=%u pict=%u clut=%u tpflag=%u clamp=%u",
+                        pc_texture_trace_current_tid, addr->globalIndex, addr->bank,
+                        timp->ImageWidth, timp->ImageHeight,
                         timp->ImageType, timp->PictFormat, timp->ClutType, timp->TpFlag, timp->ClampFlag);
 
     tbw = timp->GsTex0.TBW;
