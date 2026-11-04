@@ -15,6 +15,7 @@
 #include "gs_internal.h"
 #include "gl_funcs.h"
 #include "../../include/pc_platform.h"
+#include "../../include/pc_texture_cache.h"
 
 int pcGsScale = 3;
 float pcGsScaleX = 3.0f;
@@ -503,7 +504,183 @@ static unsigned long long gen_sum_rect(unsigned int page_lo, unsigned int stride
     return s;
 }
 
-static GLuint get_texture(u64 tex0, u64 texa, u64 texclut, int w, int h, int rows, int cols, int* hd)
+/* Asset aliases are only valid while both the decoded texture pages and its CLUT
+ * source page remain unchanged. They are metadata for the existing bounded GS cache,
+ * not a second copy of texture data. */
+#define MAX_ASSET_ALIASES 4096
+typedef struct {
+    int used;
+    unsigned int asset_id;
+    uint64_t content_hash;
+    u64 key0, key1, key2;
+    int w, h;
+    int texture_slot;
+    unsigned int clut_page;
+    unsigned int clut_page_generation;
+} CachedAssetAlias;
+
+static CachedAssetAlias texture_asset_aliases[MAX_ASSET_ALIASES];
+static unsigned int texture_asset_next_free;
+
+static int texture_asset_is_indexed(unsigned int psm)
+{
+    return (psm == GS_PSMT8) || (psm == GS_PSMT4) ||
+           (psm == GS_PSMT8H) || (psm == GS_PSMT4HL) || (psm == GS_PSMT4HH);
+}
+
+int pcGsTextureAssetCacheEnabled(void)
+{
+    static int enabled = -1;
+
+    if (enabled < 0)
+    {
+        const char* value = getenv("RECVX_PS2_TEX_CACHE");
+        enabled = (value != NULL && value[0] == '0' && value[1] == '\\0') ? 0 : 1;
+        if (enabled)
+            pcLog("gs: static indexed TIM2 asset cache enabled (default)");
+        else
+            pcLog("gs: static indexed TIM2 asset cache disabled (RECVX_PS2_TEX_CACHE=0)");
+    }
+
+    return enabled;
+}
+
+static void texture_asset_remove_slot(int texture_slot)
+{
+    int i;
+
+    for (i = 0; i < MAX_ASSET_ALIASES; i++)
+    {
+        if (texture_asset_aliases[i].used &&
+            (texture_asset_aliases[i].texture_slot == texture_slot))
+        {
+            memset(&texture_asset_aliases[i], 0, sizeof(texture_asset_aliases[i]));
+            texture_asset_aliases[i].texture_slot = -1;
+        }
+    }
+}
+
+static void texture_asset_register(unsigned int asset_id, int asset_valid, uint64_t content_hash,
+                                   u64 key0, u64 key1, u64 key2, int w, int h,
+                                   unsigned int clut_page, int texture_slot)
+{
+    CachedTex* t;
+    int i, free_slot = -1;
+
+    if (!asset_valid || !pcGsTextureAssetCacheEnabled() ||
+        !texture_asset_is_indexed(GSF(key0, 20, 6)) ||
+        texture_slot < 0 || texture_slot >= MAX_TEX)
+        return;
+
+    t = &texcache[texture_slot];
+    /* The alias must represent the complete image, not a partial draw rectangle. */
+    if (!t->used || t->hd || t->rows != h || t->cols != w ||
+        t->key0 != key0 || t->key1 != key1 || t->key2 != key2 ||
+        t->w != w || t->h != h)
+        return;
+
+    clut_page &= GS_PAGES - 1;
+    for (i = 0; i < MAX_ASSET_ALIASES; i++)
+    {
+        CachedAssetAlias* alias = &texture_asset_aliases[i];
+
+        if (alias->used && alias->asset_id == asset_id &&
+            alias->content_hash == content_hash && alias->texture_slot == texture_slot)
+        {
+            free_slot = i;
+            break;
+        }
+
+        if (!alias->used && free_slot < 0)
+            free_slot = i;
+    }
+
+    if (free_slot < 0)
+        return; /* conservative fallback: a full alias table means no asset-cache hit */
+
+    {
+        CachedAssetAlias* alias = &texture_asset_aliases[free_slot];
+        alias->used = 1;
+        alias->asset_id = asset_id;
+        alias->content_hash = content_hash;
+        alias->key0 = key0;
+        alias->key1 = key1;
+        alias->key2 = key2;
+        alias->w = w;
+        alias->h = h;
+        alias->texture_slot = texture_slot;
+        alias->clut_page = clut_page;
+        alias->clut_page_generation = gsPageGen[clut_page];
+        texture_asset_next_free = (unsigned int)(free_slot + 1) % MAX_ASSET_ALIASES;
+    }
+}
+
+int pcGsTextureAssetCacheContains(unsigned int asset_id, uint64_t content_hash,
+                                  uint64_t tex0, int width, int height)
+{
+    unsigned int psm = GSF(tex0, 20, 6);
+    unsigned int tbp = GSF(tex0, 0, 14);
+    unsigned int tbw = GSF(tex0, 14, 6);
+    unsigned int clut_page = (GSF(tex0, 37, 14) >> 5) & (GS_PAGES - 1);
+    u64 key0, key1, key2;
+    int pw, ph, i;
+    unsigned int stride, page_lo;
+    unsigned long long current_gen;
+
+    if (!pcGsTextureAssetCacheEnabled() || !texture_asset_is_indexed(psm) ||
+        width <= 0 || height <= 0 || width > 1024 || height > 1024)
+        return 0;
+
+    key0 = tex0 & 0x0000001FFFFFFFFFULL & ~(0x3ULL << 35) & ~(1ULL << 34);
+    key0 |= ((u64)GSF(tex0, 51, 4) << 37);
+    key1 = ((psm == GS_PSMCT24) || (gsPsmBits(psm) == 16) || (GSF(tex0, 51, 4) >= 2)) ? gsRegs.texa : 0;
+    key2 = gsClutHash(tex0);
+
+    psm_page_size(psm, &pw, &ph);
+    stride = (tbw * 64 + pw - 1) / pw;
+    if (stride == 0)
+        stride = 1;
+    page_lo = tbp >> 5;
+
+    current_gen = gen_sum_rect(page_lo, stride,
+                               (height + ph - 1) / ph,
+                               (width + pw - 1) / pw);
+
+    for (i = 0; i < MAX_ASSET_ALIASES; i++)
+    {
+        CachedAssetAlias* alias = &texture_asset_aliases[i];
+        CachedTex* t;
+
+        if (!alias->used || alias->asset_id != asset_id ||
+            alias->content_hash != content_hash || alias->key0 != key0 ||
+            alias->key1 != key1 || alias->key2 != key2 ||
+            alias->w != width || alias->h != height ||
+            alias->clut_page != clut_page ||
+            alias->clut_page_generation != gsPageGen[clut_page])
+            continue;
+
+        if (alias->texture_slot < 0 || alias->texture_slot >= MAX_TEX)
+            continue;
+
+        t = &texcache[alias->texture_slot];
+        if (t->used && !t->hd && t->key0 == key0 && t->key1 == key1 &&
+            t->key2 == key2 && t->w == width && t->h == height &&
+            t->rows == height && t->cols == width &&
+            t->gen == current_gen)
+            return 1;
+    }
+
+    return 0;
+}
+
+void pcGsResetTextureAssetCache(void)
+{
+    memset(texture_asset_aliases, 0, sizeof(texture_asset_aliases));
+    texture_asset_next_free = 0;
+}
+
+static GLuint get_texture(unsigned int asset_id, int asset_id_valid, uint64_t content_hash,
+                          u64 tex0, u64 texa, u64 texclut, int w, int h, int rows, int cols, int* hd)
 {
     unsigned int psm = GSF(tex0, 20, 6);
     unsigned int tbp = GSF(tex0, 0, 14);
@@ -567,6 +744,9 @@ static GLuint get_texture(u64 tex0, u64 texa, u64 texclut, int w, int h, int row
             (t->rows == rows) && (t->cols == cols))
         {
             t->last_use = frame_counter;
+            if (!t->hd && asset_id_valid && texture_asset_is_indexed(psm))
+                texture_asset_register(asset_id, asset_id_valid, content_hash, key0, key1, key2,
+                                       w, h, clut_page, i);
             *hd = t->hd;
             return t->tex;
         }
@@ -585,6 +765,7 @@ static GLuint get_texture(u64 tex0, u64 texa, u64 texclut, int w, int h, int row
     if (slot < 0)
     {
         slot = oldest;
+        texture_asset_remove_slot(slot);
 
         if (!texcache[slot].hd)
         {
@@ -631,6 +812,10 @@ static GLuint get_texture(u64 tex0, u64 texa, u64 texclut, int w, int h, int row
     { double t0 = pcOsTime(); gsDecodeTexture(tex0, texa, texclut, cols, rows, decode_buf); stats.tex_decodes++; stats.tex_texels += cols * rows; stats.t_decode += pcOsTime() - t0; }
     glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
     glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, cols, rows, GL_RGBA, GL_UNSIGNED_BYTE, decode_buf);
+
+    if (asset_id_valid && texture_asset_is_indexed(psm))
+        texture_asset_register(asset_id, asset_id_valid, content_hash, key0, key1, key2,
+                               w, h, clut_page, slot);
 
     return t->tex;
 }
@@ -1529,7 +1714,9 @@ void gsRendererDraw(const GsDrawState* st, const GsVertex* v, int nverts)
         else
         {
             int hd = 0;
-            GLuint gt = get_texture(st->tex0, st->texa, st->texclut, tw, th, texture_extent(st, v, nverts, th, 1),
+            GLuint gt = get_texture(st->texture_asset_id, st->texture_asset_valid,
+                                    st->texture_asset_content_hash, st->tex0, st->texa, st->texclut,
+                                    tw, th, texture_extent(st, v, nverts, th, 1),
                                     texture_extent(st, v, nverts, tw, 0), &hd);
 
             glBindTexture(GL_TEXTURE_2D, gt);

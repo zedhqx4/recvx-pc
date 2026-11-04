@@ -6,6 +6,7 @@ on:
     branches:
       - pc-port
       - experimental/gs-rebuild
+      - experiment/gs-texcache-clut-safe
       - FONTFix
     paths-ignore:
       - '**.md'
