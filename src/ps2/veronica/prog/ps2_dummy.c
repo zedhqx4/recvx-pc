@@ -155,7 +155,7 @@ typedef struct
 
 static FILE* pc_texture_trace_file;
 static int pc_texture_trace_enabled = -1;
-static unsigned long long pc_texture_trace_sequence;
+static uint32_t pc_texture_trace_sequence;
 static PcTextureTraceCameraState pc_texture_trace_camera_state;
 static const void* pc_texture_trace_model_stack[128];
 static unsigned int pc_texture_trace_model_depth;
@@ -207,7 +207,7 @@ void pcTextureTraceEvent(const char* kind, const char* fmt, ...)
         return;
 
     fprintf(pc_texture_trace_file,
-            "E=%llu F=%u S=%d/%d/%d/%d CUT=%d OCUT=%d VER=%d CFLG=%08x "
+            "E=%u F=%u S=%d/%d/%d/%d CUT=%d OCUT=%d VER=%d CFLG=%08x "
             "EVC=%d KEY=%d MODE=%d CAM=(%.3f,%.3f,%.3f;%d,%d,%d;%d;%.3f) "
             "MODEL=%p %s ",
             ++pc_texture_trace_sequence, Ps2_sys_cnt,
