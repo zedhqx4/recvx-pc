@@ -873,3 +873,41 @@ Tab, Up/Down, Shift+Up/Down, and Backspace retain their existing edge-selection,
 - **Source review:** Confirmed a single mode state, F10 cycling only through enabled INI modes, mode-specific R handling, Escape-to-OFF behavior, removal of the menu tuner's dependency on `debug=1`, arrow-key keycode/scancode handling with repeat support, explicit before/after logging for menu adjustments, and shared profile-default arrays used by both INI fallback and Backspace reset.
 - **Windows build:** Run [41546313454](https://github.com/zedhqx4/recvx-pc/actions/runs/41546313454) passed for the preceding source revision `b9280f8` (`Build game`, `Verify executables`, and `Upload Windows build` all succeeded). This amendment changes only this comment and the development log; a fresh CI run will validate the amended commit.
 - **Runtime:** Pending. Test all four INI combinations for `fontUVfix` and `menuUVfix`, F10 cycling, R routing in each mode, and Escape exit.
+
+## 2026-11-04 — Step 18: GL texture residency, CPU-side upload/lookup cost
+
+**Category:** Renderer performance (texture management)  
+**Status:** Implemented; host-verified (see Validation); Windows build and runtime/visual validation pending  
+**Branch:** `experiment/gl-texture-residency` (base: `experimental/gs-rebuild` @ `6ea0e8d`)
+
+### What the existing flow already does (findings)
+
+`gs-rebuild` is not a "TIM2 id -> GL texture" design. It already emulates GS local memory (`gsVram`, 4 MiB, real PSMCT32/T8/T4 swizzles), keeps a generation counter per 8 KB page (`gsPageGen`, bumped only when a transfer really changes bytes), snapshots the CLUT on TEX0/TEX2 writes with real CLD semantics, and resolves GL textures lazily at flush time (`get_texture`) keyed by the *content* of the pages the texture covers plus the palette. Every `Ps2TexLoad()` GS-visible effect (DMA upload to TBP 190*64 / CBP 254*64, TEX0 with CLD, TEXFLUSH, TEX1, CLAMP, TEST) is therefore preserved untouched. Nothing in `Ps2TexLoad`, `Send_Tim2_dataEx`, `Clut_Load_Func`, `Set_GsTex` or `LoadToVram` was skipped or cached.
+
+`njCnkCtTid()` is a CNK chunk callback: one call per texture-id chunk of every model stream, each ending in `Ps2TexLoad()`. When the texture differs from the previous one this is a real VRAM rewrite at the same fixed address (so every switch is a real state change); when it is the same TIM2 the upload is already skipped by the game's own `Ps2_tex_cache_buff[0]` test but the TEX0/palette registers are still re-sent.
+
+Repeated CPU work that was found and removed (all semantics-preserving):
+
+1. **4/8-bit uploads were written pixel by pixel** (`mem_write` + `advance()` per texel; only 32-bit had a block path). Added bit-exact 256-byte-block paths for host->GS PSMT8 and PSMT4 (`transfer8Blocks`, `transfer4Blocks`), same change detection and page-generation behavior.
+2. **Every TEX0 write with CLD flushed the queued primitives and re-read the palette**, even when the palette was identical (the normal case when a texture is re-selected). The palette is now loaded into a scratch copy; queued primitives are flushed and `clut_buf` committed only if it really changed. Queued primitives are decoded at flush time from `clut_buf`, so an unchanged palette cannot affect them.
+3. **The palette hash (256 entries, 2 multiplies each) was recomputed on every draw.** Added `gsClutGen` (moves only on a real palette change) and a per-palette-window memo.
+4. **The texture cache was found by scanning up to 2048 entries per draw.** Added a direct-mapped front index; a hit is accepted only after the full key matches, so a stale/colliding bucket can never return the wrong texture (it falls back to the original scan).
+5. **Page content hash** replaced the dependent-multiply FNV loop with XXH3 (already vendored for HD replacement): about 3.6x faster per 8 KB page in a standalone benchmark. Same role, same cache semantics.
+
+### Instrumentation
+
+`pcGsLogStats` now also logs `tex/frame`: `njCnkCtTid` calls, `Ps2TexLoad` calls (same-texture vs real uploads), GS transfers (count, KB, how many changed VRAM), CLUT loads (and how many changed), palette hashes computed vs memo hits, texture lookups (index hit / scan hit / new) and page hashes computed.
+
+### Validation
+
+- `pc/tests/gs_mem_blockpath_test.c`: 4000 randomized host->GS T8/T4 transfers (aligned and unaligned, random packet splits, repeated identical uploads). VRAM, `gsPageGen` and `gsXferDone` sequence are identical between the block paths and the per-pixel reference (`-DGS_BLOCK_FASTPATH=0`). A mutated copy of the block code fails the test.
+- `pc/tests/gs_clut_test.c`: CSM1 palette contents, generation moves only on real change, identical reload does not flush queued primitives, a changed palette flushes first, memoized hash equals a from-scratch FNV. A mutated "always flush" copy fails the test.
+- `gs.c`, `gs_mem.c` pass a gcc syntax check. `gs_gl.c` could not be compiled in the analysis environment (no SDL3/GL headers); only the absence of diagnostics in the edited regions was checked.
+- **Windows build:** pending. The workflow only triggers on pushes to `pc-port`, `experimental/gs-rebuild`, `FONTFIX` or by manual dispatch, so this branch needs `workflow_dispatch`.
+- **Runtime/visual:** NOT verified; the game was not run. No frame-time measurement exists yet. The `tex/frame` log line is meant to provide it: compare `page hashes`, `clut hash`, `xfers ... changed` and draw counts in CNK room 8 before/after.
+
+### Not done / limitations
+
+- **No GPU-resident GS VRAM.** The renderer targets OpenGL 3.3 core (no compute shaders); moving swizzle/decode/palette lookup to the GPU is a rewrite of the texture path that cannot be validated without running the game, and is not attempted here. `gsVram` remains the CPU authority.
+- The remaining per-switch CPU cost in room 8 is the real VRAM rewrite itself (block swizzle + memcmp) and the content hash of the pages it changed. Removing it needs a version token for the *source* texture data (so identical re-uploads can be proven without reading them); keying on the TIM2 pointer alone is exactly what failed in the GPU Asset Registry experiment, since main-memory buffers can be overwritten.
+- Whether the idx/scan/memo counters actually dominate in room 8 is unmeasured.

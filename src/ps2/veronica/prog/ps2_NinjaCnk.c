@@ -921,6 +921,14 @@ CHUNK_HEAD* njCnkCbExp(CHUNK_HEAD* pCnk)
 // 100% matching!
 CHUNK_HEAD* njCnkCtTid(CHUNK_HEAD* pCnk) 
 {
+#ifdef TARGET_PC /* request counter for the periodic gs log (pc/src/gs/gs_gl.c) */
+    {
+        extern unsigned int pcStatCnkTid;
+
+        pcStatCnkTid++;
+    }
+#endif
+
     if (((pCnk->ucHeadBits >> 6) & 0x3)) 
     {
         printf("'Texture Flip' Exist in 'CNK-DATA' !!\n");

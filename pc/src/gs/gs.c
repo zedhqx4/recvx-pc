@@ -604,6 +604,15 @@ static unsigned int expand24(unsigned int c, u64 texa)
 static unsigned short clut_buf[512];
 static unsigned int clut_cbp0, clut_cbp1;
 
+/* Palette generation: moves only when a CLUT load actually changes clut_buf. The renderer keys
+ * its texture lookup on palette contents (gsClutHash); with this token the hash of a given
+ * palette window is computed once per palette change instead of once per draw. */
+unsigned int gsClutGen;
+unsigned int gsStatClutLoads, gsStatClutChanged, gsStatClutHashes, gsStatClutHashMemo;
+
+typedef struct { unsigned int gen; u64 hash; } ClutHashMemo;
+static ClutHashMemo clut_hash_memo[33];   /* 32 CSA windows of 16 entries + the 256-entry palette */
+
 static int clut_entries(unsigned int psm)
 {
     if ((psm == GS_PSMT8) || (psm == GS_PSMT8H)) return 256;
@@ -620,6 +629,7 @@ static void clut_load(u64 tex0)
     unsigned int csa = GSF(tex0, 56, 5);
     unsigned int cld = GSF(tex0, 61, 3);
     int entries = clut_entries(psm);
+    unsigned short clut_new[512];
     int i, load;
 
     if (entries == 0)
@@ -642,8 +652,14 @@ static void clut_load(u64 tex0)
         return;
     }
 
-    /* primitives already queued use the old palette */
-    gsFlushPrims();
+    /* The palette is read into a scratch copy first. Primitives already queued are decoded at
+     * flush time from clut_buf, so they only need to be flushed (to keep using the old palette)
+     * when this load really changes it. Re-selecting the texture that is already loaded, which
+     * the game does for every material switch (CLD with the same CBP and palette), then neither
+     * splits the batch nor moves the palette generation. */
+    memcpy(clut_new, clut_buf, sizeof(clut_new));
+
+    gsStatClutLoads++;
 
     for (i = 0; i < entries; i++)
     {
@@ -677,13 +693,21 @@ static void clut_load(u64 tex0)
             unsigned int c = gsMemRead(GS_PSMCT32, cbp, bw, x, y);
 
             e &= 255;
-            clut_buf[e] = (unsigned short)c;
-            clut_buf[e + 256] = (unsigned short)(c >> 16);
+            clut_new[e] = (unsigned short)c;
+            clut_new[e + 256] = (unsigned short)(c >> 16);
         }
         else
         {
-            clut_buf[e & 511] = (unsigned short)gsMemRead((cpsm == 10) ? GS_PSMCT16S : GS_PSMCT16, cbp, bw, x, y);
+            clut_new[e & 511] = (unsigned short)gsMemRead((cpsm == 10) ? GS_PSMCT16S : GS_PSMCT16, cbp, bw, x, y);
         }
+    }
+
+    if (memcmp(clut_new, clut_buf, sizeof(clut_new)) != 0)
+    {
+        gsFlushPrims();
+        memcpy(clut_buf, clut_new, sizeof(clut_buf));
+        gsClutGen++;
+        gsStatClutChanged++;
     }
 }
 
@@ -722,8 +746,20 @@ u64 gsClutHash(u64 tex0)
 {
     int entries = clut_entries(GSF(tex0, 20, 6));
     unsigned int base = (entries == 16) ? GSF(tex0, 56, 5) * 16 : 0;
+    unsigned int slot = (entries == 16) ? GSF(tex0, 56, 5) : 32;
     u64 h = 1469598103934665603ULL;
     int i;
+
+    if (entries == 0)
+    {
+        return h;
+    }
+
+    if (clut_hash_memo[slot].gen == gsClutGen + 1)
+    {
+        gsStatClutHashMemo++;
+        return clut_hash_memo[slot].hash;
+    }
 
     for (i = 0; i < entries; i++)
     {
@@ -732,6 +768,10 @@ u64 gsClutHash(u64 tex0)
         h = (h ^ clut_buf[e]) * 1099511628211ULL;
         h = (h ^ clut_buf[(e + 256) & 511]) * 1099511628211ULL;
     }
+
+    gsStatClutHashes++;
+    clut_hash_memo[slot].gen = gsClutGen + 1;   /* +1 so a zeroed slot never matches generation 0 */
+    clut_hash_memo[slot].hash = h;
 
     return h;
 }

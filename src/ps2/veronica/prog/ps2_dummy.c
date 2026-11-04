@@ -2495,6 +2495,14 @@ int Ps2TexLoad(NJS_TEXMEMLIST* addr)
         return printf("Ps2CurrentTexLoad ERROR!!!!\n"); 
     }
 
+#ifdef TARGET_PC /* texture request counters for the periodic gs log (pc/src/gs/gs_gl.c) */
+    {
+        extern unsigned int pcStatTexLoadCalls;
+
+        pcStatTexLoadCalls++;
+    }
+#endif
+
     Ps2_now_tex = addr;
 
     timp = (TIM2_PICTUREHEADER_EX*)addr->texinfo.texsurface.pSurface;
@@ -2516,6 +2524,13 @@ int Ps2TexLoad(NJS_TEXMEMLIST* addr)
     if (timp == Ps2_tex_cache_buff[0]) 
     {
         cache_flag = 0;
+#ifdef TARGET_PC
+        {
+            extern unsigned int pcStatTexLoadSame;
+
+            pcStatTexLoadSame++;
+        }
+#endif
     } 
     else if ((Ps2_tex_load_tp_cancel == 0) && (timp->TpFlag != 0)) 
     {
@@ -2528,6 +2543,13 @@ label:
         
         if ((PS2_Render_tex_sub_flag == 0) || ((timp->PictFormat >= 5) && (timp->PictFormat <= 8)) || ((timp->ImageType == 4) || (timp->ImageType == 5)))
         {
+#ifdef TARGET_PC
+            {
+                extern unsigned int pcStatTexLoadUploads;
+
+                pcStatTexLoadUploads++;
+            }
+#endif
             Send_Tim2_dataEx(Ps2_tex_cache_buff[0], 190 * 64, 254 * 64);
         }
     }

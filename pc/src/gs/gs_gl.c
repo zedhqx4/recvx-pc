@@ -13,6 +13,9 @@
 #include <string.h>
 
 #include "gs_internal.h"
+
+#define XXH_INLINE_ALL
+#include "../../third_party/xxhash.h"
 #include "gl_funcs.h"
 #include "../../include/pc_platform.h"
 
@@ -261,6 +264,9 @@ static int dump_frame;
 
 /* per-interval statistics for the periodic log */
 static struct { unsigned int frames, draws, verts, rt_loads, rt_reads, tex_decodes, tex_texels; double t_load, t_read, t_decode; } stats;
+
+/* texture residency counters (reported once per interval by pcGsLogStats) */
+static struct { unsigned int lookups, index_hits, scan_hits, creates, page_hashes; } texstat;
 static int tex_cached;                     /* textures in the cache, decoded from GS memory */
 static double tex_cached_bytes;            /* their size */
 
@@ -271,6 +277,9 @@ static int movie_vram_on;
 
 double pcOsTime(void);
 
+/* game-side texture request counters (incremented from Ps2TexLoad / njCnkCtTid) */
+unsigned int pcStatTexLoadCalls, pcStatTexLoadUploads, pcStatTexLoadSame, pcStatCnkTid;
+
 void pcGsLogStats(void)
 {
     unsigned int f = stats.frames ? stats.frames : 1;
@@ -279,6 +288,22 @@ void pcGsLogStats(void)
           stats.draws / f, stats.verts / f, (double)stats.rt_loads / f, stats.t_load * 1000 / f, (double)stats.rt_reads / f,
           stats.t_read * 1000 / f, (double)stats.tex_decodes / f, stats.tex_texels / f, stats.t_decode * 1000 / f);
     pcLog("gs: %d textures cached (%.0f MB)", tex_cached, tex_cached_bytes / 1048576.0);
+    {
+        extern unsigned int gsStatClutLoads, gsStatClutChanged, gsStatClutHashes, gsStatClutHashMemo;
+        extern unsigned int gsStatXferCalls, gsStatXferBytes, gsStatXferChanged;
+        extern unsigned int pcStatTexLoadCalls, pcStatTexLoadUploads, pcStatTexLoadSame, pcStatCnkTid;
+
+        pcLog("tex/frame: ctTid %.1f, TexLoad %.1f (same-tex %.1f, uploads %.1f) | xfers %.1f (%.1f KB, %.1f changed VRAM) | clut loads %.1f (%.1f changed), clut hash %.1f (+%.1f memo) | lookups %.1f (idx %.1f, scan %.1f, new %.1f), page hashes %.1f",
+              (double)pcStatCnkTid / f, (double)pcStatTexLoadCalls / f, (double)pcStatTexLoadSame / f, (double)pcStatTexLoadUploads / f,
+              (double)gsStatXferCalls / f, gsStatXferBytes / 1024.0 / f, (double)gsStatXferChanged / f,
+              (double)gsStatClutLoads / f, (double)gsStatClutChanged / f, (double)gsStatClutHashes / f, (double)gsStatClutHashMemo / f,
+              (double)texstat.lookups / f, (double)texstat.index_hits / f, (double)texstat.scan_hits / f, (double)texstat.creates / f,
+              (double)texstat.page_hashes / f);
+        gsStatClutLoads = gsStatClutChanged = gsStatClutHashes = gsStatClutHashMemo = 0;
+        gsStatXferCalls = gsStatXferBytes = gsStatXferChanged = 0;
+        pcStatTexLoadCalls = pcStatTexLoadUploads = pcStatTexLoadSame = pcStatCnkTid = 0;
+    }
+    memset(&texstat, 0, sizeof(texstat));
     memset(&stats, 0, sizeof(stats));
 }
 
@@ -441,6 +466,14 @@ typedef struct {
 
 #define MAX_TEX 2048
 
+/* Direct-mapped front index over texcache: slot + 1 per bucket, 0 = empty. A bucket is only a
+ * hint; a hit is accepted after comparing the full key, so a stale or colliding bucket can never
+ * return the wrong texture (it just falls back to the scan below). Evicted slots need no cleanup
+ * for the same reason. */
+#define TEX_INDEX_SIZE 8192
+
+static unsigned short tex_index[TEX_INDEX_SIZE];
+
 static CachedTex texcache[MAX_TEX];
 static unsigned int* decode_buf;
 
@@ -468,19 +501,14 @@ static unsigned long long hash_page(unsigned int p)
 
     if (!page_hash_valid[p] || (page_hash_gen[p] != gsPageGen[p]))
     {
-        const unsigned long long* w = (const unsigned long long*)&gsVram[p * 8192];
-        unsigned long long h = 0x9E3779B97F4A7C15ULL ^ p;
-        int i;
-
-        for (i = 0; i < 8192 / 8; i++)
-        {
-            h = (h ^ w[i]) * 0x100000001B3ULL;
-            h ^= h >> 29;
-        }
+        /* XXH3 over the 8 KB page (seeded by the page number): the same role the former
+         * FNV-style loop had, at memory bandwidth instead of one dependent multiply per 8 bytes */
+        unsigned long long h = XXH3_64bits_withSeed(&gsVram[p * 8192], 8192, 0x9E3779B97F4A7C15ULL ^ p);
 
         page_hash[p] = h;
         page_hash_gen[p] = gsPageGen[p];
         page_hash_valid[p] = 1;
+        texstat.page_hashes++;
     }
 
     return page_hash[p];
@@ -513,6 +541,7 @@ static GLuint get_texture(u64 tex0, u64 texa, u64 texclut, int w, int h, int row
     u64 key1 = ((psm == GS_PSMCT24) || (gsPsmBits(psm) == 16) || (GSF(tex0, 51, 4) >= 2)) ? texa : 0;
     u64 key2 = gsClutHash(tex0);   /* palette contents (0-entry hash for direct color) */
     int pw, ph, i, slot = -1, oldest = 0;
+    unsigned int index_bucket;
     unsigned int page_lo, page_hi, clut_page, stride;
     unsigned long long gen;
     CachedTex* t;
@@ -559,6 +588,31 @@ static GLuint get_texture(u64 tex0, u64 texa, u64 texclut, int w, int h, int row
     clut_page = GSF(tex0, 37, 14) >> 5;
     gen = gen_sum_rect(page_lo, stride, (rows + ph - 1) / ph, (cols + pw - 1) / pw);
 
+    texstat.lookups++;
+
+    {
+        unsigned long long m = gen ^ (key0 * 0x9E3779B97F4A7C15ULL) ^ (key1 * 0xC2B2AE3D27D4EB4FULL) ^ (key2 * 0x165667B19E3779F9ULL) ^
+                               ((unsigned long long)(w | (h << 12) | ((unsigned)rows << 24)) * 0xFF51AFD7ED558CCDULL) ^ ((unsigned long long)cols << 7);
+
+        m ^= m >> 31;
+        m *= 0x9E3779B97F4A7C15ULL;
+        index_bucket = (unsigned int)(m >> 40) & (TEX_INDEX_SIZE - 1);
+    }
+
+    if (tex_index[index_bucket] != 0)
+    {
+        t = &texcache[tex_index[index_bucket] - 1];
+
+        if (t->used && (t->gen == gen) && (t->key0 == key0) && (t->key1 == key1) && (t->key2 == key2) && (t->w == w) && (t->h == h) &&
+            (t->rows == rows) && (t->cols == cols))
+        {
+            texstat.index_hits++;
+            t->last_use = frame_counter;
+            *hd = t->hd;
+            return t->tex;
+        }
+    }
+
     for (i = 0; i < MAX_TEX; i++)
     {
         t = &texcache[i];
@@ -566,6 +620,8 @@ static GLuint get_texture(u64 tex0, u64 texa, u64 texclut, int w, int h, int row
         if (t->used && (t->gen == gen) && (t->key0 == key0) && (t->key1 == key1) && (t->key2 == key2) && (t->w == w) && (t->h == h) &&
             (t->rows == rows) && (t->cols == cols))
         {
+            texstat.scan_hits++;
+            tex_index[index_bucket] = (unsigned short)(i + 1);
             t->last_use = frame_counter;
             *hd = t->hd;
             return t->tex;
@@ -593,6 +649,9 @@ static GLuint get_texture(u64 tex0, u64 texa, u64 texclut, int w, int h, int row
             tex_cached_bytes -= (double)texcache[slot].w * texcache[slot].h * 4;
         }
     }
+
+    texstat.creates++;
+    tex_index[index_bucket] = (unsigned short)(slot + 1);
 
     t = &texcache[slot];
     t->used = 1;
@@ -826,8 +885,14 @@ static void rt_sync(RenderTarget* rt)
 void gsXferDone(unsigned int bp, unsigned int bw, unsigned int psm, unsigned int x, unsigned int y, unsigned int w, unsigned int h, int changed)
 {
     int i;
+    extern unsigned int gsStatXferChanged;
 
     (void)x; (void)w;
+
+    if (changed)
+    {
+        gsStatXferChanged++;
+    }
 
     for (i = 0; i < MAX_RT; i++)
     {
