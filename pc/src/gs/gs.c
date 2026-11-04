@@ -17,9 +17,6 @@ static int gsTextureAssetValid[2];
 static uint64_t gsTextureBindingGeneration;
 int gsDumpFrame;
 
-/* Direct asset selection can flush an already queued primitive batch. */
-void gsFlushPrims(void);
-
 int gsTextureDiagnosticsEnabled(void)
 {
     static int enabled = -1;
@@ -35,30 +32,6 @@ void pcGsSetTextureAssetIdentity(uint64_t asset_id, int valid)
 {
     gsTextureAssetId[0] = valid ? asset_id : 0;
     gsTextureAssetValid[0] = valid != 0;
-}
-
-/* Directly select a prepared resource: update emulated state without GIF/DMA packets. */
-void pcGsApplyTextureAssetState(uint64_t asset_id, const PcGsTextureAssetState* state)
-{
-    int changed;
-    if (asset_id == 0 || state == NULL)
-        return;
-    changed = !gsTextureAssetValid[0] || gsTextureAssetId[0] != asset_id ||
-              gsRegs.tex0[0] != state->tex0 || gsRegs.tex1[0] != state->tex1 ||
-              gsRegs.clamp[0] != state->clamp || gsRegs.test[0] != state->test ||
-              gsRegs.texa != state->texa || gsRegs.texclut != state->texclut;
-    if (!changed)
-        return;
-    gsFlushPrims();
-    gsTextureBindingGeneration++;
-    gsRegs.tex0[0] = state->tex0;
-    gsRegs.tex1[0] = state->tex1;
-    gsRegs.clamp[0] = state->clamp;
-    gsRegs.test[0] = state->test;
-    gsRegs.texa = state->texa;
-    gsRegs.texclut = state->texclut;
-    gsTextureAssetId[0] = asset_id;
-    gsTextureAssetValid[0] = 1;
 }
 
 uint64_t pcGsGetTextureBindingGeneration(void)
@@ -128,6 +101,31 @@ void gsFlushPrims(void)
     out_count = 0;
     out_valid = 0;
 }
+
+/* Directly select a prepared resource: update emulated state without GIF/DMA packets. */
+void pcGsApplyTextureAssetState(uint64_t asset_id, const PcGsTextureAssetState* state)
+{
+    int changed;
+    if (asset_id == 0 || state == NULL)
+        return;
+    changed = !gsTextureAssetValid[0] || gsTextureAssetId[0] != asset_id ||
+              gsRegs.tex0[0] != state->tex0 || gsRegs.tex1[0] != state->tex1 ||
+              gsRegs.clamp[0] != state->clamp || gsRegs.test[0] != state->test ||
+              gsRegs.texa != state->texa || gsRegs.texclut != state->texclut;
+    if (!changed)
+        return;
+    gsFlushPrims();
+    gsTextureBindingGeneration++;
+    gsRegs.tex0[0] = state->tex0;
+    gsRegs.tex1[0] = state->tex1;
+    gsRegs.clamp[0] = state->clamp;
+    gsRegs.test[0] = state->test;
+    gsRegs.texa = state->texa;
+    gsRegs.texclut = state->texclut;
+    gsTextureAssetId[0] = asset_id;
+    gsTextureAssetValid[0] = 1;
+}
+
 
 static void emit(const GsVertex* v, int n)
 {
