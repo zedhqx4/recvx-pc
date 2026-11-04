@@ -11,13 +11,13 @@
 #include "../../../ps2/veronica/prog/ps2_texture.h"
 #include "../../../ps2/veronica/prog/sdfunc.h"
 #include "../../../ps2/veronica/prog/main.h"
+#include "../../../../pc/include/pc_texture_trace.h"
 
 #ifdef TARGET_PC
 #include <stdio.h>
 #include <string.h>
 #include <stdint.h>
 #include "../../../../pc/include/pc_texture_cache.h"
-#include "../../../../pc/include/pc_texture_trace.h"
 #include <stdarg.h>
 #include <stdlib.h>
 extern int Send_Tim2_dataExClutOnly(void* tim2_top_adr, unsigned long send_image_adr, unsigned long send_clut_adr);
