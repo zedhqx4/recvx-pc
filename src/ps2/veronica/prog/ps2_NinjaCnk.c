@@ -570,6 +570,11 @@ void    njCnkEasyDrawObject( NJS_CNK_OBJECT *model )
     
         if ((ulFlags & 0x8)) 
         {
+#ifdef TARGET_PC
+            pcTextureTraceEvent("MODEL_FILTERED",
+                                "traversal=njCnkEasyDrawObject object=%p model=%p evalflags=%08x reason=hidden_evalflag",
+                                model, model->model, ulFlags);
+#endif
             lDrawResult = 0;
         } 
         else
@@ -579,6 +584,14 @@ void    njCnkEasyDrawObject( NJS_CNK_OBJECT *model )
     
         if (!(ulFlags & 0x10)) 
         {
+            if ((ulFlags & 0x100) && (lDrawResult == 0))
+            {
+#ifdef TARGET_PC
+                pcTextureTraceEvent("MODEL_SUBTREE_CULLED",
+                                    "traversal=njCnkEasyDrawObject object=%p model=%p evalflags=%08x reason=parent_model_culled",
+                                    model, model->model, ulFlags);
+#endif
+            }
             if ((!(ulFlags & 0x100)) || (lDrawResult != 0)) 
             {
                 njCnkEasyDrawObject(model->child);
@@ -628,6 +641,11 @@ void    njCnkEasyMultiDrawObject( NJS_CNK_OBJECT *model )
     
         if ((ulFlags & 0x8)) 
         {
+#ifdef TARGET_PC
+            pcTextureTraceEvent("MODEL_FILTERED",
+                                "traversal=njCnkEasyMultiDrawObject object=%p model=%p evalflags=%08x reason=hidden_evalflag",
+                                model, model->model, ulFlags);
+#endif
             lDrawResult = 0;
         } 
         else
@@ -637,6 +655,14 @@ void    njCnkEasyMultiDrawObject( NJS_CNK_OBJECT *model )
     
         if (!(ulFlags & 0x10)) 
         {
+            if ((ulFlags & 0x100) && (lDrawResult == 0))
+            {
+#ifdef TARGET_PC
+                pcTextureTraceEvent("MODEL_SUBTREE_CULLED",
+                                    "traversal=njCnkEasyMultiDrawObject object=%p model=%p evalflags=%08x reason=parent_model_culled",
+                                    model, model->model, ulFlags);
+#endif
+            }
             if ((!(ulFlags & 0x100)) || (lDrawResult != 0)) 
             {
                 njCnkEasyMultiDrawObject(model->child);
@@ -3212,6 +3238,11 @@ void njCnkEasyMultiDrawObjectI(NJS_CNK_OBJECT* pObject)
     
         if ((ulFlags & 0x8)) 
         {
+#ifdef TARGET_PC
+            pcTextureTraceEvent("MODEL_FILTERED",
+                                "traversal=njCnkEasyMultiDrawObjectI object=%p model=%p evalflags=%08x reason=hidden_evalflag",
+                                pObject, pObject->model, ulFlags);
+#endif
             lDrawResult = 0;
         } 
         else
@@ -3221,6 +3252,14 @@ void njCnkEasyMultiDrawObjectI(NJS_CNK_OBJECT* pObject)
     
         if (!(ulFlags & 0x10)) 
         {
+            if ((ulFlags & 0x100) && (lDrawResult == 0))
+            {
+#ifdef TARGET_PC
+                pcTextureTraceEvent("MODEL_SUBTREE_CULLED",
+                                    "traversal=njCnkEasyMultiDrawObjectI object=%p model=%p evalflags=%08x reason=parent_model_culled",
+                                    pObject, pObject->model, ulFlags);
+#endif
+            }
             if ((!(ulFlags & 0x100)) || (lDrawResult != 0)) 
             {
                 njCnkEasyMultiDrawObjectI(pObject->child);
