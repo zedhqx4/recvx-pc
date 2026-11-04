@@ -12,6 +12,11 @@ void pcTextureTraceCamera(const char* source, int console_if_changed,
 void pcTextureTraceModelBegin(const void* model, const void* vlist,
                               const void* plist, float radius);
 void pcTextureTraceModelEnd(int result, const char* reason);
+#else
+#define pcTextureTraceEvent(...) ((void)0)
+#define pcTextureTraceCamera(...) ((void)0)
+#define pcTextureTraceModelBegin(...) ((void)0)
+#define pcTextureTraceModelEnd(...) ((void)0)
 #endif
 
 #endif
