@@ -875,22 +875,6 @@ Tab, Up/Down, Shift+Up/Down, and Backspace retain their existing edge-selection,
 - **Runtime:** Pending. Test all four INI combinations for `fontUVfix` and `menuUVfix`, F10 cycling, R routing in each mode, and Escape exit.
 
 
-## 2026-11-04 — GPU-resident static TIM2 asset registry (experimental)
-
-**Branch:** `experiment/gpu-asset-registry`  
-**Base:** `experiment/camera-texture-trace` at `d9953e5`  
-**Goal:** Replace per-request TIM2 image-content hashing with a stable `NJS_TEXMEMLIST*` handle mapped to a GPU-resident index texture.
-
-- Static indexed TIM2 assets are transferred once during `Ps2TextureMalloc()`; the original GS transfer path remains authoritative for swizzling and format conversion.
-- Registration creates a persistent GPU index texture and a per-asset GPU palette texture, and stores the sampling state under the stable `NJS_TEXMEMLIST*` identity.
-- On a registry hit, `Ps2TexLoad()` returns immediately after the ID lookup. It does not dereference the TIM2 surface, call our PC-only `Ps2EnsureTextureImage()`, call `Ps2BindTextureState()`, transfer image/CLUT data, or construct/interpret GIF/DMA packets.
-- The renderer resolves the same asset ID before CLUT hashing or GS-page/content hashing and binds the saved GPU image and palette directly. Hash fallback remains only for non-registered assets.
-- Final texture release removes the ID mapping and its owned GPU palette so a recycled `NJS_TEXMEMLIST` slot cannot inherit the previous asset.
-- Dynamic TP textures, render targets, VQ/special PictFormat paths, non-indexed textures and render-substitution paths remain on the original fallback.
-- This experiment does not redesign the 4 MB GS-VRAM emulation.
-
-**Validation pending:** Windows build and in-game texture consistency / room-transition test. The ID fast path now bypasses TIM2 reads, the custom Ensure helper, GS transfer packets, and CLUT hashing; verify the `gs assets/interval` hit counters in the next runtime log. If OpenGL was not ready during allocation, the first eligible request registers the resource after its normal upload.
-
 ## 2026-11-03 — Port alpha's static indexed TIM2 texture cache
 
 **Category:** Renderer / texture reuse feature port  

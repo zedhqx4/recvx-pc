@@ -34,12 +34,105 @@ extern int Send_Tim2_dataExClutOnly(void* tim2_top_adr, unsigned long send_image
 #include "../../../ps2/veronica/prog/main.h"
 
 #ifdef TARGET_PC
+#define PC_TIM2_FINGERPRINT_SLOTS 1024
+typedef struct {
+    int valid;
+    const void* surface;
+    unsigned int gindex;
+    unsigned int image_size, clut_size;
+    unsigned short header_size, image_width, image_height;
+    unsigned char format_id, image_type, clut_type, pict_format;
+    uint64_t image_hash, clut_hash;
+} PcTim2SourceFingerprint;
+static PcTim2SourceFingerprint pc_tim2_fingerprints[PC_TIM2_FINGERPRINT_SLOTS];
+
+typedef struct {
+    int valid;
+    uint64_t state_generation, image_hash, clut_hash, tex0;
+    unsigned int gindex, tbw, tw, th, psm;
+    unsigned int image_width, image_height, pict_format, image_type, clut_type, clamp_flag, bank, render_sub_flag;
+} PcPs2TextureBindCache;
+static PcPs2TextureBindCache pc_ps2_texture_bind_cache;
+
+static uint64_t pc_tim2_hash_bytes(const unsigned char* data, unsigned int size)
+{
+    uint64_t hash = 14695981039346656037ULL;
+    unsigned int i;
+    for (i = 0; i < size; i++)
+        hash = (hash ^ data[i]) * 1099511628211ULL;
+    return hash;
+}
+
+/* Address only memoizes a loaded immutable TIM2 source; cache identity is its content hash. */
+static int pc_tim2_source_hashes(TIM2_PICTUREHEADER_EX* tim, uint64_t* image_hash, uint64_t* clut_hash)
+{
+    TIM2_PICTUREHEADER* picture;
+    const unsigned char* image;
+    const unsigned char* clut;
+    uintptr_t surface_key;
+    unsigned int slot;
+    PcTim2SourceFingerprint* cached;
+
+    if ((tim == NULL) || (image_hash == NULL) || (clut_hash == NULL) || (tim->FormatId == 0))
+        return 0;
+
+    picture = (TIM2_PICTUREHEADER*)((unsigned char*)tim + 128);
+    if ((picture->HeaderSize < sizeof(TIM2_PICTUREHEADER)) ||
+        (picture->HeaderSize > picture->TotalSize) ||
+        (picture->ImageSize > picture->TotalSize - picture->HeaderSize) ||
+        (picture->ClutSize > picture->TotalSize - picture->HeaderSize - picture->ImageSize))
+        return 0;
+
+    surface_key = (uintptr_t)tim;
+    slot = (unsigned int)(((surface_key >> 4) ^ (surface_key >> 13) ^ tim->Gindex) &
+                          (PC_TIM2_FINGERPRINT_SLOTS - 1));
+    cached = &pc_tim2_fingerprints[slot];
+
+    if (cached->valid && cached->surface == tim && cached->gindex == tim->Gindex &&
+        cached->image_size == picture->ImageSize && cached->clut_size == picture->ClutSize &&
+        cached->header_size == picture->HeaderSize && cached->image_width == picture->ImageWidth &&
+        cached->image_height == picture->ImageHeight && cached->format_id == tim->FormatId &&
+        cached->image_type == picture->ImageType && cached->clut_type == picture->ClutType &&
+        cached->pict_format == picture->PictFormat)
+    {
+        *image_hash = cached->image_hash;
+        *clut_hash = cached->clut_hash;
+        return 1;
+    }
+
+    image = (const unsigned char*)picture + picture->HeaderSize;
+    clut = image + picture->ImageSize;
+    *image_hash = pc_tim2_hash_bytes(image, picture->ImageSize);
+    *clut_hash = pc_tim2_hash_bytes(clut, picture->ClutSize);
+    cached->valid = 1;
+    cached->surface = tim;
+    cached->gindex = tim->Gindex;
+    cached->image_size = picture->ImageSize;
+    cached->clut_size = picture->ClutSize;
+    cached->header_size = picture->HeaderSize;
+    cached->image_width = picture->ImageWidth;
+    cached->image_height = picture->ImageHeight;
+    cached->format_id = tim->FormatId;
+    cached->image_type = picture->ImageType;
+    cached->clut_type = picture->ClutType;
+    cached->pict_format = picture->PictFormat;
+    cached->image_hash = *image_hash;
+    cached->clut_hash = *clut_hash;
+    return 1;
+}
+
 extern void* Ps2_tex_cache_buff[4];
 extern unsigned int Ps2_tex_cache_beflag[4];
 
 void Ps2PcTextureSourceCacheReset(void)
 {
     unsigned int i;
+
+    memset(pc_tim2_fingerprints, 0, sizeof(pc_tim2_fingerprints));
+    memset(&pc_ps2_texture_bind_cache, 0, sizeof(pc_ps2_texture_bind_cache));
+
+    /* Registration may reuse a source address for different bytes. The legacy pointer cache
+     * must not report that new source as already transferred. */
     for (i = 0; i < 4; i++)
     {
         Ps2_tex_cache_buff[i] = NULL;
@@ -2857,7 +2950,7 @@ void Ps2InitTexCache()
 #ifdef TARGET_PC
     Ps2PcTextureSourceCacheReset();
     pcGsResetTextureAssetCache();
-    pcGsSetTextureAssetIdentity(0, 0);
+    pcGsSetTextureAssetIdentity(0, 0, 0);
 #endif
 }
 
@@ -2914,9 +3007,9 @@ static int Ps2EnsureTextureImage(NJS_TEXMEMLIST* addr, TIM2_PICTUREHEADER_EX* ti
         cache_flag = 0;
         pcTextureTraceEvent("IMAGE_PATH", "gindex=%u action=skip reason=same_tim2_pointer", timp->Gindex);
 #ifdef TARGET_PC
-        if (asset_cache_eligible)
+        if (asset_cache_eligible && asset_cache_hit)
         {
-            pcTextureTraceEvent("IMAGE_PATH", "gindex=%u action=rebind reason=static_asset_registry", timp->Gindex);
+            pcTextureTraceEvent("IMAGE_PATH", "gindex=%u action=rebind reason=native_asset_cache_hit", timp->Gindex);
             goto upload_image;
         }
 #endif
@@ -3077,50 +3170,34 @@ static void Ps2BindTextureState(NJS_TEXMEMLIST* addr, TIM2_PICTUREHEADER_EX* tim
 // 97.17% matching
 int Ps2TexLoad(NJS_TEXMEMLIST* addr)
 {
-    unsigned int tbw, psm, tw, th;
+    unsigned int tbw;
+    unsigned int psm;
+    unsigned int tw;
+    unsigned int th;
     TIM2_PICTUREHEADER_EX* timp;
     unsigned int cache_flag;
 #ifdef TARGET_PC
-    uint64_t asset_handle;
+    int asset_cache_eligible = 0;
+    int asset_cache_hit = 0;
+    uint64_t image_content_hash = 0;
+    uint64_t clut_content_hash = 0;
     uint64_t asset_cache_tex0 = 0;
-    int asset_cache_eligible = 0, asset_cache_hit = 0;
-    PcGsTextureAssetState asset_state;
 #endif
 
     cache_flag = 1;
-    if (addr == NULL)
+    if ((addr == NULL) || (addr->texinfo.texsurface.pSurface == NULL))
     {
-        pcTextureTraceEvent("TEX_INVALID", "null_texture_memlist");
+        pcTextureTraceEvent("TEX_INVALID", "null_texture_memlist_or_surface");
         return printf("Ps2CurrentTexLoad ERROR!!!!\n");
     }
+
     Ps2_now_tex = addr;
-
-#ifdef TARGET_PC
-    asset_handle = (uint64_t)(uintptr_t)addr;
-    if (pcGsGetTextureAssetState(asset_handle, &asset_state))
-    {
-        /* Direct registry hit: no TIM2 dereference, no Ensure helper, no GIF/DMA, no GS transfer. */
-        Ps2_gs_save.TEX0 = (unsigned long)asset_state.tex0;
-        Ps2_gs_save.TEX0_NEXT = (unsigned long)asset_state.tex0;
-        Ps2_gs_save.TEX1 = (unsigned long)asset_state.tex1;
-        Ps2_gs_save.CLAMP = (unsigned long)asset_state.clamp;
-        Ps2_gs_save.TEST = (unsigned long)asset_state.test;
-        pcGsApplyTextureAssetState(asset_handle, &asset_state);
-        return 0;
-    }
-#endif
-
-    if (addr->texinfo.texsurface.pSurface == NULL)
-    {
-        pcTextureTraceEvent("TEX_INVALID", "null_texture_surface");
-        return printf("Ps2CurrentTexLoad ERROR!!!!\n");
-    }
     timp = (TIM2_PICTUREHEADER_EX*)addr->texinfo.texsurface.pSurface;
     pcTextureTraceEvent("TEX_REQUEST",
                         "tid=%u gindex=%u bank=%u image=%ux%u image_type=%u pict=%u clut=%u tpflag=%u clamp=%u",
                         pc_texture_trace_current_tid, addr->globalIndex, addr->bank,
-                        timp->ImageWidth, timp->ImageHeight, timp->ImageType,
-                        timp->PictFormat, timp->ClutType, timp->TpFlag, timp->ClampFlag);
+                        timp->ImageWidth, timp->ImageHeight,
+                        timp->ImageType, timp->PictFormat, timp->ClutType, timp->TpFlag, timp->ClampFlag);
 
     tbw = timp->GsTex0.TBW;
     tw = Ps2BitCount(timp->ImageWidth);
@@ -3137,42 +3214,105 @@ int Ps2TexLoad(NJS_TEXMEMLIST* addr)
                            (timp->TpFlag == 0) && (timp->ClutType != 0) &&
                            (PS2_Render_tex_sub_flag == 0) &&
                            !((timp->PictFormat >= 5) && (timp->PictFormat <= 8)) &&
-                           ((timp->ImageType == 4) || (timp->ImageType == 5)) &&
-                           (tw <= 10) && (th <= 10) &&
-                           !((timp->ImageWidth > 128) && (timp->ImageHeight > 128) &&
-                             (timp->ImageWidth < 1024) && (timp->ImageHeight < 1024));
+                           ((timp->ImageType == 4) || (timp->ImageType == 5));
     if (asset_cache_eligible)
+    {
+        if (!pc_tim2_source_hashes(timp, &image_content_hash, &clut_content_hash) ||
+            (tw >= 31) || (th >= 31))
+            asset_cache_eligible = 0;
+    }
+    if (asset_cache_eligible)
+    {
         asset_cache_tex0 = SCE_GS_SET_TEX0_1(190 * 64, tbw, psm, tw, th, 1,
                                              SCE_GS_MODULATE, 254 * 64,
                                              SCE_GS_PSMCT32, 0, 0, 2);
+        asset_cache_hit = pcGsTextureAssetCacheContains(
+            timp->Gindex, image_content_hash, asset_cache_tex0,
+            (int)(1U << tw), (int)(1U << th));
+        if (asset_cache_hit && !Ps2_current_texbreak &&
+            pc_ps2_texture_bind_cache.valid &&
+            (pc_ps2_texture_bind_cache.state_generation == pcGsGetTextureBindingGeneration()) &&
+            (pc_ps2_texture_bind_cache.gindex == timp->Gindex) &&
+            (pc_ps2_texture_bind_cache.image_hash == image_content_hash) &&
+            (pc_ps2_texture_bind_cache.clut_hash == clut_content_hash) &&
+            (pc_ps2_texture_bind_cache.tex0 == asset_cache_tex0) &&
+            (pc_ps2_texture_bind_cache.tbw == tbw) &&
+            (pc_ps2_texture_bind_cache.tw == tw) && (pc_ps2_texture_bind_cache.th == th) &&
+            (pc_ps2_texture_bind_cache.psm == psm) &&
+            (pc_ps2_texture_bind_cache.image_width == timp->ImageWidth) &&
+            (pc_ps2_texture_bind_cache.image_height == timp->ImageHeight) &&
+            (pc_ps2_texture_bind_cache.pict_format == timp->PictFormat) &&
+            (pc_ps2_texture_bind_cache.image_type == timp->ImageType) &&
+            (pc_ps2_texture_bind_cache.clut_type == timp->ClutType) &&
+            (pc_ps2_texture_bind_cache.clamp_flag == timp->ClampFlag) &&
+            (pc_ps2_texture_bind_cache.bank == addr->bank) &&
+            (pc_ps2_texture_bind_cache.render_sub_flag == PS2_Render_tex_sub_flag))
+        {
+            Ps2_tex_cache_buff[0] = addr->texinfo.texsurface.pSurface;
+            Ps2BindTextureState(addr, timp, psm, tbw, tw, th);
+            pcGsSetTextureAssetIdentity(timp->Gindex, asset_cache_eligible, image_content_hash);
+            pc_ps2_texture_bind_cache.state_generation = pcGsGetTextureBindingGeneration();
+            pcTextureTraceEvent("TEX_RESULT", "gindex=%u asset_cache=hit bind_cache=hit image_transfer=skipped state_rebind=done",
+                                timp->Gindex);
+            return 0;
+        }
+    }
+    pc_ps2_texture_bind_cache.valid = 0;
 #endif
 
     cache_flag = Ps2EnsureTextureImage(addr, timp,
 #ifdef TARGET_PC
-                                       asset_cache_eligible, 0
+                                       asset_cache_eligible, asset_cache_hit
 #else
                                        0, 0
 #endif
                                        );
+    pcTextureTraceEvent("TEX_CACHE_RESULT", "gindex=%u ps2_pointer_cache_flag=%u asset_cache_eligible=%d asset_cache_hit=%d",
+                        timp->Gindex, cache_flag,
+#ifdef TARGET_PC
+                        asset_cache_eligible, asset_cache_hit
+#else
+                        0, 0
+#endif
+                        );
     Ps2BindTextureState(addr, timp, psm, tbw, tw, th);
 
 #ifdef TARGET_PC
+    pcGsSetTextureAssetIdentity(timp->Gindex, asset_cache_eligible, image_content_hash);
     if (asset_cache_eligible)
     {
-        asset_state.tex0 = asset_cache_tex0;
-        asset_state.tex1 = Ps2_gs_save.TEX1;
-        asset_state.clamp = Ps2_gs_save.CLAMP;
-        asset_state.test = Ps2_gs_save.TEST;
-        asset_state.texa = 0;
-        asset_state.texclut = 0;
-        asset_cache_hit = pcGsPreloadTextureAsset(
-            asset_handle, &asset_state, (int)(1U << tw), (int)(1U << th));
+        pc_ps2_texture_bind_cache.valid = 1;
+        pc_ps2_texture_bind_cache.state_generation = pcGsGetTextureBindingGeneration();
+        pc_ps2_texture_bind_cache.image_hash = image_content_hash;
+        pc_ps2_texture_bind_cache.clut_hash = clut_content_hash;
+        pc_ps2_texture_bind_cache.tex0 = asset_cache_tex0;
+        pc_ps2_texture_bind_cache.gindex = timp->Gindex;
+        pc_ps2_texture_bind_cache.tbw = tbw;
+        pc_ps2_texture_bind_cache.tw = tw;
+        pc_ps2_texture_bind_cache.th = th;
+        pc_ps2_texture_bind_cache.psm = psm;
+        pc_ps2_texture_bind_cache.image_width = timp->ImageWidth;
+        pc_ps2_texture_bind_cache.image_height = timp->ImageHeight;
+        pc_ps2_texture_bind_cache.pict_format = timp->PictFormat;
+        pc_ps2_texture_bind_cache.image_type = timp->ImageType;
+        pc_ps2_texture_bind_cache.clut_type = timp->ClutType;
+        pc_ps2_texture_bind_cache.clamp_flag = timp->ClampFlag;
+        pc_ps2_texture_bind_cache.bank = addr->bank;
+        pc_ps2_texture_bind_cache.render_sub_flag = PS2_Render_tex_sub_flag;
     }
-    pcGsSetTextureAssetIdentity(asset_handle, asset_cache_hit);
 #endif
-
+    pcTextureTraceEvent("TEX_RESULT",
+                        "gindex=%u ps2_pointer_cache_flag=%u asset_cache_eligible=%d asset_cache_hit=%d",
+                        timp->Gindex, cache_flag,
+#ifdef TARGET_PC
+                        asset_cache_eligible, asset_cache_hit
+#else
+                        0, 0
+#endif
+                        );
     return cache_flag;
 }
+
 void Ps2SetFogColor()
 {
 	D2_SyncTag();

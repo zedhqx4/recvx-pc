@@ -12,7 +12,8 @@
 #include "../../include/pc_texture_cache.h"
 
 GsRegs gsRegs;
-static uint64_t gsTextureAssetId[2];
+static unsigned int gsTextureAssetId[2];
+static uint64_t gsTextureAssetContentHash[2];
 static int gsTextureAssetValid[2];
 static uint64_t gsTextureBindingGeneration;
 int gsDumpFrame;
@@ -28,9 +29,10 @@ int gsTextureDiagnosticsEnabled(void)
     return enabled;
 }
 
-void pcGsSetTextureAssetIdentity(uint64_t asset_id, int valid)
+void pcGsSetTextureAssetIdentity(unsigned int asset_id, int valid, uint64_t content_hash)
 {
-    gsTextureAssetId[0] = valid ? asset_id : 0;
+    gsTextureAssetId[0] = asset_id;
+    gsTextureAssetContentHash[0] = valid ? content_hash : 0;
     gsTextureAssetValid[0] = valid != 0;
 }
 
@@ -86,7 +88,8 @@ static void current_state(GsDrawState* st)
     st->colclamp = gsRegs.colclamp;
     st->texclut = gsRegs.texclut;
     st->texture_asset_id = gsTextureAssetId[c];
-        st->texture_asset_valid = gsTextureAssetValid[c];
+    st->texture_asset_content_hash = gsTextureAssetContentHash[c];
+    st->texture_asset_valid = gsTextureAssetValid[c];
     st->font_filter_nearest = gs_font_filter_nearest ||
                               (pcFontFilterDrawActive() && !pcFontFilterIsLinear());
 }
@@ -101,31 +104,6 @@ void gsFlushPrims(void)
     out_count = 0;
     out_valid = 0;
 }
-
-/* Directly select a prepared resource: update emulated state without GIF/DMA packets. */
-void pcGsApplyTextureAssetState(uint64_t asset_id, const PcGsTextureAssetState* state)
-{
-    int changed;
-    if (asset_id == 0 || state == NULL)
-        return;
-    changed = !gsTextureAssetValid[0] || gsTextureAssetId[0] != asset_id ||
-              gsRegs.tex0[0] != state->tex0 || gsRegs.tex1[0] != state->tex1 ||
-              gsRegs.clamp[0] != state->clamp || gsRegs.test[0] != state->test ||
-              gsRegs.texa != state->texa || gsRegs.texclut != state->texclut;
-    if (!changed)
-        return;
-    gsFlushPrims();
-    gsTextureBindingGeneration++;
-    gsRegs.tex0[0] = state->tex0;
-    gsRegs.tex1[0] = state->tex1;
-    gsRegs.clamp[0] = state->clamp;
-    gsRegs.test[0] = state->test;
-    gsRegs.texa = state->texa;
-    gsRegs.texclut = state->texclut;
-    gsTextureAssetId[0] = asset_id;
-    gsTextureAssetValid[0] = 1;
-}
-
 
 static void emit(const GsVertex* v, int n)
 {
@@ -307,8 +285,8 @@ void gsWriteReg(int reg, u64 value)
     case 0x03: gsRegs.uv = value; break;
     case 0x04: latch_vertex(value, 1, 1); break;
     case 0x05: latch_vertex(value, 0, 1); break;
-    case 0x06: gsRegs.tex0[0] = value; gsTextureAssetId[0] = 0; gsTextureAssetValid[0] = 0; clut_load(value); break;
-    case 0x07: gsRegs.tex0[1] = value; gsTextureAssetId[1] = 0; gsTextureAssetValid[1] = 0; clut_load(value); break;
+    case 0x06: gsRegs.tex0[0] = value; gsTextureAssetId[0] = 0; gsTextureAssetContentHash[0] = 0; gsTextureAssetValid[0] = 0; clut_load(value); break;
+    case 0x07: gsRegs.tex0[1] = value; gsTextureAssetId[1] = 0; gsTextureAssetContentHash[1] = 0; gsTextureAssetValid[1] = 0; clut_load(value); break;
     case 0x08: gsRegs.clamp[0] = value; break;
     case 0x09: gsRegs.clamp[1] = value; break;
     case 0x0a: gsRegs.fog = value; break;
@@ -323,6 +301,7 @@ void gsWriteReg(int reg, u64 value)
         u64 mask = (0x3FULL << 20) | (0xFFFFFFFULL << 37);
 
         gsTextureAssetId[c] = 0;
+        gsTextureAssetContentHash[c] = 0;
         gsTextureAssetValid[c] = 0;
         gsRegs.tex2[c] = value;
         gsRegs.tex0[c] = (gsRegs.tex0[c] & ~mask) | (value & mask);
@@ -333,17 +312,9 @@ void gsWriteReg(int reg, u64 value)
     case 0x19: gsRegs.xyoffset[1] = value; break;
     case 0x1a: gsRegs.prmodecont = value; break;
     case 0x1b: gsRegs.prmode = value; break;
-    case 0x1c:
-        gsRegs.texclut = value;
-        gsTextureAssetId[0] = gsTextureAssetId[1] = 0;
-        gsTextureAssetValid[0] = gsTextureAssetValid[1] = 0;
-        break;
+    case 0x1c: gsRegs.texclut = value; break;
     case 0x22: gsRegs.scanmsk = value; break;
-    case 0x3b:
-        gsRegs.texa = value;
-        gsTextureAssetId[0] = gsTextureAssetId[1] = 0;
-        gsTextureAssetValid[0] = gsTextureAssetValid[1] = 0;
-        break;
+    case 0x3b: gsRegs.texa = value; break;
     case 0x3d: gsRegs.fogcol = value; break;
     case 0x3f: break; /* TEXFLUSH */
     case 0x40: gsRegs.scissor[0] = value; break;
@@ -801,50 +772,6 @@ static void read_clut(u64 tex0, u64 texa, int entries, unsigned int* clut)
 void gsReadClut32(u64 tex0, u64 texa, int entries, unsigned int* clut)
 {
     read_clut(tex0, texa, entries, clut);
-}
-
-/* Snapshot palette bytes from the TIM2 GS-VRAM destination without changing live CLUT state. */
-void gsReadClutFromVram(u64 tex0, u64 texa, u64 texclut, int entries, unsigned int* clut)
-{
-    unsigned int cbp = GSF(tex0, 37, 14), cpsm = GSF(tex0, 51, 4);
-    unsigned int csm = GSF(tex0, 55, 1);
-    unsigned int bw = csm ? GSF(texclut, 0, 6) : 1;
-    int i;
-    if (clut == NULL || entries <= 0 || entries > 256)
-        return;
-    for (i = 0; i < entries; i++)
-    {
-        unsigned int x, y, c;
-        if (!csm)
-        {
-            if (entries == 256)
-            {
-                unsigned int j = ((unsigned int)i & 0xE7) |
-                                 (((unsigned int)i & 0x08) << 1) |
-                                 (((unsigned int)i & 0x10) >> 1);
-                x = j & 15; y = j >> 4;
-            }
-            else
-            {
-                x = (unsigned int)i & 7; y = (unsigned int)i >> 3;
-            }
-        }
-        else
-        {
-            x = GSF(texclut, 6, 6) * 16 + (unsigned int)i;
-            y = GSF(texclut, 12, 10);
-        }
-        if (cpsm == GS_PSMCT32 || cpsm == GS_PSMCT24)
-        {
-            c = gsMemRead(GS_PSMCT32, cbp, bw, x, y);
-            clut[i] = cpsm == GS_PSMCT24 ? expand24(c, texa) : c;
-        }
-        else
-        {
-            c = gsMemRead(cpsm == GS_PSMCT16S ? GS_PSMCT16S : GS_PSMCT16, cbp, bw, x, y);
-            clut[i] = expand16(c, texa);
-        }
-    }
 }
 
 /* hash of the palette entries a texture would use (texture cache key) */
