@@ -137,6 +137,11 @@ void bhCheckCut(int flg)
                             
                             cam.ncut = pp;
                             
+#ifdef TARGET_PC
+                            pcTextureTraceEvent("CAMERA_CUT_DECISION", "caller=bhCheckCut mode=area_transition previous=%d candidate=%d selected=%d player=(%.3f,%.3f) sampled=(%.3f,%.3f) alternatives=%d,%d,%d,%d floor=%d flags=%08x",
+                                                cam.ocut, pp, cam.ncut, plp->gpx, plp->gpz, gpx, gpz,
+                                                p0, p1, p2, p3, plp->flr_no, flg);
+#endif
                             bhSetCut(cam.ncut, 0);
                         }
                     }
