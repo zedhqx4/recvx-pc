@@ -99,6 +99,10 @@ void bhCheckCut(int flg)
                         cam.ncut = pp;
                     }
                     
+#ifdef TARGET_PC
+                    pcTextureTraceEvent("CAMERA_CUT_DECISION", "caller=bhCheckCut mode=forced previous=%d candidate=%d selected=%d player=(%.3f,%.3f) floor=%d flags=%08x",
+                                        cam.ocut, pp, cam.ncut, plp->gpx, plp->gpz, plp->flr_no, flg);
+#endif
                     bhSetCut(cam.ncut, 1);
                     
                     cam.ocflg = rom->cutp[cam.ncut].cam[cam.camver].flg;
