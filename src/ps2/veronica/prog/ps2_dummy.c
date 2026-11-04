@@ -1,5 +1,6 @@
 #ifdef TARGET_PC
 #include "../../../../pc/include/pc_platform.h"
+#include "../../../../pc/include/pc_gs.h"
 #endif
 #include "../../../ps2/veronica/prog/ps2_dummy.h"
 #include "../../../ps2/veronica/prog/ps2_loadtim2.h"
@@ -11,6 +12,9 @@
 #include "../../../ps2/veronica/prog/ps2_texture.h"
 #include "../../../ps2/veronica/prog/sdfunc.h"
 #include "../../../ps2/veronica/prog/main.h"
+#ifdef TARGET_PC
+extern SYS_WORK* sys;
+#endif
 
 // the three vars below were originally defined as unsigned int in ps2_NaFog.c, and redeclared as unsigned long here
 extern unsigned long ulNaFogR;
@@ -2488,6 +2492,9 @@ int Ps2TexLoad(NJS_TEXMEMLIST* addr)
     unsigned int cache_flag;  
     unsigned int temp; // not from the debugging symbols
 
+#ifdef TARGET_PC
+    pcGsProfileTexLoad(sys != NULL ? (unsigned char)sys->rom_no : -1);
+#endif
     cache_flag = 1;
 
     if ((addr == NULL) || (addr->texinfo.texsurface.pSurface == NULL)) 

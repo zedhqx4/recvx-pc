@@ -9,6 +9,10 @@
 #include "../../../ps2/veronica/prog/ps2_NaTextureFunction.h"
 #include "../../../ps2/veronica/prog/ps2_NaView.h"
 #include "../../../ps2/veronica/prog/ps2_Vu1Strip.h"
+#ifdef TARGET_PC
+#include "../../../../pc/include/pc_gs.h"
+extern SYS_WORK* sys;
+#endif
 
 static VU1_STRIP_BUF* pNaCnkVerBufTop;
 static int iNaCnkVerBufMax;
@@ -921,6 +925,9 @@ CHUNK_HEAD* njCnkCbExp(CHUNK_HEAD* pCnk)
 // 100% matching!
 CHUNK_HEAD* njCnkCtTid(CHUNK_HEAD* pCnk) 
 {
+#ifdef TARGET_PC
+    pcGsProfileCnkTid(sys != NULL ? (unsigned char)sys->rom_no : -1);
+#endif
     if (((pCnk->ucHeadBits >> 6) & 0x3)) 
     {
         printf("'Texture Flip' Exist in 'CNK-DATA' !!\n");

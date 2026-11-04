@@ -11,6 +11,10 @@
 
 #include "gs_internal.h"
 
+#ifndef GS_BLOCK_FASTPATH
+#define GS_BLOCK_FASTPATH 1
+#endif
+
 unsigned char gsVram[GS_VRAM_SIZE];
 unsigned int gsPageGen[GS_PAGES];
 
@@ -645,6 +649,86 @@ static void transfer32Run(const unsigned char* data, int bytes, const unsigned c
     }
 }
 
+
+/* PSMT8 and PSMT4 host-to-GS fast paths. A physical GS block is 256 bytes; its texels
+ * are swizzled, so each complete block is assembled in GS order before compare/copy. */
+static int transfer8Blocks(const unsigned char* data, int bytes)
+{
+    int i = 0;
+    while (xfer.active && xfer.x == xfer.sx && (xfer.sx & 15u) == 0 &&
+           (xfer.w & 15u) == 0 && (xfer.y & 15u) == 0 &&
+           xfer.sy + xfer.h - xfer.y >= 16u && bytes - i >= (int)(xfer.w * 16u))
+    {
+        unsigned int bx, yy, xx;
+        for (bx = 0; bx < xfer.w; bx += 16u)
+        {
+            unsigned char block[256];
+            unsigned int a = addr8(xfer.bp, xfer.bw, xfer.sx + bx, xfer.y);
+            for (yy = 0; yy < 16u; yy++)
+            {
+                const unsigned char* row = &data[i + yy * xfer.w + bx];
+                for (xx = 0; xx < 16u; xx++)
+                    block[columnTable8[yy][xx]] = row[xx];
+            }
+            if (memcmp(&gsVram[a], block, sizeof(block)) != 0)
+            {
+                memcpy(&gsVram[a], block, sizeof(block));
+                touch(a);
+                xfer.changed = 1;
+            }
+        }
+        i += (int)(xfer.w * 16u);
+        xfer.y += 16u;
+        if (xfer.y >= xfer.sy + xfer.h)
+        {
+            xfer.active = 0;
+            gsXferDone(xfer.bp, xfer.bw, xfer.psm, xfer.sx, xfer.sy, xfer.w, xfer.h, xfer.changed);
+        }
+    }
+    return i;
+}
+
+static int transfer4Blocks(const unsigned char* data, int bytes)
+{
+    int i = 0;
+    while (xfer.active && xfer.x == xfer.sx && (xfer.sx & 31u) == 0 &&
+           (xfer.w & 31u) == 0 && (xfer.y & 15u) == 0 &&
+           xfer.sy + xfer.h - xfer.y >= 16u && bytes - i >= (int)(xfer.w * 8u))
+    {
+        unsigned int bx, yy, xx;
+        for (bx = 0; bx < xfer.w; bx += 32u)
+        {
+            unsigned char block[256];
+            unsigned int a = addr4(xfer.bp, xfer.bw, xfer.sx + bx, xfer.y) >> 1;
+            memset(block, 0, sizeof(block));
+            for (yy = 0; yy < 16u; yy++)
+            {
+                const unsigned char* row = &data[i + (yy * xfer.w + bx) / 2];
+                for (xx = 0; xx < 32u; xx++)
+                {
+                    unsigned int v = (row[xx >> 1] >> ((xx & 1u) * 4u)) & 15u;
+                    unsigned int n = columnTable4[yy][xx];
+                    block[n >> 1] |= (unsigned char)(v << ((n & 1u) * 4u));
+                }
+            }
+            if (memcmp(&gsVram[a], block, sizeof(block)) != 0)
+            {
+                memcpy(&gsVram[a], block, sizeof(block));
+                touch(a);
+                xfer.changed = 1;
+            }
+        }
+        i += (int)(xfer.w * 8u);
+        xfer.y += 16u;
+        if (xfer.y >= xfer.sy + xfer.h)
+        {
+            xfer.active = 0;
+            gsXferDone(xfer.bp, xfer.bw, xfer.psm, xfer.sx, xfer.sy, xfer.w, xfer.h, xfer.changed);
+        }
+    }
+    return i;
+}
+
 void gsMemTransferData(const unsigned char* data, int qwc)
 {
     int bytes = qwc * 16;
@@ -692,7 +776,8 @@ void gsMemTransferData(const unsigned char* data, int qwc)
         break;
     case GS_PSMT8:
     case GS_PSMT8H:
-        for (i = 0; (i < bytes) && xfer.active; i++)
+        i = ((xfer.psm == GS_PSMT8) && GS_BLOCK_FASTPATH) ? transfer8Blocks(data, bytes) : 0;
+        for (; (i < bytes) && xfer.active; i++)
         {
             xfer.changed |= mem_write(xfer.psm, xfer.bp, xfer.bw, xfer.x, xfer.y, data[i]);
             advance();
@@ -701,7 +786,8 @@ void gsMemTransferData(const unsigned char* data, int qwc)
     case GS_PSMT4:
     case GS_PSMT4HL:
     case GS_PSMT4HH:
-        for (i = 0; (i < bytes) && xfer.active; i++)
+        i = ((xfer.psm == GS_PSMT4) && GS_BLOCK_FASTPATH) ? transfer4Blocks(data, bytes) : 0;
+        for (; (i < bytes) && xfer.active; i++)
         {
             xfer.changed |= mem_write(xfer.psm, xfer.bp, xfer.bw, xfer.x, xfer.y, data[i] & 15);
             advance();

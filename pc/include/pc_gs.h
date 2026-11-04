@@ -8,3 +8,7 @@ void pcGsPresent(void);                         /* draws the display buffer to t
 extern int pcGsScale;                           /* internal resolution multiplier */
 extern float pcGsScaleX;                        /* horizontal backing-buffer scale per logical pixel */
 extern float pcGsScaleY;                        /* vertical backing-buffer scale per logical pixel */
+
+/* Low-overhead per-room texture-call counters for periodic profiling. */
+void pcGsProfileTexLoad(int room);
+void pcGsProfileCnkTid(int room);

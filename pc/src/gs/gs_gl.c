@@ -261,6 +261,7 @@ static int dump_frame;
 
 /* per-interval statistics for the periodic log */
 static struct { unsigned int frames, draws, verts, rt_loads, rt_reads, tex_decodes, tex_texels; double t_load, t_read, t_decode; } stats;
+static struct { unsigned int texload8, texload66, cnktid8, cnktid66; } profile_tex_calls;
 static int tex_cached;                     /* textures in the cache, decoded from GS memory */
 static double tex_cached_bytes;            /* their size */
 
@@ -271,6 +272,18 @@ static int movie_vram_on;
 
 double pcOsTime(void);
 
+void pcGsProfileTexLoad(int room)
+{
+    if (room == 8) profile_tex_calls.texload8++;
+    else if (room == 66) profile_tex_calls.texload66++;
+}
+
+void pcGsProfileCnkTid(int room)
+{
+    if (room == 8) profile_tex_calls.cnktid8++;
+    else if (room == 66) profile_tex_calls.cnktid66++;
+}
+
 void pcGsLogStats(void)
 {
     unsigned int f = stats.frames ? stats.frames : 1;
@@ -279,6 +292,10 @@ void pcGsLogStats(void)
           stats.draws / f, stats.verts / f, (double)stats.rt_loads / f, stats.t_load * 1000 / f, (double)stats.rt_reads / f,
           stats.t_read * 1000 / f, (double)stats.tex_decodes / f, stats.tex_texels / f, stats.t_decode * 1000 / f);
     pcLog("gs: %d textures cached (%.0f MB)", tex_cached, tex_cached_bytes / 1048576.0);
+    pcLog("profile/frame: room 8 Ps2TexLoad %.1f CnkTid %.1f | room 66 Ps2TexLoad %.1f CnkTid %.1f",
+          (double)profile_tex_calls.texload8 / f, (double)profile_tex_calls.cnktid8 / f,
+          (double)profile_tex_calls.texload66 / f, (double)profile_tex_calls.cnktid66 / f);
+    memset(&profile_tex_calls, 0, sizeof(profile_tex_calls));
     memset(&stats, 0, sizeof(stats));
 }
 

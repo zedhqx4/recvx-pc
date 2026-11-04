@@ -873,3 +873,16 @@ Tab, Up/Down, Shift+Up/Down, and Backspace retain their existing edge-selection,
 - **Source review:** Confirmed a single mode state, F10 cycling only through enabled INI modes, mode-specific R handling, Escape-to-OFF behavior, removal of the menu tuner's dependency on `debug=1`, arrow-key keycode/scancode handling with repeat support, explicit before/after logging for menu adjustments, and shared profile-default arrays used by both INI fallback and Backspace reset.
 - **Windows build:** Run [41546313454](https://github.com/zedhqx4/recvx-pc/actions/runs/41546313454) passed for the preceding source revision `b9280f8` (`Build game`, `Verify executables`, and `Upload Windows build` all succeeded). This amendment changes only this comment and the development log; a fresh CI run will validate the amended commit.
 - **Runtime:** Pending. Test all four INI combinations for `fontUVfix` and `menuUVfix`, F10 cycling, R routing in each mode, and Escape exit.
+
+
+## 2026-11-04 — GS rebuild PSMT block-transfer experiment
+
+**Branch:** `experiment/gs-rebuild-psmt-block256`  
+**Base:** `experimental/gs-rebuild` @ `6ea0e8d0e348b93fc96055034c756539c4e18f2a`
+
+- Added aligned PSMT8 and PSMT4 host-to-GS transfer fast paths. Each path assembles a complete 256-byte GS block in swizzled order, compares the block with GS VRAM, and copies it only when bytes differ.
+- Unaligned, partial, unsupported, and packet-tail cases retain the original per-pixel path. PSMT8H, PSMT4HL, and PSMT4HH remain on the original path.
+- Added `GS_BLOCK_FASTPATH=0` compile-time switch for reference-vs-fast-path host testing.
+- Added per-room profile counters for `Ps2TexLoad()` and `njCnkCtTid()`, reported as average calls per rendered frame for rooms 8 and 66 in the periodic profile log.
+- No calls in the GS/game texture state flow are skipped by this experiment.
+- Validation status at commit creation: compile, host test, CI, and runtime/visual validation pending.
