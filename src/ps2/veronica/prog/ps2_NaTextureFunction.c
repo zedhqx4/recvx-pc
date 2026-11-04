@@ -50,7 +50,10 @@ static void pcPs2PreloadTextureAsset(NJS_TEXMEMLIST* p)
     if ((timp->TpFlag != 0) || (timp->ClutType == 0) ||
         ((timp->PictFormat >= 5) && (timp->PictFormat <= 8)) ||
         ((timp->ImageType != 4) && (timp->ImageType != 5)) ||
-        (timp->ImageWidth == 0) || (timp->ImageHeight == 0))
+        (timp->ImageWidth == 0) || (timp->ImageHeight == 0) ||
+        (timp->ImageWidth > 1024) || (timp->ImageHeight > 1024) ||
+        ((timp->ImageWidth > 128) && (timp->ImageHeight > 128) &&
+         (timp->ImageWidth < 1024) && (timp->ImageHeight < 1024)))
         return;
 
     if (Send_Tim2_dataEx(timp, 190 * 64, 254 * 64) < 0)

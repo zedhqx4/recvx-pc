@@ -3122,7 +3122,9 @@ int Ps2TexLoad(NJS_TEXMEMLIST* addr)
                            (PS2_Render_tex_sub_flag == 0) &&
                            !((timp->PictFormat >= 5) && (timp->PictFormat <= 8)) &&
                            ((timp->ImageType == 4) || (timp->ImageType == 5)) &&
-                           (tw <= 10) && (th <= 10);
+                           (tw <= 10) && (th <= 10) &&
+                           !((timp->ImageWidth > 128) && (timp->ImageHeight > 128) &&
+                             (timp->ImageWidth < 1024) && (timp->ImageHeight < 1024));
     if (asset_cache_eligible)
     {
         asset_cache_tex0 = SCE_GS_SET_TEX0_1(190 * 64, tbw, psm, tw, th, 1,

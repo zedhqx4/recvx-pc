@@ -1111,7 +1111,7 @@ int pcGsPreloadTextureAsset(uint64_t asset_id, uint64_t tex0, int width, int hei
 
     if (!pcGsTextureAssetCacheEnabled() || !pcGsTextureRendererReady() ||
         asset_id == 0 || width <= 0 || height <= 0 ||
-        width > 1024 || height > 1024)
+        width > 1024 || height > 1024 || !indexed_psm(GSF(tex0, 20, 6)))
         return 0;
 
     index_key0 = tex0 & 0x0000001FFFFFFFFFULL & ~(0x3ULL << 35) & ~(1ULL << 34);
