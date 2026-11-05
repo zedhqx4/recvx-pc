@@ -915,7 +915,7 @@ Repeated CPU work that was found and removed (all semantics-preserving):
 ## 2026-11-05 — Step 19: GS/OpenGL renderer audit (CPU cost, redundant GL work, readback, instrumentation)
 
 **Category:** Renderer performance / diagnostics  
-**Status:** Implemented; host-tested; Windows build passed for `1b2a21d`, build of the latest commit see "Validation"; in-game visual validation and before/after timings **pending**  
+**Status:** Implemented; host-tested; Windows build passed (`1b2a21d`, `4cb4329`); in-game visual validation and before/after timings **pending**  
 **Branch:** `claude/gl-render-audit` (base: `experiment/gl-texture-residency` @ `33f16ca`; reason: that commit is the delivered Step 18 work the user tested with a large improvement, nothing technical argued for another base)
 
 ### Evidence that drove the work
@@ -988,7 +988,7 @@ Automated (host, gcc, `pc/tests`; each test also fails against a deliberately br
 - `gs_readback_test.c`: `gsMemWriteRect32` vs per-pixel write; `gsRtReadRegion` vs full readback on 1500 cases.
 - `gs_localcopy_test.c`: 3000 random CT32 local→local copies (disjoint and overlapping) vs the per-pixel copy (VRAM and invalidated pages).
 
-Build: the Windows workflow passed (workflow_dispatch) for `1b2a21d`; the commit that adds items 7–9 is built in the same way, result recorded in the final summary of this task.
+Build: the Windows workflow passed (workflow_dispatch) for `1b2a21d` and for `4cb4329` (items 7–9), run 41990848174. This documentation commit only changes this file.
 
 **Not validated:** nothing was run in the game from this environment. Texture assignment, indexed/CLUT textures, water/underwater, movies, camera/scene changes and 2D/menus are unverified visually. No before/after timing exists; the only runtime data is the user's `33f16ca` log quoted above. The partial-readback guard (item 9) is untested on the GL side.
 
