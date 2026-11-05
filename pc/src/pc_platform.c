@@ -475,6 +475,7 @@ static struct {
     int maximized;               /* window_max= */
     int fullscreen;          /* 0 window, 1 exclusive, 2 desktop */
     int pause_unfocused;     /* pause_unfocused= (default 1) */
+    int vsync;               /* vsync= (default 1) */
     float aspect;            /* display aspect, 4:3 = 1.333 */
 } video_cfg;
 
@@ -535,6 +536,7 @@ static void video_settings(void)
 
     video_cfg.maximized = pcIniGetInt("window_max", 0) != 0;
     video_cfg.pause_unfocused = pcIniGetInt("pause_unfocused", 1) != 0;
+    video_cfg.vsync = pcIniGetInt("vsync", 1) != 0;
 
     /* Keep 640x480 game coordinates while rasterizing into a 512x448 GS backing base.
      * pcGsScale remains the user's supersampling multiplier. */
@@ -739,14 +741,17 @@ void pcVideoInit(void)
         pcPlatformFatal("Could not create an OpenGL 3.3 context: %s", SDL_GetError());
     }
 
-    SDL_GL_SetSwapInterval(0);   /* frame pacing comes from the emulated VBLANK */
+    if (!SDL_GL_SetSwapInterval(video_cfg.vsync ? 1 : 0))
+    {
+        pcLog("video: could not set swap interval %d: %s", video_cfg.vsync ? 1 : 0, SDL_GetError());
+    }
 
     pcGsInit(spr);
 
     pcPadInit();
 
-    pcLog("video: SDL %d.%d.%d, window %dx%d%s, aspect %.3f", SDL_MAJOR_VERSION, SDL_MINOR_VERSION, SDL_MICRO_VERSION,
-          video_cfg.win_w, video_cfg.win_h, video_cfg.fullscreen ? " (fullscreen)" : "", video_cfg.aspect);
+    pcLog("video: SDL %d.%d.%d, window %dx%d%s, aspect %.3f, vsync %d", SDL_MAJOR_VERSION, SDL_MINOR_VERSION, SDL_MICRO_VERSION,
+          video_cfg.win_w, video_cfg.win_h, video_cfg.fullscreen ? " (fullscreen)" : "", video_cfg.aspect, video_cfg.vsync);
 }
 
 /* testing aids drive the game without the window being active: never pause for them */
