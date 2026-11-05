@@ -31,7 +31,7 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Apply temporary MSVC fix
+      - name: Apply temporary MSVC fix # fresh rebuild
         shell: pwsh
         run: |
           $file = Join-Path $env:GITHUB_WORKSPACE 'pc/tools/msvc.py'
