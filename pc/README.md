@@ -97,6 +97,19 @@ Environment variables for testing:
 | `RECVX_SNDLOG=1` | log sound sequence starts, rejected sequences, sequence uploads and reverb changes |
 | `RECVX_MCLOG=1` | log save-folder (memory card) calls |
 
+## GS decal depth priority
+
+The renderer applies a small polygon offset only to an explicit allowlist of 25 exact GS material
+signatures captured from known decal surfaces. Matching requires the shared GS register state and
+the exact TEX0 and ALPHA values; broad Z16S/GEQUAL/ABE heuristics are not used. The two recorded
+arms/shirt negative-control signatures are excluded.
+
+Matched draws receive draw-order priorities 1–4, capped at 4, with a zero factor and
+`priority * 0.50` units (+0.5 to +2.0). The counter resets once per presented frame, and
+`GL_POLYGON_OFFSET_FILL` is disabled immediately after the draw, including alpha-test multipass
+draws. This is based on GS state rather than source-object identity, so another object reusing an
+identical signature can also match.
+
 ## Tools
 
 ```bash
