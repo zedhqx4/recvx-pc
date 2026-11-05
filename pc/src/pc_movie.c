@@ -43,6 +43,7 @@ void pcMpegSetVolume(int vol);
 int pcMpegUpdate(unsigned char* rgba, int max_bytes, int* w, int* h);
 int pcMpegSize(int* w, int* h);
 void pcGsMovieFrame(unsigned int tbp, const unsigned char* rgba, int w, int h, int scale);
+void pcGsMovieVramFrame(unsigned int tbp, unsigned int tbw, int w, int h);
 void gsRendererFlush(void);
 const char* pcCdDataDir(void);
 void gsGifTransfer(const void* data, int qwc);
@@ -55,9 +56,30 @@ static int image_cap = 512 * 512 * 4;
 #define HD_SCALE 4                  /* upscaled movies are 4x the originals */
 static int hd;                      /* playing an upscaled movie */
 static int hd_w, hd_h;              /* its frame size */
+static int movie_use_gl;            /* video_gl=1: upload SD frames directly to the GL movie texture */
+static int movie_gl_active;
+static int movie_gs_active;
 
 void initAll()
 {
+    if (movie_gl_active || movie_gs_active)
+    {
+        gsRendererFlush();
+
+        if (movie_gl_active)
+        {
+            pcGsMovieFrame(0, NULL, 0, 0, 0);
+            movie_gl_active = 0;
+        }
+
+        if (movie_gs_active)
+        {
+            pcGsMovieVramFrame(0, 0, 0, 0);
+            movie_gs_active = 0;
+        }
+    }
+
+    hd = 0;
     rmi.iMovieState = MOVIE_STATE_PREP;
     rmi.iMovieFrame = Ps2_vcount;
     playing = 0;
@@ -88,6 +110,9 @@ void pcMovieStart(const char* name)
         pcLog("movie: %s skipped (movies need the extracted data folder, see pc/tools/convert_movies.py)", name);
         return;
     }
+
+    /* video_gl=1 selects Alpha's direct GL upload for SD movies; GS/VRAM is the default. */
+    movie_use_gl = pcIniGetInt("video_gl", 0) != 0;
 
     /* the upscaled version first (unless turned off), then the converted original */
     hd = 0;
@@ -138,6 +163,7 @@ void pcMovieStart(const char* name)
 
     playing = 1;
     image_new = 0;
+    pcLog("movie: %s renderer (%s)", hd ? "GL" : (movie_use_gl ? "GL" : "GS"), hd ? "upscaled" : (movie_use_gl ? "direct frame upload" : "GS VRAM frame"));
 }
 
 void readMpeg()
@@ -189,15 +215,27 @@ void termAll()
         playing = 0;
     }
 
-    if (hd)
+    if (movie_gl_active || movie_gs_active)
     {
         gsRendererFlush();
-        pcGsMovieFrame(0, NULL, 0, 0, 0);
-        hd = 0;
+
+        if (movie_gl_active)
+        {
+            pcGsMovieFrame(0, NULL, 0, 0, 0);
+            movie_gl_active = 0;
+        }
+
+        if (movie_gs_active)
+        {
+            pcGsMovieVramFrame(0, 0, 0, 0);
+            movie_gs_active = 0;
+        }
     }
+
+    hd = 0;
 }
 
-/* upload the current frame where the PS2 player put it */
+/* upload the current frame using the selected SD movie path */
 void setImageTag(unsigned int* tags, void* unused)
 {
     u_long gif[12];
@@ -213,12 +251,26 @@ void setImageTag(unsigned int* tags, void* unused)
 
     image_new = 0;
 
-    if (hd)
+    /* Upscaled movies always use their dedicated GL texture; they do not fit in GS VRAM. */
+    if (hd || movie_use_gl)
     {
         gsRendererFlush();   /* the previous frame's sprite may still be queued */
-        pcGsMovieFrame(MOVIE_TBP, image + 16, hd_w, hd_h, HD_SCALE);
+
+        if (hd)
+        {
+            pcGsMovieFrame(MOVIE_TBP, image + 16, hd_w, hd_h, HD_SCALE);
+        }
+        else
+        {
+            pcGsMovieFrame(MOVIE_TBP, image + 16, image_w, image_h, 1);
+        }
+
+        movie_gl_active = 1;
         return;
     }
+
+    /* GS route: upload the decoded pixels into GS VRAM, then refresh its persistent GL view. */
+    gsRendererFlush();
 
     gif[0] = SCE_GIF_SET_TAG(4, SCE_GS_TRUE, SCE_GS_FALSE, 0, SCE_GIF_PACKED, 1);
     gif[1] = SCE_GIF_PACKED_AD;
@@ -236,6 +288,9 @@ void setImageTag(unsigned int* tags, void* unused)
     ((u_long*)image)[0] = SCE_GIF_SET_TAG(qwc, SCE_GS_TRUE, SCE_GS_FALSE, 0, SCE_GIF_IMAGE, 0);
     ((u_long*)image)[1] = 0;
     gsGifTransfer(image, 1 + qwc);
+
+    pcGsMovieVramFrame(MOVIE_TBP, MOVIE_TBW, image_w, image_h);
+    movie_gs_active = 1;
 }
 
 /* the original's sprite: decoded image (TBP 14208) stretched to the movie's display rectangle */
