@@ -47,7 +47,7 @@ jobs:
           $source = Get-Content $file -Raw
 
           $old = '    exe = shutil.which(args[0], path=env["PATH"]) or args[0]'
-          $new = '    path = next((v for k, v in env.items() if k.casefold() == "path"), "")' + "`r`n" + '    exe = shutil.which(args[0], path=path) or args[0]'
+          $new = '    path = next((v for k, v in env.items() if k.casefold() == "path"), "")' + [Environment]::NewLine + '    exe = shutil.which(args[0], path=path) or args[0]'
 
           if (-not $source.Contains($old)) {
             throw 'Expected MSVC code not found; refusing to patch.'
@@ -75,17 +75,6 @@ jobs:
               throw "Expected build artifact not found: $file"
             }
           }
-
-      - name: Upload experimental Windows build
-        uses: actions/upload-artifact@v4
-        with:
-          name: recvx-pc-windows-clut-frame-diagnostics
-          path: |
-            build_pc/recvx.exe
-            build_pc/recvx-config.exe
-            build_pc/SDL3.dll
-            build_pc/libusb-1.0.dll
-          if-no-files-found: error
 
       - name: Smoke-test executable startup
         shell: pwsh
@@ -129,19 +118,61 @@ jobs:
           }
           Write-Host 'Startup smoke test passed: main, SDL initialization, window, and OpenGL context.'
 
-      - name: Verify executables
+      - name: Verify executables and collect build metadata
         shell: pwsh
         run: |
           $dir = Join-Path $env:GITHUB_WORKSPACE 'build_pc'
-          $required = @('recvx.exe', 'recvx-config.exe')
+          $required = @('recvx.exe', 'recvx-config.exe', 'SDL3.dll', 'libusb-1.0.dll')
 
           foreach ($name in $required) {
             $file = Join-Path $dir $name
             if (-not (Test-Path $file)) {
-              throw "Expected executable not found: $file"
+              throw "Expected build artifact not found: $file"
             }
             Write-Host "Found: $file"
           }
 
-          Get-ChildItem $dir -File
+          $commitMessage = git log -1 --pretty=%s
+          $builtAt = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
+          $metadata = @(
+            'recvx-pc Windows build'
+            "Branch: $env:GITHUB_REF_NAME"
+            "Commit: $env:GITHUB_SHA"
+            "Commit message: $commitMessage"
+            "Built at (UTC): $builtAt"
+            "Workflow: $env:GITHUB_WORKFLOW"
+            "Run: $env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID"
+            ''
+            'SHA256:'
+          )
 
+          foreach ($name in $required) {
+            $hash = (Get-FileHash (Join-Path $dir $name) -Algorithm SHA256).Hash
+            $metadata += "$hash  $name"
+          }
+
+          $metadata | Set-Content -Path (Join-Path $dir 'BUILD_INFO.txt') -Encoding utf8
+          Write-Host '--- BUILD_INFO.txt ---'
+          Get-Content (Join-Path $dir 'BUILD_INFO.txt')
+
+      - name: Prepare artifact name
+        id: artifact-meta
+        shell: pwsh
+        run: |
+          $branch = $env:GITHUB_REF_NAME -replace '[^A-Za-z0-9._-]', '-'
+          $commit = $env:GITHUB_SHA.Substring(0, 7)
+          "name=recvx-pc_$($branch)_$($commit)" | Add-Content -Path $env:GITHUB_OUTPUT
+
+      - name: Upload Windows build and diagnostics
+        uses: actions/upload-artifact@v4
+        with:
+          name: \${{ steps.artifact-meta.outputs.name }}
+          path: |
+            build_pc/recvx.exe
+            build_pc/recvx-config.exe
+            build_pc/SDL3.dll
+            build_pc/libusb-1.0.dll
+            build_pc/BUILD_INFO.txt
+            build_pc/recvx-startup.log
+            build_pc/recvx.log
+          if-no-files-found: error
