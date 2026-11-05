@@ -7,6 +7,7 @@ on:
       - pc-port
       - experimental/gs-rebuild
       - experimental/GSps2texloadcache
+      - ps2texloadunderwaterfix
       - FONTFix
     paths-ignore:
       - '**.md'
