@@ -481,7 +481,8 @@ case GS_PSMT4HH:o=columnTable32[y][x]*4u+3u;b[o]=(unsigned char)((b[o]&15u)|((v&
 }}
 static unsigned int gs_block_get(const unsigned char b[256],int p,unsigned int x,unsigned int y){
 unsigned int o,v,n;switch(p){
-case GS_PSMCT32:case GS_PSMCT24:case GS_PSMZ32:case GS_PSMZ24:o=columnTable32[y][x]*4u;memcpy(&v,b+o,4);return v;
+case GS_PSMCT32:case GS_PSMZ32:o=columnTable32[y][x]*4u;memcpy(&v,b+o,4);return v;
+case GS_PSMCT24:case GS_PSMZ24:o=columnTable32[y][x]*4u;memcpy(&v,b+o,4);return v&0x00FFFFFFu;
 case GS_PSMCT16:case GS_PSMCT16S:case GS_PSMZ16:case GS_PSMZ16S:o=columnTable16[y][x]*2u;return b[o]|((unsigned int)b[o+1]<<8);
 case GS_PSMT8:return b[columnTable8[y][x]];
 case GS_PSMT4:n=columnTable4[y][x];return(b[n>>1]>>((n&1u)*4u))&15u;
