@@ -66,6 +66,7 @@ int  gsBlockNumber(int psm, unsigned int bp, unsigned int bw, unsigned int x, un
 void gsMemStartTransfer(const GsRegs* r);
 void gsMemTransferData(const unsigned char* data, int qwc);
 void gsMemReadImage(const GsRegs* r, unsigned char* out);
+void gsMemWriteRenderTarget(unsigned int bp, unsigned int bw, unsigned int w, unsigned int h, const unsigned int* rgba);
 
 /* gs.c */
 void gsWriteReg(int reg, u64 value);
