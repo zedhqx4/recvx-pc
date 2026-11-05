@@ -152,6 +152,5 @@ Windows build for this branch is pending.
 
 ## Default movie scaling preference
 
-- Changed the default for `movies_hd` to `0`.
-- `pcMovieStart()` now only chooses an upscaled movie when `movies_hd=1` is explicitly set.
-- `recvx-config.exe` now displays the checkbox unchecked when the key is absent, writes `movies_hd=1` when enabled, and removes the key when disabled (the default remains 0).
+- The temporary change to default `movies_hd=0` was reverted.
+- The branch now preserves the `pc-port` behavior: `movies_hd` defaults to `1`, the settings checkbox is checked when the key is absent, and disabling the option writes `movies_hd=0`.
