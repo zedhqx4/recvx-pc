@@ -801,18 +801,18 @@ void pcVideoInit(void)
 
         if ((gl_major < 4) || ((gl_major == 4) && (gl_minor < 3)))
         {
-            pcOsStartupLog("pcVideoInit: OpenGL version too old: %d.%d", gl_major, gl_minor);
+            pcOsStartupLog("pcVideoInit: OpenGL version too old");
             pcPlatformFatal("OpenGL 4.3 Core or later is required; the driver provided %d.%d.",
                             gl_major, gl_minor);
         }
 
         if (gl_profile != SDL_GL_CONTEXT_PROFILE_CORE)
         {
-            pcOsStartupLog("pcVideoInit: OpenGL context is not Core profile (profile=%d)", gl_profile);
+            pcOsStartupLog("pcVideoInit: OpenGL context is not Core profile");
             pcPlatformFatal("An OpenGL Core profile is required; the driver provided profile %d.", gl_profile);
         }
 
-        pcOsStartupLog("pcVideoInit: OpenGL version verified: %d.%d Core", gl_major, gl_minor);
+        pcOsStartupLog("pcVideoInit: OpenGL version verified");
         pcLog("video: OpenGL context %d.%d Core", gl_major, gl_minor);
     }
 
