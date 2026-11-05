@@ -1472,6 +1472,12 @@ void pcVideoPresent(void)
                 frame_time.busy_worst = busy;
             }
 
+            {
+                extern void pcGsFrameMark(double busy_seconds, unsigned int frame_no);
+
+                pcGsFrameMark(busy, frames);
+            }
+
             if (d > frame_time.worst)
             {
                 frame_time.worst = d;

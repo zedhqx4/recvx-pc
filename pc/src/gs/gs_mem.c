@@ -7,6 +7,7 @@
  * layouts must match the real hardware; gsMemSelfTest() checks them against the game's own
  * conversion routines (ps2_pxlconv.c).
  */
+#include <stdlib.h>
 #include <string.h>
 
 #include "gs_internal.h"
@@ -490,6 +491,104 @@ static void advance(void)
     }
 }
 
+/* PSMCT32 rectangle read, the counterpart of gsMemWriteRect32: one page/block lookup per run of
+ * up to 8 pixels instead of a full address computation per pixel. */
+void gsMemReadRect32(unsigned int bp, unsigned int bw, unsigned int x0, unsigned int y0,
+                     unsigned int w, unsigned int h, unsigned int* dst, unsigned int dst_stride)
+{
+    unsigned int y;
+
+    for (y = 0; y < h; y++)
+    {
+        unsigned int* row = &dst[y * dst_stride];
+        unsigned int py = y0 + y;
+        unsigned int x = 0;
+
+        while (x < w)
+        {
+            unsigned int px = x0 + x;
+            unsigned int run = 8u - (px & 7u);
+            unsigned int page, block, block_base, j;
+
+            if (run > w - x)
+            {
+                run = w - x;
+            }
+
+            page = (py >> 5) * bw + (px >> 6);
+            block = bp + page * 32 + blockTable32[(py >> 3) & 3][(px >> 3) & 7];
+            block_base = (block * 256u) & (GS_VRAM_SIZE - 1);
+
+            for (j = 0; j < run; j++)
+            {
+                unsigned int a = (block_base + (unsigned int)columnTable32[py & 7][(px + j) & 7] * 4u) & (GS_VRAM_SIZE - 1);
+
+                row[x + j] = *(const unsigned int*)&gsVram[a];
+            }
+
+            x += run;
+        }
+    }
+}
+
+/* Blocks [lo, hi) a PSMCT32 rectangle can touch (upper bound: whole page rows). Returns 0 when
+ * the layout is not one this fast path can bound (width overflow into the next page row, or
+ * addresses that would wrap around the 4 MB of GS memory). */
+static int rect32_block_span(unsigned int bp, unsigned int bw, unsigned int x, unsigned int y,
+                             unsigned int w, unsigned int h, unsigned int* lo, unsigned int* hi)
+{
+    if ((bw == 0) || (w == 0) || (h == 0) || (x + w > bw * 64u))
+    {
+        return 0;
+    }
+
+    *lo = bp + (y / 32u) * bw * 32u;
+    *hi = bp + ((y + h + 31u) / 32u) * bw * 32u;
+
+    return *hi <= (GS_VRAM_SIZE / 256u);
+}
+
+/* local -> local copy. PSMCT32 -> PSMCT32 between ranges that cannot overlap is done through a
+ * scratch rectangle with run-based addressing; every other case keeps the original in-order
+ * per-pixel copy, whose result for overlapping ranges depends on the order of the pixels. */
+static void local_copy(unsigned int sbp, unsigned int sbw, unsigned int spsm, unsigned int ssx, unsigned int ssy,
+                       unsigned int dbp, unsigned int dbw, unsigned int dpsm, unsigned int dsx, unsigned int dsy,
+                       unsigned int w, unsigned int h)
+{
+    static unsigned int* scratch;
+    static size_t scratch_cap;
+    unsigned int slo, shi, dlo, dhi, x, y;
+    size_t need = (size_t)w * h;
+
+    if ((spsm == GS_PSMCT32) && (dpsm == GS_PSMCT32) &&
+        rect32_block_span(sbp, sbw, ssx, ssy, w, h, &slo, &shi) &&
+        rect32_block_span(dbp, dbw, dsx, dsy, w, h, &dlo, &dhi) &&
+        ((shi <= dlo) || (dhi <= slo)))
+    {
+        if (need > scratch_cap)
+        {
+            free(scratch);
+            scratch = (unsigned int*)malloc(need * sizeof(*scratch));
+            scratch_cap = (scratch != NULL) ? need : 0;
+        }
+
+        if (scratch != NULL)
+        {
+            gsMemReadRect32(sbp, sbw, ssx, ssy, w, h, scratch, w);
+            gsMemWriteRect32(dbp, dbw, dsx, dsy, w, h, scratch, w);
+            return;
+        }
+    }
+
+    for (y = 0; y < h; y++)
+    {
+        for (x = 0; x < w; x++)
+        {
+            gsMemWrite(dpsm, dbp, dbw, dsx + x, dsy + y, gsMemRead(spsm, sbp, sbw, ssx + x, ssy + y));
+        }
+    }
+}
+
 void gsMemStartTransfer(const GsRegs* r)
 {
     unsigned int dir = r->trxdir & 3;
@@ -525,17 +624,9 @@ void gsMemStartTransfer(const GsRegs* r)
         unsigned int dsy = (unsigned int)(r->trxpos >> 48) & 0x7FF;
         unsigned int w = (unsigned int)r->trxreg & 0xFFF;
         unsigned int h = (unsigned int)(r->trxreg >> 32) & 0xFFF;
-        unsigned int x, y;
 
-        gsFlushLocalToLocal(sbp, sbw, spsm, ssx, ssy, w, h);
-
-        for (y = 0; y < h; y++)
-        {
-            for (x = 0; x < w; x++)
-            {
-                gsMemWrite(dpsm, dbp, dbw, dsx + x, dsy + y, gsMemRead(spsm, sbp, sbw, ssx + x, ssy + y));
-            }
-        }
+        gsFlushLocalToLocalCopy(sbp, sbw, spsm, ssx, ssy, w, h, dbp, dbw, dpsm, dsy, h);
+        local_copy(sbp, sbw, spsm, ssx, ssy, dbp, dbw, dpsm, dsx, dsy, w, h);
 
         xfer.active = 0;
         gsXferDone(dbp, dbw, dpsm, dsx, dsy, w, h, 1);

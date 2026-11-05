@@ -285,6 +285,41 @@ double pcOsTime(void);
 /* game-side texture request counters (incremented from Ps2TexLoad / njCnkCtTid) */
 unsigned int pcStatTexLoadCalls, pcStatTexLoadUploads, pcStatTexLoadSame, pcStatCnkTid;
 
+/* Spike attribution. The periodic log averages over 150 frames, which hides the isolated slow
+ * frames that make the game stutter. pcVideoPresent reports every frame's CPU-busy time here; when
+ * it is close to or over the 33 ms budget, the GS-side stage timers accumulated during that one
+ * frame are logged, so a spike can be attributed (texture creation, transfers, readback, ...) or,
+ * when none of them explains it, to the game/IO side. Cost per normal frame: ~12 loads and a
+ * compare. */
+static int spike_prev_valid, spike_logged;
+
+void pcGsFrameMark(double busy_seconds, unsigned int frame_no)
+{
+    extern double gsTimeXfer, gsTimeClut;
+    extern unsigned int gsStatXferCalls, gsStatXferBytes;
+    static struct { double draw, texl, decode, xfer, clut, read, load; unsigned int draws, decodes, creates, xcalls, xbytes; } prev;
+    double draw = stats.t_draw, texl = stats.t_texlookup, decode = stats.t_decode, xfer = gsTimeXfer, clut = gsTimeClut,
+           read = stats.t_read, load = stats.t_load;
+
+    if (spike_prev_valid && (busy_seconds >= 0.028) && (spike_logged < 12))
+    {
+        double gs_total = (draw - prev.draw) + (xfer - prev.xfer) + (clut - prev.clut) + (read - prev.read);
+
+        spike_logged++;
+        pcLog("spike frame %u: %.1f ms busy | gs draw %.1f (texture lookup %.1f, decode %.1f, %u new textures, %u draws, rt load %.1f), "
+              "transfers %.1f (%u, %.0f KB), palette %.1f, rt readback %.1f | outside the GS stages %.1f",
+              frame_no, busy_seconds * 1000, (draw - prev.draw) * 1000, (texl - prev.texl) * 1000, (decode - prev.decode) * 1000,
+              texstat.creates - prev.creates, stats.draws - prev.draws, (load - prev.load) * 1000,
+              (xfer - prev.xfer) * 1000, gsStatXferCalls - prev.xcalls, (gsStatXferBytes - prev.xbytes) / 1024.0,
+              (clut - prev.clut) * 1000, (read - prev.read) * 1000, (busy_seconds - gs_total) * 1000);
+    }
+
+    prev.draw = draw; prev.texl = texl; prev.decode = decode; prev.xfer = xfer; prev.clut = clut; prev.read = read; prev.load = load;
+    prev.draws = stats.draws; prev.decodes = stats.tex_decodes; prev.creates = texstat.creates;
+    prev.xcalls = gsStatXferCalls; prev.xbytes = gsStatXferBytes;
+    spike_prev_valid = 1;
+}
+
 void pcGsLogStats(void)
 {
     unsigned int f = stats.frames ? stats.frames : 1;
@@ -319,6 +354,8 @@ void pcGsLogStats(void)
     }
     memset(&texstat, 0, sizeof(texstat));
     memset(&stats, 0, sizeof(stats));
+    spike_prev_valid = 0;   /* the accumulators restarted: the next frame only takes a baseline */
+    spike_logged = 0;
 }
 
 static GLuint make_texture(int w, int h, GLint ifmt, GLenum fmt, GLenum type, GLint filter)
@@ -955,7 +992,22 @@ void gsXferDone(unsigned int bp, unsigned int bw, unsigned int psm, unsigned int
  * GS memory is read, and the GPU first shrinks it to the PS2 resolution: reading the whole
  * upscaled buffer back (tens of MB at 8x) made effects that copy the screen into a texture every
  * frame, such as the water ripple, run at a few frames per second. */
+static void rt_readback(unsigned int bp, unsigned int bw, unsigned int psm, unsigned int x, unsigned int y, unsigned int w, unsigned int h,
+                        int has_dst, unsigned int dbp, unsigned int dbw, unsigned int dpsm, unsigned int dy, unsigned int dh);
+
 void gsFlushLocalToLocal(unsigned int bp, unsigned int bw, unsigned int psm, unsigned int x, unsigned int y, unsigned int w, unsigned int h)
+{
+    rt_readback(bp, bw, psm, x, y, w, h, 0, 0, 0, 0, 0, 0);
+}
+
+void gsFlushLocalToLocalCopy(unsigned int bp, unsigned int bw, unsigned int psm, unsigned int x, unsigned int y, unsigned int w, unsigned int h,
+                             unsigned int dbp, unsigned int dbw, unsigned int dpsm, unsigned int dy, unsigned int dh)
+{
+    rt_readback(bp, bw, psm, x, y, w, h, 1, dbp, dbw, dpsm, dy, dh);
+}
+
+static void rt_readback(unsigned int bp, unsigned int bw, unsigned int psm, unsigned int x, unsigned int y, unsigned int w, unsigned int h,
+                        int has_dst, unsigned int dbp, unsigned int dbw, unsigned int dpsm, unsigned int dy, unsigned int dh)
 {
     static GLuint down_fbo, down_tex;
     static int down_w, down_h;
@@ -994,6 +1046,15 @@ void gsFlushLocalToLocal(unsigned int bp, unsigned int bw, unsigned int psm, uns
              * otherwise everything drawn so far, as before */
             map = gsRtReadRegion(rt->w, rows, rt->fbp, rt->fbw, rt->psm == GS_PSMCT32, bp, bw, psm == GS_PSMCT32,
                                  x, y, w, h, region);
+
+            /* A partial copy leaves the rest of the render target marked as newer than GS memory.
+             * If this same copy then writes into the render target, gsXferDone reloads it from GS
+             * memory and that rest would be lost, so the whole drawn area is read back first (what
+             * the code did before partial readback existed). */
+            if (has_dst && rt_overlaps(rt, dbp, dbw, dpsm, dy, dh))
+            {
+                map = GS_RTMAP_FULL;
+            }
 
             if (map == GS_RTMAP_NONE)
             {

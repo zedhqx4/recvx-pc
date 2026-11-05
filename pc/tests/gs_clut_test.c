@@ -18,6 +18,7 @@ void gsRendererPresent(unsigned int a, unsigned int b) { (void)a; (void)b; }
 void gsRendererDraw(const GsDrawState* st, const GsVertex* v, int n) { (void)st; (void)v; (void)n; draws++; }
 void gsXferDone(unsigned int bp, unsigned int bw, unsigned int psm, unsigned int x, unsigned int y, unsigned int w, unsigned int h, int c) { (void)bp; (void)bw; (void)psm; (void)x; (void)y; (void)w; (void)h; (void)c; }
 void gsFlushLocalToLocal(unsigned int bp, unsigned int bw, unsigned int psm, unsigned int x, unsigned int y, unsigned int w, unsigned int h) { (void)bp; (void)bw; (void)psm; (void)x; (void)y; (void)w; (void)h; }
+void gsFlushLocalToLocalCopy(unsigned int bp, unsigned int bw, unsigned int psm, unsigned int x, unsigned int y, unsigned int w, unsigned int h, unsigned int dbp, unsigned int dbw, unsigned int dpsm, unsigned int dy, unsigned int dh) { (void)bp; (void)bw; (void)psm; (void)x; (void)y; (void)w; (void)h; (void)dbp; (void)dbw; (void)dpsm; (void)dy; (void)dh; }
 int pcFontFilterDrawActive(void) { return 0; }
 int pcFontFilterIsLinear(void) { return 0; }
 void pcLog(const char* f, ...) { (void)f; }

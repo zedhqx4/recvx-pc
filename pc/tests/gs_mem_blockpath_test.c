@@ -28,6 +28,12 @@ void gsFlushLocalToLocal(unsigned int bp, unsigned int bw, unsigned int psm, uns
     (void)bp; (void)bw; (void)psm; (void)x; (void)y; (void)w; (void)h;
 }
 
+void gsFlushLocalToLocalCopy(unsigned int bp, unsigned int bw, unsigned int psm, unsigned int x, unsigned int y, unsigned int w, unsigned int h,
+                             unsigned int dbp, unsigned int dbw, unsigned int dpsm, unsigned int dy, unsigned int dh)
+{
+    (void)bp; (void)bw; (void)psm; (void)x; (void)y; (void)w; (void)h; (void)dbp; (void)dbw; (void)dpsm; (void)dy; (void)dh;
+}
+
 static unsigned int rng = 1;
 static unsigned int rnd(void) { rng = rng * 1664525u + 1013904223u; return rng >> 8; }
 

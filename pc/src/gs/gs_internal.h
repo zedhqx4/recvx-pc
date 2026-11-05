@@ -83,6 +83,11 @@ void gsRendererFlush(void);
 /* changed: the transfer altered GS memory (render targets that were drawn into are invalidated either way) */
 void gsXferDone(unsigned int bp, unsigned int bw, unsigned int psm, unsigned int x, unsigned int y, unsigned int w, unsigned int h, int changed);
 void gsFlushLocalToLocal(unsigned int bp, unsigned int bw, unsigned int psm, unsigned int x, unsigned int y, unsigned int w, unsigned int h);
+/* same, for a local->local copy: the destination is passed too, because a partial readback of a
+ * render target that the copy then overwrites would lose the part that was not read back */
+void gsFlushLocalToLocalCopy(unsigned int bp, unsigned int bw, unsigned int psm, unsigned int x, unsigned int y, unsigned int w, unsigned int h,
+                             unsigned int dbp, unsigned int dbw, unsigned int dpsm, unsigned int dy, unsigned int dh);
+void gsMemReadRect32(unsigned int bp, unsigned int bw, unsigned int x0, unsigned int y0, unsigned int w, unsigned int h, unsigned int* dst, unsigned int dst_stride);
 
 /* texture decoding for the renderer: fills rgba (w*h) from VRAM per TEX0/TEXA/TEXCLUT */
 u64 gsClutHash(u64 tex0);
