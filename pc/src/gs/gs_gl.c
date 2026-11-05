@@ -1440,60 +1440,7 @@ void gsRendererDraw(const GsDrawState* st, const GsVertex* v, int nverts)
             glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_FALSE);
         }
 
-        glDrawArrays(mode, 0, n);
-    }
-    else
-    {
-        glDrawArrays(mode, 0, n);
-    }
-}
-
-/* ------------------------------------------------------------------------------------------- */
-
-/* draws an RGBA image (top row first) from the PC port's overlays (pc_overlay.c) with its top left
- * corner at x, y pixels of the current viewport (vw x vh); the present program is bound */
-static void draw_overlay(const unsigned char* img, int ow, int oh, int x, int y, int vw, int vh)
-{
-    static GLuint overlay_tex;
-    GlVertex q[6];
-    float x0 = 2.0f * x / vw - 1.0f, x1 = x0 + 2.0f * ow / vw;
-    float y0 = 1.0f - 2.0f * y / vh, y1 = y0 - 2.0f * oh / vh;
-    float px[4], py[4], ts[4] = { 0, 1, 0, 1 }, tt[4] = { 0, 0, 1, 1 };
-    int idx[6] = { 0, 1, 2, 1, 3, 2 };
-    int i;
-
-    px[0] = px[2] = x0;
-    px[1] = px[3] = x1;
-    py[0] = py[1] = y0;
-    py[2] = py[3] = y1;
-
-    memset(q, 0, sizeof(q));
-
-    for (i = 0; i < 6; i++)
-    {
-        q[i].x = px[idx[i]];
-        q[i].y = py[idx[i]];
-        q[i].s = ts[idx[i]];
-        q[i].t = tt[idx[i]];
-    }
-
-    if (overlay_tex == 0)
-    {
-        glGenTextures(1, &overlay_tex);
-    }
-
-    glBindTexture(GL_TEXTURE_2D, overlay_tex);
-    glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, ow, oh, 0, GL_RGBA, GL_UNSIGNED_BYTE, img);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-    glBufferData(GL_ARRAY_BUFFER, sizeof(q), q, GL_STREAM_DRAW);
-    glDrawArrays(GL_TRIANGLES, 0, 6);
-}
-
-void gsRendererPresent(unsigned int dispfb_fbp, unsigned int dispfb_fbw)
+      void gsRendererPresent(unsigned int dispfb_fbp, unsigned int dispfb_fbw)
 {
     RenderTarget* rt = find_rt(dispfb_fbp);
     int ww, wh, vw, vh;
@@ -1518,7 +1465,134 @@ void gsRendererPresent(unsigned int dispfb_fbp, unsigned int dispfb_fbw)
 
         if (dump_frame)
         {
-            extern void pcGsScreenshot(const char* path, unsigned int fbp)
+            extern void pcGsScreenshot(const char* path, unsigned int fbp);
+
+            pcLog("present fbp %u fbw %u", dispfb_fbp, dispfb_fbw);
+            pcGsScreenshot("gsdump.png", dispfb_fbp);
+        }
+
+        {
+            extern int gsDumpFrame;
+
+            gsDumpFrame = (dump_at >= 0) && ((frame_counter == (unsigned int)dump_at) || (frame_counter == (unsigned int)dump_at + 1));
+        }
+
+        dump_frame = (dump_at >= 0) && ((frame_counter == (unsigned int)dump_at) || (frame_counter == (unsigned int)dump_at + 1));
+    }
+
+    SDL_GetWindowSizeInPixels(SDL_GL_GetCurrentWindow(), &ww, &wh);
+
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    glViewport(0, 0, ww, wh);
+    glDisable(GL_SCISSOR_TEST);
+    glDisable(GL_DEPTH_TEST);
+    glDisable(GL_BLEND);
+    glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+    glClearColor(0, 0, 0, 1);
+    glClear(GL_COLOR_BUFFER_BIT);
+
+    if (rt == NULL)
+    {
+        return;
+    }
+
+    if (rt->vram_dirty || (rt->load_y1 > rt->load_y0))
+    {
+        rt_sync(rt);
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    }
+
+    /* 640x480 shown at the display aspect (4:3, or stretched for widescreen) */
+    {
+        float aspect = pcVideoAspect();
+
+        vh = wh;
+        vw = (int)(wh * aspect + 0.5f);
+
+        if (vw > ww)
+        {
+            vw = ww;
+            vh = (int)(ww / aspect + 0.5f);
+        }
+    }
+
+    glViewport((ww - vw) / 2, (wh - vh) / 2, vw, vh);
+
+    tw = 640.0f / rt->w;
+    th = 480.0f / rt->h;
+
+    memset(q, 0, sizeof(q));
+    {
+        float px[4] = { -1, 1, -1, 1 }, py[4] = { 1, 1, -1, -1 };
+        float ts[4] = { 0, tw, 0, tw }, tt[4] = { 0, 0, th, th };
+        int idx[6] = { 0, 1, 2, 1, 3, 2 };
+
+        for (i = 0; i < 6; i++)
+        {
+            q[i].x = px[idx[i]];
+            q[i].y = py[idx[i]];
+            q[i].s = ts[idx[i]];
+            q[i].t = tt[idx[i]];
+        }
+    }
+
+    glUseProgram(present_prog);
+    glActiveTexture(GL_TEXTURE0);
+    glBindVertexArray(vao);
+    glBindBuffer(GL_ARRAY_BUFFER, vbo);
+
+    /* a notice from the PC port (pc_overlay.c) in the middle of a black screen, instead of the
+     * picture */
+    {
+        extern const unsigned char* pcOverlayImage(int height, int* w, int* h);
+        const unsigned char* img;
+        int ow, oh;
+
+        img = pcOverlayImage(vh / 14, &ow, &oh);
+
+        if ((img != NULL) && (ow <= vw) && (oh <= vh))
+        {
+            draw_overlay(img, ow, oh, (vw - ow) / 2, (vh - oh) / 2, vw, vh);
+            return;
+        }
+    }
+
+    glBindTexture(GL_TEXTURE_2D, rt->color);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glBindVertexArray(vao);
+    glBindBuffer(GL_ARRAY_BUFFER, vbo);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(q), q, GL_STREAM_DRAW);
+    glDrawArrays(GL_TRIANGLES, 0, 6);
+
+    /* the build number at the bottom of the title screen (pc_overlay.c), below the copyright
+     * lines (they end at line 450 of 480) */
+    {
+        extern const unsigned char* pcOverlayBuildImage(int height, int* w, int* h);
+        const unsigned char* img;
+        int ow, oh;
+
+        img = pcOverlayBuildImage(vh / 26, &ow, &oh);
+
+        if ((img != NULL) && (ow <= vw) && (oh <= vh))
+        {
+            /* the present shader writes alpha 1, so blend the premultiplied text as a screen:
+             * text + picture * (1 - text) */
+            glEnable(GL_BLEND);
+            glBlendEquationSeparate(GL_FUNC_ADD, GL_FUNC_ADD);
+            glBlendFuncSeparate(GL_ONE, GL_ONE_MINUS_SRC_COLOR, GL_ZERO, GL_ONE);
+            draw_overlay(img, ow, oh, (vw - ow) / 2, vh * 465 / 480 - oh / 2, vw, vh);
+            glDisable(GL_BLEND);
+        }
+    }
+
+    (void)dispfb_fbw;
+}
+
+/* Debug: save a render target (logical 640x480 output) as PNG. */
+int pcWritePng(const char* path, const unsigned char* rgb, int w, int h);
+
+void pcGsScreenshot(const char* path, unsigned int fbp)
 {
     RenderTarget* rt = find_rt(fbp);
     unsigned char* px;
