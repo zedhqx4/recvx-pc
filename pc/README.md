@@ -62,6 +62,14 @@ The VU0 matrix library (`ps2_NaMatrix.c`, `ps2_NaMath.c`, `ps2_NaView.c`) is por
 
 See the main [README](../README.md) for building, game data setup and `recvx.ini`.
 
+Relevant `recvx.ini` video/movie options:
+
+| Setting | Default | Effect |
+|---|---:|---|
+| `vsync` | `1` | Enable presentation synchronization; set to `0` to disable it. |
+| `video_gl` | `0` | Select the SD movie upload path: `0` keeps frames in GS VRAM and refreshes a persistent view; `1` uploads each frame to the dedicated GL movie texture. |
+| `movies_hd` | `1` | Use the upscaled `MOVIE_HD` files when available. HD movies use the dedicated GL texture in either SD mode. |
+
 `recvx.log` (next to the exe) lists stubs as they are first called; crashes and hangs (no frame
 for 5 s) print a stack trace there.
 
