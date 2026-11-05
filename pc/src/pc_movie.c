@@ -56,7 +56,7 @@ static int image_cap = 512 * 512 * 4;
 #define HD_SCALE 4                  /* upscaled movies are 4x the originals */
 static int hd;                      /* playing an upscaled movie */
 static int hd_w, hd_h;              /* its frame size */
-static int movie_use_gl;            /* video_gl=1: upload SD frames directly to the GL movie texture */
+static int movie_use_gl;            /* movies_sd_gl=1: upload SD frames directly to the GL movie texture */
 static int movie_gl_active;
 static int movie_gs_active;
 
@@ -111,8 +111,8 @@ void pcMovieStart(const char* name)
         return;
     }
 
-    /* video_gl=1 selects Alpha's direct GL upload for SD movies; GS/VRAM is the default. */
-    movie_use_gl = pcIniGetInt("video_gl", 0) != 0;
+    /* movies_sd_gl=1 selects Alpha's direct GL upload for SD movies; GS/VRAM is the default. */
+    movie_use_gl = pcIniGetInt("movies_sd_gl", 0) != 0;
 
     /* the upscaled version first (unless turned off), then the converted original */
     hd = 0;
