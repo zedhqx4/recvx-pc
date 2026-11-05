@@ -154,3 +154,37 @@ Windows build for this branch is pending.
 
 - The temporary change to default `movies_hd=0` was reverted.
 - The branch now preserves the `pc-port` behavior: `movies_hd` defaults to `1`, the settings checkbox is checked when the key is absent, and disabling the option writes `movies_hd=0`.
+
+
+# reconstruction/3-UI_Fixes
+
+Based on `reconstruction/2-Vsync_and_moviesSD_fix` at `55d0ec649801e8e444fff781d63b6dabc16cf63f`.
+
+This branch restores only the font and menu/UI graphics fixes from the final `experimental/gs-rebuild` source. The original SDL3 platform, movie paths, VSync setting, and 512x448 GS backing base from reconstruction/2 remain intact.
+
+## Restored fixes
+
+- **Font glyph UV correction:** `ps2_NaDraw2DM` now applies the PC glyph-edge offsets `left=4, right=-4, top=4, bottom=-4` (GS 1/16-texel units). The correction is always active; `fontUVfix=1` enables the live tuner, not the correction itself.
+- **Font filtering:** `fontFilter` defaults to `1` (bilinear). The FONT tuner can switch to nearest with `R`; the font-only marker is preserved through deferred OT/DMA processing and consumed by the GS draw state and GL sampler.
+- **Menu/UI UV crop:** restored the guarded per-edge crop that maps screen X/Y to the corresponding U/V axis, including mirrored and clockwise-90-degree mappings. Defaults copied from the final GS-rebuild source are standard `left=-8, right=18, top=-14, bottom=16` and clockwise-90 `left=-4, right=8, top=10, bottom=12` (all in 1/16-texel units).
+- **Runtime tuning:** `fontUVfix=1` and `menuUVfix=1` enable their respective modes in the shared F10 selector. Escape exits; Tab selects an edge; Up/Down adjust it; Shift changes the adjustment step to 4; Backspace resets. In MENU mode, `R` switches between standard and clockwise-90 profiles. In FONT mode, `R` toggles font filtering. Tuned values persist in `recvx.ini`.
+
+## Files
+
+| File | Change |
+|---|---|
+| `pc/include/pc_platform.h` | Export font and menu UV/filter controls |
+| `pc/src/pc_platform.c` | Font correction settings, font filter state, shared F10 tuner and SDL3 event routing |
+| `pc/src/gs/gs_internal.h` | Carry the transient font-filter marker in `GsDrawState` |
+| `pc/src/gs/gs.c` | Preserve the marker across GS DMA/GIF transfer and deferred draw state |
+| `pc/src/gs/gs_gl.c` | Force nearest sampling only for tagged font glyph draws |
+| `src/ps2/veronica/prog/ps2_NaDraw2D.c` | Apply per-edge PC font glyph UV correction and bracket font draws |
+| `src/ps2/veronica/prog/ps2_dummy.c` | Restore guarded menu/UI UV crop profiles and tag font OT payloads |
+
+No movie/video, general texture-cache, VRAM, renderer-performance, or non-UI UV changes from GS-rebuild were imported.
+
+## Validation
+
+The source comparison against `experimental/gs-rebuild` confirms that `ps2_NaDraw2D.c` and `ps2_dummy.c` are copied verbatim, as are the narrowly scoped GS state files where their only GS-rebuild additions are font-filter support. The platform tuner code was transplanted into the reconstruction/2 SDL3 platform implementation rather than replacing that file.
+
+**Windows build and runtime validation are pending.** The current Windows build workflow push filter does not yet include this branch, so the progress-report Actions runs are not evidence of a successful game build.
