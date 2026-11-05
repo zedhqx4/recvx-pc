@@ -911,3 +911,87 @@ Repeated CPU work that was found and removed (all semantics-preserving):
 - **No GPU-resident GS VRAM.** The renderer targets OpenGL 3.3 core (no compute shaders); moving swizzle/decode/palette lookup to the GPU is a rewrite of the texture path that cannot be validated without running the game, and is not attempted here. `gsVram` remains the CPU authority.
 - The remaining per-switch CPU cost in room 8 is the real VRAM rewrite itself (block swizzle + memcmp) and the content hash of the pages it changed. Removing it needs a version token for the *source* texture data (so identical re-uploads can be proven without reading them); keying on the TIM2 pointer alone is exactly what failed in the GPU Asset Registry experiment, since main-memory buffers can be overwritten.
 - Whether the idx/scan/memo counters actually dominate in room 8 is unmeasured.
+
+## 2026-11-05 — Step 19: GS/OpenGL renderer audit (CPU cost, redundant GL work, readback, instrumentation)
+
+**Category:** Renderer performance / diagnostics  
+**Status:** Implemented; host-tested; Windows build passed for `1b2a21d`, build of the latest commit see "Validation"; in-game visual validation and before/after timings **pending**  
+**Branch:** `claude/gl-render-audit` (base: `experiment/gl-texture-residency` @ `33f16ca`; reason: that commit is the delivered Step 18 work the user tested with a large improvement, nothing technical argued for another base)
+
+### Evidence that drove the work
+
+A log of a full play session (build `33f16ca`, rooms rm_0000 … rm_0070) shows:
+
+- The average frame time is pinned at 33.4 ms (the game runs at 30 fps on a vsynced 60 Hz swap), so the average cannot show CPU cost. The visible problem is the spikes: `worst` 50–106 ms in many 150-frame windows, 62 s at startup.
+- Light rooms: 3–6 draws per frame. Heavy 3D scenes: 100–150 draws, 15–30k vertices.
+- Heaviest scene (end of the log, `gs: 2048 textures cached (469 MB)`): per frame `njCnkCtTid` 138, `Ps2TexLoad` 411 (292 repeat the same TIM2), transfers 225 (13.8 MB, 202 really change VRAM), CLUT loads 1097 (119 change the palette), page hashes 1084, texture lookups 118 (116 served by the index, 2 by the scan, ~0 new).
+- Therefore: lookups and creation are not the main cost; the per-switch traffic (uploads, CLUT register traffic) and whatever produces the isolated spikes are. The old build had no per-stage timers, so the spikes could not be attributed; the instrumentation below is meant to do that.
+
+Host micro-benchmarks (gcc -O2, one core, `gs_mem.c` alone, not the game): PSMCT32 uploads 3.9–4.0 GB/s, PSMT8 block path 1.6–1.8 GB/s, PSMT4 block path 0.32 GB/s; the per-pixel reference runs at 0.05–0.11 GB/s. At 13.8 MB/frame this puts the transfer cost of the heaviest scene at roughly 3–4 ms/frame on a host-class core: real but far too small to explain 60–100 ms spikes.
+
+### Changes (one entry per optimization)
+
+1. **CPU-busy time in the frame log** (`pc_os_win32.c: pcOsSleep`, `pc_platform.c: pcVideoPresent`, commit `d11f5c9`).  
+   Before: only wall-clock frame time, which is capped at 33.4 ms. Now: `pcOsSleep` accumulates the time the emulated kernel idles waiting for vblank; the log prints `cpu: X ms busy per frame (worst Y ms)` = frame time minus idle. Safe: measurement only.
+
+2. **Skip CLUT loads that cannot change anything** (`gs.c: clut_load`, commit `ce4e348`).  
+   Before: every TEX0/TEX2 write with CLD read 16/256 palette entries through `gsMemRead` (the game sends ~3 such writes per `Ps2TexLoad`, ~1100/frame in the heavy scene). Now: a CSM1 load is skipped when the pages that hold its source (`cbp` and `cbp+3`) have the same `gsPageGen` as at the last identical load and `gsClutGen` is unchanged. A CLUT load is a pure function of the memory it reads and of its parameters, so repeating it writes exactly what is already in `clut_buf`. CSM2 (TEXCLUT-based) always takes the full path. The `CLD` bookkeeping (`clut_cbp0/1`) still runs before the skip. Generations are sampled before the read, so a concurrent write only makes the next identical load run in full. Counter: `clut loads … N skipped`.
+
+3. **Rectangle writer for GS memory** (`gs_mem.c: gsMemWriteRect32`, `ce4e348`).  
+   Before: the render-target readback wrote one pixel at a time through `gsMemWrite` (full address computation, `touch()` per changed pixel). Now: one page/block lookup per run of up to 8 pixels, one page-generation bump per page per call (`gsPageGen` is an invalidation token, not a write count). Tested against the per-pixel writer for contents and for the set of invalidated pages.
+
+4. **Partial render-target readback** (`gs_rtmap.h`, `gs_gl.c: rt_readback`, `ce4e348`/`9e9d08a`) — the `underwaterfix` behaviour, see the dedicated section below.
+
+5. **Draw-program uniform shadow and vertex ring** (`gs_gl.c: renderer_draw`, `9e9d08a`).  
+   Before: every batch sent every uniform and replaced the vertex buffer with `glBufferData`. Now: (a) a shadow copy of the uniforms last sent to the draw program; a `glUniform*` is issued only when the value differs. Exact because those uniforms are only set from `renderer_draw` and a program keeps its uniform values. (b) vertices are written to successive regions of one 2^17-vertex buffer with its own VAO (`glBufferSubData`), and the buffer is orphaned only when it wraps. Counters: `gl/frame: uniforms sent/skipped, ring wraps`.
+
+6. **Stage timers** (`gs_gl.c`, `gs_mem.c`, `gs.c`, `9e9d08a`): `gs cpu ms/frame: draw (texture lookup, decode), transfers, palette reads, rt readback, rt load`. Two `QueryPerformanceCounter` reads per stage call; no extra GL calls.
+
+7. **Spike attribution** (`gs_gl.c: pcGsFrameMark`, called from `pcVideoPresent`, this step).  
+   When a frame's CPU-busy time is ≥ 28 ms the GS-stage time accumulated during that single frame is logged (`spike frame N: … busy | gs draw (texture lookup, decode, new textures, draws, rt load), transfers, palette, rt readback | outside the GS stages`). At most 12 lines per 150-frame window. "Outside the GS stages" is the game logic / IO / audio / driver share. Cost on a normal frame: a dozen loads and one compare.
+
+8. **Run-based local→local copy** (`gs_mem.c: local_copy`, `gsMemReadRect32`, this step).  
+   Before: the screen-to-texture copies of effects (water ripple) copied pixel by pixel with `gsMemRead` + `gsMemWrite`. Now: PSMCT32→PSMCT32 copies whose source and destination block spans are provably disjoint (and fit the 4 MB space without wrapping, and do not overflow the page row) go through a scratch rectangle with run-based addressing: 0.72 → 0.30 ms for a 640×224 copy in a host benchmark (2.4×). Anything else, including overlapping ranges (whose result depends on pixel order), keeps the original in-order per-pixel loop.
+
+9. **Destination-aware readback** (`gs_gl.c: gsFlushLocalToLocalCopy`, this step) — a correctness fix for the partial readback, see below.
+
+### Underwater fix review (`underwaterfix`, also in `alpha`)
+
+- **What it does.** `gsFlushLocalToLocal` copies a render target back into GS memory before a local→local / local→host transfer reads it. The original copied the whole drawn area of the render target for every transfer. The fix maps the transfer's source rectangle onto the render target when the mapping is provably a translation (both CT32, same FBW, `rt->w == bw*64`, `bp` page-aligned, `x+w` within the row, page distance a multiple of `bw`) and reads back only that rectangle (blit + `glReadPixels` of the sub-rectangle). Rectangles that consume no pixel of the target skip it altogether. `rendered`/`drawn_h` are cleared only after a full-area copy.
+- **Problem and why it is faster.** The water/underwater effect copies the screen into a texture in many small pieces per frame; every piece read back and rewrote the whole 640×N target (hundreds of KB of `glReadPixels` plus a per-pixel write), several times per frame. Now each piece costs only its own rectangle.
+- **`alpha` vs `underwaterfix`.** `alpha`'s `gs_gl.c` contains the same algorithm including the horizontal-overflow guard added by `62d932a`.
+- **Case that could give wrong results (found in this audit).** After a partial readback the target stays `rendered` with `drawn_h > 0` (correctly: the unread part is still newer than GS memory). If the same copy then **writes into that same render target**, `gsXferDone` sees an overlapped, rendered target and sets `vram_dirty`; the next `rt_sync` reloads the whole target from GS memory and the pixels that were never read back are lost. The old full readback made that reload lossless. Fix: `gsFlushLocalToLocalCopy` also receives the destination of the copy and forces the full readback when the destination overlaps that render target (same page-level test `gsXferDone` uses). When the destination is elsewhere (the usual screen→texture case) behaviour and speed are identical to `underwaterfix`. Not exercised by a host test (needs the GL renderer): reasoned from `gsXferDone`/`rt_sync` and the unchanged full-path code.
+- **More efficient equivalent?** The readback itself is already minimal (GPU-side shrink, rectangle only). What remained was the per-pixel alpha conversion and the per-pixel GS write; both are now table/run based (items 3 and 8). The unavoidable remainder is the GPU→CPU `glReadPixels` stall; removing it would need the destination texture to be produced on the GPU (a render-target-to-texture alias), which changes the GS memory model and was not attempted.
+- **Integration with the new work.** The readback writes through `gsMemWriteRect32`, which bumps `gsPageGen`, so the texture cache and CLUT-skip records see the new contents (no stale hits).
+
+### Texture architecture: findings on the "textures live in OpenGL" hypothesis
+
+- GL textures already are the resident representation: `get_texture` keeps decoded RGBA textures keyed by the content of the GS pages they cover plus the palette, and a hit binds the existing texture with no upload. What the CPU still maintains is `gsVram` (the logical GS memory), because the game uploads textures into one fixed area (TBP 190·64, CBP 254·64) and the emulated GS must hold exactly what the original would hold.
+- **What must be kept.** The GS address space semantics: swizzled CT32/T8/T4 layouts at the given TBP/TBW, page granularity of invalidation, CLUT buffer contents/CLD rules, TEXA, and the ordering of uploads vs. draws (a draw must see the memory as it was when the primitive was kicked). Everything that reads GS memory outside the texture lookup is: CLUT loads, `gsDecodeTexture`, render-target loads/readbacks, HD-replacement hashing (`gs_replace.c`), local→host reads and the page hash itself.
+- **What a deferred design would look like.** Record a host→local transfer as a pending region (copy of the packet + a content id computed from the source bytes), skip the swizzle, and let a draw whose texture is exactly that region find its GL texture from the content id. The swizzle into `gsVram` (and `gsPageGen`) would be done lazily, in the transfer-order, before any other reader above runs or before another transfer touches the same pages. It removes the swizzle and the page hashes for textures that are already resident. Constraints: transfers overlapping render targets must stay eager (`gsXferDone` semantics), every reader above needs a barrier, and the content id replaces hashing swizzled pages with hashing the source (same trust level as today's 64-bit page hashes). It is **not** a CPU copy cache of textures; the only copy is the transient pending packet.
+- **Decision: not implemented.** The measured benefit is the 3–4 ms/frame of transfer plus ~0.5 ms of page hashing in the heaviest scene (host numbers above), against a change that touches every GS-memory reader and cannot be visually validated in this environment. The earlier registry experiments failed precisely on identity-by-pointer and incomplete invalidation. It should be revisited only if the new `spike frame` / `gs cpu ms/frame` lines show transfers or page hashing dominating.
+- Keeping the render targets as GL resources and reading back only the consumed rectangle (item 4) is the part of the hypothesis that does pay off, and is in place.
+
+### Investigated and discarded
+
+- **Deferring the flush at TRXDIR.** The batch must be drawn before a transfer that changes the texture area (which is what 202 of 225 transfers/frame do), so deferral can only help the ~10 % of transfers that change nothing, and a render-target overlap would still force the flush. Not worth the ordering risk.
+- **Reusing `get_texture` results between draws.** In the heavy scene there are ~118 lookups/frame, 116 served by the index; the remaining cost is texture-extent computation and page hashing (~0.5 ms/frame estimated). A memo keyed on VRAM-write and palette epochs is exact but the gain is within noise until the new timers say otherwise.
+- **Shadowing `glTexParameteri`/`glBindTexture`.** ≤150 draws/frame; the per-draw GL calls that mattered (uniforms, vertex store) are done. Texture parameters are set from several sites (HD textures, movies, render targets), so a shadow needs per-texture state for little gain.
+- **Faster PSMT4 upload path** (0.32 GB/s, 5× slower than T8): small textures only; 4-bit images over 128×128 go through the 32-bit path. Not worth it without evidence of volume.
+- **Texture cache capacity.** The cache was full (2048 entries, 469 MB) in the last scene; eviction creates/deletes GL textures. `new textures` is reported in the spike lines; no change until that shows it matters.
+
+### Validation
+
+Automated (host, gcc, `pc/tests`; each test also fails against a deliberately broken copy of the code under test):
+- `gs_mem_blockpath_test.c`: 4000 random T8/T4 uploads, block paths vs per-pixel reference (VRAM, page generations, transfer-done sequence).
+- `gs_clut_test.c`: palette contents, generation, skip rule, hash memo.
+- `gs_readback_test.c`: `gsMemWriteRect32` vs per-pixel write; `gsRtReadRegion` vs full readback on 1500 cases.
+- `gs_localcopy_test.c`: 3000 random CT32 local→local copies (disjoint and overlapping) vs the per-pixel copy (VRAM and invalidated pages).
+
+Build: the Windows workflow passed (workflow_dispatch) for `1b2a21d`; the commit that adds items 7–9 is built in the same way, result recorded in the final summary of this task.
+
+**Not validated:** nothing was run in the game from this environment. Texture assignment, indexed/CLUT textures, water/underwater, movies, camera/scene changes and 2D/menus are unverified visually. No before/after timing exists; the only runtime data is the user's `33f16ca` log quoted above. The partial-readback guard (item 9) is untested on the GL side.
+
+### Next measurement
+
+Run CNK room 8 and the underwater scene with this build and keep the log lines `cpu:`, `gs cpu ms/frame:`, `gl/frame:`, `tex/frame:` and every `spike frame …`. The spike lines say whether the stutters come from texture creation, transfers, readback, or from outside the renderer.
