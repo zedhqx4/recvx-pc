@@ -1387,7 +1387,7 @@ void gsRendererDraw(const GsDrawState* st, const GsVertex* v, int nverts)
         unsigned int tbp = GSF(st->tex0, 0, 14);
         unsigned int tpsm = GSF(st->tex0, 20, 6);
         RenderTarget* src = NULL;
-        int linear = GSF(st->tex1, 5, 1);
+        int linear = GSF(st->tex1, 5, 1) && !st->font_filter_nearest;
 
         if (tw > 1024) tw = 1024;
         if (th > 1024) th = 1024;
