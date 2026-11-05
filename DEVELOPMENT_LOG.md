@@ -287,3 +287,15 @@ Other operational variables for input replay, screenshots, logging, audio dumps,
 ---
 
 **Maintenance rule:** update this file when a change lands in `alpha`, and describe the behavior verified in the resulting tree. Mark experiments as experiments, and explicitly mark them reverted when that happens. Keep GPU texture-content caching, TIM2 image-upload avoidance, OpenGL state caching, GS VRAM transfer optimizations, CNK profiling and movie playback as separate topics unless the implementation actually couples them.
+
+
+## OpenGL 4.3 branch: SDL3 gamepad mappings and decal targeting
+
+**Status:** Implemented on `experimental/opengl-4.3`; runtime validation pending.
+
+- Added optional `gamecontrollerdb.txt` loading in `pc/src/pc_platform.c`. The file is searched beside `recvx.exe` and loaded with `SDL_AddGamepadMappingsFromFile()` in `pcPadInit()`, after bindings load but before `SDL_GetJoysticks()` enumerates devices. If the file is absent or fails to load, SDL's built-in mappings remain available.
+- Replaced the broad blended-textured-3D decal predicate in `pc/src/gs/gs_gl.c` with the exact GS material-signature matcher from `reconstruction/4-Decalfixing`. It checks the shared GS state fields and the captured TEX0/ALPHA signature list; unrelated blended 3D primitives no longer receive decal priority.
+- Restored the earlier branch's smaller polygon offset: draw-order priorities 1–4 use `glPolygonOffset(0.0f, priority * 0.50f)` rather than 1–4 full units. The existing OpenGL state wrappers and per-frame draw-order reset are retained.
+- This is an A/B experiment against the current broad predicate and larger offset. Confirm controller mapping logs and compare decal appearance in-game before treating the visual correction as validated.
+
+**Commits:** SDL3 mapping load ([`9fa3e0caab`](https://github.com/zedhqx4/recvx-pc/commit/9fa3e0caab)); exact decal signatures and reduced offset ([`fcca847426`](https://github.com/zedhqx4/recvx-pc/commit/fcca847426)).
