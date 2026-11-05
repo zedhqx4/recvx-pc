@@ -166,7 +166,7 @@ jobs:
       - name: Upload Windows build and diagnostics
         uses: actions/upload-artifact@v4
         with:
-          name: \${{ steps.artifact-meta.outputs.name }}
+          name: ${{ steps.artifact-meta.outputs.name }}
           path: |
             build_pc/recvx.exe
             build_pc/recvx-config.exe
