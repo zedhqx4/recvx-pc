@@ -89,7 +89,7 @@ The GS renderer now keeps the game's **640x480 logical coordinate space** but us
 - `pc/src/pc_platform.c` defines the 640x480 logical dimensions and the 512x448 backing dimensions. It derives separate floating-point X/Y backing scales from the existing `scale=` setting and display aspect; the user-selected `pcGsScale` multiplier remains unchanged.
 - `pc/include/pc_gs.h` exposes the fractional horizontal and vertical backing scales.
 - `pc/src/gs/gs_gl.c` applies those scales to color/depth target allocation, viewport and scissor coordinates, GS-memory uploads, GPU readback, and debug screenshots. Fractional GS-memory uploads sample the source at output-pixel centers; integer scales retain the replication fast path.
-- At 4:3 with the default `scale=3`, the color/depth backing is 1536x1344 (512x448 multiplied by 3), while the logical game output remains 640x480.
+- At 4:3 with the default `scale=3`, the visible 640x480 area maps to 1536x1344 (512x448 multiplied by 3). The render target retains the GS's full 512-row allocation; for the 640-pixel-wide target its complete color/depth texture is 1536x1434.
 
 This is the isolated 512x448 base-resolution behavior from `experimental/gs-rebuild`; it does not import that branch's other renderer, cache, or performance changes.
 
