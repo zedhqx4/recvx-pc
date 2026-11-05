@@ -257,12 +257,25 @@ These notes are included to keep reverted tests and related-but-different caches
 
 Other operational variables for input replay, screenshots, logging, audio dumps, data paths and room warping are documented in `pc/README.md`.
 
+## PSMT8 / PSMT4 Host-to-GS IMAGE block uploads
+
+**Status:** Implemented on `experimental/opengl-4.3`; equivalence workflow added.
+
+- Added `transfer8Blocks()`: complete aligned PSMT8 blocks are assembled in GS swizzled order as 256-byte copies. One block covers 16×16 texels.
+- Added `transfer4Blocks()`: complete aligned PSMT4 blocks are assembled in GS swizzled order as 256-byte copies. One block covers 32×16 texels.
+- Partial, unaligned, and packet-tail data continues through the existing per-pixel `mem_write()` path.
+- Enabled the two block paths by default. `GS_BLOCK_FASTPATH=0` disables only these PSMT8/PSMT4 paths for a per-pixel reference comparison; the existing PSMCT32/PSMZ32 implementation is unchanged.
+- PSMT8H, PSMT4HL/HH and all other PSM formats are unchanged. No Local-to-Local or GS-to-Host transfer path was modified.
+- Added `pc/tests/gs_mem_blockpath_test.c` and `.github/workflows/test-gs-block-transfer.yml`. The test compares full GS VRAM, page-generation counters, and `gsXferDone()` notifications for 4,000 randomized transfers between block and reference builds.
+
+**Validation:** The comparison is automated on pushes to this branch. A passing Actions result is required before describing the block path as verified. Windows build and in-game performance/visual regression remain separate checks.
+
 ## 12. Source map for future work
 
 | Topic | Primary source files / functions |
 |---|---|
 | GS register and primitive path | `pc/src/gs/gs.c`: `gsWriteReg()`, `gsFlushPrims()`, `emit()`, `clut_load()` |
-| GS memory and transfers | `pc/src/gs/gs_mem.c`: `mem_write()`, `touch()`, `transfer32Run()`, `gsMemTransferData()` |
+| GS memory and transfers | `pc/src/gs/gs_mem.c`: `mem_write()`, `touch()`, `transfer32Run()`, `transfer8Blocks()`, `transfer4Blocks()`, `gsMemTransferData()` |
 | GPU texture/palette caches | `pc/src/gs/gs_gl.c`: `get_texture()`, `get_indexed_atlas_slot()`, `get_palette_texture()` |
 | OpenGL state cache | `pc/src/gs/gs_gl.c`: `PcGsGlState`, `pcGsBindFramebuffer()`, `pcGsActiveTexture()`, `pcGsBindTexture()` |
 | TIM2 asset reuse | `src/ps2/veronica/prog/ps2_dummy.c`: `Ps2TexLoad()`, `Ps2EnsureTextureImage()`, `Ps2BindTextureState()` |
