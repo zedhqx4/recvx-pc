@@ -41,11 +41,24 @@ PC_GL_FUNCS(PC_GL_DEFINE)
 
 int pcGlLoad(void)
 {
+    int missing = 0;
+
+    /* Report every unresolved entry point, not only the first: the pattern of what is
+     * missing separates a non-current/legacy context (everything after GL 1.1 is missing)
+     * from a single unsupported function. */
 #define PC_GL_LOAD(ret, name, args) \
     pc_##name = (PFN_pc_##name)SDL_GL_GetProcAddress(#name); \
-    if (pc_##name == NULL) { pcLog("OpenGL: missing %s", #name); return 0; }
+    if (pc_##name == NULL) { pcLog("OpenGL: missing %s", #name); missing++; }
     PC_GL_FUNCS(PC_GL_LOAD)
 #undef PC_GL_LOAD
+
+    if (missing != 0)
+    {
+        pcLog("OpenGL: %d required function(s) could not be resolved (current context: %s)",
+              missing, (SDL_GL_GetCurrentContext() != NULL) ? "yes" : "NO");
+        return 0;
+    }
+
     return 1;
 }
 
@@ -2084,7 +2097,8 @@ void gsRendererInit(void)
 
     if (!pcGlLoad())
     {
-        pcPlatformFatal("The graphics driver does not support OpenGL 3.3, which the game needs.\n\n"
+        pcPlatformFatal("The graphics driver could not provide every OpenGL 4.3 Core function the game needs.\n\n"
+                        "See recvx.log for the list of missing functions. "
                         "Updating the graphics driver usually fixes this.");
     }
 

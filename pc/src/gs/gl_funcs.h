@@ -1,4 +1,4 @@
-/* PC port: OpenGL 3.3 core entry points used by the renderer, loaded through SDL. */
+/* PC port: OpenGL core entry points used by the renderer (OpenGL 4.3 Core context), loaded through SDL. */
 #pragma once
 
 #include <SDL3/SDL.h>
