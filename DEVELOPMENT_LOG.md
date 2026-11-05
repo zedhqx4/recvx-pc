@@ -213,3 +213,40 @@ No general Z-fighting heuristic, depth-buffer redesign, texture-cache change, mo
 ## Validation
 
 The Windows build of the parent UI branch passed in run [#41986824072](https://github.com/zedhqx4/recvx-pc/actions/runs/41986824072). The decal branch has its own Windows build workflow trigger; compilation and runtime validation for this branch are pending.
+
+
+# reconstruction/5-performance_improvementA_GSswizzle
+
+Based on reconstruction/4-Decalfixing at ca6a0478f3e8fc28075516c787f8a1a8b4162917.
+
+## 256-byte GS block transfers
+
+- Added a common physical-block path for supported GS IMAGE formats. Complete 256-byte GS blocks are assembled in GS swizzled column order, compared with VRAM, and copied only when their contents differ.
+- Host-to-GS IMAGE uploads use block paths for PSMCT32/24, PSMZ32/24, PSMCT16/16S, PSMZ16/16S, PSMT8/T4, PSMT8H and PSMT4HL/HH.
+- Storage geometry follows the GS layouts: 8x8 for 32/24-bit and high-index formats, 16x8 for 16-bit, 16x16 for T8, and 32x16 for T4.
+- PSMCT24/PSMZ24 and high-index formats seed the destination block from existing VRAM so alpha and neighboring bits remain untouched. Incomplete, unaligned, packet-tail and unsupported transfers keep the original per-pixel fallback.
+- GS-to-host gsMemReadImage() unpacks complete aligned blocks directly into linear output. Partial rectangles use the pixel path; T4 output is packed as low/high nibbles.
+- Local-to-local transfers use raw 256-byte copies only for identical, fully-overwritten formats with aligned blocks and non-overlapping GS block ranges. Cross-format, partial-bit and overlapping copies retain the ordered pixel path.
+- OpenGL render-target readback uses gsMemWriteRenderTarget() to write complete PSMCT32 blocks; alpha conversion is preserved and unaligned dimensions retain the per-pixel fallback.
+- GS page generations are coalesced to one increment per touched 8 KB page per writeback batch. The generation remains an invalidation token, not a count of changed pixels.
+- GS_BLOCK_FASTPATH=0 disables the block paths for reference comparison.
+
+## Files changed
+
+- pc/src/gs/gs_mem.c: block geometry, address/column translation, host-to-GS assembly, GS-to-host unpacking, local-to-local copies, and page-touch batching.
+- pc/src/gs/gs_internal.h: declares the render-target bulk writer.
+- pc/src/gs/gs_gl.c: routes render-target readback through the block writer.
+- pc/tests/gs_mem_blockpath_test.c: deterministic comparison tests for supported IMAGE PSMs, packet splits, local copies, GS-to-host reads, and render-target writeback.
+- .github/workflows/build-windows.yml: enables Windows packaging for this branch.
+- .github/workflows/test-gs-block-transfer.yml: compares fast and per-pixel reference builds on Linux.
+
+## Explicit exclusions
+
+No TIM2/CLUT cache, GL texture-residency cache/index, page-hash algorithm, texture-source identity, renderer redesign, movie, VSync, UV, decal or underwater changes were imported from experiment/gl-texture-residency or experimental/gs-rebuild.
+
+## Validation
+
+- Source review: block alignment and fallback conditions are explicit; partial-write formats preserve untouched bits; raw local-to-local copies reject source/destination block overlap.
+- Equivalence test: CI compares GS_BLOCK_FASTPATH=1 against GS_BLOCK_FASTPATH=0; result pending.
+- Windows build: pending.
+- Runtime/visual: pending. Verify room transitions, indexed/direct-color textures and render-target copies before judging runtime performance.
