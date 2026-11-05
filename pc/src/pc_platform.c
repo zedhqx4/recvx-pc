@@ -1297,6 +1297,8 @@ int pcTitleRequested(void)
     return 1;
 }
 
+static void load_gamepad_mapping_database(void);
+
 void pcPadInit(void)
 {
     SDL_JoystickID* joysticks;
@@ -1378,7 +1380,7 @@ static int pad_down(const PadMap* m, const bool* keys)
 {
     int down = (m->key != SDL_SCANCODE_UNKNOWN) && keys[m->key];
 
-    if ((m->key == SDL_SCANCODE_RETURN) && (SDL_GetModState() & SDL_SDL_KMOD_ALT))
+    if ((m->key == SDL_SCANCODE_RETURN) && (SDL_GetModState() & SDL_KMOD_ALT))
     {
         down = 0;   /* Alt+Enter is the fullscreen toggle */
     }
