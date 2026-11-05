@@ -213,3 +213,32 @@ No general Z-fighting heuristic, depth-buffer redesign, texture-cache change, mo
 ## Validation
 
 The Windows build of the parent UI branch passed in run [#41986824072](https://github.com/zedhqx4/recvx-pc/actions/runs/41986824072). The decal branch has its own Windows build workflow trigger; compilation and runtime validation for this branch are pending.
+
+# reconstruction/5-performance_improvementB_Underwaterfix
+
+Based on `reconstruction/4-Decalfixing`.
+
+## Underwater render-target readback fix
+
+Ported the bounded partial-readback behavior from `underwaterfix`, limited to `gsFlushLocalToLocal()` in `pc/src/gs/gs_gl.c`.
+
+- For an eligible PSMCT32 transfer with matching framebuffer pitch and a provable GS-page-to-render-target mapping, the renderer now blits and reads only the requested rectangle instead of reading the entire render target.
+- Requests that cannot be mapped exactly retain the previous full-render-target readback path.
+- The exact-mapping path requires the requested horizontal range to remain inside the GS framebuffer page: `x + w <= bw * 64`. This is the horizontal-overflow guard from the final `underwaterfix` commit.
+- A partial readback does not clear `rt->rendered` or `rt->drawn_h`; unrequested pixels may still be newer than GS memory. Those flags are cleared only after a full readback.
+- Allocation failure leaves the render target's pending state intact and skips the readback.
+
+## Files
+
+- `pc/src/gs/gs_gl.c`: exact rectangle mapping, bounded GL blit/readback, partial-sync state preservation, and the horizontal page-overflow guard.
+- `DEVELOPMENT_LOG.md`: this record.
+
+## Explicit exclusions
+
+No texture cache, TIM2 loading, VRAM layout, GS swizzle, general renderer, decal, movie, VSync, or unrelated performance changes from the source branch were imported.
+
+## Validation
+
+- **Source review:** the exact-map conditions and horizontal bound match the final `underwaterfix` behavior; nonmatching layouts use the original full-readback fallback.
+- **Windows build:** pending.
+- **Runtime/visual:** pending. Verify the underwater ripple/camera-copy effect and transfers that partially overlap render targets; also verify a following read still synchronizes pixels omitted by an earlier partial readback.
