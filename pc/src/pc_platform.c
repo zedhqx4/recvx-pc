@@ -17,7 +17,7 @@
 #include "pc_audio.h"
 
 static unsigned int frames;   /* frames presented */
-static struct { double last, sum, worst, swap; int n; } frame_time;
+static struct { double last, sum, worst, swap, busy_sum, busy_worst, sleep_seen; int n; } frame_time;
 
 #define PS2_WIDTH  640   /* logical game coordinate space */
 #define PS2_HEIGHT 480
@@ -1459,15 +1459,29 @@ void pcVideoPresent(void)
 
         if (frame_time.last > 0)
         {
+            extern double pcOsSleepTotal;
             double d = now - frame_time.last;
+            double busy = d - (pcOsSleepTotal - frame_time.sleep_seen);
 
             frame_time.sum += d;
             frame_time.n++;
+            frame_time.busy_sum += busy;
+
+            if (busy > frame_time.busy_worst)
+            {
+                frame_time.busy_worst = busy;
+            }
 
             if (d > frame_time.worst)
             {
                 frame_time.worst = d;
             }
+        }
+
+        {
+            extern double pcOsSleepTotal;
+
+            frame_time.sleep_seen = pcOsSleepTotal;
         }
 
         frame_time.last = now;
@@ -1481,7 +1495,11 @@ void pcVideoPresent(void)
         pcLog("frame %u: %.1f ms per frame (worst %.1f ms), %.1f ms waiting for the GPU", frames,
               frame_time.n ? frame_time.sum * 1000 / frame_time.n : 0.0, frame_time.worst * 1000,
               frame_time.n ? frame_time.swap * 1000 / frame_time.n : 0.0);
+        pcLog("cpu: %.1f ms busy per frame (worst %.1f ms) of %.1f ms; the rest is idle waiting for vblank",
+              frame_time.n ? frame_time.busy_sum * 1000 / frame_time.n : 0.0, frame_time.busy_worst * 1000,
+              frame_time.n ? frame_time.sum * 1000 / frame_time.n : 0.0);
         frame_time.sum = frame_time.swap = frame_time.worst = 0;
+        frame_time.busy_sum = frame_time.busy_worst = 0;
         frame_time.n = 0;
         {
             extern long pcAudioStarved(int v);

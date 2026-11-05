@@ -78,9 +78,14 @@ double pcOsTime(void)
     return (double)now.QuadPart / (double)freq.QuadPart;
 }
 
+/* time spent idle in pcOsSleep: the emulated kernel sleeps here when every thread waits for the
+ * next vblank, so (frame time - idle time) is the CPU time the frame really needed */
+double pcOsSleepTotal;
+
 void pcOsSleep(double seconds)
 {
-    double end = pcOsTime() + seconds;
+    double start = pcOsTime();
+    double end = start + seconds;
 
     /* coarse sleep, then spin for the last millisecond for accurate frame pacing */
     if (seconds > 0.002)
@@ -91,6 +96,11 @@ void pcOsSleep(double seconds)
     while (pcOsTime() < end)
     {
         YieldProcessor();
+    }
+
+    if (seconds > 0)
+    {
+        pcOsSleepTotal += pcOsTime() - start;
     }
 }
 
