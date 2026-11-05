@@ -188,3 +188,28 @@ No movie/video, general texture-cache, VRAM, renderer-performance, or non-UI UV 
 The source comparison against `experimental/gs-rebuild` confirms that `ps2_NaDraw2D.c` and `ps2_dummy.c` are copied verbatim, as are the narrowly scoped GS state files where their only GS-rebuild additions are font-filter support. The platform tuner code was transplanted into the reconstruction/2 SDL3 platform implementation rather than replacing that file.
 
 **Windows build is in progress.** GitHub Actions run [#41986824072](https://github.com/zedhqx4/recvx-pc/actions/runs/41986824072) is building source commit `56c1883b654e403ead58885a4bae3d228735114b`, which contains the UI fixes; the later commits only restore the workflow file and add this log entry. Compilation is not yet confirmed. Runtime validation is also pending.
+
+
+# reconstruction/4-Decalfixing
+
+Based on `reconstruction/3-UI_Fixes`. The parent branch's Windows build passed in Actions run [#41986824072](https://github.com/zedhqx4/recvx-pc/actions/runs/41986824072).
+
+## Restored GS-rebuild fix
+
+- **Exact-signature decal depth priority:** imported the GS-rebuild allowlist of 25 captured `TEX0`/`ALPHA` material signatures. A draw is eligible only when it also matches the shared GS state fields in `gs_decal_signature_match()` and uses depth testing. Broad state heuristics are not used, and the recorded arms/shirt negative controls are not in the allowlist.
+- Matched draws receive a per-frame priority from 1 through 4, capped at 4, through `glPolygonOffset(0.0f, priority * 0.50f)`. The offset is enabled only around the matching draw (including any alpha-test passes), then disabled immediately. The priority counter resets once per presented frame.
+- Added `glPolygonOffset` to the OpenGL function loader.
+
+## Files
+
+| File | Change |
+|---|---|
+| `pc/src/gs/gs_gl.c` | Exact decal signatures, GS-state matcher and bounded per-frame polygon-offset priority |
+| `pc/src/gs/gl_funcs.h` | Load `glPolygonOffset` |
+| `pc/README.md` | Document the decal depth-priority behavior and its allowlist scope |
+
+No general Z-fighting heuristic, depth-buffer redesign, texture-cache change, movie/video change, UV change, or performance optimization was imported.
+
+## Validation
+
+The Windows build of the parent UI branch passed in run [#41986824072](https://github.com/zedhqx4/recvx-pc/actions/runs/41986824072). The decal branch has its own Windows build workflow trigger; compilation and runtime validation for this branch are pending.
