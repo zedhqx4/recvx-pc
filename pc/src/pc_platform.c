@@ -681,6 +681,101 @@ static void save_window(void)
     }
 }
 
+/* Ask the driver what context it really gave us.
+ *
+ * SDL_GL_GetAttribute(SDL_GL_CONTEXT_*_VERSION / PROFILE_MASK) returns the values that were
+ * *requested* with SDL_GL_SetAttribute, not the ones the driver granted (SDL_video.c), so it
+ * cannot detect a downgrade. On Windows SDL_GL_CreateContext() also falls back to the legacy
+ * OpenGL 1.1 context ("GL 3.x is not supported") and still returns it when
+ * wglCreateContextAttribsARB is unavailable (GDI generic renderer, remote desktop, some VMs).
+ * In that case only the GL 1.1 entry points resolve and the first one the renderer needs
+ * beyond them is glActiveTexture ("OpenGL: missing glActiveTexture"). glGetString exists in
+ * every context, so use it (and GL_CONTEXT_PROFILE_MASK on GL >= 3.2) as the source of truth. */
+#define PC_GL_VENDOR              0x1F00
+#define PC_GL_RENDERER            0x1F01
+#define PC_GL_VERSION             0x1F02
+#define PC_GL_CONTEXT_PROFILE_MASK 0x9126
+#define PC_GL_CONTEXT_CORE_PROFILE_BIT 0x00000001
+
+#ifndef APIENTRY
+#define APIENTRY
+#endif
+typedef const unsigned char* (APIENTRY* PcPfnGlGetString)(unsigned int name);
+typedef void (APIENTRY* PcPfnGlGetIntegerv)(unsigned int pname, int* data);
+
+static void verify_gl_context(void)
+{
+    PcPfnGlGetString get_string;
+    PcPfnGlGetIntegerv get_integerv;
+    const char* version;
+    const char* renderer;
+    const char* vendor;
+    int gl_major = 0;
+    int gl_minor = 0;
+
+    if (SDL_GL_GetCurrentContext() == NULL)
+    {
+        pcOsStartupLog("pcVideoInit: no current OpenGL context after creation");
+        pcPlatformFatal("The OpenGL context is not current on the video thread: %s", SDL_GetError());
+    }
+
+    get_string = (PcPfnGlGetString)SDL_GL_GetProcAddress("glGetString");
+    get_integerv = (PcPfnGlGetIntegerv)SDL_GL_GetProcAddress("glGetIntegerv");
+
+    if ((get_string == NULL) || (get_integerv == NULL))
+    {
+        pcOsStartupLog("pcVideoInit: glGetString/glGetIntegerv unavailable");
+        pcPlatformFatal("The OpenGL driver could not resolve glGetString/glGetIntegerv: %s", SDL_GetError());
+    }
+
+    version = (const char*)get_string(PC_GL_VERSION);
+    renderer = (const char*)get_string(PC_GL_RENDERER);
+    vendor = (const char*)get_string(PC_GL_VENDOR);
+
+    if (version == NULL)
+    {
+        pcOsStartupLog("pcVideoInit: glGetString(GL_VERSION) returned NULL");
+        pcPlatformFatal("The OpenGL driver did not report a version.");
+    }
+
+    pcLog("video: GL_VENDOR=%s GL_RENDERER=%s GL_VERSION=%s",
+          vendor ? vendor : "(null)", renderer ? renderer : "(null)", version);
+
+    /* GL_VERSION begins with "<major>.<minor>" in every profile. */
+    if (sscanf(version, "%d.%d", &gl_major, &gl_minor) != 2)
+    {
+        pcOsStartupLog("pcVideoInit: could not parse GL_VERSION");
+        pcPlatformFatal("Could not parse the OpenGL version string \"%s\".", version);
+    }
+
+    if ((gl_major < 4) || ((gl_major == 4) && (gl_minor < 3)))
+    {
+        pcOsStartupLog("pcVideoInit: OpenGL version too old");
+        pcPlatformFatal("OpenGL 4.3 Core or later is required; the driver provided %d.%d (%s, %s).\n\n"
+                        "On Windows this usually means the default Microsoft GDI renderer is being used "
+                        "(no GPU driver, remote desktop or a virtual machine). Install or update the "
+                        "graphics driver.",
+                        gl_major, gl_minor, renderer ? renderer : "unknown renderer",
+                        vendor ? vendor : "unknown vendor");
+    }
+
+    {
+        int profile = 0;
+
+        get_integerv(PC_GL_CONTEXT_PROFILE_MASK, &profile);   /* valid from GL 3.2 */
+
+        if ((profile & PC_GL_CONTEXT_CORE_PROFILE_BIT) == 0)
+        {
+            pcOsStartupLog("pcVideoInit: OpenGL context is not Core profile");
+            pcPlatformFatal("An OpenGL Core profile is required; the driver provided profile mask 0x%x.",
+                            (unsigned)profile);
+        }
+    }
+
+    pcOsStartupLog("pcVideoInit: OpenGL version verified");
+    pcLog("video: OpenGL context %d.%d Core verified with glGetString", gl_major, gl_minor);
+}
+
 void pcVideoInit(void)
 {
     SDL_WindowFlags flags = SDL_WINDOW_RESIZABLE | SDL_WINDOW_OPENGL;
@@ -786,35 +881,7 @@ void pcVideoInit(void)
     }
     pcOsStartupLog("pcVideoInit: OpenGL context created");
 
-    {
-        int gl_major = 0;
-        int gl_minor = 0;
-        int gl_profile = 0;
-
-        if (!SDL_GL_GetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, &gl_major) ||
-            !SDL_GL_GetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, &gl_minor) ||
-            !SDL_GL_GetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, &gl_profile))
-        {
-            pcOsStartupLog("pcVideoInit: could not query the actual OpenGL context attributes");
-            pcPlatformFatal("Could not query the actual OpenGL context attributes: %s", SDL_GetError());
-        }
-
-        if ((gl_major < 4) || ((gl_major == 4) && (gl_minor < 3)))
-        {
-            pcOsStartupLog("pcVideoInit: OpenGL version too old");
-            pcPlatformFatal("OpenGL 4.3 Core or later is required; the driver provided %d.%d.",
-                            gl_major, gl_minor);
-        }
-
-        if (gl_profile != SDL_GL_CONTEXT_PROFILE_CORE)
-        {
-            pcOsStartupLog("pcVideoInit: OpenGL context is not Core profile");
-            pcPlatformFatal("An OpenGL Core profile is required; the driver provided profile %d.", gl_profile);
-        }
-
-        pcOsStartupLog("pcVideoInit: OpenGL version verified");
-        pcLog("video: OpenGL context %d.%d Core", gl_major, gl_minor);
-    }
+    verify_gl_context();
 
     {
         int swap_interval = video_cfg.vsync ? 1 : 0;
