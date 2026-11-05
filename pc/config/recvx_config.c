@@ -407,7 +407,7 @@ static void load_settings(void)
     SendMessageA(h_pause, BM_SETCHECK, ((v == NULL) || (atoi(v) != 0)) ? BST_CHECKED : BST_UNCHECKED, 0);
 
     v = ini_get("movies_hd");
-    SendMessageA(h_movies_hd, BM_SETCHECK, ((v != NULL) && (atoi(v) != 0)) ? BST_CHECKED : BST_UNCHECKED, 0);
+    SendMessageA(h_movies_hd, BM_SETCHECK, ((v == NULL) || (atoi(v) != 0)) ? BST_CHECKED : BST_UNCHECKED, 0);
 
     v = ini_get("skip_doors");
     SendMessageA(h_skip_doors, BM_SETCHECK, ((v != NULL) && (atoi(v) != 0)) ? BST_CHECKED : BST_UNCHECKED, 0);
@@ -475,7 +475,7 @@ static int save_settings(void)
     ini_set("fullscreen", (sel == 1) ? "1" : (sel == 2) ? "desktop" : NULL);
 
     ini_set("pause_unfocused", (SendMessageA(h_pause, BM_GETCHECK, 0, 0) == BST_CHECKED) ? NULL : "0");
-    ini_set("movies_hd", (SendMessageA(h_movies_hd, BM_GETCHECK, 0, 0) == BST_CHECKED) ? "1" : NULL);
+    ini_set("movies_hd", (SendMessageA(h_movies_hd, BM_GETCHECK, 0, 0) == BST_CHECKED) ? NULL : "0");
     ini_set("skip_doors", (SendMessageA(h_skip_doors, BM_GETCHECK, 0, 0) == BST_CHECKED) ? "1" : NULL);
     ini_set("skip_intro", (SendMessageA(h_skip_intro, BM_GETCHECK, 0, 0) == BST_CHECKED) ? "1" : NULL);
     ini_set("debug_save", (SendMessageA(h_save_anywhere, BM_GETCHECK, 0, 0) == BST_CHECKED) ? "1" : NULL);
