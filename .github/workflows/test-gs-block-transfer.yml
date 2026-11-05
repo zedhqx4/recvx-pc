@@ -1,0 +1,28 @@
+name: GS block-transfer equivalence
+
+on:
+  push:
+    branches:
+      - reconstruction/5-performance_improvementA_GSswizzle
+    paths:
+      - 'pc/src/gs/gs_mem.c'
+      - 'pc/src/gs/gs_internal.h'
+      - 'pc/tests/gs_mem_blockpath_test.c'
+      - '.github/workflows/test-gs-block-transfer.yml'
+  workflow_dispatch:
+
+jobs:
+  equivalence:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build fast and reference paths
+        run: |
+          cc -O2 -std=c99 -Wall -Wextra -DGS_BLOCK_FASTPATH=1 pc/tests/gs_mem_blockpath_test.c -o /tmp/gs-fast
+          cc -O2 -std=c99 -Wall -Wextra -DGS_BLOCK_FASTPATH=0 pc/tests/gs_mem_blockpath_test.c -o /tmp/gs-reference
+      - name: Compare complete transfer outputs
+        run: |
+          /tmp/gs-fast > /tmp/gs-fast.txt
+          /tmp/gs-reference > /tmp/gs-reference.txt
+          cmp /tmp/gs-fast.txt /tmp/gs-reference.txt
+          cat /tmp/gs-fast.txt
