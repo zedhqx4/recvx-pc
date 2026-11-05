@@ -13,6 +13,10 @@
 
 unsigned char gsVram[GS_VRAM_SIZE];
 unsigned int gsPageGen[GS_PAGES];
+static unsigned int pageTouchEpoch[GS_PAGES],currentPageTouchEpoch;
+static int coalescePageTouches;
+static void gsMemBeginWriteBatch(void){currentPageTouchEpoch++;if(currentPageTouchEpoch==0){memset(pageTouchEpoch,0,sizeof(pageTouchEpoch));currentPageTouchEpoch=1;}coalescePageTouches=1;}
+static void gsMemEndWriteBatch(void){coalescePageTouches=0;}
 
 static const unsigned char blockTable32[4][8] = {
     {  0,  1,  4,  5, 16, 17, 20, 21 },
@@ -234,7 +238,9 @@ int gsBlockNumber(int psm, unsigned int bp, unsigned int bw, unsigned int x, uns
 
 static void touch(unsigned int byte_addr)
 {
-    gsPageGen[(byte_addr >> 13) & (GS_PAGES - 1)]++;
+ unsigned int p=(byte_addr>>13)&(GS_PAGES-1);
+ if(coalescePageTouches){if(pageTouchEpoch[p]!=currentPageTouchEpoch){pageTouchEpoch[p]=currentPageTouchEpoch;gsPageGen[p]++;}}
+ else gsPageGen[p]++;
 }
 
 unsigned int gsMemRead(int psm, unsigned int bp, unsigned int bw, unsigned int x, unsigned int y)
@@ -436,6 +442,73 @@ int gsPsmBits(int psm)
     return 32;
 }
 
+
+#ifndef GS_BLOCK_FASTPATH
+#define GS_BLOCK_FASTPATH 1
+#endif
+typedef struct {unsigned int w,h,bits;int preserve;} GsBlockInfo;
+static int gs_block_info(int p,GsBlockInfo* i){switch(p){
+case GS_PSMCT32:case GS_PSMZ32:i->w=8;i->h=8;i->bits=32;i->preserve=0;return 1;
+case GS_PSMCT24:case GS_PSMZ24:i->w=8;i->h=8;i->bits=24;i->preserve=1;return 1;
+case GS_PSMCT16:case GS_PSMCT16S:case GS_PSMZ16:case GS_PSMZ16S:i->w=16;i->h=8;i->bits=16;i->preserve=0;return 1;
+case GS_PSMT8:i->w=16;i->h=16;i->bits=8;i->preserve=0;return 1;
+case GS_PSMT4:i->w=32;i->h=16;i->bits=4;i->preserve=0;return 1;
+case GS_PSMT8H:i->w=8;i->h=8;i->bits=8;i->preserve=1;return 1;
+case GS_PSMT4HL:case GS_PSMT4HH:i->w=8;i->h=8;i->bits=4;i->preserve=1;return 1;
+default:return 0;}}
+static unsigned int gs_block_base(int p,unsigned int bp,unsigned int bw,unsigned int x,unsigned int y){
+unsigned int a;switch(p){
+case GS_PSMCT32:case GS_PSMCT24:a=addr32(bp,bw,x,y,blockTable32);return(a-columnTable32[y&7u][x&7u]*4u)&(GS_VRAM_SIZE-1);
+case GS_PSMZ32:case GS_PSMZ24:a=addr32(bp,bw,x,y,blockTable32Z);return(a-columnTable32[y&7u][x&7u]*4u)&(GS_VRAM_SIZE-1);
+case GS_PSMCT16:a=addr16(bp,bw,x,y,blockTable16);return(a-columnTable16[y&7u][x&15u]*2u)&(GS_VRAM_SIZE-1);
+case GS_PSMCT16S:a=addr16(bp,bw,x,y,blockTable16S);return(a-columnTable16[y&7u][x&15u]*2u)&(GS_VRAM_SIZE-1);
+case GS_PSMZ16:a=addr16(bp,bw,x,y,blockTable16Z);return(a-columnTable16[y&7u][x&15u]*2u)&(GS_VRAM_SIZE-1);
+case GS_PSMZ16S:a=addr16(bp,bw,x,y,blockTable16SZ);return(a-columnTable16[y&7u][x&15u]*2u)&(GS_VRAM_SIZE-1);
+case GS_PSMT8:a=addr8(bp,bw,x,y);return(a-columnTable8[y&15u][x&15u])&(GS_VRAM_SIZE-1);
+case GS_PSMT4:{unsigned int n=addr4(bp,bw,x,y);n=(n-columnTable4[y&15u][x&31u])&(GS_VRAM_SIZE*2-1);return(n>>1)&(GS_VRAM_SIZE-1);}
+case GS_PSMT8H:case GS_PSMT4HL:case GS_PSMT4HH:a=addr32(bp,bw,x,y,blockTable32);return(a-columnTable32[y&7u][x&7u]*4u)&(GS_VRAM_SIZE-1);
+default:return 0;}}
+static void gs_block_set(unsigned char b[256],int p,unsigned int x,unsigned int y,unsigned int v){
+unsigned int o,n;switch(p){
+case GS_PSMCT32:case GS_PSMZ32:o=columnTable32[y][x]*4u;memcpy(b+o,&v,4);break;
+case GS_PSMCT24:case GS_PSMZ24:o=columnTable32[y][x]*4u;b[o]=(unsigned char)v;b[o+1]=(unsigned char)(v>>8);b[o+2]=(unsigned char)(v>>16);break;
+case GS_PSMCT16:case GS_PSMCT16S:case GS_PSMZ16:case GS_PSMZ16S:o=columnTable16[y][x]*2u;b[o]=(unsigned char)v;b[o+1]=(unsigned char)(v>>8);break;
+case GS_PSMT8:b[columnTable8[y][x]]=(unsigned char)v;break;
+case GS_PSMT4:n=columnTable4[y][x];o=n>>1;b[o]=(unsigned char)((b[o]&(n&1u?15u:240u))|((v&15u)<<((n&1u)*4u)));break;
+case GS_PSMT8H:o=columnTable32[y][x]*4u+3u;b[o]=(unsigned char)v;break;
+case GS_PSMT4HL:o=columnTable32[y][x]*4u+3u;b[o]=(unsigned char)((b[o]&240u)|(v&15u));break;
+case GS_PSMT4HH:o=columnTable32[y][x]*4u+3u;b[o]=(unsigned char)((b[o]&15u)|((v&15u)<<4));break;
+}}
+static unsigned int gs_block_get(const unsigned char b[256],int p,unsigned int x,unsigned int y){
+unsigned int o,v,n;switch(p){
+case GS_PSMCT32:case GS_PSMCT24:case GS_PSMZ32:case GS_PSMZ24:o=columnTable32[y][x]*4u;memcpy(&v,b+o,4);return v;
+case GS_PSMCT16:case GS_PSMCT16S:case GS_PSMZ16:case GS_PSMZ16S:o=columnTable16[y][x]*2u;return b[o]|((unsigned int)b[o+1]<<8);
+case GS_PSMT8:return b[columnTable8[y][x]];
+case GS_PSMT4:n=columnTable4[y][x];return(b[n>>1]>>((n&1u)*4u))&15u;
+case GS_PSMT8H:return b[columnTable32[y][x]*4u+3u];
+case GS_PSMT4HL:return b[columnTable32[y][x]*4u+3u]&15u;
+case GS_PSMT4HH:return b[columnTable32[y][x]*4u+3u]>>4;
+default:return 0;}}
+static unsigned int gs_block_input(const unsigned char* row,unsigned int x,unsigned int bits){
+const unsigned char* p;if(bits==4)return(row[x>>1]>>((x&1u)*4u))&15u;p=row+(x*bits)/8u;
+if(bits==32){unsigned int v;memcpy(&v,p,4);return v;}if(bits==24)return p[0]|((unsigned int)p[1]<<8)|((unsigned int)p[2]<<16);
+if(bits==16)return p[0]|((unsigned int)p[1]<<8);return p[0];}
+static int gs_mem_read_blocks(int p,unsigned int bp,unsigned int bw,unsigned int sx,unsigned int sy,unsigned int w,unsigned int h,unsigned char* out){
+GsBlockInfo i;unsigned int bx,by,xx,yy,bits,rb;if(!GS_BLOCK_FASTPATH||!gs_block_info(p,&i)||(sx%i.w)||(sy%i.h)||(w%i.w)||(h%i.h))return 0;
+bits=(unsigned int)gsPsmBits(p);if(bits!=4&&bits!=8&&bits!=16&&bits!=32)return 0;rb=(w*bits+7u)/8u;if(bits==4)memset(out,0,(size_t)rb*h);
+for(by=0;by<h;by+=i.h)for(bx=0;bx<w;bx+=i.w){unsigned int base=gs_block_base(p,bp,bw,sx+bx,sy+by);const unsigned char* block=gsVram+base;
+for(yy=0;yy<i.h;yy++)for(xx=0;xx<i.w;xx++){unsigned int v=gs_block_get(block,p,xx,yy);unsigned char* row=out+(size_t)(by+yy)*rb;
+if(bits==4){unsigned int c=bx+xx,s=(c&1u)*4u;row[c>>1]=(unsigned char)((row[c>>1]&(240u>>s))|((v&15u)<<s));}
+else memcpy(row+(size_t)(bx+xx)*(bits/8u),&v,bits/8u);}}return 1;}
+void gsMemWriteRenderTarget(unsigned int bp,unsigned int bw,unsigned int w,unsigned int h,const unsigned int* rgba){
+unsigned int bx,by,xx,yy;gsMemBeginWriteBatch();
+if(GS_BLOCK_FASTPATH&&!(w&7u)&&!(h&7u)){for(by=0;by<h;by+=8u)for(bx=0;bx<w;bx+=8u){unsigned char block[256];unsigned int base=gs_block_base(GS_PSMCT32,bp,bw,bx,by);
+for(yy=0;yy<8u;yy++)for(xx=0;xx<8u;xx++){unsigned int v=rgba[(size_t)(by+yy)*w+bx+xx],a=(v>>24)&255u;v=(v&0x00FFFFFFu)|(((a*128u+127u)/255u)<<24);memcpy(block+columnTable32[yy][xx]*4u,&v,4);}
+if(memcmp(gsVram+base,block,256)!=0){memcpy(gsVram+base,block,256);touch(base);}}}
+else{unsigned int x,y;for(y=0;y<h;y++)for(x=0;x<w;x++){unsigned int v=rgba[(size_t)y*w+x],a=(v>>24)&255u;v=(v&0x00FFFFFFu)|(((a*128u+127u)/255u)<<24);mem_write(GS_PSMCT32,bp,bw,x,y,v);}}
+gsMemEndWriteBatch();}
+
+
 /* ---- transfers (BITBLTBUF / TRXPOS / TRXREG / TRXDIR) ---- */
 
 static struct {
@@ -461,6 +534,15 @@ static void advance(void)
         }
     }
 }
+
+
+static int gs_mem_copy_blocks(int sp,unsigned int sbp,unsigned int sbw,unsigned int sx,unsigned int sy,int dp,unsigned int dbp,unsigned int dbw,unsigned int dx,unsigned int dy,unsigned int w,unsigned int h){
+unsigned char used[GS_VRAM_SIZE/256];GsBlockInfo i;unsigned int bx,by;
+if(!GS_BLOCK_FASTPATH||sp!=dp||!gs_block_info(sp,&i)||i.preserve||(sx%i.w)||(dx%i.w)||(sy%i.h)||(dy%i.h)||(w%i.w)||(h%i.h))return 0;
+memset(used,0,sizeof(used));for(by=0;by<h;by+=i.h)for(bx=0;bx<w;bx+=i.w){unsigned int s=gs_block_base(sp,sbp,sbw,sx+bx,sy+by);used[s>>8]=1;}
+for(by=0;by<h;by+=i.h)for(bx=0;bx<w;bx+=i.w){unsigned int d=gs_block_base(dp,dbp,dbw,dx+bx,dy+by);if(used[d>>8])return 0;}
+gsMemBeginWriteBatch();for(by=0;by<h;by+=i.h)for(bx=0;bx<w;bx+=i.w){unsigned char b[256];unsigned int s=gs_block_base(sp,sbp,sbw,sx+bx,sy+by),d=gs_block_base(dp,dbp,dbw,dx+bx,dy+by);memcpy(b,gsVram+s,256);if(memcmp(gsVram+d,b,256)!=0){memcpy(gsVram+d,b,256);touch(d);}}
+gsMemEndWriteBatch();return 1;}
 
 void gsMemStartTransfer(const GsRegs* r)
 {
@@ -500,12 +582,13 @@ void gsMemStartTransfer(const GsRegs* r)
 
         gsFlushLocalToLocal(sbp, sbw, spsm, ssx, ssy, w, h);
 
-        for (y = 0; y < h; y++)
+        if (!gs_mem_copy_blocks(spsm, sbp, sbw, ssx, ssy, dpsm, dbp, dbw, dsx, dsy, w, h))
         {
-            for (x = 0; x < w; x++)
-            {
-                gsMemWrite(dpsm, dbp, dbw, dsx + x, dsy + y, gsMemRead(spsm, sbp, sbw, ssx + x, ssy + y));
-            }
+            gsMemBeginWriteBatch();
+            for (y = 0; y < h; y++)
+                for (x = 0; x < w; x++)
+                    gsMemWrite(dpsm, dbp, dbw, dsx + x, dsy + y, gsMemRead(spsm, sbp, sbw, ssx + x, ssy + y));
+            gsMemEndWriteBatch();
         }
 
         xfer.active = 0;
@@ -518,21 +601,28 @@ void gsMemStartTransfer(const GsRegs* r)
 }
 
 /* host -> local data (IMAGE mode GIF data), qwc quadwords */
+
+static int gs_mem_transfer_blocks(const unsigned char* data,int bytes){
+GsBlockInfo i;int used=0;unsigned int rb;if(!GS_BLOCK_FASTPATH||!gs_block_info((int)xfer.psm,&i))return 0;rb=(xfer.w*i.bits+7u)/8u;
+while(xfer.active&&xfer.x==xfer.sx&&!(xfer.sx%i.w)&&!(xfer.w%i.w)&&!(xfer.y%i.h)&&(xfer.sy+xfer.h-xfer.y)>=i.h&&(bytes-used)>=(int)(rb*i.h)){
+unsigned int bx,yy,xx;for(bx=0;bx<xfer.w;bx+=i.w){unsigned char b[256];unsigned int base=gs_block_base((int)xfer.psm,xfer.bp,xfer.bw,xfer.sx+bx,xfer.y);if(i.preserve)memcpy(b,gsVram+base,256);else memset(b,0,256);
+for(yy=0;yy<i.h;yy++){const unsigned char* row=data+used+yy*rb;for(xx=0;xx<i.w;xx++)gs_block_set(b,(int)xfer.psm,xx,yy,gs_block_input(row,bx+xx,i.bits));}
+if(memcmp(gsVram+base,b,256)!=0){memcpy(gsVram+base,b,256);touch(base);xfer.changed=1;}}
+used+=(int)(rb*i.h);xfer.y+=i.h;if(xfer.y>=xfer.sy+xfer.h){xfer.active=0;gsXferDone(xfer.bp,xfer.bw,xfer.psm,xfer.sx,xfer.sy,xfer.w,xfer.h,xfer.changed);}}
+return used;}
+
 void gsMemTransferData(const unsigned char* data, int qwc)
 {
-    int bytes = qwc * 16;
+    int bytes=qwc*16;
     int i;
-
-    if (!xfer.active)
-    {
-        return;
-    }
-
-    switch (xfer.psm)
+    if(!xfer.active)return;
+    gsMemBeginWriteBatch();
+    i=gs_mem_transfer_blocks(data,bytes);
+    switch(xfer.psm)
     {
     case GS_PSMCT32:
     case GS_PSMZ32:
-        for (i = 0; (i + 4 <= bytes) && xfer.active; i += 4)
+        for (; (i + 4 <= bytes) && xfer.active; i += 4)
         {
             xfer.changed |= mem_write(xfer.psm, xfer.bp, xfer.bw, xfer.x, xfer.y, *(const unsigned int*)&data[i]);
             advance();
@@ -540,7 +630,7 @@ void gsMemTransferData(const unsigned char* data, int qwc)
         break;
     case GS_PSMCT24:
     case GS_PSMZ24:
-        for (i = 0; (i + 3 <= bytes) && xfer.active; i += 3)
+        for (; (i + 3 <= bytes) && xfer.active; i += 3)
         {
             xfer.changed |= mem_write(xfer.psm, xfer.bp, xfer.bw, xfer.x, xfer.y, data[i] | (data[i + 1] << 8) | (data[i + 2] << 16));
             advance();
@@ -550,7 +640,7 @@ void gsMemTransferData(const unsigned char* data, int qwc)
     case GS_PSMCT16S:
     case GS_PSMZ16:
     case GS_PSMZ16S:
-        for (i = 0; (i + 2 <= bytes) && xfer.active; i += 2)
+        for (; (i + 2 <= bytes) && xfer.active; i += 2)
         {
             xfer.changed |= mem_write(xfer.psm, xfer.bp, xfer.bw, xfer.x, xfer.y, *(const unsigned short*)&data[i]);
             advance();
@@ -558,7 +648,7 @@ void gsMemTransferData(const unsigned char* data, int qwc)
         break;
     case GS_PSMT8:
     case GS_PSMT8H:
-        for (i = 0; (i < bytes) && xfer.active; i++)
+        for (; (i < bytes) && xfer.active; i++)
         {
             xfer.changed |= mem_write(xfer.psm, xfer.bp, xfer.bw, xfer.x, xfer.y, data[i]);
             advance();
@@ -567,7 +657,7 @@ void gsMemTransferData(const unsigned char* data, int qwc)
     case GS_PSMT4:
     case GS_PSMT4HL:
     case GS_PSMT4HH:
-        for (i = 0; (i < bytes) && xfer.active; i++)
+        for (; (i < bytes) && xfer.active; i++)
         {
             xfer.changed |= mem_write(xfer.psm, xfer.bp, xfer.bw, xfer.x, xfer.y, data[i] & 15);
             advance();
@@ -580,6 +670,8 @@ void gsMemTransferData(const unsigned char* data, int qwc)
         }
         break;
     }
+
+    gsMemEndWriteBatch();
 }
 
 /* local -> host (sceGsExecStoreImage) */
@@ -596,27 +688,13 @@ void gsMemReadImage(const GsRegs* r, unsigned char* out)
     int bits = gsPsmBits(spsm);
 
     gsFlushLocalToLocal(sbp, sbw, spsm, ssx, ssy, w, h);
-
-    for (y = 0; y < h; y++)
-    {
-        for (x = 0; x < w; x++)
-        {
-            unsigned int v = gsMemRead(spsm, sbp, sbw, ssx + x, ssy + y);
-
-            if (bits == 32)
-            {
-                *(unsigned int*)out = v;
-                out += 4;
-            }
-            else if (bits == 16)
-            {
-                *(unsigned short*)out = (unsigned short)v;
-                out += 2;
-            }
-            else if (bits == 8)
-            {
-                *out++ = (unsigned char)v;
-            }
-        }
+    if(gs_mem_read_blocks((int)spsm,sbp,sbw,ssx,ssy,w,h,out))return;
+    if(bits==4)memset(out,0,(size_t)((w+1u)/2u)*h);
+    for(y=0;y<h;y++)for(x=0;x<w;x++){
+        unsigned int v=gsMemRead(spsm,sbp,sbw,ssx+x,ssy+y);
+        if(bits==32){memcpy(out,&v,4);out+=4;}
+        else if(bits==16){unsigned short z=(unsigned short)v;memcpy(out,&z,2);out+=2;}
+        else if(bits==8)*out++=(unsigned char)v;
+        else if(bits==4){unsigned int shift=(x&1u)*4u;unsigned char* dst=out+(size_t)y*((w+1u)/2u)+(x>>1);*dst=(unsigned char)((*dst&(240u>>shift))|((v&15u)<<shift));}
     }
 }
