@@ -6,8 +6,9 @@
 
 #include <io.h>
 
-#include <SDL.h>
-#include <SDL_syswm.h>
+#define SDL_MAIN_HANDLED
+#include <SDL3/SDL.h>
+#include <SDL3/SDL_main.h>
 
 #include "pc_platform.h"
 #include "pc_os.h"
@@ -29,6 +30,36 @@ static void save_event(const SDL_Event* ev);
 static void save_tick(void);
 static void fps_tick(void);
 static void update_title(int force);
+
+/* SDL3 gives each window event its own event type; keep the platform's event decisions centralized. */
+enum { PC_WINDOW_EVENT_NONE=0, PC_WINDOW_EVENT_MOVED, PC_WINDOW_EVENT_SIZE_CHANGED,
+       PC_WINDOW_EVENT_MAXIMIZED, PC_WINDOW_EVENT_RESTORED, PC_WINDOW_EVENT_FOCUS_GAINED,
+       PC_WINDOW_EVENT_FOCUS_LOST, PC_WINDOW_EVENT_EXPOSED };
+static int pc_window_event(Uint32 type)
+{
+    switch (type) {
+    case SDL_EVENT_WINDOW_MOVED: return PC_WINDOW_EVENT_MOVED;
+    case SDL_EVENT_WINDOW_RESIZED:
+    case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED: return PC_WINDOW_EVENT_SIZE_CHANGED;
+    case SDL_EVENT_WINDOW_MAXIMIZED: return PC_WINDOW_EVENT_MAXIMIZED;
+    case SDL_EVENT_WINDOW_RESTORED: return PC_WINDOW_EVENT_RESTORED;
+    case SDL_EVENT_WINDOW_FOCUS_GAINED: return PC_WINDOW_EVENT_FOCUS_GAINED;
+    case SDL_EVENT_WINDOW_FOCUS_LOST: return PC_WINDOW_EVENT_FOCUS_LOST;
+    case SDL_EVENT_WINDOW_EXPOSED: return PC_WINDOW_EVENT_EXPOSED;
+    default: return PC_WINDOW_EVENT_NONE;
+    }
+}
+/* SDL3 changed the cursor API from a query/enable/disable argument to separate functions. */
+enum { SDL_QUERY=-1, SDL_DISABLE=0, SDL_ENABLE=1 };
+static int pc_sdl_show_cursor(int toggle)
+{
+    if (toggle == SDL_QUERY) return SDL_CursorVisible() ? SDL_ENABLE : SDL_DISABLE;
+    if (toggle == SDL_ENABLE) return SDL_ShowCursor() ? SDL_ENABLE : -1;
+    if (toggle == SDL_DISABLE) return SDL_HideCursor() ? SDL_DISABLE : -1;
+    return -1;
+}
+#define SDL_ShowCursor(toggle) pc_sdl_show_cursor(toggle)
+
 static SDL_GLContext gl_context;
 static FILE* log_file;
 
@@ -44,9 +75,9 @@ typedef struct
     size_t len, cap;
 } OutQueue;
 
-static SDL_mutex* out_lock;
-static SDL_cond* out_wake;
 static OutQueue out_q[2];   /* 0 = log, 1 = input recording */
+static SDL_Mutex* out_lock;
+static SDL_Condition* out_wake;
 static int out_busy;
 
 static int out_thread(void* param)
@@ -61,7 +92,7 @@ static int out_thread(void* param)
 
         while ((out_q[0].len == 0) && (out_q[1].len == 0))
         {
-            SDL_CondWait(out_wake, out_lock);
+            SDL_WaitCondition(out_wake, out_lock);
         }
 
         out_busy = 1;
@@ -100,7 +131,7 @@ static void out_write(int which, FILE* f, const char* text, size_t len)
     if (out_lock == NULL)
     {
         out_lock = SDL_CreateMutex();
-        out_wake = SDL_CreateCond();
+        out_wake = SDL_CreateCondition();
         SDL_DetachThread(SDL_CreateThread(out_thread, "file output", NULL));
         atexit(pcLogFlush);
     }
@@ -130,7 +161,7 @@ static void out_write(int which, FILE* f, const char* text, size_t len)
     q->f = f;
     memcpy(q->buf + q->len, text, len);
     q->len += len;
-    SDL_CondSignal(out_wake);
+    SDL_SignalCondition(out_wake);
     SDL_UnlockMutex(out_lock);
 }
 
@@ -251,7 +282,7 @@ void pcPlatformNotSetUp(void)
     pcPlatformExeDir(dir, sizeof(dir));
     snprintf(exe, sizeof(exe), "%s\\recvx-config.exe", dir);
 
-    if ((SDL_ShowMessageBox(&box, &choice) == 0) && (choice == 1) && !pcOsLaunch(exe))
+    if ((SDL_ShowMessageBox(&box, &choice)) && (choice == 1) && !pcOsLaunch(exe))
     {
         SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Resident Evil Code: Veronica X",
                                  "Could not start recvx-config.exe. It should be in the same folder as recvx.exe.", NULL);
@@ -262,7 +293,7 @@ void pcPlatformNotSetUp(void)
 
 void pcPlatformExeDir(char* out, int size)
 {
-    char* base = SDL_GetBasePath();
+    const char* base = SDL_GetBasePath();
     size_t n;
 
     if (base == NULL)
@@ -273,7 +304,7 @@ void pcPlatformExeDir(char* out, int size)
 
     strncpy(out, base, size - 1);
     out[size - 1] = '\0';
-    SDL_free(base);
+    /* SDL3 owns and caches this pointer; it must not be freed by the caller. */
 
     n = strlen(out);
 
@@ -521,44 +552,63 @@ float pcVideoWideScale(void)
     return (4.0f / 3.0f) / video_cfg.aspect;
 }
 
+static void set_fullscreen(int enable)
+{
+    if (enable)
+    {
+        if (video_cfg.fullscreen == 1)
+        {
+            SDL_DisplayID display = SDL_GetDisplayForWindow(window);
+            const SDL_DisplayMode* mode = SDL_GetCurrentDisplayMode(display);
+            if ((mode != NULL) && !SDL_SetWindowFullscreenMode(window, mode))
+                pcLog("video: could not select exclusive fullscreen mode: %s", SDL_GetError());
+        }
+        else
+        {
+            SDL_SetWindowFullscreenMode(window, NULL);
+        }
+    }
+
+    if (!SDL_SetWindowFullscreen(window, enable != 0))
+        pcLog("video: fullscreen change failed: %s", SDL_GetError());
+}
+
 static void toggle_fullscreen(void)
 {
-    Uint32 flags = SDL_GetWindowFlags(window);
-
-    if (flags & (SDL_WINDOW_FULLSCREEN | SDL_WINDOW_FULLSCREEN_DESKTOP))
-    {
-        SDL_SetWindowFullscreen(window, 0);
-    }
-    else
-    {
-        SDL_SetWindowFullscreen(window, (video_cfg.fullscreen == 1) ? SDL_WINDOW_FULLSCREEN : SDL_WINDOW_FULLSCREEN_DESKTOP);
-    }
+    SDL_WindowFlags flags = SDL_GetWindowFlags(window);
+    set_fullscreen((flags & SDL_WINDOW_FULLSCREEN) == 0);
 }
 
 /* the remembered spot is used only while it is still on a connected monitor */
 static int position_visible(int x, int y, int w, int h)
 {
-    int i;
+    SDL_DisplayID* displays;
+    int count = 0, i, visible = 0;
 
-    for (i = 0; i < SDL_GetNumVideoDisplays(); i++)
+    displays = SDL_GetDisplays(&count);
+    if (displays == NULL) return 0;
+
+    for (i = 0; i < count; i++)
     {
         SDL_Rect r;
-
-        if ((SDL_GetDisplayUsableBounds(i, &r) == 0) && (x + w / 2 >= r.x) && (x + w / 2 < r.x + r.w) &&
+        if (SDL_GetDisplayUsableBounds(displays[i], &r) &&
+            (x + w / 2 >= r.x) && (x + w / 2 < r.x + r.w) &&
             (y >= r.y - 8) && (y + 32 < r.y + r.h))
         {
-            return 1;
+            visible = 1;
+            break;
         }
     }
 
-    return 0;
+    SDL_free(displays);
+    return visible;
 }
 
 static void track_window(void)
 {
-    Uint32 flags = SDL_GetWindowFlags(window);
+    SDL_WindowFlags flags = SDL_GetWindowFlags(window);
 
-    if (flags & (SDL_WINDOW_FULLSCREEN | SDL_WINDOW_FULLSCREEN_DESKTOP | SDL_WINDOW_MINIMIZED))
+    if (flags & (SDL_WINDOW_FULLSCREEN | SDL_WINDOW_MINIMIZED))
     {
         return;
     }
@@ -602,7 +652,8 @@ static void save_window(void)
 
 void pcVideoInit(void)
 {
-    Uint32 flags = SDL_WINDOW_RESIZABLE | SDL_WINDOW_OPENGL;
+    SDL_WindowFlags flags = SDL_WINDOW_RESIZABLE | SDL_WINDOW_OPENGL;
+    unsigned char* spr;
     int x = SDL_WINDOWPOS_CENTERED, y = SDL_WINDOWPOS_CENTERED;
 
     if (window != NULL)
@@ -613,9 +664,25 @@ void pcVideoInit(void)
     pcOsInstallDiagnostics();
     SDL_SetMainReady();
 
-    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMECONTROLLER | SDL_INIT_AUDIO) != 0)
+    /* Built with HIDAPI/libusb support: explicitly enable the Nintendo Wii U GameCube adapter. */
+    pcLog("controller: enabling HIDAPI/libusb GameCube adapter support");
+    SDL_SetHint(SDL_HINT_JOYSTICK_HIDAPI, "1");
+    SDL_SetHint(SDL_HINT_JOYSTICK_HIDAPI_GAMECUBE, "1");
+    SDL_SetHint(SDL_HINT_HIDAPI_LIBUSB, "1");
+    SDL_SetHint(SDL_HINT_HIDAPI_LIBUSB_GAMECUBE, "1");
+
+    if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD | SDL_INIT_AUDIO))
     {
         pcPlatformFatal("SDL_Init failed: %s", SDL_GetError());
+    }
+
+    /* Reserve the PS2 scratchpad before any OpenGL window/context or driver is created.
+     * The game addresses this 16 KB region at the fixed virtual address 0x70000000. */
+    spr = (unsigned char*)pcOsAllocScratchpad();
+
+    if (spr == NULL)
+    {
+        pcPlatformFatal("Could not reserve the PS2 scratchpad address range (0x70000000).");
     }
 
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
@@ -624,11 +691,6 @@ void pcVideoInit(void)
     SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
 
     video_settings();
-
-    if (video_cfg.fullscreen)
-    {
-        flags |= (video_cfg.fullscreen == 1) ? SDL_WINDOW_FULLSCREEN : SDL_WINDOW_FULLSCREEN_DESKTOP;
-    }
 
     if (video_cfg.has_pos && position_visible(video_cfg.win_x, video_cfg.win_y, video_cfg.win_w, video_cfg.win_h))
     {
@@ -641,22 +703,18 @@ void pcVideoInit(void)
         flags |= SDL_WINDOW_MAXIMIZED;
     }
 
-    window = SDL_CreateWindow("Resident Evil Code: Veronica X", x, y, video_cfg.win_w, video_cfg.win_h, flags);
+    window = SDL_CreateWindow("Resident Evil Code: Veronica X", video_cfg.win_w, video_cfg.win_h, flags);
 
     if (window == NULL)
     {
         pcPlatformFatal("Could not create the window: %s", SDL_GetError());
     }
+    SDL_SetWindowPosition(window, x, y);
 
     {
-        SDL_SysWMinfo info;
-
-        SDL_VERSION(&info.version);
-
-        if (SDL_GetWindowWMInfo(window, &info))
-        {
-            pcOsSetWindowIcon(info.info.win.window);
-        }
+        void* hwnd = SDL_GetPointerProperty(SDL_GetWindowProperties(window),
+                                            SDL_PROP_WINDOW_WIN32_HWND_POINTER, NULL);
+        if (hwnd != NULL) pcOsSetWindowIcon(hwnd);
     }
 
     /* the windowed size and spot, also when starting fullscreen or maximized */
@@ -667,6 +725,7 @@ void pcVideoInit(void)
     win_state.maximized = video_cfg.maximized;
     track_window();
     atexit(save_window);
+    if (video_cfg.fullscreen) set_fullscreen(1);
 
     gl_context = SDL_GL_CreateContext(window);
 
@@ -677,20 +736,11 @@ void pcVideoInit(void)
 
     SDL_GL_SetSwapInterval(0);   /* frame pacing comes from the emulated VBLANK */
 
-    {
-        unsigned char* spr = pcOsAllocScratchpad();
-
-        if (spr == NULL)
-        {
-            pcPlatformFatal("Could not reserve the PS2 scratchpad address range (0x70000000).");
-        }
-
-        pcGsInit(spr);
-    }
+    pcGsInit(spr);
 
     pcPadInit();
 
-    pcLog("video: SDL %d.%d.%d, window %dx%d%s, aspect %.3f", SDL_MAJOR_VERSION, SDL_MINOR_VERSION, SDL_PATCHLEVEL,
+    pcLog("video: SDL %d.%d.%d, window %dx%d%s, aspect %.3f", SDL_MAJOR_VERSION, SDL_MINOR_VERSION, SDL_MICRO_VERSION,
           video_cfg.win_w, video_cfg.win_h, video_cfg.fullscreen ? " (fullscreen)" : "", video_cfg.aspect);
 }
 
@@ -720,31 +770,31 @@ static int pause_until_active(void)
             continue;
         }
 
-        if (ev.type == SDL_QUIT)
+        if (ev.type == SDL_EVENT_QUIT)
         {
             return 0;
         }
 
-        if (ev.type == SDL_WINDOWEVENT)
+        if (pc_window_event(ev.type) != PC_WINDOW_EVENT_NONE)
         {
-            if (ev.window.event == SDL_WINDOWEVENT_FOCUS_GAINED)
+            if (pc_window_event(ev.type) == PC_WINDOW_EVENT_FOCUS_GAINED)
             {
                 break;
             }
 
-            if ((ev.window.event == SDL_WINDOWEVENT_MOVED) || (ev.window.event == SDL_WINDOWEVENT_SIZE_CHANGED))
+            if ((pc_window_event(ev.type) == PC_WINDOW_EVENT_MOVED) || (pc_window_event(ev.type) == PC_WINDOW_EVENT_SIZE_CHANGED))
             {
                 track_window();
             }
 
-            if ((ev.window.event == SDL_WINDOWEVENT_EXPOSED) || (ev.window.event == SDL_WINDOWEVENT_SIZE_CHANGED))
+            if ((pc_window_event(ev.type) == PC_WINDOW_EVENT_EXPOSED) || (pc_window_event(ev.type) == PC_WINDOW_EVENT_SIZE_CHANGED))
             {
                 pcGsPresent();   /* redraw the frozen picture */
                 SDL_GL_SwapWindow(window);
             }
         }
 
-        if ((ev.type == SDL_CONTROLLERDEVICEADDED) || (ev.type == SDL_CONTROLLERDEVICEREMOVED))
+        if ((ev.type == SDL_EVENT_GAMEPAD_ADDED) || (ev.type == SDL_EVENT_GAMEPAD_REMOVED))
         {
             pcPadInit();
         }
@@ -763,20 +813,20 @@ int pcVideoPumpEvents(void)
 
     while (SDL_PollEvent(&ev))
     {
-        if (ev.type == SDL_QUIT)
+        if (ev.type == SDL_EVENT_QUIT)
         {
             return 0;
         }
 
-        if (ev.type == SDL_WINDOWEVENT)
+        if (pc_window_event(ev.type) != PC_WINDOW_EVENT_NONE)
         {
-            if ((ev.window.event == SDL_WINDOWEVENT_MOVED) || (ev.window.event == SDL_WINDOWEVENT_SIZE_CHANGED) ||
-                (ev.window.event == SDL_WINDOWEVENT_MAXIMIZED) || (ev.window.event == SDL_WINDOWEVENT_RESTORED))
+            if ((pc_window_event(ev.type) == PC_WINDOW_EVENT_MOVED) || (pc_window_event(ev.type) == PC_WINDOW_EVENT_SIZE_CHANGED) ||
+                (pc_window_event(ev.type) == PC_WINDOW_EVENT_MAXIMIZED) || (pc_window_event(ev.type) == PC_WINDOW_EVENT_RESTORED))
             {
                 track_window();
             }
 
-            if ((ev.window.event == SDL_WINDOWEVENT_FOCUS_LOST) && video_cfg.pause_unfocused && !scripted_run() &&
+            if ((pc_window_event(ev.type) == PC_WINDOW_EVENT_FOCUS_LOST) && video_cfg.pause_unfocused && !scripted_run() &&
                 !pause_until_active())
             {
                 return 0;
@@ -784,28 +834,28 @@ int pcVideoPumpEvents(void)
         }
 
         /* the mouse is not used by the game: it hides after 2 seconds without moving */
-        if (ev.type == SDL_MOUSEMOTION)
+        if (ev.type == SDL_EVENT_MOUSE_MOTION)
         {
             last_mouse_move = SDL_GetTicks();
             SDL_ShowCursor(SDL_ENABLE);
         }
 
         /* Alt+Enter: fullscreen on/off, like other Windows games */
-        if ((ev.type == SDL_KEYDOWN) && !ev.key.repeat && (ev.key.keysym.scancode == SDL_SCANCODE_RETURN) &&
-            (ev.key.keysym.mod & KMOD_ALT))
+        if ((ev.type == SDL_EVENT_KEY_DOWN) && !ev.key.repeat && (ev.key.scancode == SDL_SCANCODE_RETURN) &&
+            (ev.key.mod & SDL_KMOD_ALT))
         {
             toggle_fullscreen();
             continue;
         }
 
-        if ((ev.type == SDL_CONTROLLERDEVICEADDED) || (ev.type == SDL_CONTROLLERDEVICEREMOVED))
+        if ((ev.type == SDL_EVENT_GAMEPAD_ADDED) || (ev.type == SDL_EVENT_GAMEPAD_REMOVED))
         {
             pcPadInit();
         }
 
-        if (((ev.type == SDL_KEYDOWN) && !ev.key.repeat && (ev.key.keysym.scancode != SDL_SCANCODE_UNKNOWN) &&
-             (ev.key.keysym.scancode == pcPadFullscreenKey())) ||
-            ((ev.type == SDL_CONTROLLERBUTTONDOWN) && (ev.cbutton.button == pcPadFullscreenButton())))
+        if (((ev.type == SDL_EVENT_KEY_DOWN) && !ev.key.repeat && (ev.key.scancode != SDL_SCANCODE_UNKNOWN) &&
+             (ev.key.scancode == pcPadFullscreenKey())) ||
+            ((ev.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN) && (ev.gbutton.button == pcPadFullscreenButton())))
         {
             toggle_fullscreen();
         }
@@ -935,14 +985,14 @@ void pcVideoPresent(void)
 /* ------------------------------------------------------------------------------------------- */
 /* controller: SDL game controller or keyboard -> DualShock 2 report */
 
-static SDL_GameController* controller;
+static SDL_Gamepad* controller;
 static unsigned char pad_report[32];
 
 typedef struct {
     int byte, bit, pressure;           /* report byte/bit (active low), pressure byte or -1 */
     SDL_Scancode key;
-    SDL_GameControllerButton button;
-    SDL_GameControllerAxis axis;       /* a trigger used as a button, or INVALID */
+    SDL_GamepadButton button;
+    SDL_GamepadAxis axis;       /* a trigger used as a button, or INVALID */
 } PadMap;
 
 /* report position of each DualShock 2 button, in pc_binding_defs order */
@@ -990,8 +1040,8 @@ static void load_bindings(void)
         m->bit = (i < PC_BINDING_PS2_BUTTONS) ? pad_bits[i].bit : 0;
         m->pressure = (i < PC_BINDING_PS2_BUTTONS) ? pad_bits[i].pressure : -1;
         m->key = SDL_SCANCODE_UNKNOWN;
-        m->button = SDL_CONTROLLER_BUTTON_INVALID;
-        m->axis = SDL_CONTROLLER_AXIS_INVALID;
+        m->button = SDL_GAMEPAD_BUTTON_INVALID;
+        m->axis = SDL_GAMEPAD_AXIS_INVALID;
 
         if ((key[0] != 0) && (_stricmp(key, "none") != 0))
         {
@@ -1005,15 +1055,15 @@ static void load_bindings(void)
 
         if ((pad[0] != 0) && (_stricmp(pad, "none") != 0))
         {
-            m->button = SDL_GameControllerGetButtonFromString(pad);
+            m->button = SDL_GetGamepadButtonFromString(pad);
 
-            if (m->button == SDL_CONTROLLER_BUTTON_INVALID)
+            if (m->button == SDL_GAMEPAD_BUTTON_INVALID)
             {
-                m->axis = SDL_GameControllerGetAxisFromString(pad);
+                m->axis = SDL_GetGamepadAxisFromString(pad);
 
-                if ((m->axis != SDL_CONTROLLER_AXIS_TRIGGERLEFT) && (m->axis != SDL_CONTROLLER_AXIS_TRIGGERRIGHT))
+                if ((m->axis != SDL_GAMEPAD_AXIS_LEFT_TRIGGER) && (m->axis != SDL_GAMEPAD_AXIS_RIGHT_TRIGGER))
                 {
-                    m->axis = SDL_CONTROLLER_AXIS_INVALID;
+                    m->axis = SDL_GAMEPAD_AXIS_INVALID;
                     pcLog("input: unknown controller button \"%s\" for %s", pad, d->name);
                 }
             }
@@ -1045,9 +1095,9 @@ static int is_title_key(const SDL_Event* ev)
 {
     load_bindings();
 
-    return ((ev->type == SDL_KEYDOWN) && !ev->key.repeat && (ev->key.keysym.scancode != SDL_SCANCODE_UNKNOWN) &&
-            (ev->key.keysym.scancode == pad_map[PAD_TITLE].key)) ||
-           ((ev->type == SDL_CONTROLLERBUTTONDOWN) && (ev->cbutton.button == pad_map[PAD_TITLE].button));
+    return ((ev->type == SDL_EVENT_KEY_DOWN) && !ev->key.repeat && (ev->key.scancode != SDL_SCANCODE_UNKNOWN) &&
+            (ev->key.scancode == pad_map[PAD_TITLE].key)) ||
+           ((ev->type == SDL_EVENT_GAMEPAD_BUTTON_DOWN) && (ev->gbutton.button == pad_map[PAD_TITLE].button));
 }
 
 /* the question on a black screen, the game and its sound held meanwhile; returns 0 when the
@@ -1081,19 +1131,19 @@ static int title_event(const SDL_Event* ev)
             continue;
         }
 
-        if (e.type == SDL_QUIT)
+        if (e.type == SDL_EVENT_QUIT)
         {
             open = 0;
             break;
         }
 
-        if ((e.type == SDL_WINDOWEVENT) && ((e.window.event == SDL_WINDOWEVENT_MOVED) ||
-                                            (e.window.event == SDL_WINDOWEVENT_SIZE_CHANGED)))
+        if ((pc_window_event(e.type) != PC_WINDOW_EVENT_NONE) && ((pc_window_event(e.type) == PC_WINDOW_EVENT_MOVED) ||
+                                            (pc_window_event(e.type) == PC_WINDOW_EVENT_SIZE_CHANGED)))
         {
             track_window();
         }
 
-        if ((e.type == SDL_CONTROLLERDEVICEADDED) || (e.type == SDL_CONTROLLERDEVICEREMOVED))
+        if ((e.type == SDL_EVENT_GAMEPAD_ADDED) || (e.type == SDL_EVENT_GAMEPAD_REMOVED))
         {
             pcPadInit();
         }
@@ -1102,7 +1152,7 @@ static int title_event(const SDL_Event* ev)
         {
             answer = 1;
         }
-        else if (((e.type == SDL_KEYDOWN) && !e.key.repeat) || (e.type == SDL_CONTROLLERBUTTONDOWN))
+        else if (((e.type == SDL_EVENT_KEY_DOWN) && !e.key.repeat) || (e.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN))
         {
             answer = 0;
         }
@@ -1193,9 +1243,9 @@ static void save_event(const SDL_Event* ev)
 
     load_bindings();
 
-    if (((ev->type == SDL_KEYDOWN) && !ev->key.repeat && (ev->key.keysym.scancode != SDL_SCANCODE_UNKNOWN) &&
-         (ev->key.keysym.scancode == pad_map[PAD_SAVE].key)) ||
-        ((ev->type == SDL_CONTROLLERBUTTONDOWN) && (ev->cbutton.button == pad_map[PAD_SAVE].button)))
+    if (((ev->type == SDL_EVENT_KEY_DOWN) && !ev->key.repeat && (ev->key.scancode != SDL_SCANCODE_UNKNOWN) &&
+         (ev->key.scancode == pad_map[PAD_SAVE].key)) ||
+        ((ev->type == SDL_EVENT_GAMEPAD_BUTTON_DOWN) && (ev->gbutton.button == pad_map[PAD_SAVE].button)))
     {
         if (!enabled)
         {
@@ -1249,51 +1299,100 @@ int pcTitleRequested(void)
 
 void pcPadInit(void)
 {
-    int i;
+    SDL_JoystickID* joysticks;
+    int joystick_count = 0, i;
 
     load_bindings();
+    load_gamepad_mapping_database();
 
     if (controller != NULL)
     {
-        SDL_GameControllerClose(controller);
+        SDL_CloseGamepad(controller);
         controller = NULL;
     }
 
-    for (i = 0; i < SDL_NumJoysticks(); i++)
+    joysticks = SDL_GetJoysticks(&joystick_count);
+    pcLog("controller: SDL enumerated %d joystick(s)", joystick_count);
+    for (i = 0; (joysticks != NULL) && (i < joystick_count); i++)
     {
-        if (SDL_IsGameController(i))
-        {
-            controller = SDL_GameControllerOpen(i);
+        const char* name = SDL_GetJoystickNameForID(joysticks[i]);
+        Uint16 vendor = SDL_GetJoystickVendorForID(joysticks[i]);
+        Uint16 product = SDL_GetJoystickProductForID(joysticks[i]);
+        int is_gamepad = SDL_IsGamepad(joysticks[i]);
 
+        pcLog("controller: joystick id=%u VID=%04X PID=%04X gamepad=%d name=%s",
+              joysticks[i], vendor, product, is_gamepad, (name != NULL) ? name : "(unknown)");
+
+        if (is_gamepad)
+        {
+            controller = SDL_OpenGamepad(joysticks[i]);
             if (controller != NULL)
             {
-                pcLog("controller: %s", SDL_GameControllerName(controller));
+                pcLog("controller: opened gamepad: %s", SDL_GetGamepadName(controller));
                 break;
             }
+            pcLog("controller: SDL_OpenGamepad failed: %s", SDL_GetError());
         }
+    }
+    SDL_free(joysticks);
+
+    if (controller == NULL)
+    {
+        pcLog("controller: no mapped SDL gamepad opened; check preceding VID/PID entries");
     }
 }
 
 /* a binding is held on the keyboard or the controller */
-static int pad_down(const PadMap* m, const Uint8* keys)
+
+/* Load optional custom mappings from beside the executable before enumerating gamepads.
+ * SDL's built-in mapping database remains available when the external file is absent. */
+static void load_gamepad_mapping_database(void)
+{
+    char dir[1024], path[1200];
+    FILE* f;
+    int added;
+
+    pcPlatformExeDir(dir, sizeof(dir));
+    snprintf(path, sizeof(path), "%s/gamecontrollerdb.txt", dir);
+
+    f = fopen(path, "rb");
+    if (f == NULL)
+    {
+        pcLog("controller: no custom mapping database found at %s; using SDL built-in mappings", path);
+        return;
+    }
+    fclose(f);
+
+    added = SDL_AddGamepadMappingsFromFile(path);
+    if (added < 0)
+    {
+        pcLog("controller: could not load %s: %s", path, SDL_GetError());
+        return;
+    }
+
+    pcLog("controller: accepted %d custom mapping(s) from %s", added, path);
+}
+
+
+static int pad_down(const PadMap* m, const bool* keys)
 {
     int down = (m->key != SDL_SCANCODE_UNKNOWN) && keys[m->key];
 
-    if ((m->key == SDL_SCANCODE_RETURN) && (SDL_GetModState() & KMOD_ALT))
+    if ((m->key == SDL_SCANCODE_RETURN) && (SDL_GetModState() & SDL_SDL_KMOD_ALT))
     {
         down = 0;   /* Alt+Enter is the fullscreen toggle */
     }
 
     if (controller != NULL)
     {
-        if (m->button != SDL_CONTROLLER_BUTTON_INVALID)
+        if (m->button != SDL_GAMEPAD_BUTTON_INVALID)
         {
-            down |= SDL_GameControllerGetButton(controller, m->button);
+            down |= SDL_GetGamepadButton(controller, m->button);
         }
 
-        if (m->axis != SDL_CONTROLLER_AXIS_INVALID)
+        if (m->axis != SDL_GAMEPAD_AXIS_INVALID)
         {
-            down |= SDL_GameControllerGetAxis(controller, m->axis) > 8000;
+            down |= SDL_GetGamepadAxis(controller, m->axis) > 8000;
         }
     }
 
@@ -1428,7 +1527,7 @@ static void pcPadRecordReplay(unsigned char* r)
 
 void pcPadUpdate(void)
 {
-    const Uint8* keys = SDL_GetKeyboardState(NULL);
+    const bool* keys = SDL_GetKeyboardState(NULL);
     unsigned char* r = pad_report;
     size_t i;
 
@@ -1627,10 +1726,10 @@ void pcPadUpdate(void)
 
     if (controller != NULL)
     {
-        r[4] = axis_to_byte(SDL_GameControllerGetAxis(controller, SDL_CONTROLLER_AXIS_RIGHTX));
-        r[5] = axis_to_byte(SDL_GameControllerGetAxis(controller, SDL_CONTROLLER_AXIS_RIGHTY));
-        r[6] = axis_to_byte(SDL_GameControllerGetAxis(controller, SDL_CONTROLLER_AXIS_LEFTX));
-        r[7] = axis_to_byte(SDL_GameControllerGetAxis(controller, SDL_CONTROLLER_AXIS_LEFTY));
+        r[4] = axis_to_byte(SDL_GetGamepadAxis(controller, SDL_GAMEPAD_AXIS_RIGHTX));
+        r[5] = axis_to_byte(SDL_GetGamepadAxis(controller, SDL_GAMEPAD_AXIS_RIGHTY));
+        r[6] = axis_to_byte(SDL_GetGamepadAxis(controller, SDL_GAMEPAD_AXIS_LEFTX));
+        r[7] = axis_to_byte(SDL_GetGamepadAxis(controller, SDL_GAMEPAD_AXIS_LEFTY));
     }
 
     pcPadRecordReplay(r);
@@ -1659,7 +1758,9 @@ void pcPadGetState(int port, unsigned char* rdata)
 /* the controller has motors: the game then offers VIBRATION and starts them */
 int pcPadHasRumble(void)
 {
-    return (controller != NULL) && SDL_GameControllerHasRumble(controller);
+    return (controller != NULL) &&
+           SDL_GetBooleanProperty(SDL_GetGamepadProperties(controller),
+                                  SDL_PROP_GAMEPAD_CAP_RUMBLE_BOOLEAN, false);
 }
 
 /* DualShock 2 motors, set every frame: small (on/off, the right motor) and large (0-255, the
@@ -1679,7 +1780,7 @@ void pcPadRumble(int small, int large)
         return;
     }
 
-    SDL_GameControllerRumble(controller, (Uint16)(large * 257), small ? 0xFFFF : 0, 150);
+    SDL_RumbleGamepad(controller, (Uint16)(large * 257), small ? 0xFFFF : 0, 150);
 
     last_small = small;
     last_large = large;
