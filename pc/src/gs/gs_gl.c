@@ -267,6 +267,9 @@ static int dump_frame;
 /* per-interval statistics for the periodic log */
 static struct { unsigned int frames, draws, verts, rt_loads, rt_reads, tex_decodes, tex_texels; double t_load, t_read, t_decode, t_draw, t_texlookup; } stats;
 
+/* per-draw GL counters (uniforms sent/skipped, vertex ring wraps) */
+static struct { unsigned int sent, skipped, ring_wraps; } drawgl;
+
 /* texture residency counters (reported once per interval by pcGsLogStats) */
 static struct { unsigned int lookups, index_hits, scan_hits, creates, page_hashes; } texstat;
 static int tex_cached;                     /* textures in the cache, decoded from GS memory */
@@ -1430,7 +1433,6 @@ enum { UC_target, UC_iip, UC_tme, UC_fst, UC_fge, UC_fogcol, UC_ate, UC_atst, UC
 typedef struct { int valid; int i[4]; float f[4]; } UniformShadow;
 
 static UniformShadow ushadow[UC_COUNT];
-static struct { unsigned int sent, skipped, ring_wraps; } drawgl;
 
 static int ushadow_same_i(UniformShadow* u, int n, const int* v)
 {
