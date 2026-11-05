@@ -140,7 +140,7 @@ The parent branch's Windows Actions build #483 passed before this branch was cre
 
 ## Changes
 
-- `pc/src/pc_movie.c`: added `video_gl=0|1` selection for standard-definition movies. The default GS route preserves the GIF transfer into GS VRAM and refreshes the persistent GS-VRAM texture view. The GL route ports Alpha's direct frame upload into the dedicated movie texture. Upscaled movies remain on their existing GL path controlled independently by `movies_hd`.
+- `pc/src/pc_movie.c`: added `movies_sd_gl=0|1` selection for standard-definition movies. The default GS route preserves the GIF transfer into GS VRAM and refreshes the persistent GS-VRAM texture view. The GL route ports Alpha's direct frame upload into the dedicated movie texture. Upscaled movies remain on their existing GL path controlled independently by `movies_hd`.
 - `pc/src/gs/gs_gl.c`: added the persistent 512x512 movie-VRAM texture used by the GS route. It is allocated once and updated with `glTexSubImage2D`; the GS texture address selects this view while the movie is active.
 - `pc/src/pc_platform.c`: added `vsync=0|1`, defaulting to `1`, and applied it with SDL3 after GL context creation.
 - `pc/README.md`: documented the new INI settings.
