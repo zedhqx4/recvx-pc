@@ -13,6 +13,7 @@
 #include <string.h>
 
 #include "gs_internal.h"
+#include "gs_rtmap.h"
 
 #define XXH_INLINE_ALL
 #include "../../third_party/xxhash.h"
@@ -166,6 +167,7 @@ static const char* present_fs =
 
 static GLuint prog, present_prog;
 static GLuint vao, vbo;
+static void ring_init(void);   /* per-draw vertex ring, defined with the draw path */
 
 static struct {
     GLint target, tme, fst, tfx, tcc, iip, texrt, texsize, rtsize, wrap, region, linear;
@@ -263,7 +265,7 @@ static unsigned int decal_draw_order;
 static int dump_frame;
 
 /* per-interval statistics for the periodic log */
-static struct { unsigned int frames, draws, verts, rt_loads, rt_reads, tex_decodes, tex_texels; double t_load, t_read, t_decode; } stats;
+static struct { unsigned int frames, draws, verts, rt_loads, rt_reads, tex_decodes, tex_texels; double t_load, t_read, t_decode, t_draw, t_texlookup; } stats;
 
 /* texture residency counters (reported once per interval by pcGsLogStats) */
 static struct { unsigned int lookups, index_hits, scan_hits, creates, page_hashes; } texstat;
@@ -289,17 +291,26 @@ void pcGsLogStats(void)
           stats.t_read * 1000 / f, (double)stats.tex_decodes / f, stats.tex_texels / f, stats.t_decode * 1000 / f);
     pcLog("gs: %d textures cached (%.0f MB)", tex_cached, tex_cached_bytes / 1048576.0);
     {
-        extern unsigned int gsStatClutLoads, gsStatClutChanged, gsStatClutHashes, gsStatClutHashMemo;
+        extern unsigned int gsStatClutLoads, gsStatClutChanged, gsStatClutHashes, gsStatClutHashMemo, gsStatClutSkipped;
         extern unsigned int gsStatXferCalls, gsStatXferBytes, gsStatXferChanged;
         extern unsigned int pcStatTexLoadCalls, pcStatTexLoadUploads, pcStatTexLoadSame, pcStatCnkTid;
 
-        pcLog("tex/frame: ctTid %.1f, TexLoad %.1f (same-tex %.1f, uploads %.1f) | xfers %.1f (%.1f KB, %.1f changed VRAM) | clut loads %.1f (%.1f changed), clut hash %.1f (+%.1f memo) | lookups %.1f (idx %.1f, scan %.1f, new %.1f), page hashes %.1f",
+        extern double gsTimeXfer, gsTimeClut;
+
+        pcLog("gs cpu ms/frame: draw %.2f (of which texture lookup %.2f incl. decode %.2f), transfers %.2f, palette reads %.2f, rt readback %.2f, rt load %.2f",
+              stats.t_draw * 1000 / f, stats.t_texlookup * 1000 / f, stats.t_decode * 1000 / f, gsTimeXfer * 1000 / f, gsTimeClut * 1000 / f,
+              stats.t_read * 1000 / f, stats.t_load * 1000 / f);
+        gsTimeXfer = gsTimeClut = 0;
+        pcLog("gl/frame: draw-program uniforms sent %.1f, skipped %.1f; vertex ring wraps %u",
+              (double)drawgl.sent / f, (double)drawgl.skipped / f, drawgl.ring_wraps);
+        memset(&drawgl, 0, sizeof(drawgl));
+        pcLog("tex/frame: ctTid %.1f, TexLoad %.1f (same-tex %.1f, uploads %.1f) | xfers %.1f (%.1f KB, %.1f changed VRAM) | clut loads %.1f (%.1f changed, %.1f skipped), clut hash %.1f (+%.1f memo) | lookups %.1f (idx %.1f, scan %.1f, new %.1f), page hashes %.1f",
               (double)pcStatCnkTid / f, (double)pcStatTexLoadCalls / f, (double)pcStatTexLoadSame / f, (double)pcStatTexLoadUploads / f,
               (double)gsStatXferCalls / f, gsStatXferBytes / 1024.0 / f, (double)gsStatXferChanged / f,
-              (double)gsStatClutLoads / f, (double)gsStatClutChanged / f, (double)gsStatClutHashes / f, (double)gsStatClutHashMemo / f,
+              (double)gsStatClutLoads / f, (double)gsStatClutChanged / f, (double)gsStatClutSkipped / f, (double)gsStatClutHashes / f, (double)gsStatClutHashMemo / f,
               (double)texstat.lookups / f, (double)texstat.index_hits / f, (double)texstat.scan_hits / f, (double)texstat.creates / f,
               (double)texstat.page_hashes / f);
-        gsStatClutLoads = gsStatClutChanged = gsStatClutHashes = gsStatClutHashMemo = 0;
+        gsStatClutLoads = gsStatClutChanged = gsStatClutHashes = gsStatClutHashMemo = gsStatClutSkipped = 0;
         gsStatXferCalls = gsStatXferBytes = gsStatXferChanged = 0;
         pcStatTexLoadCalls = pcStatTexLoadUploads = pcStatTexLoadSame = pcStatCnkTid = 0;
     }
@@ -955,8 +966,13 @@ void gsFlushLocalToLocal(unsigned int bp, unsigned int bw, unsigned int psm, uns
 
         if (rt->used && rt_overlaps(rt, bp, bw, psm, y, h))
         {
-            unsigned int* buf;
-            int px, py, rows;
+            static unsigned int* rb_buf;
+            static size_t rb_cap;
+            static unsigned char alpha_lut[256];
+            static int alpha_lut_ready;
+            int rows, map, region[4];
+            int read_x0, read_y0, read_x1, read_y1, read_w, read_h, full_sync;
+            size_t need;
             double t0;
 
             rt_sync(rt);
@@ -969,6 +985,43 @@ void gsFlushLocalToLocal(unsigned int bp, unsigned int bw, unsigned int psm, uns
 
             t0 = pcOsTime();
             rows = (rt->drawn_h > 0) ? rt->drawn_h : rt->h;
+
+            /* only the rectangle this transfer consumes is copied back when the mapping between
+             * its source buffer and this render target is provably a translation (gs_rtmap.h);
+             * otherwise everything drawn so far, as before */
+            map = gsRtReadRegion(rt->w, rows, rt->fbp, rt->fbw, rt->psm == GS_PSMCT32, bp, bw, psm == GS_PSMCT32,
+                                 x, y, w, h, region);
+
+            if (map == GS_RTMAP_NONE)
+            {
+                continue;
+            }
+
+            if (map == GS_RTMAP_REGION)
+            {
+                read_x0 = region[0]; read_y0 = region[1]; read_x1 = region[2]; read_y1 = region[3];
+            }
+            else
+            {
+                read_x0 = 0; read_y0 = 0; read_x1 = rt->w; read_y1 = rows;
+            }
+
+            read_w = read_x1 - read_x0;
+            read_h = read_y1 - read_y0;
+            need = (size_t)read_w * (size_t)read_h;
+
+            if (need > rb_cap)
+            {
+                free(rb_buf);
+                rb_buf = (unsigned int*)malloc(need * sizeof(*rb_buf));
+                rb_cap = (rb_buf != NULL) ? need : 0;
+            }
+
+            if (rb_buf == NULL)
+            {
+                pcLog("gs: could not allocate %d x %d pixels for render-target readback", read_w, read_h);
+                continue;
+            }
 
             if ((down_w != rt->w) || (down_h != rt->h))
             {
@@ -986,33 +1039,56 @@ void gsFlushLocalToLocal(unsigned int bp, unsigned int bw, unsigned int psm, uns
                 down_h = rt->h;
             }
 
-            /* one sample per PS2 pixel, as before, but picked on the GPU */
+            /* one sample per PS2 pixel, picked on the GPU, for the rectangle that is needed */
             glDisable(GL_SCISSOR_TEST);
             glBindFramebuffer(GL_READ_FRAMEBUFFER, rt->fbo);
             glBindFramebuffer(GL_DRAW_FRAMEBUFFER, down_fbo);
-            glBlitFramebuffer(0, 0, gs_scale_x(rt->w), gs_scale_y(rows), 0, 0, rt->w, rows, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+            glBlitFramebuffer(gs_scale_x(read_x0), gs_scale_y(read_y0), gs_scale_x(read_x1), gs_scale_y(read_y1),
+                              read_x0, read_y0, read_x1, read_y1, GL_COLOR_BUFFER_BIT, GL_NEAREST);
 
-            buf = malloc(rt->w * rows * 4);
             glBindFramebuffer(GL_FRAMEBUFFER, down_fbo);
             glPixelStorei(GL_PACK_ALIGNMENT, 4);
-            glReadPixels(0, 0, rt->w, rows, GL_RGBA, GL_UNSIGNED_BYTE, buf);
+            glReadPixels(read_x0, read_y0, read_w, read_h, GL_RGBA, GL_UNSIGNED_BYTE, rb_buf);
             glBindFramebuffer(GL_FRAMEBUFFER, rt->fbo);
 
-            for (py = 0; py < rows; py++)
+            /* GS alpha is 0..128: same rounding as the former per-pixel conversion, via a table */
+            if (!alpha_lut_ready)
             {
-                for (px = 0; px < rt->w; px++)
-                {
-                    unsigned int c = buf[py * rt->w + px];
-                    unsigned int a = ((c >> 24) * 128 + 127) / 255;
+                unsigned int k;
 
-                    gsMemWrite(GS_PSMCT32, rt->fbp * 32, rt->fbw, px, py, (c & 0xFFFFFF) | (a << 24));
+                for (k = 0; k < 256; k++)
+                {
+                    alpha_lut[k] = (unsigned char)((k * 128 + 127) / 255);
+                }
+
+                alpha_lut_ready = 1;
+            }
+
+            {
+                size_t k;
+
+                for (k = 0; k < need; k++)
+                {
+                    unsigned int c = rb_buf[k];
+
+                    rb_buf[k] = (c & 0xFFFFFF) | ((unsigned int)alpha_lut[c >> 24] << 24);
                 }
             }
 
-            free(buf);
+            gsMemWriteRect32(rt->fbp * 32, rt->fbw, (unsigned int)read_x0, (unsigned int)read_y0,
+                             (unsigned int)read_w, (unsigned int)read_h, rb_buf, (unsigned int)read_w);
+
+            full_sync = (read_x0 == 0) && (read_x1 >= rt->w) && (read_y0 == 0) && (read_y1 >= rows);
             rt->vram_dirty = 0;
-            rt->rendered = 0;
-            rt->drawn_h = 0;
+
+            /* rendered / drawn_h describe everything that may still be newer than GS memory: a
+             * partial copy must not mark the part it did not copy as synchronized */
+            if (full_sync)
+            {
+                rt->rendered = 0;
+                rt->drawn_h = 0;
+            }
+
             stats.rt_reads++;
             stats.t_read += pcOsTime() - t0;
         }
@@ -1059,6 +1135,8 @@ void gsRendererInit(void)
     {
         glEnableVertexAttribArray(i);
     }
+
+    ring_init();
 
     {
         extern void gsReplaceInit(void);
@@ -1335,7 +1413,148 @@ static int gs_decal_signature_match(const GsDrawState* st)
     return 0;
 }
 
-void gsRendererDraw(const GsDrawState* st, const GsVertex* v, int nverts)
+/* ------------------------------------------------------------------------------------------- */
+/* per-draw GL cost
+ *
+ * Uniforms: the draw program's uniforms are only ever set from renderer_draw, and a program keeps
+ * its uniform values, so a shadow copy of what was last sent is exact; consecutive draws mostly
+ * differ in a handful of values, so the rest of the glUniform calls are skipped.
+ *
+ * Vertices: draws are written to successive regions of one large buffer (own VAO/VBO) instead of
+ * re-specifying a new buffer store with glBufferData for every batch. The buffer is orphaned
+ * only when it wraps. */
+
+enum { UC_target, UC_iip, UC_tme, UC_fst, UC_fge, UC_fogcol, UC_ate, UC_atst, UC_aref, UC_atinv, UC_tex, UC_texrt, UC_hd,
+       UC_rtsize, UC_texa, UC_texsize, UC_tfx, UC_tcc, UC_wrap, UC_region, UC_linear, UC_COUNT };
+
+typedef struct { int valid; int i[4]; float f[4]; } UniformShadow;
+
+static UniformShadow ushadow[UC_COUNT];
+static struct { unsigned int sent, skipped, ring_wraps; } drawgl;
+
+static int ushadow_same_i(UniformShadow* u, int n, const int* v)
+{
+    int k;
+
+    if (u->valid)
+    {
+        for (k = 0; k < n; k++)
+        {
+            if (u->i[k] != v[k])
+            {
+                break;
+            }
+        }
+
+        if (k == n)
+        {
+            drawgl.skipped++;
+            return 1;
+        }
+    }
+
+    for (k = 0; k < n; k++)
+    {
+        u->i[k] = v[k];
+    }
+
+    u->valid = 1;
+    drawgl.sent++;
+    return 0;
+}
+
+static int ushadow_same_f(UniformShadow* u, int n, const float* v)
+{
+    int k;
+
+    if (u->valid)
+    {
+        for (k = 0; k < n; k++)
+        {
+            if (u->f[k] != v[k])
+            {
+                break;
+            }
+        }
+
+        if (k == n)
+        {
+            drawgl.skipped++;
+            return 1;
+        }
+    }
+
+    for (k = 0; k < n; k++)
+    {
+        u->f[k] = v[k];
+    }
+
+    u->valid = 1;
+    drawgl.sent++;
+    return 0;
+}
+
+static void u1i(int s, GLint loc, int a) { int v[1]; v[0] = a; if (!ushadow_same_i(&ushadow[s], 1, v)) glUniform1i(loc, a); }
+static void u2i(int s, GLint loc, int a, int b) { int v[2]; v[0] = a; v[1] = b; if (!ushadow_same_i(&ushadow[s], 2, v)) glUniform2i(loc, a, b); }
+static void u4i(int s, GLint loc, int a, int b, int c, int d) { int v[4]; v[0] = a; v[1] = b; v[2] = c; v[3] = d; if (!ushadow_same_i(&ushadow[s], 4, v)) glUniform4i(loc, a, b, c, d); }
+static void u2f(int s, GLint loc, float a, float b) { float v[2]; v[0] = a; v[1] = b; if (!ushadow_same_f(&ushadow[s], 2, v)) glUniform2f(loc, a, b); }
+static void u3f(int s, GLint loc, float a, float b, float c) { float v[3]; v[0] = a; v[1] = b; v[2] = c; if (!ushadow_same_f(&ushadow[s], 3, v)) glUniform3f(loc, a, b, c); }
+
+#define RING_VERTS (1 << 17)
+
+static GLuint ring_vao, ring_vbo;
+static unsigned int ring_pos;
+
+static void ring_init(void)
+{
+    glGenVertexArrays(1, &ring_vao);
+    glBindVertexArray(ring_vao);
+    glGenBuffers(1, &ring_vbo);
+    glBindBuffer(GL_ARRAY_BUFFER, ring_vbo);
+    glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)RING_VERTS * sizeof(GlVertex), NULL, GL_STREAM_DRAW);
+
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(GlVertex), (void*)offsetof(GlVertex, x));
+    glVertexAttribPointer(1, 4, GL_UNSIGNED_BYTE, GL_TRUE, sizeof(GlVertex), (void*)offsetof(GlVertex, r));
+    glVertexAttribPointer(2, 3, GL_FLOAT, GL_FALSE, sizeof(GlVertex), (void*)offsetof(GlVertex, s));
+    glVertexAttribPointer(3, 2, GL_FLOAT, GL_FALSE, sizeof(GlVertex), (void*)offsetof(GlVertex, u));
+    glVertexAttribPointer(4, 1, GL_FLOAT, GL_FALSE, sizeof(GlVertex), (void*)offsetof(GlVertex, fog));
+    glVertexAttribPointer(5, 4, GL_FLOAT, GL_FALSE, sizeof(GlVertex), (void*)offsetof(GlVertex, cu0));
+
+    {
+        int k;
+
+        for (k = 0; k < 6; k++)
+        {
+            glEnableVertexAttribArray(k);
+        }
+    }
+
+    glBindVertexArray(vao);
+}
+
+/* uploads n vertices into the ring; returns the index of the first one */
+static GLint ring_upload(const GlVertex* verts, int n)
+{
+    GLint first;
+
+    glBindVertexArray(ring_vao);
+    glBindBuffer(GL_ARRAY_BUFFER, ring_vbo);
+
+    if (ring_pos + (unsigned int)n > RING_VERTS)
+    {
+        glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)RING_VERTS * sizeof(GlVertex), NULL, GL_STREAM_DRAW);   /* orphan */
+        ring_pos = 0;
+        drawgl.ring_wraps++;
+    }
+
+    glBufferSubData(GL_ARRAY_BUFFER, (GLintptr)ring_pos * sizeof(GlVertex), (GLsizeiptr)n * sizeof(GlVertex), verts);
+    first = (GLint)ring_pos;
+    ring_pos += (unsigned int)n;
+
+    return first;
+}
+
+static void renderer_draw(const GsDrawState* st, const GsVertex* v, int nverts)
 {
     unsigned int fbp = GSF(st->frame, 0, 9);
     unsigned int fbw = GSF(st->frame, 16, 6);
@@ -1351,6 +1570,7 @@ void gsRendererDraw(const GsDrawState* st, const GsVertex* v, int nverts)
     int ate = GSF(st->test, 0, 1);
     int atst = GSF(st->test, 1, 3);
     GLenum mode;
+    GLint first_vertex;
     int n = 0, i;
 
     rt->last_use = frame_counter;
@@ -1524,17 +1744,17 @@ void gsRendererDraw(const GsDrawState* st, const GsVertex* v, int nverts)
     setup_blend(st);
 
     glUseProgram(prog);
-    glUniform2f(U.target, (float)rt->w, (float)rt->h);
-    glUniform1i(U.iip, (st->type == 6) ? 0 : st->iip);
-    glUniform1i(U.tme, st->tme);
-    glUniform1i(U.fst, st->fst);
-    glUniform1i(U.fge, st->fge);
-    glUniform3f(U.fogcol, (float)GSF(st->fogcol, 0, 8), (float)GSF(st->fogcol, 8, 8), (float)GSF(st->fogcol, 16, 8));
-    glUniform1i(U.ate, ate);
-    glUniform1i(U.atst, atst);
-    glUniform1i(U.aref, GSF(st->test, 4, 8));
-    glUniform1i(U.atinv, 0);
-    glUniform1i(U.tex, 0);
+    u2f(UC_target, U.target, (float)rt->w, (float)rt->h);
+    u1i(UC_iip, U.iip, (st->type == 6) ? 0 : st->iip);
+    u1i(UC_tme, U.tme, st->tme);
+    u1i(UC_fst, U.fst, st->fst);
+    u1i(UC_fge, U.fge, st->fge);
+    u3f(UC_fogcol, U.fogcol, (float)GSF(st->fogcol, 0, 8), (float)GSF(st->fogcol, 8, 8), (float)GSF(st->fogcol, 16, 8));
+    u1i(UC_ate, U.ate, ate);
+    u1i(UC_atst, U.atst, atst);
+    u1i(UC_aref, U.aref, GSF(st->test, 4, 8));
+    u1i(UC_atinv, U.atinv, 0);
+    u1i(UC_tex, U.tex, 0);
 
     if (st->tme)
     {
@@ -1564,8 +1784,8 @@ void gsRendererDraw(const GsDrawState* st, const GsVertex* v, int nverts)
         if (movie_vram_on && (tbp == movie_vram_tbp))
         {
             glBindTexture(GL_TEXTURE_2D, movie_vram_tex);
-            glUniform1i(U.texrt, 0);
-            glUniform1i(U.hd, 0);
+            u1i(UC_texrt, U.texrt, 0);
+            u1i(UC_hd, U.hd, 0);
         }
         else if ((src != NULL) && (src != rt))
         {
@@ -1578,28 +1798,31 @@ void gsRendererDraw(const GsDrawState* st, const GsVertex* v, int nverts)
             glBindTexture(GL_TEXTURE_2D, src->color);
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, linear ? GL_LINEAR : GL_NEAREST);
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, linear ? GL_LINEAR : GL_NEAREST);
-            glUniform1i(U.texrt, (gsPsmBits(tpsm) == 16) ? 2 : 1);
-            glUniform1i(U.hd, 0);
-            glUniform2f(U.rtsize, (float)src->w, (float)src->h);
-            glUniform3f(U.texa, (float)GSF(st->texa, 0, 8), (float)GSF(st->texa, 32, 8), (float)GSF(st->texa, 15, 1));
+            u1i(UC_texrt, U.texrt, (gsPsmBits(tpsm) == 16) ? 2 : 1);
+            u1i(UC_hd, U.hd, 0);
+            u2f(UC_rtsize, U.rtsize, (float)src->w, (float)src->h);
+            u3f(UC_texa, U.texa, (float)GSF(st->texa, 0, 8), (float)GSF(st->texa, 32, 8), (float)GSF(st->texa, 15, 1));
         }
         else if (movie_on && (GSF(st->tex0, 0, 14) == movie_tbp))
         {
             glBindTexture(GL_TEXTURE_2D, movie_tex);
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-            glUniform1i(U.texrt, 0);
-            glUniform1i(U.hd, 1);
+            u1i(UC_texrt, U.texrt, 0);
+            u1i(UC_hd, U.hd, 1);
         }
         else
         {
             int hd = 0;
+            double tex_t0 = pcOsTime();
             GLuint gt = get_texture(st->tex0, st->texa, st->texclut, tw, th, texture_extent(st, v, nverts, th, 1),
                                     texture_extent(st, v, nverts, tw, 0), &hd);
 
+            stats.t_texlookup += pcOsTime() - tex_t0;
+
             glBindTexture(GL_TEXTURE_2D, gt);
-            glUniform1i(U.texrt, 0);
-            glUniform1i(U.hd, hd);
+            u1i(UC_texrt, U.texrt, 0);
+            u1i(UC_hd, U.hd, hd);
 
             if (hd)
             {
@@ -1608,17 +1831,15 @@ void gsRendererDraw(const GsDrawState* st, const GsVertex* v, int nverts)
             }
         }
 
-        glUniform2f(U.texsize, (float)tw, (float)th);
-        glUniform1i(U.tfx, GSF(st->tex0, 35, 2));
-        glUniform1i(U.tcc, GSF(st->tex0, 34, 1));
-        glUniform2i(U.wrap, GSF(st->clamp, 0, 2), GSF(st->clamp, 2, 2));
-        glUniform4i(U.region, GSF(st->clamp, 4, 10), GSF(st->clamp, 14, 10), GSF(st->clamp, 24, 10), GSF(st->clamp, 34, 10));
-        glUniform1i(U.linear, linear);
+        u2f(UC_texsize, U.texsize, (float)tw, (float)th);
+        u1i(UC_tfx, U.tfx, GSF(st->tex0, 35, 2));
+        u1i(UC_tcc, U.tcc, GSF(st->tex0, 34, 1));
+        u2i(UC_wrap, U.wrap, GSF(st->clamp, 0, 2), GSF(st->clamp, 2, 2));
+        u4i(UC_region, U.region, GSF(st->clamp, 4, 10), GSF(st->clamp, 14, 10), GSF(st->clamp, 24, 10), GSF(st->clamp, 34, 10));
+        u1i(UC_linear, U.linear, linear);
     }
 
-    glBindVertexArray(vao);
-    glBindBuffer(GL_ARRAY_BUFFER, vbo);
-    glBufferData(GL_ARRAY_BUFFER, n * sizeof(GlVertex), glverts, GL_STREAM_DRAW);
+    first_vertex = ring_upload(glverts, n);
 
     if (decal_depth_priority)
     {
@@ -1633,9 +1854,9 @@ void gsRendererDraw(const GsDrawState* st, const GsVertex* v, int nverts)
     {
         /* alpha test with a fail action: pass 1 normal, pass 2 the failing pixels with the
          * buffers AFAIL still allows (FB_ONLY: color, ZB_ONLY: depth, RGB_ONLY: rgb) */
-        glDrawArrays(mode, 0, n);
+        glDrawArrays(mode, first_vertex, n);
 
-        glUniform1i(U.atinv, 1);
+        u1i(UC_atinv, U.atinv, 1);
 
         if (afail == 1)
         {
@@ -1651,15 +1872,25 @@ void gsRendererDraw(const GsDrawState* st, const GsVertex* v, int nverts)
             glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_FALSE);
         }
 
-        glDrawArrays(mode, 0, n);
+        glDrawArrays(mode, first_vertex, n);
     }
     else
     {
-        glDrawArrays(mode, 0, n);
+        glDrawArrays(mode, first_vertex, n);
     }
 
     if (decal_depth_priority)
         glDisable(GL_POLYGON_OFFSET_FILL);
+}
+
+/* CPU time spent building and issuing draws (reported by pcGsLogStats); includes the texture
+ * lookup below, which is also timed on its own */
+void gsRendererDraw(const GsDrawState* st, const GsVertex* v, int nverts)
+{
+    double t0 = pcOsTime();
+
+    renderer_draw(st, v, nverts);
+    stats.t_draw += pcOsTime() - t0;
 }
 
 /* ------------------------------------------------------------------------------------------- */

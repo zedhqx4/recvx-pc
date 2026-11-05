@@ -119,6 +119,7 @@ typedef ptrdiff_t GLintptr;
     X(void, glGenBuffers, (GLsizei n, GLuint* b)) \
     X(void, glBindBuffer, (GLenum t, GLuint b)) \
     X(void, glBufferData, (GLenum t, GLsizeiptr size, const void* data, GLenum usage)) \
+    X(void, glBufferSubData, (GLenum t, GLintptr offset, GLsizeiptr size, const void* data)) \
     X(void, glVertexAttribPointer, (GLuint i, GLint size, GLenum type, GLboolean norm, GLsizei stride, const void* p)) \
     X(void, glEnableVertexAttribArray, (GLuint i)) \
     X(void, glDrawArrays, (GLenum mode, GLint first, GLsizei count)) \
@@ -183,6 +184,7 @@ PC_GL_FUNCS(PC_GL_DECLARE)
 #define glGenBuffers pc_glGenBuffers
 #define glBindBuffer pc_glBindBuffer
 #define glBufferData pc_glBufferData
+#define glBufferSubData pc_glBufferSubData
 #define glVertexAttribPointer pc_glVertexAttribPointer
 #define glEnableVertexAttribArray pc_glEnableVertexAttribArray
 #define glDrawArrays pc_glDrawArrays
