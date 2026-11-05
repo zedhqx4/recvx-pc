@@ -24,5 +24,8 @@ jobs:
         run: |
           /tmp/gs-fast > /tmp/gs-fast.txt
           /tmp/gs-reference > /tmp/gs-reference.txt
-          cmp /tmp/gs-fast.txt /tmp/gs-reference.txt
+          echo "FAST PATH:"
           cat /tmp/gs-fast.txt
+          echo "REFERENCE PATH:"
+          cat /tmp/gs-reference.txt
+          cmp /tmp/gs-fast.txt /tmp/gs-reference.txt
