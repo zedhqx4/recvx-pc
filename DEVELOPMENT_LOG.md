@@ -919,3 +919,35 @@ decal rules, or font-filter handling.
 - **Windows build:** [Run 41682237692](https://github.com/zedhqx4/recvx-pc/actions/runs/41682237692) passed for commit `b41901f`; `Build game`, `Verify executables`, and `Upload Windows build` all succeeded.
 - **Source review:** The original UV helpers (`pc_snap_uv`, rotated-UV detection, `pc_crop_uv_edges`, and `pc_wide_clip`) are unchanged from the destination base. The GS texture-state packet was retained. Indexed-shader selection is applied inside `gsRendererDraw()` before both alpha-test draw passes, never in `gsRendererPresent()`.
 - **Runtime:** Pending. Validate indexed TIM2 assignment, palette variants, UI/menu UV appearance, scene transitions, and frame-time behavior. The reported texture-assignment/coherency faults and frame drops are not claimed fixed by this port.
+
+## 2026-11-04 — Port partial GS render-target readback for underwater ripple
+
+**Category:** GS renderer / local-to-local readback performance  
+**Status:** Ported to `ps2texloadunderwaterfix`; build and in-game validation pending  
+**Reference:** `underwaterfix` branch at `62d932a721c9349dc9bf68295442d6a0854c5a6e`  
+**Destination:** `experimental/GSps2texloadcache` at `9b2e876840087d9039ed34414f2c1fcc52738bd4`  
+**Implementation commit:** `b3480a9251ccedb88b2861184d1a521074e899f4`
+
+### Change
+
+- Ported the partial readback path in `gsFlushLocalToLocal()`.
+- For a PSMCT32 transfer whose framebuffer pitch, base-page alignment, render-target width, and horizontal bounds prove an exact mapping, compute the intersection between the requested GS rectangle and the rendered target.
+- Downsample and read only that rectangle instead of the full render target. This targets screen-copy effects such as the underwater/water-ripple path, which previously forced a full-resolution render-target readback.
+- Retain the full render-target readback fallback whenever the exact address mapping cannot be established.
+- Preserve pending render-target state after a partial readback. Clear `rendered` and `drawn_h` only when the readback covers the complete drawn region.
+- Keep the source branch's horizontal page-overflow guard.
+- Adapted OpenGL calls to the direct-call renderer in this destination branch; no Alpha GL state-cache wrappers were imported.
+- Added gated readback-stage diagnostics for the requested region, bytes read, blit time, `glReadPixels` time, GS write time, and total time.
+
+### Files Changed
+
+- `pc/src/gs/gs_gl.c`
+  - Adds exact-rectangle mapping, partial downsample/readback, safe fallback, and partial/full synchronization handling.
+- `DEVELOPMENT_LOG.md`
+  - Records the port and its validation boundary.
+
+### Validation
+
+- **Source review:** Confirmed the branch is based on `experimental/GSps2texloadcache` and that the port is limited to the local-to-local render-target readback path plus this log entry.
+- **Build:** Pending for this branch.
+- **Runtime:** Pending. Compare the underwater/ripple scene, other local-to-local transfers, scene transitions, and texture/render-target coherence. The speedup and correctness are not yet claimed as validated.
