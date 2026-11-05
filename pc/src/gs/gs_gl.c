@@ -870,7 +870,7 @@ void gsFlushLocalToLocal(unsigned int bp, unsigned int bw, unsigned int psm, uns
         if (rt->used && rt_overlaps(rt, bp, bw, psm, y, h))
         {
             unsigned int* buf;
-            int px, py, rows;
+            int rows;
             double t0;
 
             rt_sync(rt);
@@ -912,16 +912,7 @@ void gsFlushLocalToLocal(unsigned int bp, unsigned int bw, unsigned int psm, uns
             glReadPixels(0, 0, rt->w, rows, GL_RGBA, GL_UNSIGNED_BYTE, buf);
             glBindFramebuffer(GL_FRAMEBUFFER, rt->fbo);
 
-            for (py = 0; py < rows; py++)
-            {
-                for (px = 0; px < rt->w; px++)
-                {
-                    unsigned int c = buf[py * rt->w + px];
-                    unsigned int a = ((c >> 24) * 128 + 127) / 255;
-
-                    gsMemWrite(GS_PSMCT32, rt->fbp * 32, rt->fbw, px, py, (c & 0xFFFFFF) | (a << 24));
-                }
-            }
+            gsMemWriteRenderTarget(rt->fbp * 32, rt->fbw, rt->w, rows, buf);
 
             free(buf);
             rt->vram_dirty = 0;
