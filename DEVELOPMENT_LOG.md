@@ -273,4 +273,4 @@ Other operational variables for input replay, screenshots, logging, audio dumps,
 
 ---
 
-**Maintenance rule:** update this file when a change lands in `alpha), and describe the behavior verified in the resulting tree. Mark experiments as experiments, and explicitly mark them reverted when that happens. Keep GPU texture-content caching, TIM2 image-upload avoidance, OpenGL state caching, GS VRAM transfer optimizations, CNK profiling and movie playback as separate topics unless the implementation actually couples them.
+**Maintenance rule:** update this file when a change lands in `alpha`, and describe the behavior verified in the resulting tree. Mark experiments as experiments, and explicitly mark them reverted when that happens. Keep GPU texture-content caching, TIM2 image-upload avoidance, OpenGL state caching, GS VRAM transfer optimizations, CNK profiling and movie playback as separate topics unless the implementation actually couples them.
