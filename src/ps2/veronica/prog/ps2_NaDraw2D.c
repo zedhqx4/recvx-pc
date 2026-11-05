@@ -2,6 +2,9 @@
 #include "../../../ps2/veronica/prog/ps2_NaView.h"
 #include "../../../ps2/veronica/prog/ps2_dummy.h"
 #include "../../../ps2/veronica/prog/main.h"
+#ifdef TARGET_PC
+#include "../../../../pc/include/pc_platform.h"
+#endif
 
 float Ps2_zbuff_a;
 float Ps2_zbuff_b;
@@ -182,6 +185,12 @@ void njDrawPolygon2DM(NJS_POINT2COL* p, int n, float pri, unsigned int attr)
     float (* bp)[4];  
     unsigned int i;    
     unsigned long prim; 
+#ifdef TARGET_PC
+    int font_uv_left = 4, font_uv_right = -4, font_uv_top = 4, font_uv_bottom = -4;
+
+    /* The base PC glyph correction is always active; fontUVfix gates only the F10 debug tuner. */
+    pcFontUvFixGet(&font_uv_left, &font_uv_right, &font_uv_top, &font_uv_bottom);
+#endif
 
     if (pri > -1.0f) 
     {
@@ -194,8 +203,29 @@ void njDrawPolygon2DM(NJS_POINT2COL* p, int n, float pri, unsigned int attr)
     {
         if ((attr & 0x80000000)) 
         {
-            switch (i) 
-            {                 
+#ifdef TARGET_PC
+            switch (i)
+            {
+            case 0: // Top-Left: left U, top V
+                *(int*)&bp[0][0] = (p->tex[i].tex.u * 16) + font_uv_left;
+                *(int*)&bp[0][1] = (p->tex[i].tex.v * 16) + font_uv_top;
+                break;
+            case 1: // Top-Right: right U, top V
+                *(int*)&bp[0][0] = (p->tex[i].tex.u * 16) + font_uv_right;
+                *(int*)&bp[0][1] = (p->tex[i].tex.v * 16) + font_uv_top;
+                break;
+            case 2: // Bottom-Right: right U, bottom V
+                *(int*)&bp[0][0] = (p->tex[i].tex.u * 16) + font_uv_right;
+                *(int*)&bp[0][1] = (p->tex[i].tex.v * 16) + font_uv_bottom;
+                break;
+            case 3: // Bottom-Left: left U, bottom V
+                *(int*)&bp[0][0] = (p->tex[i].tex.u * 16) + font_uv_left;
+                *(int*)&bp[0][1] = (p->tex[i].tex.v * 16) + font_uv_bottom;
+                break;
+            }
+#else
+            switch (i)
+            {
             case 0:
                 *(int*)&bp[0][0] = (p->tex[i].tex.u * 16) + 8;
                 *(int*)&bp[0][1] = (p->tex[i].tex.v * 16) + 8;
@@ -213,6 +243,7 @@ void njDrawPolygon2DM(NJS_POINT2COL* p, int n, float pri, unsigned int attr)
                 *(int*)&bp[0][1] = (p->tex[i].tex.v * 16) + 4;
                 break;
             }
+#endif
             
             *(int*)&bp[0][2] = 4096;
             *(int*)&bp[0][3] = 0;
@@ -265,5 +296,17 @@ void njDrawPolygon2DM(NJS_POINT2COL* p, int n, float pri, unsigned int attr)
         prim |= 0x8000000000000; 
     }
     
+#ifdef TARGET_PC
+    if (attr & 0x80000000)
+    {
+        pcFontFilterDrawBegin();
+    }
+#endif
     Ps2AddPrim2D(prim, buff, n);
+#ifdef TARGET_PC
+    if (attr & 0x80000000)
+    {
+        pcFontFilterDrawEnd();
+    }
+#endif
 }
