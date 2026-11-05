@@ -77,6 +77,8 @@ jobs:
           }
 
       - name: Smoke-test executable startup
+        id: smoke-test
+        continue-on-error: true
         shell: pwsh
         run: |
           $dir = Join-Path $env:GITHUB_WORKSPACE 'build_pc'
@@ -176,3 +178,9 @@ jobs:
             build_pc/recvx-startup.log
             build_pc/recvx.log
           if-no-files-found: error
+
+      - name: Report startup smoke-test failure after artifact upload
+        if: always() && steps.smoke-test.outcome == 'failure'
+        shell: pwsh
+        run: |
+          throw 'Startup smoke test failed. The compiled artifact and diagnostic logs were uploaded; inspect recvx-startup.log and recvx.log.'
