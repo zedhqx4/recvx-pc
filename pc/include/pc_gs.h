@@ -5,5 +5,6 @@ void pcGsInit(unsigned char* scratchpad);      /* needs a current OpenGL 3.3 con
 void pcGsSetDisplay(unsigned int fbp, unsigned int fbw);
 void pcGsPresent(void);                         /* draws the display buffer to the window */
 
-extern int pcGsScale;                           /* internal resolution multiplier */
-extern int pcGsScaleX;                          /* horizontal multiplier (higher for widescreen) */
+extern int pcGsScale;                           /* user-selected supersampling multiplier */
+extern float pcGsScaleX;                        /* horizontal backing-buffer scale per logical pixel */
+extern float pcGsScaleY;                        /* vertical backing-buffer scale per logical pixel */

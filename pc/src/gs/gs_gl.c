@@ -17,7 +17,18 @@
 #include "../../include/pc_platform.h"
 
 int pcGsScale = 3;
-int pcGsScaleX = 3;
+float pcGsScaleX = 3.0f;
+float pcGsScaleY = 3.0f;
+
+static int gs_scale_x(int x)
+{
+    return (int)(x * pcGsScaleX + 0.5f);
+}
+
+static int gs_scale_y(int y)
+{
+    return (int)(y * pcGsScaleY + 0.5f);
+}
 
 #define PC_GL_DEFINE(ret, name, args) PFN_pc_##name pc_##name;
 PC_GL_FUNCS(PC_GL_DEFINE)
@@ -342,7 +353,7 @@ static RenderTarget* get_rt(unsigned int fbp, unsigned int fbw)
     rt->fbw = fbw;
     rt->w = fbw * 64;
     rt->h = 512;
-    rt->color = make_texture(rt->w * pcGsScaleX, rt->h * pcGsScale, GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE, GL_LINEAR);
+    rt->color = make_texture(gs_scale_x(rt->w), gs_scale_y(rt->h), GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE, GL_LINEAR);
 
     glGenFramebuffers(1, &rt->fbo);
     glBindFramebuffer(GL_FRAMEBUFFER, rt->fbo);
@@ -376,7 +387,7 @@ static DepthBuffer* get_db(unsigned int zbp, int w, int h)
             dbs[i].zbp = zbp;
             dbs[i].w = w;
             dbs[i].h = h;
-            dbs[i].tex = make_texture(w * pcGsScaleX, h * pcGsScale, GL_DEPTH_COMPONENT24, GL_DEPTH_COMPONENT,
+            dbs[i].tex = make_texture(gs_scale_x(w), gs_scale_y(h), GL_DEPTH_COMPONENT24, GL_DEPTH_COMPONENT,
                                       GL_UNSIGNED_INT, GL_NEAREST);
             return &dbs[i];
         }
@@ -650,31 +661,75 @@ static int rt_overlaps(const RenderTarget* rt, unsigned int bp, unsigned int bw,
 static void rt_load_rows(RenderTarget* rt, int y0, int y1)
 {
     double t0 = pcOsTime();
-    int x, y, sx, sy;
-    unsigned int* buf = malloc(rt->w * (y1 - y0) * 4 * pcGsScaleX * pcGsScale);
+    int x, y;
+    int rw = gs_scale_x(rt->w);
+    int py0 = gs_scale_y(y0);
+    int py1 = gs_scale_y(y1);
+    int out_h = py1 - py0;
+    int ix = (int)(pcGsScaleX + 0.5f);
+    int iy = (int)(pcGsScaleY + 0.5f);
+    int integer_scale = (ix >= 1) && (iy >= 1) &&
+                        (fabsf(pcGsScaleX - ix) < 0.0001f) &&
+                        (fabsf(pcGsScaleY - iy) < 0.0001f);
+    unsigned int* buf;
 
-    for (y = y0; y < y1; y++)
+    if (rw <= 0 || out_h <= 0)
     {
-        for (x = 0; x < rt->w; x++)
+        return;
+    }
+
+    buf = (unsigned int*)malloc((size_t)rw * out_h * sizeof(*buf));
+    if (buf == NULL)
+    {
+        pcLog("gs: could not allocate %d x %d pixels while loading GS memory", rw, out_h);
+        return;
+    }
+
+    if (integer_scale)
+    {
+        /* Keep the fast replication path for integer supersampling factors. */
+        for (y = y0; y < y1; y++)
         {
-            unsigned int c = gsMemRead(GS_PSMCT32, rt->fbp * 32, rt->fbw, x, y);
-            unsigned int a = (c >> 24) >= 0x80 ? 255 : (c >> 24) * 2;
-
-            c = (c & 0xFFFFFF) | (a << 24);
-
-            for (sy = 0; sy < pcGsScale; sy++)
+            for (x = 0; x < rt->w; x++)
             {
-                for (sx = 0; sx < pcGsScaleX; sx++)
+                unsigned int c = gsMemRead(GS_PSMCT32, rt->fbp * 32, rt->fbw, x, y);
+                unsigned int a = (c >> 24) >= 0x80 ? 255 : (c >> 24) * 2;
+                c = (c & 0xFFFFFF) | (a << 24);
+
+                for (int sy = 0; sy < iy; sy++)
                 {
-                    buf[((y - y0) * pcGsScale + sy) * rt->w * pcGsScaleX + x * pcGsScaleX + sx] = c;
+                    for (int sx = 0; sx < ix; sx++)
+                    {
+                        buf[((y - y0) * iy + sy) * rw + x * ix + sx] = c;
+                    }
                 }
+            }
+        }
+    }
+    else
+    {
+        /* The 512x448 base is smaller than the 640x480 logical GS space.
+         * Sample source VRAM at output-pixel centers into the reduced backing buffer. */
+        for (y = py0; y < py1; y++)
+        {
+            int src_y = (int)((y + 0.5f) / pcGsScaleY);
+            if (src_y < y0) src_y = y0;
+            if (src_y >= y1) src_y = y1 - 1;
+
+            for (x = 0; x < rw; x++)
+            {
+                int src_x = (int)((x + 0.5f) / pcGsScaleX);
+                unsigned int c, a;
+                if (src_x >= rt->w) src_x = rt->w - 1;
+                c = gsMemRead(GS_PSMCT32, rt->fbp * 32, rt->fbw, src_x, src_y);
+                a = (c >> 24) >= 0x80 ? 255 : (c >> 24) * 2;
+                buf[(y - py0) * rw + x] = (c & 0xFFFFFF) | (a << 24);
             }
         }
     }
 
     glBindTexture(GL_TEXTURE_2D, rt->color);
-    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, y0 * pcGsScale, rt->w * pcGsScaleX, (y1 - y0) * pcGsScale, GL_RGBA,
-                    GL_UNSIGNED_BYTE, buf);
+    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, py0, rw, out_h, GL_RGBA, GL_UNSIGNED_BYTE, buf);
     free(buf);
 
     stats.rt_loads++;
@@ -807,7 +862,7 @@ void gsFlushLocalToLocal(unsigned int bp, unsigned int bw, unsigned int psm, uns
             glDisable(GL_SCISSOR_TEST);
             glBindFramebuffer(GL_READ_FRAMEBUFFER, rt->fbo);
             glBindFramebuffer(GL_DRAW_FRAMEBUFFER, down_fbo);
-            glBlitFramebuffer(0, 0, rt->w * pcGsScaleX, rows * pcGsScale, 0, 0, rt->w, rows, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+            glBlitFramebuffer(0, 0, gs_scale_x(rt->w), gs_scale_y(rows), 0, 0, rt->w, rows, GL_COLOR_BUFFER_BIT, GL_NEAREST);
 
             buf = malloc(rt->w * rows * 4);
             glBindFramebuffer(GL_FRAMEBUFFER, down_fbo);
@@ -883,7 +938,7 @@ void gsRendererInit(void)
         gsReplaceInit();
     }
 
-    pcLog("gs: renderer ready (internal resolution x%d horizontal, x%d vertical)", pcGsScaleX, pcGsScale);
+    pcLog("gs: renderer ready (512x448 base, %dx%d backing for 640x480 logical output)", gs_scale_x(640), gs_scale_y(480));
 }
 
 void gsRendererFlush(void)
@@ -1232,7 +1287,7 @@ void gsRendererDraw(const GsDrawState* st, const GsVertex* v, int nverts)
     }
 
     glBindFramebuffer(GL_FRAMEBUFFER, rt->fbo);
-    glViewport(0, 0, rt->w * pcGsScaleX, rt->h * pcGsScale);
+    glViewport(0, 0, gs_scale_x(rt->w), gs_scale_y(rt->h));
 
     /* depth */
     if (use_depth)
@@ -1260,8 +1315,11 @@ void gsRendererDraw(const GsDrawState* st, const GsVertex* v, int nverts)
         int x0 = GSF(st->scissor, 0, 11), x1 = GSF(st->scissor, 16, 11);
         int y0 = GSF(st->scissor, 32, 11), y1 = GSF(st->scissor, 48, 11);
 
+        int sx0 = gs_scale_x(x0), sy0 = gs_scale_y(y0);
+        int sx1 = gs_scale_x(x1 + 1), sy1 = gs_scale_y(y1 + 1);
+
         glEnable(GL_SCISSOR_TEST);
-        glScissor(x0 * pcGsScaleX, y0 * pcGsScale, (x1 - x0 + 1) * pcGsScaleX, (y1 - y0 + 1) * pcGsScale);
+        glScissor(sx0, sy0, sx1 - sx0, sy1 - sy0);
     }
 
     glColorMask((fbmsk & 0xFF) != 0xFF, (fbmsk & 0xFF00) != 0xFF00, (fbmsk & 0xFF0000) != 0xFF0000,
@@ -1460,134 +1518,7 @@ void gsRendererPresent(unsigned int dispfb_fbp, unsigned int dispfb_fbw)
 
         if (dump_frame)
         {
-            extern void pcGsScreenshot(const char* path, unsigned int fbp);
-
-            pcLog("present fbp %u fbw %u", dispfb_fbp, dispfb_fbw);
-            pcGsScreenshot("gsdump.png", dispfb_fbp);
-        }
-
-        {
-            extern int gsDumpFrame;
-
-            gsDumpFrame = (dump_at >= 0) && ((frame_counter == (unsigned int)dump_at) || (frame_counter == (unsigned int)dump_at + 1));
-        }
-
-        dump_frame = (dump_at >= 0) && ((frame_counter == (unsigned int)dump_at) || (frame_counter == (unsigned int)dump_at + 1));
-    }
-
-    SDL_GetWindowSizeInPixels(SDL_GL_GetCurrentWindow(), &ww, &wh);
-
-    glBindFramebuffer(GL_FRAMEBUFFER, 0);
-    glViewport(0, 0, ww, wh);
-    glDisable(GL_SCISSOR_TEST);
-    glDisable(GL_DEPTH_TEST);
-    glDisable(GL_BLEND);
-    glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
-    glClearColor(0, 0, 0, 1);
-    glClear(GL_COLOR_BUFFER_BIT);
-
-    if (rt == NULL)
-    {
-        return;
-    }
-
-    if (rt->vram_dirty || (rt->load_y1 > rt->load_y0))
-    {
-        rt_sync(rt);
-        glBindFramebuffer(GL_FRAMEBUFFER, 0);
-    }
-
-    /* 640x480 shown at the display aspect (4:3, or stretched for widescreen) */
-    {
-        float aspect = pcVideoAspect();
-
-        vh = wh;
-        vw = (int)(wh * aspect + 0.5f);
-
-        if (vw > ww)
-        {
-            vw = ww;
-            vh = (int)(ww / aspect + 0.5f);
-        }
-    }
-
-    glViewport((ww - vw) / 2, (wh - vh) / 2, vw, vh);
-
-    tw = 640.0f / rt->w;
-    th = 480.0f / rt->h;
-
-    memset(q, 0, sizeof(q));
-    {
-        float px[4] = { -1, 1, -1, 1 }, py[4] = { 1, 1, -1, -1 };
-        float ts[4] = { 0, tw, 0, tw }, tt[4] = { 0, 0, th, th };
-        int idx[6] = { 0, 1, 2, 1, 3, 2 };
-
-        for (i = 0; i < 6; i++)
-        {
-            q[i].x = px[idx[i]];
-            q[i].y = py[idx[i]];
-            q[i].s = ts[idx[i]];
-            q[i].t = tt[idx[i]];
-        }
-    }
-
-    glUseProgram(present_prog);
-    glActiveTexture(GL_TEXTURE0);
-    glBindVertexArray(vao);
-    glBindBuffer(GL_ARRAY_BUFFER, vbo);
-
-    /* a notice from the PC port (pc_overlay.c) in the middle of a black screen, instead of the
-     * picture */
-    {
-        extern const unsigned char* pcOverlayImage(int height, int* w, int* h);
-        const unsigned char* img;
-        int ow, oh;
-
-        img = pcOverlayImage(vh / 14, &ow, &oh);
-
-        if ((img != NULL) && (ow <= vw) && (oh <= vh))
-        {
-            draw_overlay(img, ow, oh, (vw - ow) / 2, (vh - oh) / 2, vw, vh);
-            return;
-        }
-    }
-
-    glBindTexture(GL_TEXTURE_2D, rt->color);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    glBindVertexArray(vao);
-    glBindBuffer(GL_ARRAY_BUFFER, vbo);
-    glBufferData(GL_ARRAY_BUFFER, sizeof(q), q, GL_STREAM_DRAW);
-    glDrawArrays(GL_TRIANGLES, 0, 6);
-
-    /* the build number at the bottom of the title screen (pc_overlay.c), below the copyright
-     * lines (they end at line 450 of 480) */
-    {
-        extern const unsigned char* pcOverlayBuildImage(int height, int* w, int* h);
-        const unsigned char* img;
-        int ow, oh;
-
-        img = pcOverlayBuildImage(vh / 26, &ow, &oh);
-
-        if ((img != NULL) && (ow <= vw) && (oh <= vh))
-        {
-            /* the present shader writes alpha 1, so blend the premultiplied text as a screen:
-             * text + picture * (1 - text) */
-            glEnable(GL_BLEND);
-            glBlendEquationSeparate(GL_FUNC_ADD, GL_FUNC_ADD);
-            glBlendFuncSeparate(GL_ONE, GL_ONE_MINUS_SRC_COLOR, GL_ZERO, GL_ONE);
-            draw_overlay(img, ow, oh, (vw - ow) / 2, vh * 465 / 480 - oh / 2, vw, vh);
-            glDisable(GL_BLEND);
-        }
-    }
-
-    (void)dispfb_fbw;
-}
-
-/* Debug: save a render target (PS2 resolution, top row first) as PNG. */
-int pcWritePng(const char* path, const unsigned char* rgb, int w, int h);
-
-void pcGsScreenshot(const char* path, unsigned int fbp)
+            extern void pcGsScreenshot(const char* path, unsigned int fbp)
 {
     RenderTarget* rt = find_rt(fbp);
     unsigned char* px;
@@ -1601,51 +1532,66 @@ void pcGsScreenshot(const char* path, unsigned int fbp)
 
     gsRendererFlush();
 
-    W = rt->w * pcGsScaleX;
-    H = rt->h * pcGsScale;
-    px = malloc(W * H * 4);
-    rgb = malloc(640 * 480 * 3);
+    W = gs_scale_x(rt->w);
+    H = gs_scale_y(rt->h);
+    px = (unsigned char*)malloc((size_t)W * H * 4);
+    rgb = (unsigned char*)malloc(640 * 480 * 3);
 
-    glBindFramebuffer(GL_FRAMEBUFFER, rt->fbo);
-    glPixelStorei(GL_PACK_ALIGNMENT, 4);
-    glReadPixels(0, 0, W, H, GL_RGBA, GL_UNSIGNED_BYTE, px);
-
-    /* RECVX_SHOTS_FULL=1: the internal resolution instead of 640x480 (for checking fine detail) */
-    if (getenv("RECVX_SHOTS_FULL") != NULL)
+    if (px == NULL || rgb == NULL)
     {
-        int w = 640 * pcGsScaleX, h = 480 * pcGsScale;
-
-        free(rgb);
-        rgb = malloc(w * h * 3);
-
-        for (y = 0; y < h; y++)
-        {
-            for (x = 0; x < w; x++)
-            {
-                memcpy(&rgb[(y * w + x) * 3], &px[(y * W + x) * 4], 3);
-            }
-        }
-
-        pcWritePng(path, rgb, w, h);
         free(px);
         free(rgb);
         return;
     }
 
+    glBindFramebuffer(GL_FRAMEBUFFER, rt->fbo);
+    glPixelStorei(GL_PACK_ALIGNMENT, 4);
+    glReadPixels(0, 0, W, H, GL_RGBA, GL_UNSIGNED_BYTE, px);
+
+    /* RECVX_SHOTS_FULL=1: save the visible area at the actual backing-buffer resolution. */
+    if (getenv("RECVX_SHOTS_FULL") != NULL)
+    {
+        int w = gs_scale_x(640), h = gs_scale_y(480);
+        if (w > W) w = W;
+        if (h > H) h = H;
+
+        free(rgb);
+        rgb = (unsigned char*)malloc((size_t)w * h * 3);
+        if (rgb != NULL)
+        {
+            for (y = 0; y < h; y++)
+            {
+                for (x = 0; x < w; x++)
+                {
+                    memcpy(&rgb[(y * w + x) * 3], &px[(y * W + x) * 4], 3);
+                }
+            }
+            pcWritePng(path, rgb, w, h);
+        }
+        free(px);
+        free(rgb);
+        return;
+    }
+
+    /* Keep debug screenshots in the game's logical 640x480 coordinate space. */
     for (y = 0; y < 480; y++)
     {
+        int sy = gs_scale_y(y);
+        if (sy >= H) sy = H - 1;
+
         for (x = 0; x < 640; x++)
         {
-            const unsigned char* s = &px[((y * pcGsScale) * W + x * pcGsScaleX) * 4];
-
-            rgb[(y * 640 + x) * 3 + 0] = s[0];
-            rgb[(y * 640 + x) * 3 + 1] = s[1];
-            rgb[(y * 640 + x) * 3 + 2] = s[2];
+            int sx = gs_scale_x(x);
+            const unsigned char* src;
+            if (sx >= W) sx = W - 1;
+            src = &px[((size_t)sy * W + sx) * 4];
+            rgb[(y * 640 + x) * 3 + 0] = src[0];
+            rgb[(y * 640 + x) * 3 + 1] = src[1];
+            rgb[(y * 640 + x) * 3 + 2] = src[2];
         }
     }
 
     pcWritePng(path, rgb, 640, 480);
-
     free(px);
     free(rgb);
 }

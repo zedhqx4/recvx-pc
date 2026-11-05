@@ -4,7 +4,7 @@
 **Branch:** `reconstruction/1-scratchpadAndSDL3`  
 **Base branch:** `pc-port`  
 **Base commit:** `7146e57630b8cdb2a9c6e0443e25aa5a2ecce7a9`  
-**Scope:** scratchpad initialization order, SDL3 migration, and external Gamepad mapping database only.
+**Scope:** early scratchpad initialization, SDL3 migration, external Gamepad mappings, and a fixed 512x448 GS render base.
 
 This is an intentionally narrow reconstruction branch. It starts directly from `pc-port`; it does not inherit the graphics-fixes, Alpha, SDL3, or GS-Rebuild feature sets wholesale.
 
@@ -13,8 +13,9 @@ This is an intentionally narrow reconstruction branch. It starts directly from `
 1. Reserve the PS2 scratchpad early enough that SDL/OpenGL driver initialization cannot claim its fixed virtual address.
 2. Migrate the PC platform code and build dependencies from SDL2 to SDL3.
 3. Load an optional external `gamecontrollerdb.txt` beside `recvx.exe`, before enumerating gamepads.
+4. Preserve the game's 640x480 logical coordinate space while rasterizing GS render targets into a 512x448 base.
 
-No renderer redesign, texture/cache work, CNK optimization, UV correction, decal/depth work, video changes, profiling additions, or game-logic changes are in scope.
+No renderer redesign, texture/cache work, CNK optimization, UV correction, decal/depth work, movie/video playback changes, profiling additions, or game-logic changes are in scope.
 
 ## 1. Early PS2 scratchpad reservation
 
@@ -81,6 +82,17 @@ Behavior:
 
 The loader follows the implementation in `experimental/gs-rebuild`, without importing that branch's unrelated renderer work.
 
+## 4. Fixed 512x448 GS render base
+
+The GS renderer now keeps the game's **640x480 logical coordinate space** but uses a **512x448 backing base** for OpenGL render targets. This is a backing-buffer change, not a window-size change and not a change to game-side vertex coordinates or GS register values.
+
+- `pc/src/pc_platform.c` defines the 640x480 logical dimensions and the 512x448 backing dimensions. It derives separate floating-point X/Y backing scales from the existing `scale=` setting and display aspect; the user-selected `pcGsScale` multiplier remains unchanged.
+- `pc/include/pc_gs.h` exposes the fractional horizontal and vertical backing scales.
+- `pc/src/gs/gs_gl.c` applies those scales to color/depth target allocation, viewport and scissor coordinates, GS-memory uploads, GPU readback, and debug screenshots. Fractional GS-memory uploads sample the source at output-pixel centers; integer scales retain the replication fast path.
+- At 4:3 with the default `scale=3`, the color/depth backing is 1536x1344 (512x448 multiplied by 3), while the logical game output remains 640x480.
+
+This is the isolated 512x448 base-resolution behavior from `experimental/gs-rebuild`; it does not import that branch's other renderer, cache, or performance changes.
+
 ## Files changed
 
 | File | Purpose in this branch |
@@ -88,13 +100,14 @@ The loader follows the implementation in `experimental/gs-rebuild`, without impo
 | `.github/workflows/build-windows.yml` | Build this branch and publish SDL3/libusb runtime DLLs |
 | `pc/config/recvx_config.c` | Migrate the settings app to SDL3 |
 | `pc/src/gs/gl_funcs.h` | Include SDL3 OpenGL declarations |
-| `pc/src/gs/gs_gl.c` | Query drawable pixel size through SDL3 |
+| `pc/src/gs/gs_gl.c` | Query drawable pixel size through SDL3; render into the fixed 512x448 GS backing base |
 | `pc/src/pc_audio.c` | Migrate audio output to SDL3 audio streams |
-| `pc/src/pc_platform.c` | SDL3 window/input/Gamepad APIs, early scratchpad reservation, external mappings loader |
+| `pc/src/pc_platform.c` | SDL3 window/input/Gamepad APIs, early scratchpad reservation, external mappings loader, 512x448 backing-scale setup |
+| `pc/include/pc_gs.h` | Expose separate fractional X/Y backing scales to the GS renderer |
 | `pc/tools/build.py` | Link against SDL3 and stage its runtime dependencies |
 | `pc/tools/fetch_deps.py` | Build SDL3 3.4.18 with HIDAPI/libusb enabled |
 
-Only these eight files are changed relative to the `pc-port` base, plus this `DEVELOPMENT_LOG.md`.
+Only these nine implementation/build files are changed relative to the `pc-port` base, plus this `DEVELOPMENT_LOG.md`.
 
 ## Explicit exclusions
 
@@ -105,15 +118,15 @@ The following are intentionally not ported into this branch:
 - GS VRAM transfer or swizzle experiments.
 - GS draw-state caching or CLUT flush changes.
 - CNK/VU0/SSE2 geometry optimizations or profiling.
-- UI UV crop/tuning, font sampling, custom render resolution, VSync configuration, and decal/depth changes.
+- UI UV crop/tuning, font sampling, arbitrary/user-selectable base render dimensions (the 512x448 base is fixed), VSync configuration, and decal/depth changes.
 - Any movie/video implementation changes.
 - Startup tracing or unrelated diagnostic infrastructure.
 
 ## Validation status
 
-The source/API migration and branch diff have been inspected. The current diff against `pc-port` is limited to the eight files listed above. The SDL2 event/controller identifiers in the migrated platform file were checked for remaining references.
+The SDL3 + early-scratchpad baseline was verified by GitHub Actions run #480 on code commit `9938d7891508ee2a1f4740792872cf30166e62a1` (Build, executable verification, and artifact upload succeeded). That run predates the 512x448 backing-buffer change documented here.
 
-**A Windows build has not yet been confirmed for this branch.** The configured Actions workflow should provide the compilation check; until a successful run is observed, this log does not claim that the branch builds or that runtime controller/audio behavior has been tested.
+**The new 512x448 code has not yet been build-verified.** A fresh Actions run is required for this revision. CI validates compilation and packaging, not rendered output; no runtime image/parity test for the reduced backing base is claimed here.
 
 ## Maintenance rule
 

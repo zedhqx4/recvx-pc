@@ -19,8 +19,10 @@
 static unsigned int frames;   /* frames presented */
 static struct { double last, sum, worst, swap; int n; } frame_time;
 
-#define PS2_WIDTH  640
+#define PS2_WIDTH  640   /* logical game coordinate space */
 #define PS2_HEIGHT 480
+#define GS_RENDER_WIDTH  512 /* native PS2 GS render base */
+#define GS_RENDER_HEIGHT 448
 
 static SDL_Window* window;
 static int pcPadFullscreenKey(void);
@@ -534,8 +536,11 @@ static void video_settings(void)
     video_cfg.maximized = pcIniGetInt("window_max", 0) != 0;
     video_cfg.pause_unfocused = pcIniGetInt("pause_unfocused", 1) != 0;
 
-    /* the 640 wide frame is stretched to the display aspect: render more columns to match */
-    pcGsScaleX = (int)(pcGsScale * video_cfg.aspect / (4.0f / 3.0f) + 0.5f);
+    /* Keep 640x480 game coordinates while rasterizing into a 512x448 GS backing base.
+     * pcGsScale remains the user's supersampling multiplier. */
+    pcGsScaleX = (float)((int)(pcGsScale * video_cfg.aspect / (4.0f / 3.0f) + 0.5f)) *
+                 ((float)GS_RENDER_WIDTH / PS2_WIDTH);
+    pcGsScaleY = (float)pcGsScale * ((float)GS_RENDER_HEIGHT / PS2_HEIGHT);
 }
 
 float pcVideoAspect(void)
