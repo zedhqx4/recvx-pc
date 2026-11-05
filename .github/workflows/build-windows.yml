@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - pc-port
+      - reconstruction/1-scratchpadAndSDL3
     paths-ignore:
       - '**.md'
       - 'docs/**'
@@ -82,4 +83,6 @@ jobs:
           path: |
             build_pc/recvx.exe
             build_pc/recvx-config.exe
+            build_pc/SDL3.dll
+            build_pc/libusb-1.0.dll
           if-no-files-found: error
