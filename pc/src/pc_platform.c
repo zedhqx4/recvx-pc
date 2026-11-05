@@ -15,9 +15,14 @@
 #include "pc_gs.h"
 #include "pc_bindings.h"
 #include "pc_audio.h"
+#include "../include/pc_game_profile.h"
 
 static unsigned int frames;   /* frames presented */
-static struct { double last, sum, worst, swap, busy_sum, busy_worst, sleep_seen; int n; } frame_time;
+static struct {
+    double last, sum, worst, swap, busy_sum, busy_worst, sleep_seen;
+    double profile_present_sum, profile_outside_sum;
+    int n;
+} frame_time;
 
 #define PS2_WIDTH  640   /* logical game coordinate space */
 #define PS2_HEIGHT 480
@@ -1402,6 +1407,8 @@ int pcVideoPumpEvents(void)
 void pcVideoPresent(void)
 {
     static double last_report;
+    int profile_present = pcGameProfileEnabled();
+    double profile_present_t0 = profile_present ? pcOsTime() : 0.0;
 
     if (!pcVideoPumpEvents())
     {
@@ -1463,6 +1470,15 @@ void pcVideoPresent(void)
             double d = now - frame_time.last;
             double busy = d - (pcOsSleepTotal - frame_time.sleep_seen);
 
+            if (profile_present)
+            {
+                double present_ms = now - profile_present_t0;
+                double outside_ms = d - present_ms;
+
+                frame_time.profile_present_sum += present_ms;
+                frame_time.profile_outside_sum += (outside_ms > 0.0) ? outside_ms : 0.0;
+            }
+
             frame_time.sum += d;
             frame_time.n++;
             frame_time.busy_sum += busy;
@@ -1492,14 +1508,27 @@ void pcVideoPresent(void)
 
     if (SDL_GetTicks() - last_report >= 5000)
     {
-        pcLog("frame %u: %.1f ms per frame (worst %.1f ms), %.1f ms waiting for the GPU", frames,
-              frame_time.n ? frame_time.sum * 1000 / frame_time.n : 0.0, frame_time.worst * 1000,
-              frame_time.n ? frame_time.swap * 1000 / frame_time.n : 0.0);
+        if (profile_present)
+        {
+            pcLog("frame %u: %.1f ms per frame (worst %.1f ms), %.1f ms waiting for the GPU; pcVideoPresent %.1f ms, outside present %.1f ms",
+                  frames, frame_time.n ? frame_time.sum * 1000 / frame_time.n : 0.0,
+                  frame_time.worst * 1000,
+                  frame_time.n ? frame_time.swap * 1000 / frame_time.n : 0.0,
+                  frame_time.n ? frame_time.profile_present_sum * 1000 / frame_time.n : 0.0,
+                  frame_time.n ? frame_time.profile_outside_sum * 1000 / frame_time.n : 0.0);
+        }
+        else
+        {
+            pcLog("frame %u: %.1f ms per frame (worst %.1f ms), %.1f ms waiting for the GPU", frames,
+                  frame_time.n ? frame_time.sum * 1000 / frame_time.n : 0.0, frame_time.worst * 1000,
+                  frame_time.n ? frame_time.swap * 1000 / frame_time.n : 0.0);
+        }
         pcLog("cpu: %.1f ms busy per frame (worst %.1f ms) of %.1f ms; the rest is idle waiting for vblank",
               frame_time.n ? frame_time.busy_sum * 1000 / frame_time.n : 0.0, frame_time.busy_worst * 1000,
               frame_time.n ? frame_time.sum * 1000 / frame_time.n : 0.0);
         frame_time.sum = frame_time.swap = frame_time.worst = 0;
         frame_time.busy_sum = frame_time.busy_worst = 0;
+        frame_time.profile_present_sum = frame_time.profile_outside_sum = 0.0;
         frame_time.n = 0;
         {
             extern long pcAudioStarved(int v);

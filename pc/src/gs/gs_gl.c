@@ -19,6 +19,9 @@
 #include "../../third_party/xxhash.h"
 #include "gl_funcs.h"
 #include "../../include/pc_platform.h"
+#ifdef TARGET_PC
+#include "../../include/pc_game_profile.h"
+#endif
 
 int pcGsScale = 3;
 float pcGsScaleX = 3.0f;
@@ -265,7 +268,11 @@ static unsigned int decal_draw_order;
 static int dump_frame;
 
 /* per-interval statistics for the periodic log */
-static struct { unsigned int frames, draws, verts, rt_loads, rt_reads, tex_decodes, tex_texels; double t_load, t_read, t_decode, t_draw, t_texlookup; } stats;
+static struct {
+    unsigned int frames, draws, verts, rt_loads, rt_reads, tex_decodes, tex_texels;
+    double t_load, t_read, t_decode, t_draw, t_texlookup;
+    double t_pre, t_geom, t_setup, t_upload, t_submit;
+} stats;
 
 /* per-draw GL counters (uniforms sent/skipped, vertex ring wraps) */
 static struct { unsigned int sent, skipped, ring_wraps; } drawgl;
@@ -293,6 +300,14 @@ void pcGsLogStats(void)
           stats.draws / f, stats.verts / f, (double)stats.rt_loads / f, stats.t_load * 1000 / f, (double)stats.rt_reads / f,
           stats.t_read * 1000 / f, (double)stats.tex_decodes / f, stats.tex_texels / f, stats.t_decode * 1000 / f);
     pcLog("gs: %d textures cached (%.0f MB)", tex_cached, tex_cached_bytes / 1048576.0);
+#ifdef TARGET_PC
+    if (pcGameProfileEnabled())
+    {
+        pcLog("gs CPU/present: pre %.2f ms, geometry %.2f ms, GL setup %.2f ms, buffer upload %.2f ms, draw/restore %.2f ms, total gs draw CPU %.2f ms",
+              stats.t_pre * 1000 / f, stats.t_geom * 1000 / f, stats.t_setup * 1000 / f,
+              stats.t_upload * 1000 / f, stats.t_submit * 1000 / f, stats.t_draw * 1000 / f);
+    }
+#endif
     {
         extern unsigned int gsStatClutLoads, gsStatClutChanged, gsStatClutHashes, gsStatClutHashMemo, gsStatClutSkipped;
         extern unsigned int gsStatXferCalls, gsStatXferBytes, gsStatXferChanged;
@@ -1574,6 +1589,11 @@ static void renderer_draw(const GsDrawState* st, const GsVertex* v, int nverts)
     GLenum mode;
     GLint first_vertex;
     int n = 0, i;
+#ifdef TARGET_PC
+    int perf_timing = pcGameProfileEnabled();
+    double perf_total_start = perf_timing ? pcOsTime() : 0.0;
+    double perf_phase_start = perf_total_start;
+#endif
 
     rt->last_use = frame_counter;
     stats.draws++;
@@ -1650,6 +1670,15 @@ static void renderer_draw(const GsDrawState* st, const GsVertex* v, int nverts)
         }
     }
 
+#ifdef TARGET_PC
+    if (perf_timing)
+    {
+        double now = pcOsTime();
+        stats.t_pre += now - perf_total_start;
+        perf_phase_start = now;
+    }
+#endif
+
     /* build GL vertices */
     if (st->type == 6)
     {
@@ -1704,6 +1733,15 @@ static void renderer_draw(const GsDrawState* st, const GsVertex* v, int nverts)
     {
         if (glverts[i].z > 1.0f) glverts[i].z = 1.0f;
     }
+
+#ifdef TARGET_PC
+    if (perf_timing)
+    {
+        double now = pcOsTime();
+        stats.t_geom += now - perf_phase_start;
+        perf_phase_start = now;
+    }
+#endif
 
     glBindFramebuffer(GL_FRAMEBUFFER, rt->fbo);
     glViewport(0, 0, gs_scale_x(rt->w), gs_scale_y(rt->h));
@@ -1841,7 +1879,25 @@ static void renderer_draw(const GsDrawState* st, const GsVertex* v, int nverts)
         u1i(UC_linear, U.linear, linear);
     }
 
+#ifdef TARGET_PC
+    if (perf_timing)
+    {
+        double now = pcOsTime();
+        stats.t_setup += now - perf_phase_start;
+        perf_phase_start = now;
+    }
+#endif
+
     first_vertex = ring_upload(glverts, n);
+
+#ifdef TARGET_PC
+    if (perf_timing)
+    {
+        double now = pcOsTime();
+        stats.t_upload += now - perf_phase_start;
+        perf_phase_start = now;
+    }
+#endif
 
     if (decal_depth_priority)
     {
@@ -1883,6 +1939,14 @@ static void renderer_draw(const GsDrawState* st, const GsVertex* v, int nverts)
 
     if (decal_depth_priority)
         glDisable(GL_POLYGON_OFFSET_FILL);
+
+#ifdef TARGET_PC
+    if (perf_timing)
+    {
+        double now = pcOsTime();
+        stats.t_submit += now - perf_phase_start;
+    }
+#endif
 }
 
 /* CPU time spent building and issuing draws (reported by pcGsLogStats); includes the texture

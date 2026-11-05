@@ -1,5 +1,6 @@
 #ifdef TARGET_PC
 #include "../../../../pc/include/pc_platform.h"
+#include "../../../../pc/include/pc_game_profile.h"
 #endif
 #include "../../../ps2/veronica/prog/ps2_dummy.h"
 #include "../../../ps2/veronica/prog/ps2_loadtim2.h"
@@ -2487,6 +2488,14 @@ int Ps2TexLoad(NJS_TEXMEMLIST* addr)
     TIM2_PICTUREHEADER_EX* timp; 
     unsigned int cache_flag;  
     unsigned int temp; // not from the debugging symbols
+#ifdef TARGET_PC
+    int profile_texture = 0;
+    int profile_source_hit = 0;
+    double profile_texload_t0 = 0.0;
+    double profile_send_t0 = 0.0;
+    double profile_send_ms = 0.0;
+    unsigned int profile_send_calls = 0;
+#endif
 
     cache_flag = 1;
 
@@ -2494,6 +2503,12 @@ int Ps2TexLoad(NJS_TEXMEMLIST* addr)
     {
         return printf("Ps2CurrentTexLoad ERROR!!!!\n"); 
     }
+
+#ifdef TARGET_PC
+    profile_texture = pcGameProfileEnabled();
+    if (profile_texture)
+        profile_texload_t0 = pcGameProfileNowMs();
+#endif
 
 #ifdef TARGET_PC /* texture request counters for the periodic gs log (pc/src/gs/gs_gl.c) */
     {
@@ -2525,6 +2540,10 @@ int Ps2TexLoad(NJS_TEXMEMLIST* addr)
     {
         cache_flag = 0;
 #ifdef TARGET_PC
+        if (profile_texture)
+            profile_source_hit = 1;
+#endif
+#ifdef TARGET_PC
         {
             extern unsigned int pcStatTexLoadSame;
 
@@ -2535,6 +2554,10 @@ int Ps2TexLoad(NJS_TEXMEMLIST* addr)
     else if ((Ps2_tex_load_tp_cancel == 0) && (timp->TpFlag != 0)) 
     {
         cache_flag = 0;
+#ifdef TARGET_PC
+        if (profile_texture)
+            profile_source_hit = 1;
+#endif
     } 
     else 
     {
@@ -2550,7 +2573,22 @@ label:
                 pcStatTexLoadUploads++;
             }
 #endif
+#ifdef TARGET_PC
+            if (profile_texture)
+            {
+                profile_send_t0 = pcGameProfileNowMs();
+                pcGameProfileSetTextureUploadScope(1);
+            }
+#endif
             Send_Tim2_dataEx(Ps2_tex_cache_buff[0], 190 * 64, 254 * 64);
+#ifdef TARGET_PC
+            if (profile_texture)
+            {
+                pcGameProfileSetTextureUploadScope(0);
+                profile_send_ms += pcGameProfileNowMs() - profile_send_t0;
+                profile_send_calls++;
+            }
+#endif
         }
     }
 
@@ -2635,6 +2673,14 @@ label:
 
     loadImage((void*)0xF0000000);
 
+#ifdef TARGET_PC
+    if (profile_texture)
+    {
+        pcGameProfileRecordTextureLoad(pcGameProfileNowMs() - profile_texload_t0,
+                                       profile_send_ms, profile_send_calls);
+        pcGameProfileRecordTextureCache(profile_source_hit, profile_send_calls == 0, 0.0);
+    }
+#endif
     return cache_flag;
 }
 

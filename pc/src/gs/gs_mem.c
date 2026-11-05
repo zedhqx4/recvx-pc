@@ -10,6 +10,9 @@
 #include <string.h>
 
 #include "gs_internal.h"
+#ifdef TARGET_PC
+#include "../../include/pc_game_profile.h"
+#endif
 
 /* The 4/8-bit block upload paths can be switched off for the host test (pc/tests) that
  * compares them with the per-pixel reference. */
@@ -778,9 +781,20 @@ double pcOsTime(void);
 void gsMemTransferData(const unsigned char* data, int qwc)
 {
     double t0 = pcOsTime();
+#ifdef TARGET_PC
+    int profile_texture_upload = pcGameProfileTextureUploadActive();
+    double profile_t0 = profile_texture_upload ? pcGameProfileNowMs() : 0.0;
+#endif
 
     transfer_data(data, qwc);
     gsTimeXfer += pcOsTime() - t0;
+#ifdef TARGET_PC
+    if (profile_texture_upload)
+    {
+        pcGameProfileRecordTextureTransfer(pcGameProfileNowMs() - profile_t0,
+                                           (qwc > 0) ? (unsigned int)qwc : 0);
+    }
+#endif
 }
 
 static void transfer_data(const unsigned char* data, int qwc)
