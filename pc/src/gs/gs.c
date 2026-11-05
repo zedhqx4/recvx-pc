@@ -25,6 +25,7 @@ static GsVertex out_verts[1024 * 3];
 static int out_count;
 static GsDrawState out_state;
 static int out_valid;
+static int gs_font_filter_nearest;
 
 static void current_state(GsDrawState* st)
 {
@@ -58,6 +59,8 @@ static void current_state(GsDrawState* st)
     st->dthe = gsRegs.dthe;
     st->colclamp = gsRegs.colclamp;
     st->texclut = gsRegs.texclut;
+    st->font_filter_nearest = gs_font_filter_nearest ||
+                              (pcFontFilterDrawActive() && !pcFontFilterIsLinear());
 }
 
 void gsFlushPrims(void)
@@ -468,6 +471,15 @@ static const void* dma_ptr(unsigned int addr, int spr)
     return (const void*)(size_t)addr;
 }
 
+static void gs_dma_gif_transfer(const void* data, int qwc, int font_filter_nearest)
+{
+    int previous = gs_font_filter_nearest;
+
+    gs_font_filter_nearest = font_filter_nearest;
+    gsGifTransfer(data, qwc);
+    gs_font_filter_nearest = previous;
+}
+
 void gsDmaChain(const void* tag_ptr)
 {
     int ntags = 0, nqwc = 0, k0 = kicks;
@@ -483,6 +495,7 @@ void gsDmaChain(const void* tag_ptr)
         const unsigned int* tag = (const unsigned int*)dma_ptr(tag_addr & 0x7FFFFFFF, tag_spr);
         unsigned int qwc = tag[0] & 0xFFFF;
         unsigned int id = (tag[0] >> 28) & 7;
+        int font_filter_nearest = (tag[0] & (1u << 16)) != 0;
         unsigned int addr = tag[1] & 0x7FFFFFFF;
         int spr = (tag[1] & 0x80000000) != 0;
         unsigned int next = tag_addr + 16;
@@ -497,23 +510,23 @@ void gsDmaChain(const void* tag_ptr)
         switch (id)
         {
         case 0: /* refe */
-            gsGifTransfer(dma_ptr(addr, spr), qwc);
+            gs_dma_gif_transfer(dma_ptr(addr, spr), qwc, font_filter_nearest);
             end = 1;
             break;
         case 1: /* cnt */
-            gsGifTransfer(tag + 4, qwc);
+            gs_dma_gif_transfer(tag + 4, qwc, font_filter_nearest);
             next = tag_addr + 16 + qwc * 16;
             break;
         case 2: /* next */
-            gsGifTransfer(tag + 4, qwc);
+            gs_dma_gif_transfer(tag + 4, qwc, font_filter_nearest);
             next = addr | (spr ? 0x80000000 : 0);
             break;
         case 3: /* ref */
         case 4: /* refs */
-            gsGifTransfer(dma_ptr(addr, spr), qwc);
+            gs_dma_gif_transfer(dma_ptr(addr, spr), qwc, font_filter_nearest);
             break;
         case 5: /* call */
-            gsGifTransfer(tag + 4, qwc);
+            gs_dma_gif_transfer(tag + 4, qwc, font_filter_nearest);
 
             if (sp < 2)
             {
@@ -523,7 +536,7 @@ void gsDmaChain(const void* tag_ptr)
             next = addr | (spr ? 0x80000000 : 0);
             break;
         case 6: /* ret */
-            gsGifTransfer(tag + 4, qwc);
+            gs_dma_gif_transfer(tag + 4, qwc, font_filter_nearest);
 
             if (sp > 0)
             {
@@ -535,7 +548,7 @@ void gsDmaChain(const void* tag_ptr)
             }
             break;
         case 7: /* end */
-            gsGifTransfer(tag + 4, qwc);
+            gs_dma_gif_transfer(tag + 4, qwc, font_filter_nearest);
             end = 1;
             break;
         }
