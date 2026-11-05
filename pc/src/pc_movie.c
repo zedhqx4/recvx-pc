@@ -124,7 +124,7 @@ void pcMovieStart(const char* name)
         strcpy(path + n - 4, ".MPG");
     }
 
-    if ((pcIniGetInt("movies_hd", 0) != 0) && file_exists(path) && pcMpegOpen(path))
+    if ((pcIniGetInt("movies_hd", 1) != 0) && file_exists(path) && pcMpegOpen(path))
     {
         hd = 1;
     }
