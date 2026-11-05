@@ -8,6 +8,7 @@ on:
       - reconstruction/1-scratchpadAndSDL3
       - reconstruction/2-Vsync_and_moviesSD_fix
       - reconstruction/4-Decalfixing
+      - reconstruction/5-performance_improvementA_GSswizzle
     paths-ignore:
       - '**.md'
       - 'docs/**'
