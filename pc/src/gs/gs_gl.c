@@ -1,4 +1,5 @@
-/* PC port, GS emulator: OpenGL 3.3 renderer.
+/* PC port, GS emulator: OpenGL renderer (requires an OpenGL 4.3 Core context).
+ * The current draw path deliberately remains on GLSL 3.30-compatible features.
  *
  * Render targets: every frame buffer the game draws to (FRAME.FBP) is an FBO, rendered at
  * pcGsScaleX x pcGsScale times the PS2 resolution (more horizontally for widescreen). A texture whose TBP0 is the address of a render target

@@ -35,11 +35,15 @@ which document what each block computes): facial animation (`face_bh.c`), morphi
 scrolling and skinning (`njplus.c`), water surface (`objitm.c`) and the LZ decompressor
 (`expand.c`).
 
+## Experimental OpenGL 4.3 baseline
+
+The `experimental/opengl-4.3` branch requests and verifies an OpenGL 4.3 Core context at startup. This first step changes the context requirement only: the existing draw path continues to use its GLSL 3.30-compatible shaders, while GS memory management and texture decoding remain CPU-side. No Compute Shader or SSBO-based GS operations are enabled yet; those will be evaluated separately after this baseline builds and runs.
+
 ## Platform layer (`pc/src`)
 
 | File | Replaces |
 |---|---|
-| `gs/` | Graphics Synthesizer on OpenGL 3.3: GIF/DMA parsing, GS memory, render targets, CLUT buffer, texture cache, PCSX2-format HD texture replacement (`gs_replace.c`) |
+| `gs/` | Graphics Synthesizer on an OpenGL 4.3 Core context: GIF/DMA parsing, GS memory, render targets, CLUT buffer, texture cache, PCSX2-format HD texture replacement (`gs_replace.c`) |
 | `vu/` | VU0 microcode translated to C |
 | `pc_kernel.c` | EE kernel: threads (as fibers, same priority rules), semaphores, alarms, VBLANK interrupts |
 | `pc_cdvd.c` | libcdvd: reads sectors from the extracted data folder (`files.idx`) or the ISO |

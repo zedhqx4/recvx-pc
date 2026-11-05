@@ -726,7 +726,7 @@ void pcVideoInit(void)
     pcOsStartupLog("pcVideoInit: scratchpad reservation succeeded");
 
     pcOsStartupLog("pcVideoInit: setting OpenGL attributes");
-    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 4);
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 3);
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
     SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
@@ -782,9 +782,39 @@ void pcVideoInit(void)
     if (gl_context == NULL)
     {
         pcOsStartupLog("pcVideoInit: OpenGL context creation failed");
-        pcPlatformFatal("Could not create an OpenGL 3.3 context: %s", SDL_GetError());
+        pcPlatformFatal("Could not create an OpenGL 4.3 Core context: %s", SDL_GetError());
     }
     pcOsStartupLog("pcVideoInit: OpenGL context created");
+
+    {
+        int gl_major = 0;
+        int gl_minor = 0;
+        int gl_profile = 0;
+
+        if (!SDL_GL_GetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, &gl_major) ||
+            !SDL_GL_GetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, &gl_minor) ||
+            !SDL_GL_GetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, &gl_profile))
+        {
+            pcOsStartupLog("pcVideoInit: could not query the actual OpenGL context attributes");
+            pcPlatformFatal("Could not query the actual OpenGL context attributes: %s", SDL_GetError());
+        }
+
+        if ((gl_major < 4) || ((gl_major == 4) && (gl_minor < 3)))
+        {
+            pcOsStartupLog("pcVideoInit: OpenGL version too old: %d.%d", gl_major, gl_minor);
+            pcPlatformFatal("OpenGL 4.3 Core or later is required; the driver provided %d.%d.",
+                            gl_major, gl_minor);
+        }
+
+        if (gl_profile != SDL_GL_CONTEXT_PROFILE_CORE)
+        {
+            pcOsStartupLog("pcVideoInit: OpenGL context is not Core profile (profile=%d)", gl_profile);
+            pcPlatformFatal("An OpenGL Core profile is required; the driver provided profile %d.", gl_profile);
+        }
+
+        pcOsStartupLog("pcVideoInit: OpenGL version verified: %d.%d Core", gl_major, gl_minor);
+        pcLog("video: OpenGL context %d.%d Core", gl_major, gl_minor);
+    }
 
     {
         int swap_interval = video_cfg.vsync ? 1 : 0;

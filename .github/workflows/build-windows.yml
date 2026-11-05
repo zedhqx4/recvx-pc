@@ -15,6 +15,7 @@ on:
       - experiment/ps2-tex-cache
       - alpha
       - experimental/workbench-rendering
+      - experimental/opengl-4.3
       - c3853984-baseline
       - merge-c3853984-into-graphics-fixes
     paths-ignore:
@@ -122,6 +123,9 @@ jobs:
           }
           if (-not (Select-String -Path $trace -Pattern 'pcVideoInit: OpenGL context created' -Quiet)) {
             throw 'recvx did not reach a working SDL window and OpenGL context; see the startup trace above.'
+          }
+          if (-not (Select-String -Path $trace -Pattern 'pcVideoInit: OpenGL version verified:' -Quiet)) {
+            throw 'recvx did not verify an OpenGL 4.3 Core context; see the startup trace above.'
           }
           Write-Host 'Startup smoke test passed: main, SDL initialization, window, and OpenGL context.'
 
