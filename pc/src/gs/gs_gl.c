@@ -263,6 +263,11 @@ static struct { unsigned int frames, draws, verts, rt_loads, rt_reads, tex_decod
 static int tex_cached;                     /* textures in the cache, decoded from GS memory */
 static double tex_cached_bytes;            /* their size */
 
+/* Persistent OpenGL view of the normal movie surface in GS VRAM (GS movie mode). */
+static GLuint movie_vram_tex;
+static unsigned int movie_vram_tbp;
+static int movie_vram_on;
+
 double pcOsTime(void);
 
 void pcGsLogStats(void)
@@ -640,6 +645,42 @@ void pcGsMovieFrame(unsigned int tbp, const unsigned char* rgba, int w, int h, i
     glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, w, h, GL_RGBA, GL_UNSIGNED_BYTE, rgba);
     movie_tbp = tbp;
     movie_on = 1;
+}
+
+/* Update the persistent GL view of the movie's GS VRAM surface.
+ * The texture is allocated once and subsequent frames only replace its pixels. */
+void pcGsMovieVramFrame(unsigned int tbp, unsigned int tbw, int w, int h)
+{
+    u64 tex0;
+
+    if ((w <= 0) || (h <= 0))
+    {
+        movie_vram_on = 0;
+        return;
+    }
+
+    if ((tbw == 0) || (w > 512) || (h > 512))
+    {
+        movie_vram_on = 0;
+        return;
+    }
+
+    glActiveTexture(GL_TEXTURE0);
+
+    if (movie_vram_tex == 0)
+    {
+        movie_vram_tex = make_texture(512, 512, GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE, GL_NEAREST);
+    }
+
+    tex0 = (u64)tbp | ((u64)tbw << 14) | ((u64)GS_PSMCT32 << 20) | ((u64)9 << 26) | ((u64)9 << 30);
+    gsDecodeTexture(tex0, 0, 0, w, h, decode_buf);
+
+    glBindTexture(GL_TEXTURE_2D, movie_vram_tex);
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, w, h, GL_RGBA, GL_UNSIGNED_BYTE, decode_buf);
+
+    movie_vram_tbp = tbp;
+    movie_vram_on = 1;
 }
 
 /* ------------------------------------------------------------------------------------------- */
@@ -1365,7 +1406,13 @@ void gsRendererDraw(const GsDrawState* st, const GsVertex* v, int nverts)
 
         glActiveTexture(GL_TEXTURE0);
 
-        if ((src != NULL) && (src != rt))
+        if (movie_vram_on && (tbp == movie_vram_tbp))
+        {
+            glBindTexture(GL_TEXTURE_2D, movie_vram_tex);
+            glUniform1i(U.texrt, 0);
+            glUniform1i(U.hd, 0);
+        }
+        else if ((src != NULL) && (src != rt))
         {
             if (src->vram_dirty || (src->load_y1 > src->load_y0))
             {
