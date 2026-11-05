@@ -7,6 +7,7 @@ on:
       - pc-port
       - reconstruction/1-scratchpadAndSDL3
       - reconstruction/2-Vsync_and_moviesSD_fix
+      - reconstruction/4-Decalfixing
     paths-ignore:
       - '**.md'
       - 'docs/**'
