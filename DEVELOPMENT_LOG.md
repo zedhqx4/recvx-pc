@@ -187,4 +187,4 @@ No movie/video, general texture-cache, VRAM, renderer-performance, or non-UI UV 
 
 The source comparison against `experimental/gs-rebuild` confirms that `ps2_NaDraw2D.c` and `ps2_dummy.c` are copied verbatim, as are the narrowly scoped GS state files where their only GS-rebuild additions are font-filter support. The platform tuner code was transplanted into the reconstruction/2 SDL3 platform implementation rather than replacing that file.
 
-**Windows build and runtime validation are pending.** The current Windows build workflow push filter does not yet include this branch, so the progress-report Actions runs are not evidence of a successful game build.
+**Windows build is in progress.** GitHub Actions run [#41986824072](https://github.com/zedhqx4/recvx-pc/actions/runs/41986824072) is building source commit `56c1883b654e403ead58885a4bae3d228735114b`, which contains the UI fixes; the later commits only restore the workflow file and add this log entry. Compilation is not yet confirmed. Runtime validation is also pending.
