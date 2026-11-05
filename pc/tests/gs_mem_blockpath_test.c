@@ -11,6 +11,8 @@
 
 #include "../src/gs/gs_mem.c"
 
+double pcOsTime(void) { return 0.0; }
+
 static unsigned long long done_hash;
 static unsigned int done_count;
 

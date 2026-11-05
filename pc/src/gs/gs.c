@@ -607,8 +607,20 @@ static unsigned int clut_cbp0, clut_cbp1;
 /* Palette generation: moves only when a CLUT load actually changes clut_buf. The renderer keys
  * its texture lookup on palette contents (gsClutHash); with this token the hash of a given
  * palette window is computed once per palette change instead of once per draw. */
+double gsTimeClut;
+double pcOsTime(void);
 unsigned int gsClutGen;
 unsigned int gsStatClutLoads, gsStatClutChanged, gsStatClutHashes, gsStatClutHashMemo;
+
+unsigned int gsStatClutSkipped;
+
+/* Last CSM1 loads, by source: a CLUT load is a pure function of the GS memory it reads and of
+ * the load parameters, so when the pages that hold the source have not been written (gsPageGen)
+ * and clut_buf has not been modified by another load since (gsClutGen), repeating the load
+ * would write exactly what is already there and can be skipped. CSM2 loads depend on TEXCLUT
+ * rectangles and always take the full path. */
+typedef struct { u64 key; unsigned int gen0, gen1, clut_gen; int valid; } ClutSrcRecord;
+static ClutSrcRecord clut_src[8];
 
 typedef struct { unsigned int gen; u64 hash; } ClutHashMemo;
 static ClutHashMemo clut_hash_memo[33];   /* 32 CSA windows of 16 entries + the 256-entry palette */
@@ -630,6 +642,10 @@ static void clut_load(u64 tex0)
     unsigned int cld = GSF(tex0, 61, 3);
     int entries = clut_entries(psm);
     unsigned short clut_new[512];
+    ClutSrcRecord* src_rec = NULL;
+    u64 src_key = 0;
+    unsigned int src_g0 = 0, src_g1 = 0;
+    double clut_t0;
     int i, load;
 
     if (entries == 0)
@@ -652,11 +668,29 @@ static void clut_load(u64 tex0)
         return;
     }
 
+    if (csm == 0)
+    {
+        /* 256 entries: blocks cbp..cbp+3 (16x16 CT32); 16 entries and CT16 stay inside that span */
+        src_key = (u64)cbp | ((u64)cpsm << 14) | ((u64)entries << 18) | ((u64)((entries == 16) ? csa : 0) << 28);
+        src_rec = &clut_src[(cbp ^ (cbp >> 3) ^ (unsigned int)(entries + ((entries == 16) ? csa : 0))) & 7];
+        src_g0 = gsPageGen[(cbp >> 5) & (GS_PAGES - 1)];
+        src_g1 = gsPageGen[((cbp + 3) >> 5) & (GS_PAGES - 1)];
+
+        if (src_rec->valid && (src_rec->key == src_key) && (src_rec->clut_gen == gsClutGen) &&
+            (src_rec->gen0 == src_g0) && (src_rec->gen1 == src_g1))
+        {
+            gsStatClutLoads++;
+            gsStatClutSkipped++;
+            return;
+        }
+    }
+
     /* The palette is read into a scratch copy first. Primitives already queued are decoded at
      * flush time from clut_buf, so they only need to be flushed (to keep using the old palette)
      * when this load really changes it. Re-selecting the texture that is already loaded, which
      * the game does for every material switch (CLD with the same CBP and palette), then neither
      * splits the batch nor moves the palette generation. */
+    clut_t0 = pcOsTime();
     memcpy(clut_new, clut_buf, sizeof(clut_new));
 
     gsStatClutLoads++;
@@ -702,12 +736,25 @@ static void clut_load(u64 tex0)
         }
     }
 
+    gsTimeClut += pcOsTime() - clut_t0;
+
     if (memcmp(clut_new, clut_buf, sizeof(clut_new)) != 0)
     {
         gsFlushPrims();
         memcpy(clut_buf, clut_new, sizeof(clut_buf));
         gsClutGen++;
         gsStatClutChanged++;
+    }
+
+    if (src_rec != NULL)
+    {
+        /* generations were sampled before the read, so a write during the flush above only
+         * makes the next identical load run in full */
+        src_rec->key = src_key;
+        src_rec->gen0 = src_g0;
+        src_rec->gen1 = src_g1;
+        src_rec->clut_gen = gsClutGen;
+        src_rec->valid = 1;
     }
 }
 

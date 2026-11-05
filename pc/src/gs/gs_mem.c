@@ -769,7 +769,21 @@ static int transfer4Blocks(const unsigned char* data, int bytes)
     return i;
 }
 
+static void transfer_data(const unsigned char* data, int qwc);
+
+/* CPU time spent writing host->GS transfers into gsVram (reported by pcGsLogStats) */
+double gsTimeXfer;
+double pcOsTime(void);
+
 void gsMemTransferData(const unsigned char* data, int qwc)
+{
+    double t0 = pcOsTime();
+
+    transfer_data(data, qwc);
+    gsTimeXfer += pcOsTime() - t0;
+}
+
+static void transfer_data(const unsigned char* data, int qwc)
 {
     int bytes = qwc * 16;
     int i;
@@ -842,6 +856,63 @@ void gsMemTransferData(const unsigned char* data, int qwc)
         }
         break;
     }
+    coalescePageTouches = 0;
+}
+
+/* Writes a w x h rectangle of 32-bit pixels (row pitch src_stride pixels) as PSMCT32, the same
+ * result as one gsMemWrite() per pixel but with the page/block lookup done once per run of eight
+ * pixels. Page generations move once per changed page per call. Used for render-target
+ * readbacks, which previously made one full address computation per pixel. */
+void gsMemWriteRect32(unsigned int bp, unsigned int bw, unsigned int x0, unsigned int y0,
+                      unsigned int w, unsigned int h, const unsigned int* src, unsigned int src_stride)
+{
+    unsigned int y;
+
+    currentPageTouchEpoch++;
+    if (currentPageTouchEpoch == 0)
+    {
+        memset(pageTouchEpoch, 0, sizeof(pageTouchEpoch));
+        currentPageTouchEpoch = 1;
+    }
+    coalescePageTouches = 1;
+
+    for (y = 0; y < h; y++)
+    {
+        const unsigned int* row = &src[y * src_stride];
+        unsigned int py = y0 + y;
+        unsigned int x = 0;
+
+        while (x < w)
+        {
+            unsigned int px = x0 + x;
+            unsigned int run = 8u - (px & 7u);
+            unsigned int page, block, block_base, j;
+
+            if (run > w - x)
+            {
+                run = w - x;
+            }
+
+            page = (py >> 5) * bw + (px >> 6);
+            block = bp + page * 32 + blockTable32[(py >> 3) & 3][(px >> 3) & 7];
+            block_base = (block * 256u) & (GS_VRAM_SIZE - 1);
+
+            for (j = 0; j < run; j++)
+            {
+                unsigned int a = (block_base + (unsigned int)columnTable32[py & 7][(px + j) & 7] * 4u) & (GS_VRAM_SIZE - 1);
+                unsigned int* dst = (unsigned int*)&gsVram[a];
+
+                if (*dst != row[x + j])
+                {
+                    *dst = row[x + j];
+                    touch(a);
+                }
+            }
+
+            x += run;
+        }
+    }
+
     coalescePageTouches = 0;
 }
 
