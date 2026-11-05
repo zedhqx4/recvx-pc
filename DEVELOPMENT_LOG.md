@@ -299,3 +299,15 @@ Other operational variables for input replay, screenshots, logging, audio dumps,
 - This is an A/B experiment against the current broad predicate and larger offset. Confirm controller mapping logs and compare decal appearance in-game before treating the visual correction as validated.
 
 **Commits:** SDL3 mapping load ([`9fa3e0caab`](https://github.com/zedhqx4/recvx-pc/commit/9fa3e0caab)); exact decal signatures and reduced offset ([`fcca847426`](https://github.com/zedhqx4/recvx-pc/commit/fcca847426)).
+
+
+## OpenGL 4.3 review: context verification and loader diagnostics
+
+**Status:** Implemented on `review/claude-opengl-4.3`; syntax-checked and mock-tested on Linux only. Windows build and runtime validation pending. Full findings: `claude_report.md`.
+
+- `pc/src/pc_platform.c`: replaced the `SDL_GL_GetAttribute` version/profile check (which returns the *requested* values in SDL 3.4.18, so it could never fail) with `verify_gl_context()`. It checks that the context is current, logs `GL_VENDOR/GL_RENDERER/GL_VERSION`, and requires GL >= 4.3 and a Core profile as reported by `glGetString` / `GL_CONTEXT_PROFILE_MASK`. A legacy GL 1.1 context returned by SDL's Windows fallback is now reported as such instead of surfacing later as `OpenGL: missing glActiveTexture`.
+- `pc/src/gs/gs_gl.c`: `pcGlLoad()` logs every unresolved function and whether a context is current; it still fails. Fatal message no longer says OpenGL 3.3.
+- `pc/src/gs/gl_funcs.h`, `pc/include/pc_gs.h`: stale "OpenGL 3.3" comments corrected.
+- No change to the draw path, GS emulation, texture system or shaders.
+
+**Validation actually run:** `gcc -fsyntax-only` on `gs_gl.c` (clean before and after); 9-case mock test of `verify_gl_context()`. **Not run:** MSVC build, GitHub Actions, any runtime test. The `missing glActiveTexture` root cause (legacy/GDI context) is probable, not confirmed: check the new `video: GL_VENDOR=...` line in `recvx.log`.
