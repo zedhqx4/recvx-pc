@@ -332,9 +332,9 @@ The contextual GameCube START rule is now exactly:
 - Otherwise keep it as PS2 START.
 
 Evidence for Options-task detection:
-- `main.c` task table index 16 is `bhSysCallOption`; the scheduler runs a task only when its `tk_flg` bit is set and corresponding `ts_flg` bit is clear.
+- `main.c` task table index 16 is `bhSysCallOption`; the scheduler runs a task only when its `tk_flg` bit is set and corresponding `ts_flg` bit is clear. Title Options enters with `tk_flg = 0x310000` (bit 16 set, bit 7 clear).
 - `bhSysCallFirstmovie()` handles title return code 4 by setting `tk_flg = 0x310000`, which includes task 16; this is the title Options route.
-- `bhSysCallOption()` is the common Options task and distinguishes title vs in-game handling using the game-task bit `0x80`.
+- `bhSysCallOption()` is the common Options task. `bhFirstGameStart()` adds `0x73DFC0` to `tk_flg` for gameplay/demo; that value includes both bits 16 and 7, so the new test explicitly rejects it as title Options.
 
 Mode evidence:
 - `CheckButton()` in `adv.c` sets `gm_mode` to 0/1/2 for New Game choices and 3 for Battle/Extra Game. Load Game restores the saved `gm_mode` from `SAVEFILE`.
