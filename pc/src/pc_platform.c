@@ -2111,10 +2111,14 @@ void pcPlatformDebugInputText(char* text, size_t size)
     if (text == NULL || size == 0)
         return;
     text[0] = 0;
+    load_bindings();
 
     if (controller == NULL)
     {
-        snprintf(text, size, "CONTROLLER: none connected\n");
+        ps2_start = !(pad_report[pad_map[PAD_START].byte] & (1 << pad_map[PAD_START].bit));
+        ps2_select = !(pad_report[pad_map[PAD_SELECT].byte] & (1 << pad_map[PAD_SELECT].bit));
+        snprintf(text, size, "CONTROLLER: none connected\nPS2 report: START=%d SELECT=%d  (1=pressed)\n",
+                 ps2_start, ps2_select);
         return;
     }
 
