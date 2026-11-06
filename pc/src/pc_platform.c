@@ -960,6 +960,32 @@ static int ui_uv_crop_handle_event(const SDL_Event* ev)
 
     key = ev->key.scancode;
 
+    /* Live state overlay hotkeys are always available; they do not consume game bindings. */
+    if (key == SDL_SCANCODE_F10 && (ev->key.mod & SDL_KMOD_CTRL))
+    {
+        if (down && !ev->key.repeat)
+        {
+            extern void pcOverlayDebugToggle(void);
+            pcOverlayDebugToggle();
+        }
+        return 1;
+    }
+
+    if ((key == SDL_SCANCODE_PAGEUP || key == SDL_SCANCODE_PAGEDOWN) &&
+        (ev->key.mod & SDL_KMOD_CTRL))
+    {
+        extern int pcOverlayDebugVisible(void);
+        if (pcOverlayDebugVisible())
+        {
+            if (down && !ev->key.repeat)
+            {
+                extern void pcOverlayDebugPageChange(int delta);
+                pcOverlayDebugPageChange(key == SDL_SCANCODE_PAGEUP ? -1 : 1);
+            }
+            return 1;
+        }
+    }
+
     if (!pc_debug_mode_enabled())
     {
         /* Reserve diagnostic hotkeys without invoking tools or leaking them into game input. */
@@ -1148,6 +1174,23 @@ void pcVideoPresent(void)
     }
 
     pcPadUpdate();
+
+    /* Build the live debug text after input polling so the panel shows this frame's final
+     * DualShock 2 report, including contextual GameCube START/SELECT mapping. */
+    {
+        extern int pcOverlayDebugVisible(void);
+        if (pcOverlayDebugVisible())
+        {
+            char debug_text[8192];
+            extern int pcOverlayDebugPage(void);
+            extern void pcOverlayDebugSetText(const char* text);
+            extern void pcGameDebugText(int page, char* out, size_t cap);
+
+            pcGameDebugText(pcOverlayDebugPage(), debug_text, sizeof(debug_text));
+            pcOverlayDebugSetText(debug_text);
+        }
+    }
+
     pcOsHeartbeat();
     fps_tick();
 
@@ -2044,6 +2087,89 @@ void pcPadUpdate(void)
     }
 
     pcPadRecordReplay(r);
+}
+
+/* Physical SDL state plus the final active-low PS2 report, for the on-screen debugger. */
+void pcPlatformDebugInputText(char* text, size_t size)
+{
+    static const struct { SDL_GamepadButton button; const char* name; } buttons[] = {
+        { SDL_GAMEPAD_BUTTON_SOUTH, "S" }, { SDL_GAMEPAD_BUTTON_EAST, "E" },
+        { SDL_GAMEPAD_BUTTON_WEST, "W" }, { SDL_GAMEPAD_BUTTON_NORTH, "N" },
+        { SDL_GAMEPAD_BUTTON_BACK, "BACK" }, { SDL_GAMEPAD_BUTTON_GUIDE, "GUIDE" },
+        { SDL_GAMEPAD_BUTTON_START, "START" }, { SDL_GAMEPAD_BUTTON_LEFT_STICK, "L3" },
+        { SDL_GAMEPAD_BUTTON_RIGHT_STICK, "R3" }, { SDL_GAMEPAD_BUTTON_LEFT_SHOULDER, "LB" },
+        { SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER, "RB" }, { SDL_GAMEPAD_BUTTON_DPAD_UP, "DU" },
+        { SDL_GAMEPAD_BUTTON_DPAD_DOWN, "DD" }, { SDL_GAMEPAD_BUTTON_DPAD_LEFT, "DL" },
+        { SDL_GAMEPAD_BUTTON_DPAD_RIGHT, "DR" }
+    };
+    size_t used = 0, i;
+    int is_gamecube = (controller != NULL) &&
+                      (SDL_GetGamepadType(controller) == SDL_GAMEPAD_TYPE_GAMECUBE);
+    int started = 0, raw_start = 0, ps2_start, ps2_select;
+    const char* name = (controller != NULL) ? SDL_GetGamepadName(controller) : NULL;
+
+    if (text == NULL || size == 0)
+        return;
+    text[0] = 0;
+
+    if (controller == NULL)
+    {
+        snprintf(text, size, "CONTROLLER: none connected\n");
+        return;
+    }
+
+    used += (size_t)snprintf(text + used, size - used, "CONTROLLER: %s%s\n",
+                             is_gamecube ? "GameCube / " : "",
+                             (name != NULL) ? name : "(unnamed)");
+
+    used += (size_t)snprintf(text + used, size - used, "SDL buttons:");
+    for (i = 0; i < sizeof(buttons) / sizeof(buttons[0]) && used < size; i++)
+    {
+        int down = SDL_GetGamepadButton(controller, buttons[i].button);
+        used += (size_t)snprintf(text + used, size - used, " %s=%d", buttons[i].name, down);
+        if (i == 7 && used < size)
+            used += (size_t)snprintf(text + used, size - used, "\n            ");
+    }
+    if (used < size)
+        used += (size_t)snprintf(text + used, size - used, "\n");
+
+    if (is_gamecube)
+    {
+        extern int pcGameHasStarted(void);
+        started = pcGameHasStarted();
+        raw_start = SDL_GetGamepadButton(controller, SDL_GAMEPAD_BUTTON_START);
+    }
+
+    ps2_start = !(pad_report[pad_map[PAD_START].byte] & (1 << pad_map[PAD_START].bit));
+    ps2_select = !(pad_report[pad_map[PAD_SELECT].byte] & (1 << pad_map[PAD_SELECT].bit));
+
+    if (used < size)
+    {
+        used += (size_t)snprintf(text + used, size - used,
+                                 "SDL axes: LX=%6d LY=%6d RX=%6d RY=%6d LT=%5d RT=%5d\n",
+                                 SDL_GetGamepadAxis(controller, SDL_GAMEPAD_AXIS_LEFTX),
+                                 SDL_GetGamepadAxis(controller, SDL_GAMEPAD_AXIS_LEFTY),
+                                 SDL_GetGamepadAxis(controller, SDL_GAMEPAD_AXIS_RIGHTX),
+                                 SDL_GetGamepadAxis(controller, SDL_GAMEPAD_AXIS_RIGHTY),
+                                 SDL_GetGamepadAxis(controller, SDL_GAMEPAD_AXIS_LEFT_TRIGGER),
+                                 SDL_GetGamepadAxis(controller, SDL_GAMEPAD_AXIS_RIGHT_TRIGGER));
+    }
+    if (used < size)
+    {
+        if (is_gamecube)
+        {
+            snprintf(text + used, size - used,
+                     "GC START raw=%d  session_started=%d  pressed -> %s\n"
+                     "PS2 report: START=%d SELECT=%d  (1=pressed)\n",
+                     raw_start, started, started ? "SELECT" : "START", ps2_start, ps2_select);
+        }
+        else
+        {
+            snprintf(text + used, size - used,
+                     "PS2 report: START=%d SELECT=%d  (1=pressed)\n",
+                     ps2_start, ps2_select);
+        }
+    }
 }
 
 /* an OK button (Cross or Square, both OK / Attack in the game) held this frame, from the keyboard,
