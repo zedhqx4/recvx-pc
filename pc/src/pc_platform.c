@@ -1632,7 +1632,9 @@ void pcPadInit(void)
             controller = SDL_OpenGamepad(joysticks[i]);
             if (controller != NULL)
             {
-                pcLog("controller: opened gamepad: %s", SDL_GetGamepadName(controller));
+                SDL_GamepadType type = SDL_GetGamepadType(controller);
+                pcLog("controller: opened gamepad: %s (SDL type=%d, GameCube=%d)",
+                      SDL_GetGamepadName(controller), (int)type, type == SDL_GAMEPAD_TYPE_GAMECUBE);
                 break;
             }
             pcLog("controller: SDL_OpenGamepad failed: %s", SDL_GetError());
