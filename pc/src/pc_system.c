@@ -141,20 +141,21 @@ void pcGameStateLog(void)
 }
 
 /* GameCube START is translated to PS2 SELECT in either of two observed states:
- * 1) the option-screen task (task 16) is currently runnable;
+ * 1) title Options: task 16 is runnable, while the game task (task 7) is absent;
  * 2) all four player-slot status words are exactly 0x4.
  *
- * The task scheduler in main.c uses the same tk_flg/ts_flg test before calling
- * bhSysCallOption(), so this identifies the title Options screen without gm_mode.
- * Do not use gm_mode or the general game task bit: DEMO PLAY also runs game tasks,
- * and Battle Mode is a legitimate playable mode. */
+ * The task scheduler in main.c uses tk_flg/ts_flg to decide whether task 16 runs.
+ * DEMO PLAY also enables task 16 as part of its game-task set (tk_flg=0x73DFC0),
+ * so the game-task bit must be absent to identify the title Options screen.
+ * Do not use gm_mode: Battle Mode is a legitimate playable mode. */
 int pcGameOptionsMenuActive(void)
 {
     extern SYS_WORK* sys;
 
     return (sys != NULL) &&
            ((sys->tk_flg & (1u << 16)) != 0) &&
-           ((sys->ts_flg & (1u << 16)) == 0);
+           ((sys->ts_flg & (1u << 16)) == 0) &&
+           ((sys->tk_flg & (1u << 7)) == 0);
 }
 
 int pcGameAllPlayerSlotsAreFour(void)
@@ -279,7 +280,7 @@ void pcGameDebugText(int page, char* out, size_t cap)
         pcDebugAppend(out, cap, &used,
                       "GAME gm_mode=%d  stg=%d rom=%d rcase=%d pos=%d cut=%d flr=%d ply=%d\n"
                       "PAD pad_on=%08X pad_ps=%08X pad_rs=%08X pad_old=%08X\n"
-                      "GC START rule: option_task=%d all_ply_stflg_4=%d -> PS2 %s\n",
+                      "GC START rule: title_options=%d all_ply_stflg_4=%d -> PS2 %s\n",
                       sys->gm_mode, (int)sys->stg_no, (int)sys->rom_no, (int)sys->rcase,
                       (int)sys->pos_no, (int)sys->cut_no, (int)sys->flr_no, (int)sys->ply_id,
                       sys->pad_on, sys->pad_ps, sys->pad_rs, sys->pad_old,
