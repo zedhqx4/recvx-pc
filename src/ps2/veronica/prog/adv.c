@@ -2679,11 +2679,6 @@ void DisplayOptionBg(int Level, int Flag)
 }
 
 // 99.65% matching
-#ifdef TARGET_PC
-/* PC: OPTION row not shown: 1 key config (recvx-config.exe sets the buttons) */
-#define PC_OPTION_HIDDEN(i) ((i) == 1)
-#endif
-
 int DisplayOptionPlateLevel0(int PortId, int Flag)
 {
     ADV_WORK* ap;            
@@ -2774,12 +2769,6 @@ int DisplayOptionPlateLevel0(int PortId, int Flag)
                     {
                         ap->OptIndex--;
                     }
-#ifdef TARGET_PC
-                    while (PC_OPTION_HIDDEN(ap->OptIndex)) /* PC: rows left out, see below */
-                    {
-                        ap->OptIndex--;
-                    }
-#endif
                     
                 label:
                     CallSystemSe(0, 2);
@@ -2798,12 +2787,6 @@ int DisplayOptionPlateLevel0(int PortId, int Flag)
                         {
                             ap->OptIndex++;
                         }
-#ifdef TARGET_PC
-                        while (PC_OPTION_HIDDEN(ap->OptIndex)) /* PC: rows left out */
-                        {
-                            ap->OptIndex++;
-                        }
-#endif
                     }
                     
                     CallSystemSe(0, 2);
@@ -2812,7 +2795,7 @@ int DisplayOptionPlateLevel0(int PortId, int Flag)
             
             if ((Pad[PortId].press & 0x8000)) 
             {
-                if (((ap->OptIndex != 4) || (PuruFindFlag != 0)) && ((ap->OptIndex != 1) && (OptionDef[ap->OptIndex].Item != 0))) 
+                if (((ap->OptIndex != 4) || (PuruFindFlag != 0)) && (OptionDef[ap->OptIndex].Item != 0)) 
                 {
                     OptionDef[ap->OptIndex].Item--;
 
@@ -2837,7 +2820,7 @@ int DisplayOptionPlateLevel0(int PortId, int Flag)
             } 
             else if ((Pad[PortId].press & 0x2000)) 
             {
-                if (((ap->OptIndex != 4) || (PuruFindFlag != 0)) && ((ap->OptIndex != 1) && (OptionDef[ap->OptIndex].Item != OptionDef[ap->OptIndex].MaxItem)))  
+                if (((ap->OptIndex != 4) || (PuruFindFlag != 0)) && (OptionDef[ap->OptIndex].Item != OptionDef[ap->OptIndex].MaxItem))  
                 {
                     OptionDef[ap->OptIndex].Item++;
                     
@@ -2912,33 +2895,8 @@ int DisplayOptionPlateLevel0(int PortId, int Flag)
     SetQuadPos(96.0f, 96.0f, 448.0f, 48.0f, &qp[13]);
     SetQuadUv2(0, 320.0f, 448.0f, 48.0f, 2, &qp[13]);
     
-#ifdef TARGET_PC
-    /* PC: the key config row (recvx-config.exe sets the buttons) is left out; the rows below
-     * it move up, with the vibration row's ON and OFF */
-    while (PC_OPTION_HIDDEN(ap->OptIndex))
-    {
-        ap->OptIndex++;
-    }
-
-    {
-        static const float up[13] = { 0, 0, 32.0f, 32.0f, 32.0f, 32.0f, 32.0f, 0, 0, 0, 0, 32.0f, 32.0f };
-
-        for (i = 0; i < 13; i++)
-        {
-            qp[i].y1 -= up[i];
-            qp[i].y2 -= up[i];
-        }
-    }
-#endif
-
     for (i = 0; i < 7; i++) 
     {
-#ifdef TARGET_PC
-        if (PC_OPTION_HIDDEN(i))
-        {
-            continue;
-        }
-#endif
         Alpha = 255;
         
         if (OptionDef[i].SelectFlag != 0) 
@@ -2984,7 +2942,6 @@ int DisplayOptionPlateLevel0(int PortId, int Flag)
         }
     }
     
-#ifndef TARGET_PC /* PC: no controls row */
     if (ap->OptIndex == 1) 
     {
         AdvEasyDrawTexture(0, 0xDFFFFFFF, &Qtex[10], 0.05f, 1);
@@ -2995,7 +2952,6 @@ int DisplayOptionPlateLevel0(int PortId, int Flag)
         AdvEasyDrawTexture(0, 0xDFCFCFCF, &Qtex[10], 0.05f, 1);
         AdvEasyDrawTexture(0, 0xDFCFCFCF, &Qtex[11], 0.05f, 1);
     }
-#endif
     
     if (OptionDef[4].Item == 0) 
     {
