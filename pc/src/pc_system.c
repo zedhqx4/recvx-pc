@@ -135,6 +135,16 @@ void pcGameStateLog(void)
           sys->st_flg, sys->stg_no, sys->rom_no, sys->gm_mode);
 }
 
+/* Nonzero after the game task has been created for a play session.
+ * Test tk_flg without masking ts_flg: gameplay menus suspend the game task,
+ * but they must not make GameCube START revert to START. */
+int pcGameHasStarted(void)
+{
+    extern SYS_WORK* sys;
+
+    return (sys->tk_flg & (1 << 7)) != 0;
+}
+
 /* debug: nonzero while the title screen task is running */
 int pcGameInTitle(void)
 {
