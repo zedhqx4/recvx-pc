@@ -299,3 +299,17 @@ Other operational variables for input replay, screenshots, logging, audio dumps,
 - This is an A/B experiment against the current broad predicate and larger offset. Confirm controller mapping logs and compare decal appearance in-game before treating the visual correction as validated.
 
 **Commits:** SDL3 mapping load ([`9fa3e0caab`](https://github.com/zedhqx4/recvx-pc/commit/9fa3e0caab)); exact decal signatures and reduced offset ([`fcca847426`](https://github.com/zedhqx4/recvx-pc/commit/fcca847426)).
+
+
+## OpenGL 4.3 experiment — restore the in-game Key Config menu
+
+**Branch:** `experiment/opengl43-gamecube-keyconfig` (based on `experimental/opengl-4.3`)  
+**Status:** Implemented; Windows build/runtime validation pending.
+
+- Restored the original **Key Config** row in the in-game Options menu for PC builds. It had been hidden because PC button bindings were configured in `recvx-config.exe`.
+- Restored normal menu navigation through the row, its original row spacing and selection graphics, and the existing Type A/B/C submenu.
+- Re-enabled left/right changes to `OptionDef[1].Item`, which updates `sys->keytype` and therefore selects the existing `pad_tab_a`, `pad_tab_b`, or `pad_tab_c` mapping in `pad.c`.
+- No SDL button mapping, HIDAPI/libusb behavior, GameCube adapter handling, or virtual button translation was changed in this experiment. This isolates whether the game's built-in Type A/B/C selection is usable with the current PC/GameCube input path.
+- Added this branch to the Windows build workflow so pushes produce a downloadable build artifact even when the GitHub runner's lack of a real OpenGL driver causes the runtime smoke test to fail.
+
+**Validation:** Source-level change only so far. Confirm the menu row appears, can be selected, opens the Type A/B/C page, and saves/applies the chosen type. Then test all three types with a GameCube controller and verify that changing the type affects in-game actions as expected.
