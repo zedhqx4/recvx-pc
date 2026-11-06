@@ -140,16 +140,43 @@ void pcGameStateLog(void)
           sys->st_flg, sys->stg_no, sys->rom_no, sys->gm_mode);
 }
 
-/* Nonzero during a normal play session.
- * DEMO PLAY (gm_mode == 3) also creates the game task, but must retain
- * the pre-game GameCube START mapping. Test tk_flg without masking ts_flg
- * so gameplay menus do not make START revert to START. */
-int pcGameHasStarted(void)
+/* GameCube START is translated to PS2 SELECT in either of two observed states:
+ * 1) the option-screen task (task 16) is currently runnable;
+ * 2) all four player-slot status words are exactly 0x4.
+ *
+ * The task scheduler in main.c uses the same tk_flg/ts_flg test before calling
+ * bhSysCallOption(), so this identifies the title Options screen without gm_mode.
+ * Do not use gm_mode or the general game task bit: DEMO PLAY also runs game tasks,
+ * and Battle Mode is a legitimate playable mode. */
+int pcGameOptionsMenuActive(void)
 {
     extern SYS_WORK* sys;
 
-    return ((sys->tk_flg & (1 << 7)) != 0) &&
-           (sys->gm_mode != 3);
+    return (sys != NULL) &&
+           ((sys->tk_flg & (1u << 16)) != 0) &&
+           ((sys->ts_flg & (1u << 16)) == 0);
+}
+
+int pcGameAllPlayerSlotsAreFour(void)
+{
+    extern SYS_WORK* sys;
+    int i;
+
+    if (sys == NULL)
+        return 0;
+
+    for (i = 0; i < 4; i++)
+    {
+        if (sys->ply_stflg[i] != 0x4)
+            return 0;
+    }
+
+    return 1;
+}
+
+int pcGameCubeStartUsesSelect(void)
+{
+    return pcGameOptionsMenuActive() || pcGameAllPlayerSlotsAreFour();
 }
 
 /* debug: nonzero while the title screen task is running */
@@ -251,10 +278,13 @@ void pcGameDebugText(int page, char* out, size_t cap)
     {
         pcDebugAppend(out, cap, &used,
                       "GAME gm_mode=%d  stg=%d rom=%d rcase=%d pos=%d cut=%d flr=%d ply=%d\n"
-                      "PAD pad_on=%08X pad_ps=%08X pad_rs=%08X pad_old=%08X\n",
+                      "PAD pad_on=%08X pad_ps=%08X pad_rs=%08X pad_old=%08X\n"
+                      "GC START rule: option_task=%d all_ply_stflg_4=%d -> PS2 %s\n",
                       sys->gm_mode, (int)sys->stg_no, (int)sys->rom_no, (int)sys->rcase,
                       (int)sys->pos_no, (int)sys->cut_no, (int)sys->flr_no, (int)sys->ply_id,
-                      sys->pad_on, sys->pad_ps, sys->pad_rs, sys->pad_old);
+                      sys->pad_on, sys->pad_ps, sys->pad_rs, sys->pad_old,
+                      pcGameOptionsMenuActive(), pcGameAllPlayerSlotsAreFour(),
+                      pcGameCubeStartUsesSelect() ? "SELECT" : "START");
 
         input[0] = 0;
         {
