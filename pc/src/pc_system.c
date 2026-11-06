@@ -280,7 +280,6 @@ void pcGameDebugText(int page, char* out, size_t cap)
         PC_DEBUG_FLAG(opt_flg);
         pcDebugFlagLine(out, cap, &used, "mvi_flg", sys->mvi_flg, 16);
         pcDebugFlagLine(out, cap, &used, "ufo_flg", sys->ufo_flg, 8);
-        pcDebugFlagLine(out, cap, &used, "ply_stflg*", sys->ply_stflg[0], 32);
         pcDebugFlagLine(out, cap, &used, "brkfg", sys->brkfg, 32);
         pcDebugFlagLine(out, cap, &used, "brkfg_tkb", sys->brkfg_tkb, 32);
         pcDebugFlagLine(out, cap, &used, "brkfg_tsb", sys->brkfg_tsb, 32);
