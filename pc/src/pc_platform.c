@@ -1277,6 +1277,8 @@ static const struct { int byte, bit, pressure; } pad_bits[PC_BINDING_PS2_BUTTONS
 /* keyboard and controller bindings: pc_binding_defs defaults, overridden by recvx.ini
  * key_<name>= / pad_<name>= lines (written by recvx-config.exe) */
 static PadMap pad_map[PC_BINDING_COUNT];
+#define PAD_START       10  /* pc_binding_defs: DualShock 2 START */
+#define PAD_SELECT      11  /* pc_binding_defs: DualShock 2 SELECT */
 #define PAD_FASTFORWARD PC_BINDING_PS2_BUTTONS
 #define PAD_FULLSCREEN  (PC_BINDING_PS2_BUTTONS + 1)
 #define PAD_TITLE       (PC_BINDING_PS2_BUTTONS + 2)
@@ -1824,17 +1826,50 @@ void pcPadUpdate(void)
         }
     }
 
-    for (i = 0; i < PC_BINDING_PS2_BUTTONS; i++)
     {
-        const PadMap* m = &pad_map[i];
+        int gamecube = (controller != NULL) &&
+                       (SDL_GetGamepadType(controller) == SDL_GAMEPAD_TYPE_GAMECUBE);
+        int gamecube_start = gamecube &&
+                             SDL_GetGamepadButton(controller, SDL_GAMEPAD_BUTTON_START);
+        int title_screen = 0;
 
-        if (pad_down(m, keys))
+        if (gamecube_start)
         {
-            r[m->byte] &= ~(1 << m->bit);
+            extern int pcGameInTitle(void);
+            title_screen = pcGameInTitle();
+        }
 
-            if (m->pressure >= 0)
+        for (i = 0; i < PC_BINDING_PS2_BUTTONS; i++)
+        {
+            const PadMap* m = &pad_map[i];
+            int down = pad_down(m, keys);
+
+            /* Only a GameCube pad gets contextual START. Keep the keyboard binding
+             * and every non-GameCube controller's configured mapping unchanged. */
+            if (gamecube_start && (i == PAD_START))
             {
-                r[m->pressure] = 0xFF;
+                int key_down = (m->key != SDL_SCANCODE_UNKNOWN) && keys[m->key];
+
+                if ((m->key == SDL_SCANCODE_RETURN) && (SDL_GetModState() & SDL_KMOD_ALT))
+                {
+                    key_down = 0;
+                }
+
+                down = key_down || title_screen;
+            }
+            else if (gamecube_start && (i == PAD_SELECT) && !title_screen)
+            {
+                down = 1;
+            }
+
+            if (down)
+            {
+                r[m->byte] &= ~(1 << m->bit);
+
+                if (m->pressure >= 0)
+                {
+                    r[m->pressure] = 0xFF;
+                }
             }
         }
     }
