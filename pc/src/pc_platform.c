@@ -1881,8 +1881,8 @@ void pcPadUpdate(void)
 
         if (gamecube_start)
         {
-            extern int pcGameHasStarted(void);
-            game_started = pcGameHasStarted();
+            extern int pcGameCubeStartUsesSelect(void);
+            game_started = pcGameCubeStartUsesSelect();
         }
 
         for (i = 0; i < PC_BINDING_PS2_BUTTONS; i++)
@@ -1890,10 +1890,10 @@ void pcPadUpdate(void)
             const PadMap* m = &pad_map[i];
             int down = pad_down(m, keys);
 
-            /* Before a game session starts (title, attract videos, mode selection),
-             * GameCube START remains START. Once the game task has been created,
-             * GameCube START becomes SELECT, including while gameplay menus suspend it.
-             * Keyboard and non-GameCube controller mappings remain unchanged. */
+            /* GameCube START becomes PS2 SELECT only while the title Options task is
+             * running, or when all four SYS_WORK player slots equal 0x4. In title,
+             * attract videos and DEMO PLAY it remains PS2 START. Keyboard and other
+             * controller mappings are unchanged. */
             if (gamecube_start && (i == PAD_START))
             {
                 int key_down = (m->key != SDL_SCANCODE_UNKNOWN) && keys[m->key];
@@ -2105,7 +2105,7 @@ void pcPlatformDebugInputText(char* text, size_t size)
     size_t used = 0, i;
     int is_gamecube = (controller != NULL) &&
                       (SDL_GetGamepadType(controller) == SDL_GAMEPAD_TYPE_GAMECUBE);
-    int started = 0, raw_start = 0, ps2_start, ps2_select;
+    int use_select = 0, raw_start = 0, ps2_start, ps2_select;
     const char* name = (controller != NULL) ? SDL_GetGamepadName(controller) : NULL;
 
     if (text == NULL || size == 0)
@@ -2139,8 +2139,8 @@ void pcPlatformDebugInputText(char* text, size_t size)
 
     if (is_gamecube)
     {
-        extern int pcGameHasStarted(void);
-        started = pcGameHasStarted();
+        extern int pcGameCubeStartUsesSelect(void);
+        use_select = pcGameCubeStartUsesSelect();
         raw_start = SDL_GetGamepadButton(controller, SDL_GAMEPAD_BUTTON_START);
     }
 
@@ -2163,9 +2163,9 @@ void pcPlatformDebugInputText(char* text, size_t size)
         if (is_gamecube)
         {
             snprintf(text + used, size - used,
-                     "GC START raw=%d  session_started=%d  pressed -> %s\n"
+                     "GC START raw=%d  select_rule=%d  pressed -> PS2 %s\n"
                      "PS2 report: START=%d SELECT=%d  (1=pressed)\n",
-                     raw_start, started, started ? "SELECT" : "START", ps2_start, ps2_select);
+                     raw_start, use_select, use_select ? "SELECT" : "START", ps2_start, ps2_select);
         }
         else
         {
