@@ -16,6 +16,7 @@ on:
       - alpha
       - experimental/workbench-rendering
       - experimental/opengl-4.3
+      - experiment/opengl43-gamecube-keyconfig
       - c3853984-baseline
       - merge-c3853984-into-graphics-fixes
     paths-ignore:
