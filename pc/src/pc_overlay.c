@@ -21,6 +21,7 @@ typedef struct {
     int w, h;
     char text[8192];
     int line_height;
+    int max_w, max_h;
     DWORD rendered_at;
 } DebugOverlayImage;
 
@@ -192,7 +193,7 @@ static int render_debug(DebugOverlayImage* out, const char* text, int line_h, in
         return 0;
     }
 
-    font = CreateFontA(-(line_h * 11 / 20), 0, 0, 0, FW_SEMIBOLD, 0, 0, 0, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS,
+    font = CreateFontA(-(line_h * 3 / 4), 0, 0, 0, FW_SEMIBOLD, 0, 0, 0, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS,
                        CLIP_DEFAULT_PRECIS, ANTIALIASED_QUALITY, DEFAULT_PITCH | FF_MODERN, "Consolas");
     old_font = (HFONT)SelectObject(dc, font);
 
@@ -319,6 +320,7 @@ const unsigned char* pcOverlayDebugImage(int line_h, int max_w, int max_h, int* 
 
     now = GetTickCount();
     if ((debug_image.rgba == NULL) || (debug_image.line_height != line_h) ||
+        (debug_image.max_w != max_w) || (debug_image.max_h != max_h) ||
         (strcmp(debug_image.text, debug_text) != 0 && (now - debug_image.rendered_at >= 100 || debug_image.rendered_at == 0)))
     {
         if (!render_debug(&debug_image, debug_text, line_h, max_w, max_h))
@@ -327,6 +329,8 @@ const unsigned char* pcOverlayDebugImage(int line_h, int max_w, int max_h, int* 
         }
         snprintf(debug_image.text, sizeof(debug_image.text), "%s", debug_text);
         debug_image.line_height = line_h;
+        debug_image.max_w = max_w;
+        debug_image.max_h = max_h;
         debug_image.rendered_at = now;
     }
 
