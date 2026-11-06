@@ -9,6 +9,11 @@
 #include "pc_platform.h"
 #include "pc_os.h"
 
+#include <stdarg.h>
+#include <stddef.h>
+#include <stdio.h>
+#include <string.h>
+
 extern unsigned char Ps2_tex_mem[10485760];
 
 void _builtin_set_imask(int mask)
@@ -165,10 +170,6 @@ int pcGameInStatusScreen(void)
 
 
 /* Live state overlay. Values are read directly from the game's SYS_WORK structure. */
-#include <stdarg.h>
-#include <stdio.h>
-#include <string.h>
-
 static void pcDebugAppend(char* out, size_t cap, size_t* used, const char* fmt, ...)
 {
     va_list ap;
