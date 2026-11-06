@@ -319,3 +319,30 @@ Other operational variables for input replay, screenshots, logging, audio dumps,
 - .github/workflows/build-windows-compile-only.yml: includes this experimental branch in the Windows compile-only build and artifact workflow.
 
 **Validation:** Windows compile-only workflow run 42147206528 passed for code commit 90d1130dc7. The workflow verified recvx.exe, recvx-config.exe, SDL3.dll, and libusb-1.0.dll, then uploaded recvx-pc-windows-opengl-4.3-compile-only. Actual overlay appearance and live flag behavior still require an in-game test.
+
+
+## GameCube START mapping: verified two-part SELECT rule
+
+**Status:** Implemented in `pc/src/pc_system.c` and `pc/src/pc_platform.c`; Windows compile check pending.
+
+The contextual GameCube START rule is now exactly:
+
+- Map physical GameCube START to PS2 SELECT when the Options task (task index 16 / `0x10000`) is runnable: its bit is set in `tk_flg` and clear in `ts_flg`.
+- Also map it to PS2 SELECT when all four `sys->ply_stflg[0..3]` values are exactly `0x4`.
+- Otherwise keep it as PS2 START.
+
+Evidence for Options-task detection:
+- `main.c` task table index 16 is `bhSysCallOption`; the scheduler runs a task only when its `tk_flg` bit is set and corresponding `ts_flg` bit is clear.
+- `bhSysCallFirstmovie()` handles title return code 4 by setting `tk_flg = 0x310000`, which includes task 16; this is the title Options route.
+- `bhSysCallOption()` is the common Options task and distinguishes title vs in-game handling using the game-task bit `0x80`.
+
+Mode evidence:
+- `CheckButton()` in `adv.c` sets `gm_mode` to 0/1/2 for New Game choices and 3 for Battle/Extra Game. Load Game restores the saved `gm_mode` from `SAVEFILE`.
+- Therefore `gm_mode` is not used as a gate for GameCube START; Battle Mode is not excluded.
+
+About `ply_stflg`:
+- `bhFirstGameStart()` initializes all four slots to `0x40000000` on the fresh-start path when `ss_flg & 0x400200` is clear.
+- Other writes copy the live player's `plp->stflg` into the slot (`bup_00.c::TypewriterInit`, `room.c::bhPushGameData`, and the room/player-switch path in `system.c`); Load Game also restores the array as part of the `SAVEFILE` data copy.
+- The scanned game sources do not contain a direct literal assignment of `0x4` to `sys->ply_stflg[]`. The new condition uses the exact runtime value observed by the user, without assigning a speculative meaning to it.
+
+The debug overlay's page 0 now reports `option_task`, `all_ply_stflg_4`, and the resulting PS2 mapping separately. It continues to report the physical SDL START and actual PS2 START/SELECT report.
