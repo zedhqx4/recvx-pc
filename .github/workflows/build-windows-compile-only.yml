@@ -16,6 +16,7 @@ on:
       - 'build.bat'
       - 'pc/tools/**'
       - '.github/workflows/build-windows-compile-only.yml'
+      - 'DEVELOPMENT_LOG.md'
 
 permissions:
   contents: read
