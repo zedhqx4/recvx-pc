@@ -1829,16 +1829,17 @@ void pcPadUpdate(void)
     }
 
     {
-        int gamecube = (controller != NULL) &&
-                       (SDL_GetGamepadType(controller) == SDL_GAMEPAD_TYPE_GAMECUBE);
-        int gamecube_start = gamecube &&
-                             SDL_GetGamepadButton(controller, SDL_GAMEPAD_BUTTON_START);
-        int title_screen = 0;
+        /* Identify the active controller at input-poll time, not only when it was opened.
+         * This keeps the contextual mapping correct if the selected device/type changes. */
+        int gamecube_start = (controller != NULL) &&
+                             (SDL_GetGamepadButton(controller, SDL_GAMEPAD_BUTTON_START)) &&
+                             (SDL_GetGamepadType(controller) == SDL_GAMEPAD_TYPE_GAMECUBE);
+        int game_started = 0;
 
         if (gamecube_start)
         {
-            extern int pcGameInTitle(void);
-            title_screen = pcGameInTitle();
+            extern int pcGameHasStarted(void);
+            game_started = pcGameHasStarted();
         }
 
         for (i = 0; i < PC_BINDING_PS2_BUTTONS; i++)
@@ -1846,8 +1847,10 @@ void pcPadUpdate(void)
             const PadMap* m = &pad_map[i];
             int down = pad_down(m, keys);
 
-            /* Only a GameCube pad gets contextual START. Keep the keyboard binding
-             * and every non-GameCube controller's configured mapping unchanged. */
+            /* Before a game session starts (title, attract videos, mode selection),
+             * GameCube START remains START. Once the game task has been created,
+             * GameCube START becomes SELECT, including while gameplay menus suspend it.
+             * Keyboard and non-GameCube controller mappings remain unchanged. */
             if (gamecube_start && (i == PAD_START))
             {
                 int key_down = (m->key != SDL_SCANCODE_UNKNOWN) && keys[m->key];
@@ -1857,9 +1860,9 @@ void pcPadUpdate(void)
                     key_down = 0;
                 }
 
-                down = key_down || title_screen;
+                down = key_down || !game_started;
             }
-            else if (gamecube_start && (i == PAD_SELECT) && !title_screen)
+            else if (gamecube_start && (i == PAD_SELECT) && game_started)
             {
                 down = 1;
             }
