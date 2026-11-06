@@ -135,14 +135,16 @@ void pcGameStateLog(void)
           sys->st_flg, sys->stg_no, sys->rom_no, sys->gm_mode);
 }
 
-/* Nonzero after the game task has been created for a play session.
- * Test tk_flg without masking ts_flg: gameplay menus suspend the game task,
- * but they must not make GameCube START revert to START. */
+/* Nonzero during a normal play session.
+ * DEMO PLAY (gm_mode == 3) also creates the game task, but must retain
+ * the pre-game GameCube START mapping. Test tk_flg without masking ts_flg
+ * so gameplay menus do not make START revert to START. */
 int pcGameHasStarted(void)
 {
     extern SYS_WORK* sys;
 
-    return (sys->tk_flg & (1 << 7)) != 0;
+    return ((sys->tk_flg & (1 << 7)) != 0) &&
+           (sys->gm_mode != 3);
 }
 
 /* debug: nonzero while the title screen task is running */
