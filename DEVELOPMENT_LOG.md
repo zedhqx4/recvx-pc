@@ -299,3 +299,23 @@ Other operational variables for input replay, screenshots, logging, audio dumps,
 - This is an A/B experiment against the current broad predicate and larger offset. Confirm controller mapping logs and compare decal appearance in-game before treating the visual correction as validated.
 
 **Commits:** SDL3 mapping load ([`9fa3e0caab`](https://github.com/zedhqx4/recvx-pc/commit/9fa3e0caab)); exact decal signatures and reduced offset ([`fcca847426`](https://github.com/zedhqx4/recvx-pc/commit/fcca847426)).
+
+
+## Experimental GameCube START context: live SYS_WORK debug overlay
+
+**Status:** Implemented on experimental/gamecube-start-context; Windows compile-only build passed. In-game visual/input validation is still pending.
+
+- Added a toggleable on-screen diagnostic panel. Ctrl+F10 shows/hides it; Ctrl+PageUp / Ctrl+PageDown changes pages. Plain F10 remains reserved for the existing UI UV crop tuner.
+- The panel reads the live SYS_WORK structure. It covers all 19 scalar fields whose names contain flg, plus all 8 flag arrays: ev_flg[32], it_flg[16], ic_flg[16], ed_flg[32], ky_flg[16], mp_flg[8], en_flg[4], and ply_stflg[4]. Values are shown in hexadecimal and binary (MSB to LSB); the 16-bit mvi_flg and 8-bit ufo_flg use their actual widths.
+- Also shows runtime location/mode fields, selected PS2 pad bitfields, the extra brkfg / brkfg_tkb / brkfg_tsb registers, raw SDL gamepad buttons and axes, GameCube START state, and the resulting PS2 START/SELECT report.
+- Added a separate cached GDI bitmap path for the panel, refreshed at up to 10 Hz, then composited top-left after the game image in gsRendererPresent(). It does not replace the existing modal notice or title build-number overlays.
+- The panel is paged to keep the complete flag arrays visible without dumping the whole structure into a log.
+
+**Source map:**
+- pc/src/pc_overlay.c: pcOverlayDebugToggle(), pcOverlayDebugPageChange(), pcOverlayDebugSetText(), pcOverlayDebugImage(), render_debug().
+- pc/src/pc_platform.c: ui_uv_crop_handle_event() (hotkeys), pcVideoPresent() (live text update after pcPadUpdate()), pcPlatformDebugInputText() (physical SDL state and final PS2 report).
+- pc/src/pc_system.c: pcGameDebugText(), pcDebugFlagLine() (complete SYS_WORK flag pages).
+- pc/src/gs/gs_gl.c: gsRendererPresent() draws the panel over the game frame.
+- .github/workflows/build-windows-compile-only.yml: includes this experimental branch in the Windows compile-only build and artifact workflow.
+
+**Validation:** Windows compile-only workflow run 42147206528 passed for code commit 90d1130dc7. The workflow verified recvx.exe, recvx-config.exe, SDL3.dll, and libusb-1.0.dll, then uploaded recvx-pc-windows-opengl-4.3-compile-only. Actual overlay appearance and live flag behavior still require an in-game test.
