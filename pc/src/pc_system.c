@@ -162,3 +162,148 @@ int pcGameInStatusScreen(void)
 
     return ((sys->tk_flg & ~sys->ts_flg) & (1 << 9)) != 0;
 }
+
+
+/* Live state overlay. Values are read directly from the game's SYS_WORK structure. */
+#include <stdarg.h>
+#include <stdio.h>
+#include <string.h>
+
+static void pcDebugAppend(char* out, size_t cap, size_t* used, const char* fmt, ...)
+{
+    va_list ap;
+    int n;
+
+    if (*used >= cap)
+        return;
+
+    va_start(ap, fmt);
+    n = vsnprintf(out + *used, cap - *used, fmt, ap);
+    va_end(ap);
+
+    if (n > 0)
+    {
+        size_t left = cap - *used;
+        *used += ((size_t)n < left) ? (size_t)n : left - 1;
+    }
+}
+
+static void pcDebugFlagLine(char* out, size_t cap, size_t* used, const char* name,
+                            unsigned int value, int bit_count)
+{
+    char bits[33];
+    int i;
+
+    if (bit_count < 1) bit_count = 1;
+    if (bit_count > 32) bit_count = 32;
+
+    for (i = 0; i < bit_count; i++)
+    {
+        bits[i] = (value & (1u << (bit_count - i - 1))) ? '1' : '0';
+    }
+    bits[bit_count] = 0;
+
+    pcDebugAppend(out, cap, used, "%-12s 0x%08X  %s\n", name, value, bits);
+}
+
+#define PC_DEBUG_FLAG(field) pcDebugFlagLine(out, cap, &used, #field, sys->field, 32)
+#define PC_DEBUG_ARRAY(field, first, count) \
+    do { \
+        int pc_debug_i; \
+        for (pc_debug_i = (first); pc_debug_i < (first) + (count); pc_debug_i++) { \
+            char pc_debug_name[24]; \
+            snprintf(pc_debug_name, sizeof(pc_debug_name), #field "[%02d]", pc_debug_i); \
+            pcDebugFlagLine(out, cap, &used, pc_debug_name, sys->field[pc_debug_i], 32); \
+        } \
+    } while (0)
+
+/* page layout:
+ * 0 = runtime state + every scalar *_flg register
+ * 1-2 = ev_flg, 3 = it_flg, 4 = ic_flg, 5-6 = ed_flg, 7 = ky_flg,
+ * 8 = mp_flg + en_flg + ply_stflg
+ */
+void pcGameDebugText(int page, char* out, size_t cap)
+{
+    size_t used = 0;
+    char input[768];
+
+    if (out == NULL || cap == 0)
+        return;
+
+    out[0] = 0;
+
+    if (sys == NULL)
+    {
+        pcDebugAppend(out, cap, &used, "RECVX LIVE DEBUG\nSYS_WORK is not initialized yet.\n");
+        return;
+    }
+
+    if (page < 0 || page > 8)
+        page = 0;
+
+    pcDebugAppend(out, cap, &used,
+                  "RECVX LIVE DEBUG  |  Ctrl+F10 hide  |  Ctrl+PgUp/PgDn page\n"
+                  "PAGE %d/9  |  flags shown as HEX and binary (MSB -> LSB)\n",
+                  page + 1);
+
+    if (page == 0)
+    {
+        pcDebugAppend(out, cap, &used,
+                      "GAME gm_mode=%d  stg=%d rom=%d rcase=%d pos=%d cut=%d flr=%d ply=%d\n"
+                      "PAD pad_on=%08X pad_ps=%08X pad_rs=%08X pad_old=%08X\n",
+                      sys->gm_mode, (int)sys->stg_no, (int)sys->rom_no, (int)sys->rcase,
+                      (int)sys->pos_no, (int)sys->cut_no, (int)sys->flr_no, (int)sys->ply_id,
+                      sys->pad_on, sys->pad_ps, sys->pad_rs, sys->pad_old);
+
+        input[0] = 0;
+        {
+            extern void pcPlatformDebugInputText(char* text, size_t size);
+            pcPlatformDebugInputText(input, sizeof(input));
+        }
+        pcDebugAppend(out, cap, &used, "%s", input);
+
+        PC_DEBUG_FLAG(ssd_flg);
+        PC_DEBUG_FLAG(ss_flg);
+        PC_DEBUG_FLAG(typ_flg);
+        PC_DEBUG_FLAG(tk_flg);
+        PC_DEBUG_FLAG(ts_flg);
+        PC_DEBUG_FLAG(gm_flg);
+        PC_DEBUG_FLAG(st_flg);
+        PC_DEBUG_FLAG(cb_flg);
+        PC_DEBUG_FLAG(rm_flg);
+        PC_DEBUG_FLAG(pt_flg);
+        PC_DEBUG_FLAG(sp_flg);
+        PC_DEBUG_FLAG(ef_flg);
+        PC_DEBUG_FLAG(sdm_flg);
+        PC_DEBUG_FLAG(sco_flg);
+        PC_DEBUG_FLAG(com_flg);
+        PC_DEBUG_FLAG(opt_flg);
+        pcDebugFlagLine(out, cap, &used, "mvi_flg", sys->mvi_flg, 16);
+        pcDebugFlagLine(out, cap, &used, "ufo_flg", sys->ufo_flg, 8);
+        pcDebugFlagLine(out, cap, &used, "ply_stflg*", sys->ply_stflg[0], 32);
+        pcDebugFlagLine(out, cap, &used, "brkfg", sys->brkfg, 32);
+        pcDebugFlagLine(out, cap, &used, "brkfg_tkb", sys->brkfg_tkb, 32);
+        pcDebugFlagLine(out, cap, &used, "brkfg_tsb", sys->brkfg_tsb, 32);
+    }
+    else
+    {
+        switch (page)
+        {
+        case 1: PC_DEBUG_ARRAY(ev_flg, 0, 16); break;
+        case 2: PC_DEBUG_ARRAY(ev_flg, 16, 16); break;
+        case 3: PC_DEBUG_ARRAY(it_flg, 0, 16); break;
+        case 4: PC_DEBUG_ARRAY(ic_flg, 0, 16); break;
+        case 5: PC_DEBUG_ARRAY(ed_flg, 0, 16); break;
+        case 6: PC_DEBUG_ARRAY(ed_flg, 16, 16); break;
+        case 7: PC_DEBUG_ARRAY(ky_flg, 0, 16); break;
+        case 8:
+            PC_DEBUG_ARRAY(mp_flg, 0, 8);
+            PC_DEBUG_ARRAY(en_flg, 0, 4);
+            PC_DEBUG_ARRAY(ply_stflg, 0, 4);
+            break;
+        }
+    }
+
+    if (used == 0)
+        snprintf(out, cap, "RECVX LIVE DEBUG: no data");
+}
