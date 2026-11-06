@@ -3027,6 +3027,20 @@ void gsRendererPresent(unsigned int dispfb_fbp, unsigned int dispfb_fbw)
         }
     }
 
+    /* Live SYS_WORK/input debugger: opaque panel over the rendered game, top-left. */
+    {
+        extern const unsigned char* pcOverlayDebugImage(int line_h, int max_w, int max_h, int* w, int* h);
+        const unsigned char* img;
+        int ow, oh;
+
+        img = pcOverlayDebugImage(vh / 34, vw - 16, vh - 16, &ow, &oh);
+        if ((img != NULL) && (ow <= vw - 16) && (oh <= vh - 16))
+        {
+            pcGsDisable(GL_BLEND);
+            draw_overlay(img, ow, oh, 8, 8, vw, vh);
+        }
+    }
+
     (void)dispfb_fbw;
 }
 
