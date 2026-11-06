@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - experimental/opengl-4.3
+      - experimental/gamecube-start-context
     paths:
       - 'pc/src/**'
       - 'pc/include/**'
