@@ -276,6 +276,7 @@ void pcGameDebugText(int page, char* out, size_t cap)
         PC_DEBUG_FLAG(sp_flg);
         PC_DEBUG_FLAG(ef_flg);
         PC_DEBUG_FLAG(sdm_flg);
+        PC_DEBUG_FLAG(vsyc_flg);
         PC_DEBUG_FLAG(sco_flg);
         PC_DEBUG_FLAG(com_flg);
         PC_DEBUG_FLAG(opt_flg);
