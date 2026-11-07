@@ -69,3 +69,18 @@ Rama: `review/claude-opengl-4.3` (base `c46b743`). Alcance: creación de context
 - Hilo/contexto: los hilos PS2 son fibras (`pcOsFiberCreate`) del hilo principal; no hay otros hilos que usen GL.
 - Caché de estado: `gs_replace.c` usa `glBindTexture` sin caché, pero `pcGsInvalidateTextureBindings()` se llama antes de `gsReplaceLookup`; el cache de unidad activa no se ve afectado.
 - Orden de inicialización: la reserva del scratchpad ocurre antes del contexto, y `pcGsInit` después de él.
+
+---
+
+## Auditoría de texturas (fase 2)
+
+### CGL-009 — Medio — Confirmado (harness host) — Corregido, sin verificar en ejecución
+- **Archivo/función:** `pc/src/gs/gs_gl.c`, `get_texture()` / `gen_sum_rect()`.
+- **Problema:** la caché de texturas decide si los datos cambiaron hasheando las páginas de 8 KB `page_lo = tbp>>5` + `ceil(rows/ph)` bandas × `ceil(cols/pw)` columnas. Si `tbp & 31 != 0` la textura empieza dentro de una página y desborda a una fila/columna de páginas adicional que no se hasheaba.
+- **Evidencia:** harness (escribe cada píxel con `gsMemWrite` y compara páginas con `gsPageGen` modificado contra las hasheadas): 140 casos (CT32/CT16/T8/T4, 64–512 px, varios TBP); los 92 casos con `tbp&31 != 0` dejan ≥1 página tocada sin cubrir; con TBP alineado, 0 fallos.
+- **Consecuencia:** una subida parcial a esa página extra no invalida la caché → textura obsoleta. Con la carga TIM2 del juego (TBP 190*64, alineado) no se dispara; afecta a otras rutas con TBP no alineado.
+- **Solución:** +1 banda y +1 columna cuando `tbp & 31`, en ambos usos de `gen_sum_rect`. Revalidar con el harness tras el cambio queda pendiente.
+
+### Pendientes sin confirmar (hipótesis de la lectura de código)
+- **CGL-010** `texture_extent` con REGION_CLAMP/REGION_REPEAT puede devolver extensión menor a la muestreable (harness no ejecutado).
+- **CGL-011** Ruta HD (`uHD`): `texture()*255.0` deja alfa en 255 mientras el resto del pipeline usa 0x80 = 1.0 (no verificado).
