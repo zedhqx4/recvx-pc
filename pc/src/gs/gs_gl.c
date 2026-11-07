@@ -14,6 +14,7 @@
 
 #include "gs_internal.h"
 #include "gl_funcs.h"
+#include "../../include/pc_gs.h"
 #include "../../include/pc_platform.h"
 #include "../../include/pc_texture_cache.h"
 
@@ -389,6 +390,7 @@ static const char* fs_src =
     "uniform int uIndexed;\n"
     "uniform int uTme, uFst, uTfx, uTcc, uIip;\n"
     "uniform int uWireframe;\n"
+    "uniform int uGeometryDebugMode;\n"
     "uniform vec3 uTexa;\n"                    /* TA0, TA1, AEM */
     "uniform int uHD;\n"                      /* replaced (HD) texture: filtered, any size */
     "uniform int uTexRT;\n"                     /* 1: texture is a render target */
@@ -449,6 +451,8 @@ static const char* fs_src =
     "    return r;\n"
     "}\n"
     "void main() {\n"
+    "    if (uGeometryDebugMode == 1) { oColor = vec4(1.0); return; }\n"
+    "    if (uGeometryDebugMode == 2) { oColor = vec4(0.0, 1.0, 1.0, 1.0); return; }\n"
     "    if (uWireframe != 0) { oColor = vec4(0.0, 1.0, 1.0, 1.0); return; }\n"
     "    vec4 vc = (uIip != 0 ? vColor : vFlatColor) * 255.0;\n"
     "    vec3 rgb = vc.rgb; float a = vc.a;\n"
@@ -483,7 +487,7 @@ static GLuint vao, vbo;
 
 static struct {
     GLint target, tme, fst, tfx, tcc, iip, texrt, texsize, rtsize, wrap, region, linear;
-    GLint ate, atst, aref, atinv, fge, fogcol, tex, palette, indexed, texa, hd, wireframe;
+    GLint ate, atst, aref, atinv, fge, fogcol, tex, palette, indexed, texa, hd, wireframe, geometry_debug_mode;
 } U;
 
 static GLuint compile(GLenum type, const char* src)
@@ -577,6 +581,7 @@ static unsigned int frame_counter;
 static unsigned int decal_draw_order;
 static int dump_frame;
 static int ui_wireframe;
+static int geometry_debug_mode = PC_GS_GEOMETRY_NORMAL;
 
 int pcGsToggleUiWireframe(void)
 {
@@ -585,6 +590,14 @@ int pcGsToggleUiWireframe(void)
     return ui_wireframe;
 }
 
+int pcGsCycleGeometryDebugMode(void)
+{
+    static const char* const names[] = { "normal", "solid white (texture bypass)", "wireframe (texture bypass)" };
+
+    geometry_debug_mode = (geometry_debug_mode + 1) % 3;
+    pcLog("gs: geometry debug mode %s", names[geometry_debug_mode]);
+    return geometry_debug_mode;
+}
 
 /* per-interval statistics for the periodic log */
 static struct {
@@ -2099,7 +2112,7 @@ void gsRendererInit(void)
     UL(linear, "uLinear"); UL(ate, "uAte"); UL(atst, "uAtst"); UL(aref, "uAref"); UL(atinv, "uAtestInvert");
     UL(fge, "uFge"); UL(fogcol, "uFogCol"); UL(tex, "uTex"); UL(palette, "uPalette"); UL(indexed, "uIndexed");
     UL(texa, "uTexa"); UL(hd, "uHD");
-    UL(wireframe, "uWireframe");
+    UL(wireframe, "uWireframe"); UL(geometry_debug_mode, "uGeometryDebugMode");
 #undef UL
 
     glGenVertexArrays(1, &vao);
@@ -2403,13 +2416,14 @@ void gsRendererDraw(const GsDrawState* st, const GsVertex* v, int nverts)
     unsigned int fbmsk = GSF(st->frame, 32, 32);
     unsigned int fpsm = GSF(st->frame, 24, 6);
     RenderTarget* rt = get_rt(fbp, fbw);
+    int geometry_mode = geometry_debug_mode;
     int ztst = GSF(st->test, 17, 2);
     int zmsk = GSF(st->zbuf, 32, 1);
     int use_depth = (ztst != 1) || !zmsk;
-    int decal_depth_priority = use_depth && gs_decal_signature_match(st);
+    int decal_depth_priority = (geometry_mode == PC_GS_GEOMETRY_NORMAL) && use_depth && gs_decal_signature_match(st);
     float zs = z_scale(st->zbuf);
     int afail = GSF(st->test, 12, 2);
-    int ate = GSF(st->test, 0, 1);
+    int ate = (geometry_mode == PC_GS_GEOMETRY_NORMAL) ? GSF(st->test, 0, 1) : 0;
     int atst = GSF(st->test, 1, 3);
     GLenum mode;
     int n = 0, i;
@@ -2598,15 +2612,24 @@ void gsRendererDraw(const GsDrawState* st, const GsVertex* v, int nverts)
         pcGsScissor(sx0, sy0, sx1 - sx0, sy1 - sy0);
     }
 
-    pcGsColorMask((fbmsk & 0xFF) != 0xFF, (fbmsk & 0xFF00) != 0xFF00, (fbmsk & 0xFF0000) != 0xFF0000,
-                ((fbmsk & 0xFF000000) != 0xFF000000) && (fpsm != GS_PSMCT24));
-
-    setup_blend(st);
+    if (geometry_mode == PC_GS_GEOMETRY_NORMAL)
+    {
+        pcGsColorMask((fbmsk & 0xFF) != 0xFF, (fbmsk & 0xFF00) != 0xFF00, (fbmsk & 0xFF0000) != 0xFF0000,
+                    ((fbmsk & 0xFF000000) != 0xFF000000) && (fpsm != GS_PSMCT24));
+        setup_blend(st);
+    }
+    else
+    {
+        /* Debug views must be opaque and must not inherit GS channel masks or blending. */
+        pcGsColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+        pcGsDisable(GL_BLEND);
+    }
 
     pcGsUseProgram(prog);
     glUniform2f(U.target, (float)rt->w, (float)rt->h);
     glUniform1i(U.iip, (st->type == 6) ? 0 : st->iip);
-    glUniform1i(U.tme, st->tme);
+    glUniform1i(U.tme, (geometry_mode == PC_GS_GEOMETRY_NORMAL) ? st->tme : 0);
+    glUniform1i(U.geometry_debug_mode, geometry_mode);
     glUniform1i(U.fst, st->fst);
     glUniform1i(U.fge, st->fge);
     glUniform3f(U.fogcol, (float)GSF(st->fogcol, 0, 8), (float)GSF(st->fogcol, 8, 8), (float)GSF(st->fogcol, 16, 8));
@@ -2616,7 +2639,9 @@ void gsRendererDraw(const GsDrawState* st, const GsVertex* v, int nverts)
     glUniform1i(U.atinv, 0);
     glUniform1i(U.tex, 0);
 
-    if (st->tme)
+    /* WHITE and WIREFRAME bypass the complete texture path: no render-target/movie binding,
+     * VRAM decode, palette lookup, replacement lookup, or texture-cache work. */
+    if (st->tme && (geometry_mode == PC_GS_GEOMETRY_NORMAL))
     {
         int tw = 1 << GSF(st->tex0, 26, 4), th = 1 << GSF(st->tex0, 30, 4);
         unsigned int tbp = GSF(st->tex0, 0, 14);
@@ -2744,7 +2769,10 @@ void gsRendererDraw(const GsDrawState* st, const GsVertex* v, int nverts)
         pcGsEnable(GL_POLYGON_OFFSET_FILL);
     }
 
-    if (ate && (afail != 0) && (atst != 1))
+    if ((geometry_mode == PC_GS_GEOMETRY_WIREFRAME) && (mode == GL_TRIANGLES))
+        glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
+
+    if ((geometry_mode == PC_GS_GEOMETRY_NORMAL) && ate && (afail != 0) && (atst != 1))
     {
         /* alpha test with a fail action: pass 1 normal, pass 2 the failing pixels with the
          * buffers AFAIL still allows (FB_ONLY: color, ZB_ONLY: depth, RGB_ONLY: rgb) */
@@ -2773,12 +2801,15 @@ void gsRendererDraw(const GsDrawState* st, const GsVertex* v, int nverts)
         glDrawArrays(mode, 0, n);
     }
 
+    if ((geometry_mode == PC_GS_GEOMETRY_WIREFRAME) && (mode == GL_TRIANGLES))
+        glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+
     if (decal_depth_priority)
         pcGsDisable(GL_POLYGON_OFFSET_FILL);
 
     /* Diagnostic overlay only: fixed-UV textured primitives (the usual 2D UI/text path).
      * Force a solid color so transparency and the suspect UVs cannot hide the geometry. */
-    if (ui_wireframe && st->tme && st->fst && (mode == GL_TRIANGLES) && (n > 0))
+    if ((geometry_mode == PC_GS_GEOMETRY_NORMAL) && ui_wireframe && st->tme && st->fst && (mode == GL_TRIANGLES) && (n > 0))
     {
         pcGsColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
         pcGsDepthMask(GL_FALSE);
