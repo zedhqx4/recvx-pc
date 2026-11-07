@@ -76,11 +76,16 @@ void gsDmaChain(const void* tag);
 void gsTakeClutFrameStats(unsigned int* loads, unsigned int* flushes, unsigned int* vertices,
                          unsigned int* draw_calls, double* draw_seconds);
 
-/* gs_gl.c (renderer) */
+/* Legacy OpenGL backend; kept live for side-by-side comparison. */
 void gsRendererInit(void);
 void gsRendererDraw(const GsDrawState* st, const GsVertex* v, int nverts);   /* triangle list / line list / points */
 void gsRendererPresent(unsigned int dispfb_fbp, unsigned int dispfb_fbw);
 void gsRendererFlush(void);
+
+/* gs_native.c: independent CPU shadow renderer (parallel validation path). */
+void gsNativeInit(void);
+void gsNativeDraw(const GsDrawState* st, const GsVertex* v, int nverts);
+void gsNativePresent(unsigned int dispfb_fbp, unsigned int dispfb_fbw);
 
 /* VRAM <-> render target coherency */
 /* changed: the transfer altered GS memory (render targets that were drawn into are invalidated either way) */

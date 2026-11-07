@@ -296,3 +296,18 @@ Other operational variables for input replay, screenshots, logging, audio dumps,
 ---
 
 **Maintenance rule:** update this file when a change lands in `alpha`, and describe the behavior verified in the resulting tree. Mark experiments as experiments, and explicitly mark them reverted when that happens. Keep GPU texture-content caching, TIM2 image-upload avoidance, OpenGL state caching, GS VRAM transfer optimizations, CNK profiling and movie playback as separate topics unless the implementation actually couples them.
+
+
+## render-nativo: first parallel CPU renderer milestone
+
+**Status:** Experimental shadow path; not a replacement for the existing GS/OpenGL renderer.
+
+- New pc/src/gs/gs_native.c receives the same completed GsDrawState and GsVertex batches as the current OpenGL renderer.
+- The established gsRendererDraw() and gsRendererPresent() calls remain active. The native path runs alongside them and owns separate linear CPU framebuffers; it never writes to gsVram.
+- Initial supported subset: untextured, unblended, fog-free, antialiasing-free, alpha-test-free, depth-disabled PSMCT32/PSMCT24 points, lines, triangles and sprites; color masks and scissor are applied.
+- Unsupported state is skipped explicitly and counted by category. Texturing, blending, fog, alpha/destination-alpha tests, depth testing, other pixel formats, render-target feedback and GS VRAM coherency are not implemented in this milestone.
+- RECVX_NATIVE_DUMP=1 writes recvx-native-reference.ppm and a same-present GL reference recvx-gs-reference.png for visual inspection. The CPU image contains only the subset implemented so far; it is not expected to match a complete game frame.
+- Added standalone deterministic tests for sprite coverage/scissor, Gouraud triangle interpolation, point/line rasterization, unsupported-state isolation and independent framebuffer allocation. Added a GitHub Actions test workflow and included this branch in the Windows compile-only workflow.
+
+**Validation boundary:** standalone CPU tests and Windows compilation are separate from runtime equivalence. The initial CPU image is a partial reference, not proof of GS equivalence. Keep this branch isolated; do not merge into OpenGl-3.3 or alpha before broader comparison.
+

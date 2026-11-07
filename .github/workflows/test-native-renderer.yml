@@ -1,0 +1,28 @@
+name: Native CPU renderer reference tests
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - render-nativo
+    paths:
+      - 'pc/src/gs/gs_native.c'
+      - 'pc/src/gs/gs_internal.h'
+      - 'pc/tests/gs_native_rasterizer_test.c'
+      - '.github/workflows/test-native-renderer.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  native-rasterizer:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+      - name: Build native renderer tests
+        working-directory: pc/tests
+        run: cc -std=c99 -O2 -Wall -Wextra gs_native_rasterizer_test.c -lm -o gs-native-test
+      - name: Run native renderer tests
+        working-directory: pc/tests
+        run: ./gs-native-test

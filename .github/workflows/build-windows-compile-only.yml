@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - OpenGl-3.3
+      - render-nativo
     paths:
       - 'pc/src/**'
       - 'pc/include/**'
@@ -64,7 +65,7 @@ jobs:
       - name: Upload Windows build
         uses: actions/upload-artifact@v4
         with:
-          name: recvx-pc-windows-opengl-3.3-compile-only
+          name: recvx-pc-windows-native-renderer-compile-only
           path: |
             build_pc/recvx.exe
             build_pc/recvx-config.exe

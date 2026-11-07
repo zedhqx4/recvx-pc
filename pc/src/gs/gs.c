@@ -2,7 +2,7 @@
  *
  * The PS2 code builds GIF packets (DMA'd on PATH3) exactly as for the real GS; this file
  * interprets them: register writes update GsRegs, vertex kicks assemble primitives which are
- * handed to the OpenGL renderer (gs_gl.c), IMAGE data goes to local memory (gs_mem.c).
+ * handed to the rendering backends (OpenGL gs_gl.c and CPU shadow gs_native.c), IMAGE data goes to local memory (gs_mem.c).
  */
 #include <stdlib.h>
 #include <string.h>
@@ -122,7 +122,9 @@ void gsFlushPrims(void)
 {
     if (out_valid && (out_count > 0))
     {
+        /* Keep the established GL path live while the native CPU renderer observes the same batch. */
         gsRendererDraw(&out_state, out_verts, out_count);
+        gsNativeDraw(&out_state, out_verts, out_count);
     }
 
     out_count = 0;
@@ -929,6 +931,7 @@ void pcGsInit(unsigned char* scratchpad)
 {
     pcScratchpad = scratchpad;
     gsMemInit();
+    gsNativeInit();
     gsRendererInit();
 }
 
@@ -942,6 +945,7 @@ void pcGsPresent(void)
 {
     gsFlushPrims();
     gsRendererPresent(disp_fbp, disp_fbw);
+    gsNativePresent(disp_fbp, disp_fbw);
 }
 
 void gsMemReadImageRegs(uint64_t bitbltbuf, uint64_t trxpos, uint64_t trxreg, void* out)
