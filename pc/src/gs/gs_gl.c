@@ -2329,6 +2329,73 @@ static int texture_extent(const GsDrawState* st, const GsVertex* v, int nverts, 
     return (int)hi + 2;
 }
 
+/* Exact GS material signatures for the known coplanar decals.
+ * The historical captures did not record AA1, so matching uses the complete
+ * set of common identity fields available in those captures, plus TEX0/ALPHA.
+ * Arms and shirt negative-control signatures are intentionally not included.
+ */
+typedef struct {
+    u64 tex0;
+    u64 alpha;
+} GsDecalSignature;
+
+static const GsDecalSignature gs_decal_signatures[] = {
+    /* recvx.zip */
+    { 0x4005c885dd30af80ULL, 0x0000000000000044ULL },
+    { 0x0e07fe05dd40af80ULL, 0x0000000000000044ULL },
+    { 0x4005c98621312fa0ULL, 0x0000000000000044ULL },
+    { 0x0e07fe05dd40b328ULL, 0x0000000000000044ULL },
+
+    /* recvx(8).log */
+    { 0x4005c9859930af90ULL, 0x0000000000000044ULL },
+    { 0x4005c8859930af80ULL, 0x0000000000000044ULL },
+    { 0x0007ff0621413140ULL, 0x0000000000000048ULL },
+    { 0x4005ce859930b140ULL, 0x0000000000000044ULL },
+    { 0x4005ca855530b084ULL, 0x0000000000000044ULL },
+    { 0x4005c9855530b080ULL, 0x0000000000000044ULL },
+    { 0x4005cb855530b088ULL, 0x0000000000000044ULL },
+    { 0x4005cd859930b124ULL, 0x0000000000000044ULL },
+    { 0x4005cc855530b120ULL, 0x0000000000000044ULL },
+    { 0x4005ce86213131c4ULL, 0x0000000000000044ULL },
+    { 0x4005cf85dd30b2c4ULL, 0x0000000000000044ULL },
+    { 0x4005cd86213130c4ULL, 0x0000000000000044ULL },
+    { 0x4005d085dd30b304ULL, 0x0000000000000044ULL },
+    { 0x4005c985dd30afc0ULL, 0x0000000000000044ULL },
+    { 0x4005cd85dd30b0c4ULL, 0x0000000000000044ULL },
+    { 0x4005d28621313504ULL, 0x0000000000000044ULL },
+    { 0x4005cf85dd30b3c0ULL, 0x0000000000000044ULL },
+    { 0x4005cc85dd30b2c0ULL, 0x0000000000000044ULL },
+    { 0x4005d38621313544ULL, 0x0000000000000044ULL },
+    { 0x4005ce859930ba00ULL, 0x0000000000000048ULL },
+    { 0x4005cf859930ba80ULL, 0x0000000000000048ULL }
+};
+
+#define GS_DECAL_SIGNATURE_COUNT ((int)(sizeof(gs_decal_signatures) / sizeof(gs_decal_signatures[0])))
+
+static int gs_decal_signature_match(const GsDrawState* st)
+{
+    int i;
+
+    if ((st->type != 4) || !st->iip || !st->tme || !st->fge || !st->abe ||
+        st->fst || st->ctxt || st->fix ||
+        (st->tex1 != 0x0000000000000060ULL) ||
+        (st->clamp != 0x00000000ff000ff5ULL) ||
+        (st->test != 0x000000000005180bULL) ||
+        (st->zbuf != 0x000000000a00012cULL) ||
+        (st->texa != 0x0000008000008000ULL) ||
+        (st->texclut != 0) || (st->pabe != 0))
+        return 0;
+
+    for (i = 0; i < GS_DECAL_SIGNATURE_COUNT; i++)
+    {
+        if ((st->tex0 == gs_decal_signatures[i].tex0) &&
+            (st->alpha == gs_decal_signatures[i].alpha))
+            return 1;
+    }
+
+    return 0;
+}
+
 void gsRendererDraw(const GsDrawState* st, const GsVertex* v, int nverts)
 {
     unsigned int fbp = GSF(st->frame, 0, 9);
@@ -2339,12 +2406,7 @@ void gsRendererDraw(const GsDrawState* st, const GsVertex* v, int nverts)
     int ztst = GSF(st->test, 17, 2);
     int zmsk = GSF(st->zbuf, 32, 1);
     int use_depth = (ztst != 1) || !zmsk;
-    /* Fixed renderer behavior: give blended textured 3D decals a bounded,
-     * draw-order depth priority without exposing a runtime toggle. */
-    int decal_depth_priority = use_depth && (ztst == 2) &&
-                               (GSF(st->zbuf, 24, 4) == 10) &&
-                               st->tme && !st->fst && st->abe &&
-                               (st->type >= 3) && (st->type <= 5);
+    int decal_depth_priority = use_depth && gs_decal_signature_match(st);
     float zs = z_scale(st->zbuf);
     int afail = GSF(st->test, 12, 2);
     int ate = GSF(st->test, 0, 1);
@@ -2667,7 +2729,7 @@ void gsRendererDraw(const GsDrawState* st, const GsVertex* v, int nverts)
         static int logged = 0;
         if (!logged)
         {
-            pcLog("gs: coplanar decal priority active (Z16S, GEQUAL, blended textured 3D): polygon offset +1..+4 depth units by draw order");
+            pcLog("gs: coplanar decal priority active (Z16S, GEQUAL, blended textured 3D): polygon offset +0.5..+2 depth units by draw order");
             logged = 1;
         }
 
@@ -2677,7 +2739,7 @@ void gsRendererDraw(const GsDrawState* st, const GsVertex* v, int nverts)
             unsigned int priority = ++decal_draw_order;
             if (priority > 4)
                 priority = 4;
-            glPolygonOffset(0.0f, (GLfloat)priority);
+            glPolygonOffset(0.0f, (GLfloat)priority * 0.50f);
         }
         pcGsEnable(GL_POLYGON_OFFSET_FILL);
     }
