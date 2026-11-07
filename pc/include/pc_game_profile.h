@@ -23,5 +23,7 @@ void pcGameProfileSetTextureUploadScope(int active);
 int pcGameProfileTextureUploadActive(void);
 void pcGameProfileRecordTextureLoad(double total_ms, double send_ms, unsigned int send_calls);
 void pcGameProfileRecordTextureCache(int source_hit, int image_skipped, double clut_only_ms);
+void pcPs2TexLoadStatsTake(unsigned int* lookups, unsigned int* rehashes, double* rehash_bytes,
+                           double* rehash_ms, unsigned int* guard_fired);
 void pcGameProfileRecordTextureTransfer(double ms, unsigned int qwc);
 #endif

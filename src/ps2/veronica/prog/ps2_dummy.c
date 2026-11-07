@@ -17,7 +17,7 @@ extern int Send_Tim2_dataExClutOnly(void* tim2_top_adr, unsigned long send_image
 #include "../../../ps2/veronica/prog/main.h"
 
 #ifdef TARGET_PC
-#define PC_TIM2_FINGERPRINT_SLOTS 1024
+#define PC_TIM2_FINGERPRINT_SLOTS 4096   /* was 1024: ~390 live textures collided and re-hashed whole images */
 typedef struct {
     int valid;
     const void* surface;
@@ -36,6 +36,23 @@ typedef struct {
     unsigned int image_width, image_height, pict_format, image_type, clut_type, clamp_flag, bank, render_sub_flag;
 } PcPs2TextureBindCache;
 static PcPs2TextureBindCache pc_ps2_texture_bind_cache;
+
+/* Cumulative counters read (as deltas) by the PROFILE TEX log in game.c. */
+static unsigned int pc_texstat_lookups;
+static unsigned int pc_texstat_rehashes;
+static double pc_texstat_rehash_bytes;
+static double pc_texstat_rehash_ms;
+static unsigned int pc_texstat_guard_fired;   /* stale-VRAM guard (CGL-012) forced an upload */
+
+void pcPs2TexLoadStatsTake(unsigned int* lookups, unsigned int* rehashes, double* rehash_bytes,
+                           double* rehash_ms, unsigned int* guard_fired)
+{
+    *lookups = pc_texstat_lookups;        pc_texstat_lookups = 0;
+    *rehashes = pc_texstat_rehashes;      pc_texstat_rehashes = 0;
+    *rehash_bytes = pc_texstat_rehash_bytes; pc_texstat_rehash_bytes = 0.0;
+    *rehash_ms = pc_texstat_rehash_ms;    pc_texstat_rehash_ms = 0.0;
+    *guard_fired = pc_texstat_guard_fired; pc_texstat_guard_fired = 0;
+}
 
 static uint64_t pc_tim2_hash_bytes(const unsigned char* data, unsigned int size)
 {
@@ -66,6 +83,7 @@ static int pc_tim2_source_hashes(TIM2_PICTUREHEADER_EX* tim, uint64_t* image_has
         (picture->ClutSize > picture->TotalSize - picture->HeaderSize - picture->ImageSize))
         return 0;
 
+    pc_texstat_lookups++;
     surface_key = (uintptr_t)tim;
     slot = (unsigned int)(((surface_key >> 4) ^ (surface_key >> 13) ^ tim->Gindex) &
                           (PC_TIM2_FINGERPRINT_SLOTS - 1));
@@ -85,8 +103,14 @@ static int pc_tim2_source_hashes(TIM2_PICTUREHEADER_EX* tim, uint64_t* image_has
 
     image = (const unsigned char*)picture + picture->HeaderSize;
     clut = image + picture->ImageSize;
-    *image_hash = pc_tim2_hash_bytes(image, picture->ImageSize);
-    *clut_hash = pc_tim2_hash_bytes(clut, picture->ClutSize);
+    {
+        double rehash_t0 = pcGameProfileNowMs();
+        *image_hash = pc_tim2_hash_bytes(image, picture->ImageSize);
+        *clut_hash = pc_tim2_hash_bytes(clut, picture->ClutSize);
+        pc_texstat_rehashes++;
+        pc_texstat_rehash_bytes += (double)picture->ImageSize + (double)picture->ClutSize;
+        pc_texstat_rehash_ms += pcGameProfileNowMs() - rehash_t0;
+    }
     cached->valid = 1;
     cached->surface = tim;
     cached->gindex = tim->Gindex;
@@ -2641,7 +2665,10 @@ static int Ps2EnsureTextureImage(NJS_TEXMEMLIST* addr, TIM2_PICTUREHEADER_EX* ti
          * Ps2_tex_cache_buff[0]. If the renderer alias has since been evicted, the image is
          * not in VRAM and the draw would decode whatever texture was uploaded last. */
         if (asset_cache_eligible && (timp != pc_vram_image_resident))
+        {
+            pc_texstat_guard_fired++;
             goto label;
+        }
 #endif
     } 
     else if ((Ps2_tex_load_tp_cancel == 0) && (timp->TpFlag != 0)) 

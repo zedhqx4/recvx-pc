@@ -281,3 +281,11 @@ Other operational variables for input replay, screenshots, logging, audio dumps,
 - Verified (host): `pc/tests/gs_direct_ad_test.c`, 108 configurations of the four bind variants; GS registers, CLUT view, binding generation and asset hint identical to the packet path. Not verified: full game build, runtime, framerate effect.
 - `Ps2EnsureTextureImage` (PC): an asset-cache hit skips the image upload but left `Ps2_tex_cache_buff[0]` set, so a later same-texture load with an evicted alias uploaded nothing and drew another texture's pixels. `pc_vram_image_resident` records what was really uploaded; eligible textures not resident are uploaded. Found by code reading; not reproduced at runtime.
 - Not done yet: per-texture native binding object and `GsDrawState` handle (skipping the per-call hash/compare steps and `get_texture`). Needs profile data from `PROFILE TEX Ps2TexLoad` to pick the next cut.
+
+### Claude-alpha: log analysis and instrumentation (2026-11-07)
+
+From a user run (`recvx.log`, 161 profile windows, game at ~33 ms/frame): `Ps2TexLoad` averages 3.0 ms/frame (p95 7.0 ms), 160 calls/frame on average, up to 563; `Send_Tim2_dataEx` is only 13% of it. Heavy windows spend ~5.4 ms in ~390 calls that neither upload nor do CLUT-only work, ~14 us per call.
+
+Host benchmark of the GS side of one bind (`gs.c` + `gs_mem.c`): ~1.9 us (T8 CLUT load), packet path and direct A+D path identical. So the direct-apply change above is neutral for speed; the cost is elsewhere in `Ps2TexLoad`.
+
+Hypothesis (not yet measured): the TIM2 fingerprint table had 1024 direct-mapped slots for ~390 live textures; colliding textures evict each other and the whole image is re-hashed with byte-wise FNV on every miss. Changes: table raised to 4096, and `PROFILE TEX fingerprint per frame` logs lookups, re-hashes, KB hashed, ms spent and how often the CGL-012 stale-VRAM guard fired. A single run with `PROFILE` enabled confirms or rules out the hypothesis.
