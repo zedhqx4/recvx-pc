@@ -893,7 +893,6 @@ static int pc_debug_mode_enabled(void)
 }
 
 static int ui_uv_tuning;
-static int geometry_debug_key_down;
 static int ui_uv_crop_selected_edge;
 static int ui_uv_crop_rot90_cw;
 static int ui_uv_consume_escape_up;
@@ -935,28 +934,6 @@ static int ui_uv_crop_handle_event(const SDL_Event* ev)
     {
         /* Reserve diagnostic hotkeys without invoking tools or leaking them into game input. */
         return (key == SDL_SCANCODE_F10 || key == SDL_SCANCODE_F12);
-    }
-
-    if (key == SDL_SCANCODE_F12 && ((ev->key.mod & SDL_KMOD_CTRL) || geometry_debug_key_down))
-    {
-        if (down)
-        {
-            if (!ev->key.repeat && !geometry_debug_key_down)
-            {
-                int mode = pcGsCycleGeometryDebugMode();
-                const char* label = (mode == PC_GS_GEOMETRY_WHITE) ? "WHITE / NO TEXTURES" :
-                                    (mode == PC_GS_GEOMETRY_WIREFRAME) ? "WIREFRAME / NO TEXTURES" : "NORMAL";
-                char notice[96];
-                snprintf(notice, sizeof(notice), "GS GEOMETRY: %s", label);
-                title_notice_show(notice);
-            }
-            geometry_debug_key_down = 1;
-        }
-        else
-        {
-            geometry_debug_key_down = 0;
-        }
-        return 1;
     }
 
     if (key == SDL_SCANCODE_F10)
@@ -1084,8 +1061,8 @@ int pcVideoPumpEvents(void)
             continue;
         }
 
-        /* F12 keeps the existing textured-2D UI wireframe overlay; Ctrl+F12 cycles the
-         * global GS geometry diagnostic (normal, solid white, wireframe). */
+        /* F12: toggle a wireframe overlay on textured 2D primitives for graphics diagnosis.
+         * F12 is not one of the default game bindings (F11 fullscreen, F9 title, F5 save). */
         if ((ev.type == SDL_EVENT_KEY_DOWN) && !ev.key.repeat && (ev.key.scancode == SDL_SCANCODE_F12))
         {
             int enabled = pcGsToggleUiWireframe();

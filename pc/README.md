@@ -77,8 +77,7 @@ Internal render-resolution test (in `recvx.ini`, next to `recvx.exe`; restart th
 
 Debug mode (in `recvx.ini`, next to `recvx.exe`):
 - `debug=0` is the normal/release default. Diagnostic hotkeys are inert and cannot toggle overlays or edit UV crop values.
-- Set `debug=1` to enable developer diagnostics: F10 enters/leaves live UV crop tuning; F12 toggles the existing cyan wireframe overlay for textured 2D UI primitives; Ctrl+F12 cycles the full GS geometry view through NORMAL, WHITE and WIREFRAME. These keys remain reserved while debug mode is on.
-- `WHITE` draws solid white geometry and bypasses texture lookup/decoding; `WIREFRAME` draws triangle edges and also bypasses textures. Both are runtime-only debug views: Ctrl+F12 returns to NORMAL, and every new run starts in NORMAL. Depth testing and scissor clipping remain active; GS blending, alpha testing and color masks are bypassed for these views.
+- Set `debug=1` to enable developer diagnostics: F10 enters/leaves live UV crop tuning; F12 toggles the cyan wireframe. These keys remain reserved while debug mode is on.
 - Default game controls remain F11 fullscreen, F9 return to title and F5 save anywhere.
 
 Automatic UI atlas-edge correction:
