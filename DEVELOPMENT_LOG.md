@@ -297,3 +297,13 @@ Hypothesis (not yet measured): the TIM2 fingerprint table had 1024 direct-mapped
 Remaining candidate, from code reading: `pc_tim2_source_hashes` trusts a cached fingerprint when pointer, Gindex, sizes and formats match, without looking at the bytes. A room load that reuses a source address with a same-size image and the same Gindex keeps the old hash, and the renderer asset alias then returns the previous texture's index plane. The 4096-slot table (previous commit) can keep such stale entries longer than the old 1024-slot one.
 
 Change: each cached fingerprint is re-verified against the real bytes every 2 s (`RECVX_TEX_VERIFY=0` disables). A mismatch logs `texture: STALE TIM2 fingerprint ...` (first 100) and corrects the hash; the `PROFILE TEX fingerprint` line reports re-checks and the cumulative stale count. Not compiled or run here (game build needs the MSVC/Katana toolchain). It bounds a stale texture to about 2 s; it does not prove this is the cause: the next wrong-texture run should show a STALE line if it is.
+
+### Claude-alpha: third log, wrong texture at one camera angle, room RM_0030 (2026-11-07)
+
+User report: wrong texture at one camera angle, correct on the next camera. The run showed 0 stale fingerprints and 0 stale-VRAM guard hits, so neither earlier mechanism applies, and a transient, view-dependent error does not fit a persistent stale hash.
+
+Mechanism found by code reading + host test: depth-sorted draws go through `Ps2DrawOTagSub`, which uploads the visible textures to a VRAM pool (`tex_addr` starts at 0x2F80 and advances by `ImageSize >> 8` blocks per texture) and draws them with a per-entry TEX0. This path does not use the asset cache; the renderer identifies the texture by the generation hash of the VRAM pages it covers (`gen_sum_rect`). A texture whose TBP is not page aligned (`tbp & 31`, which happens as soon as a small texture sits before it in the pool) spills into one more page row/column than `ceil(rows/ph) x ceil(cols/pw)`. Pool contents depend on which textures are in view, so on the next camera that uncovered page holds different texels while the hash does not change, and the cached (older) texture is served.
+
+Host test (`gs_mem.c` writes each pixel, compares pages touched vs pages hashed): 140 cases, 92 left pages uncovered before the fix, 0 after. The fix (+1 page row/column when `tbp & 31`) was already on `review/claude-opengl-4.3` as CGL-009 and is now ported here.
+
+Not verified: that this is what the user saw. The game build is not compiled here; only `gs_gl.c` was syntax-checked.

@@ -1479,7 +1479,11 @@ static GLuint get_texture(unsigned int asset_id, int asset_id_valid, uint64_t co
         return t->tex;
     }
 
-    gen = gen_sum_rect(page_lo, stride, (rows + ph - 1) / ph, (cols + pw - 1) / pw);
+    /* A TBP that is not page aligned (tbp & 31) shifts the texture inside its first page, so it
+     * spills into one extra page row and column that the plain ceil() misses. The OT texture pool
+     * advances by ImageSize >> 8 blocks per texture, so small textures leave the next one unaligned. */
+    gen = gen_sum_rect(page_lo, stride, (rows + ph - 1) / ph + ((tbp & 31) ? 1 : 0),
+                       (cols + pw - 1) / pw + ((tbp & 31) ? 1 : 0));
     cached_slot = texture_cache_find(gen, key0, key1, key2, w, h, rows, cols);
     if (cached_slot >= 0)
     {
@@ -1527,7 +1531,8 @@ static GLuint get_texture(unsigned int asset_id, int asset_id_valid, uint64_t co
             (t->rows >= rows) && (t->cols >= cols))
         {
             unsigned long long cached_gen =
-                gen_sum_rect(page_lo, stride, (t->rows + ph - 1) / ph, (t->cols + pw - 1) / pw);
+                gen_sum_rect(page_lo, stride, (t->rows + ph - 1) / ph + ((tbp & 31) ? 1 : 0),
+                             (t->cols + pw - 1) / pw + ((tbp & 31) ? 1 : 0));
 
             if (cached_gen == t->gen)
             {
