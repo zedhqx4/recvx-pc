@@ -324,3 +324,13 @@ Other operational variables for input replay, screenshots, logging, audio dumps,
 - The previous CPU rasterizer remains only for its standalone unit tests. It has been disconnected from `gsFlushPrims()`, `pcGsInit()`, and `pcGsPresent()`.
 
 **Validation boundary:** source-level implementation only until the Windows compile workflow and an in-game run complete. Successful compilation will not establish geometry coverage, correct screen coordinates, or visual parity. The first runtime log and both PNGs are required to verify those.
+
+
+## render-nativo: fixed-address scratchpad startup collision
+
+**Status:** Corrective startup-order change, triggered by runtime testing of the GPU geometry probe build.
+
+- The game still uses literal PS2 scratchpad addresses at `0x70000000`; relocating the scratchpad is not part of this change.
+- A Windows runtime log showed `inputhost.dll` already owned that range when `pcOsAllocScratchpad()` called `VirtualAlloc()`.
+- `pcVideoInit()` previously called `SDL_Init()` first, then attempted to reserve the fixed address. The reservation now occurs after diagnostics and SDL hints are configured, but **before `SDL_Init()`** so SDL's Windows backends cannot claim the required range first.
+- Validation still requires a Windows runtime start. A successful compile alone cannot verify that Windows relocates any conflicting module and that SDL starts correctly with the reserved range.

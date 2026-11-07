@@ -705,6 +705,18 @@ void pcVideoInit(void)
     SDL_SetHint(SDL_HINT_HIDAPI_LIBUSB, "1");
     SDL_SetHint(SDL_HINT_HIDAPI_LIBUSB_GAMECUBE, "1");
 
+    /* The game uses literal pointers in the PS2 scratchpad range. Reserve it before SDL_Init:
+     * SDL's Windows backends can load inputhost.dll (or other modules) at 0x70000000. */
+    pcOsStartupLog("pcVideoInit: reserving PS2 scratchpad before SDL_Init");
+    spr = pcOsAllocScratchpad();
+
+    if (spr == NULL)
+    {
+        pcOsStartupLog("pcVideoInit: scratchpad reservation failed before SDL_Init");
+        pcPlatformFatal("Could not reserve the PS2 scratchpad address range (0x70000000). See recvx.log for the address-space diagnostic.");
+    }
+    pcOsStartupLog("pcVideoInit: scratchpad reservation succeeded");
+
     pcOsStartupLog("pcVideoInit: calling SDL_Init");
     if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD | SDL_INIT_AUDIO))
     {
@@ -712,18 +724,6 @@ void pcVideoInit(void)
         pcPlatformFatal("SDL_Init failed: %s", SDL_GetError());
     }
     pcOsStartupLog("pcVideoInit: SDL_Init succeeded");
-
-    /* Reserve the PS2's fixed-address scratchpad before creating an OpenGL window/context.
-     * Loading the graphics driver can occupy 0x70000000, which the PS2 code requires. */
-    pcOsStartupLog("pcVideoInit: reserving PS2 scratchpad");
-    spr = pcOsAllocScratchpad();
-
-    if (spr == NULL)
-    {
-        pcOsStartupLog("pcVideoInit: scratchpad reservation failed");
-        pcPlatformFatal("Could not reserve the PS2 scratchpad address range (0x70000000). See recvx.log for the address-space diagnostic.");
-    }
-    pcOsStartupLog("pcVideoInit: scratchpad reservation succeeded");
 
     pcOsStartupLog("pcVideoInit: setting OpenGL attributes");
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
