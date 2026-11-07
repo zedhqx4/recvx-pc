@@ -2001,6 +2001,10 @@ void Ps2AddPrim3DEx1P(unsigned long prim, void* dp, unsigned int num)
 
     if ((Ps2_albinoid_flag == 0) && ((prim & 0x20000000000000))) 
     {
+        /* Same post-VU1 capture for the 1P route; keep the original OT priority/order. */
+#ifdef TARGET_PC
+        pcNativeRendererCapture(Ps2_ot_list_no, dp, num, (unsigned int)((prim >> 47) & 7));
+#endif
         Ps2AddOT((void*)0x70000000, num, Ps2AddPrimPrio, prim);
     }
     else 

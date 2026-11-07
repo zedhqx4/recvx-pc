@@ -318,8 +318,8 @@ Other operational variables for input replay, screenshots, logging, audio dumps,
 **Status:** Experimental diagnostic path, separate from the live GS/OpenGL output. This is not yet a parity renderer.
 
 - Added `pc/src/pc_native_renderer.c`, an OpenGL 3.3 VAO/VBO + framebuffer path. Triangle rasterization is performed by the GPU; the old CPU rasterizer is no longer called by the game.
-- Captures the post-VU1 `VU1_PRIM_BUF` data passed to `Ps2AddPrim3DEx()`, associates it with its `PS2_OT` entry, and consumes it from `Ps2DrawOTagSub()` in the same ordering-table traversal as the GS path.
-- First supported diagnostic output is cyan wireframe for CNK triangle-list/strip/fan geometry. It deliberately ignores textures, materials, fog, blending, and depth; it is a geometry-coverage probe, not expected to resemble the finished frame.
+- Captures the post-VU1 `VU1_PRIM_BUF` data passed to `Ps2AddPrim3DEx()` and `Ps2AddPrim3DEx1P()`, associates each draw with its `PS2_OT` entry, and consumes it from `Ps2DrawOTagSub()` in the same ordering-table traversal as the GS path. The special per-triangle `Ps2AddPrim3DExI()` route and `Ps2AddPrim3DMod()` are not included yet.
+- First supported diagnostic output is cyan wireframe for triangle, triangle-strip and triangle-fan draws routed through `Ex`/`Ex1P`. Special `ExI` per-triangle depth sorting and `3DMod` draws are not captured yet. It deliberately ignores textures, materials, fog, blending, and depth; it is a geometry-coverage probe, not expected to resemble the finished frame.
 - `RECVX_NATIVE_GEOMETRY_DUMP=1` enables the probe and writes `recvx-native-geometry.png` plus the paired `recvx-gs-reference.png` every 60 frames next to the executable.
 - The previous CPU rasterizer remains only for its standalone unit tests. It has been disconnected from `gsFlushPrims()`, `pcGsInit()`, and `pcGsPresent()`.
 

@@ -17,6 +17,7 @@
 
 #define PC_NATIVE_OT_CAPACITY 8192u
 #define PC_NATIVE_MAX_FRAME_VERTICES 3000000u
+#define PC_NATIVE_MAX_CAPTURE_BYTES (64u * 1024u * 1024u)
 #define PC_NATIVE_WIDTH 640
 #define PC_NATIVE_HEIGHT 480
 #define PC_NATIVE_VERTEX_STRIDE 48u
@@ -29,6 +30,7 @@ static PcNativeCommand commands[PC_NATIVE_OT_CAPACITY];
 static unsigned int active_indices[PC_NATIVE_OT_CAPACITY], active_count;
 static PcNativeGpuVertex* frame_vertices;
 static unsigned int frame_vertex_count, frame_vertex_capacity, frame_number;
+static size_t frame_capture_bytes;
 static unsigned int frame_captured_draws, frame_consumed_draws, frame_triangles, frame_dropped_triangles;
 static GLuint native_fbo, native_color, native_vao, native_vbo, native_program;
 static int native_enabled, native_initialized, native_failed;
@@ -145,6 +147,7 @@ void pcNativeRendererBeginFrame(void)
     }
     active_count = 0;
     frame_vertex_count = 0;
+    frame_capture_bytes = 0;
     frame_number++;
     frame_captured_draws = frame_consumed_draws = frame_triangles = frame_dropped_triangles = 0;
 }
@@ -168,12 +171,17 @@ void pcNativeRendererCapture(unsigned int ot_index, const void* vertices,
         command->used = 0;
     }
     bytes = (size_t)count * PC_NATIVE_VERTEX_STRIDE;
+    if (bytes > PC_NATIVE_MAX_CAPTURE_BYTES - frame_capture_bytes) {
+        frame_dropped_triangles++;
+        return;
+    }
     command->source = (unsigned char*)malloc(bytes);
     if (!command->source) { frame_dropped_triangles++; return; }
     memcpy(command->source, vertices, bytes);
     command->count = count;
     command->primitive_type = primitive_type;
     command->used = 1;
+    frame_capture_bytes += bytes;
     if (active_count < PC_NATIVE_OT_CAPACITY) active_indices[active_count++] = ot_index;
     frame_captured_draws++;
 }
