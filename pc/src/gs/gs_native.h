@@ -26,3 +26,11 @@ int gsNativeTexSet(unsigned int tbp, unsigned int cbp, int psm, int w, int h,
                    const unsigned char* pixels, const unsigned int* clut, unsigned int clut_entries);
 const GsNativeTex* gsNativeTexFind(unsigned int tbp, unsigned int cbp, int psm, int w, int h);
 void gsNativeTexClear(void);
+
+/* Index-plane store: one decoded 8-bit index plane per (asset id, source content hash, size, PSM).
+ * It is the native source of truth for a static indexed TIM2: once stored, the image never has to
+ * be (re)uploaded to or decoded from emulated VRAM again. Bounded; oldest entries are dropped. */
+const unsigned char* gsNativeIndexFind(unsigned int asset_id, uint64_t content_hash, int psm, int w, int h);
+int gsNativeIndexStore(unsigned int asset_id, uint64_t content_hash, int psm, int w, int h, const unsigned char* indices);
+uint64_t gsNativeIdentityGen(unsigned int asset_id, uint64_t content_hash);   /* cache key independent of VRAM pages */
+void gsNativeIndexClear(void);

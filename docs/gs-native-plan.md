@@ -6,7 +6,8 @@ Estado actual: el renderer recibe `GsDrawState` + `GsVertex` (`gsRendererDraw`),
 
 ## Pasos
 1. **(hecho) Registro de texturas lineales** — `gs_native.[ch]`: guarda píxeles/índices + CLUT sin swizzle. Probado en host; aún no conectado.
-2. Conectar `Send_Tim2_dataEx`/`Ps2TexLoad` para registrar la textura nativa, y que `get_texture()` use `gsNativeTexFind` (por TBP/CBP/PSM/tamaño) en vez de leer la VRAM. Comparar contra la ruta emulada píxel a píxel.
+2. **(hecho, sin ejecutar)** Almacén de planos de índices (`gsNativeIndex*`): con `RECVX_GS_NATIVE=1`, la identidad de una textura TIM2 indexada es (asset, hash de contenido), no las páginas de VRAM; el plano decodificado se guarda en CPU, el atlas se reconstruye desde él y el juego omite la subida solo si el plano está en el almacén. Pendiente la comparación píxel a píxel con la ruta emulada.
+   Siguiente: conectar `Send_Tim2_dataEx`/`Ps2TexLoad` para registrar la textura nativa, y que `get_texture()` use `gsNativeTexFind` (por TBP/CBP/PSM/tamaño) en vez de leer la VRAM. Comparar contra la ruta emulada píxel a píxel.
 3. CLUT/paletas nativas (CSA, CPSM, TEXA) sin pasar por `clut_buf`.
 4. API de dibujo directa (vértices + estado) para las rutas 2D del juego, saltando GIF; luego 3D.
 5. Retirar la dependencia de la VRAM emulada solo donde haya equivalencia demostrada.

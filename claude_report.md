@@ -91,3 +91,8 @@ Rama: `review/claude-opengl-4.3` (base `c46b743`). Alcance: creación de context
 - **Consecuencia:** `get_texture()` falla el alias y decodifica de la VRAM la imagen de otra textura con la paleta de la nueva → índices desincronizados / caras con textura equivocada.
 - **Solución:** `pc_vram_image_resident` registra qué TIM2 se subió de verdad; para texturas elegibles, si `timp != residente` se fuerza la ruta de subida.
 - **Verificación:** solo lectura de código + revisión del diff. No se pudo compilar (`ninja.h`/MSVC) ni ejecutar. Confirmar con `RECVX_PS2_TEX_CACHE=0` (si desaparece, apunta a esta ruta) y comparando antes/después.
+
+### Paso 2 de nativización (no es un hallazgo): almacén de planos de índices
+- `gs_native.[ch]` + `gs_gl.c` (`get_texture`, `get_indexed_atlas_slot`, `pcGsTextureAssetCacheContains`), solo con `RECVX_GS_NATIVE=1`. Con el flag apagado el camino es el anterior.
+- Verificado: `gcc -fsyntax-only` de `gs_gl.c`; prueba de host del almacén con ASan/UBSan (identidad, copia privada, desbordamiento de tabla, clear). **No verificado:** ejecución con GPU, equivalencia píxel a píxel con la ruta emulada, MSVC.
+- Límite conocido: la primera aparición de cada textura sigue pasando por la VRAM emulada (los TIM2 grandes vienen pre-swizzleados para el GS, no son lineales).
