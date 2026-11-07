@@ -1,0 +1,36 @@
+name: GS 256-byte IMAGE block equivalence
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - OpenGl-3.3
+    paths:
+      - 'pc/src/gs/gs_mem.c'
+      - 'pc/src/gs/gs_internal.h'
+      - 'pc/tests/gs_mem_blockpath_test.c'
+      - '.github/workflows/test-gs-block-transfer.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  compare-block-and-reference:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Build fast and per-pixel reference variants
+        working-directory: pc/tests
+        run: |
+          cc -std=c99 -O2 -DTARGET_PC -DGS_BLOCK_FASTPATH=1 -I../src/gs gs_mem_blockpath_test.c -o gs-block-fast
+          cc -std=c99 -O2 -DTARGET_PC -DGS_BLOCK_FASTPATH=0 -I../src/gs gs_mem_blockpath_test.c -o gs-block-reference
+
+      - name: Compare VRAM, page generations and transfer notifications
+        working-directory: pc/tests
+        run: |
+          ./gs-block-fast > fast.txt
+          ./gs-block-reference > reference.txt
+          diff -u reference.txt fast.txt
+          cat fast.txt
