@@ -3798,7 +3798,11 @@ void Ps2AddPrim3DExI(unsigned long prim, void* dp, unsigned int num)
                         max = fz[2][2];
                     }
                     
-                    Ps2AddOT((void*)0x70000000, 3, max, prim);
+                    /* Each split strip triangle gets its own OT slot; preserve that exact depth ordering. */
+#ifdef TARGET_PC
+            pcNativeRendererCapture(Ps2_ot_list_no, (const unsigned char*)dp + (size_t)j * 48u, 3, 3u);
+#endif
+            Ps2AddOT((void*)0x70000000, 3, max, prim);
                     break;
                 }
                 case 1:
@@ -3807,7 +3811,11 @@ void Ps2AddPrim3DExI(unsigned long prim, void* dp, unsigned int num)
                     
                     max = zsum = fz[0][0] + fz[0][1] + fz[0][2]; 
                     
-                    Ps2AddOT((void*)0x70000000, 3, 0.33333334f * max, prim);
+                    /* Each split strip triangle gets its own OT slot; preserve that exact depth ordering. */
+#ifdef TARGET_PC
+            pcNativeRendererCapture(Ps2_ot_list_no, (const unsigned char*)dp + (size_t)j * 48u, 3, 3u);
+#endif
+            Ps2AddOT((void*)0x70000000, 3, 0.33333334f * max, prim);
                     break;
                 }
                 case 2:
@@ -3830,7 +3838,11 @@ void Ps2AddPrim3DExI(unsigned long prim, void* dp, unsigned int num)
                         max = fz[2][2];
                     }
                     
-                    Ps2AddOT((void*)0x70000000, 3, max, prim);
+                    /* Each split strip triangle gets its own OT slot; preserve that exact depth ordering. */
+#ifdef TARGET_PC
+            pcNativeRendererCapture(Ps2_ot_list_no, (const unsigned char*)dp + (size_t)j * 48u, 3, 3u);
+#endif
+            Ps2AddOT((void*)0x70000000, 3, max, prim);
                     break;
                 }
                 }
@@ -3839,6 +3851,10 @@ void Ps2AddPrim3DExI(unsigned long prim, void* dp, unsigned int num)
             return;
         }
         
+        /* Non-split ExI path stays one strip/fan command in its existing OT slot. */
+#ifdef TARGET_PC
+        pcNativeRendererCapture(Ps2_ot_list_no, dp, num, (unsigned int)((prim >> 47) & 7));
+#endif
         Ps2AddOT((void*)0x70000000, num, ((float*)p)[(12 * num) + 3], prim);
     }
     else 
