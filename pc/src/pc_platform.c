@@ -879,21 +879,20 @@ static int pause_until_active(void)
 
 static Uint64 last_mouse_move;
 
-/* Rendering diagnostics are opt-in; enable them with renderdebug=1 in recvx.ini. */
-static int pc_render_debug_enabled(void)
+/* Diagnostic hotkeys are inert in normal builds; enable them with debug=1 in recvx.ini. */
+static int pc_debug_mode_enabled(void)
 {
     static int enabled = -1;
 
     if (enabled < 0)
     {
-        enabled = pcIniGetInt("renderdebug", 0) != 0;
+        enabled = pcIniGetInt("debug", 0) != 0;
     }
 
     return enabled;
 }
 
 static int ui_uv_tuning;
-static int geometry_debug_key_down;
 static int ui_uv_crop_selected_edge;
 static int ui_uv_crop_rot90_cw;
 static int ui_uv_consume_escape_up;
@@ -931,32 +930,10 @@ static int ui_uv_crop_handle_event(const SDL_Event* ev)
 
     key = ev->key.scancode;
 
-    if (!pc_render_debug_enabled())
+    if (!pc_debug_mode_enabled())
     {
         /* Reserve diagnostic hotkeys without invoking tools or leaking them into game input. */
         return (key == SDL_SCANCODE_F10 || key == SDL_SCANCODE_F12);
-    }
-
-    if (key == SDL_SCANCODE_F12 && ((ev->key.mod & SDL_KMOD_CTRL) || geometry_debug_key_down))
-    {
-        if (down)
-        {
-            if (!ev->key.repeat && !geometry_debug_key_down)
-            {
-                int mode = pcGsCycleGeometryDebugMode();
-                const char* label = (mode == 1) ? "WHITE / NO TEXTURES" :
-                                    (mode == 2) ? "BLACK WIREFRAME / NO TEXTURES" : "NORMAL";
-                char notice[112];
-                snprintf(notice, sizeof(notice), "3D GEOMETRY: %s", label);
-                title_notice_show(notice);
-            }
-            geometry_debug_key_down = 1;
-        }
-        else
-        {
-            geometry_debug_key_down = 0;
-        }
-        return 1;
     }
 
     if (key == SDL_SCANCODE_F10)
