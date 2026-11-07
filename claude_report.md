@@ -84,3 +84,10 @@ Rama: `review/claude-opengl-4.3` (base `c46b743`). Alcance: creación de context
 ### Pendientes sin confirmar (hipótesis de la lectura de código)
 - **CGL-010** `texture_extent` con REGION_CLAMP/REGION_REPEAT puede devolver extensión menor a la muestreable (harness no ejecutado).
 - **CGL-011** Ruta HD (`uHD`): `texture()*255.0` deja alfa en 255 mientras el resto del pipeline usa 0x80 = 1.0 (no verificado).
+
+### CGL-012 — Alto — Probable (por lectura; reproduce los síntomas descritos) — Corregido, sin verificar en ejecución
+- **Archivo/función:** `src/ps2/veronica/prog/ps2_dummy.c`, `Ps2EnsureTextureImage()`.
+- **Problema:** un acierto en la caché de assets TIM2 omite la subida de la imagen a VRAM (190*64) pero deja `Ps2_tex_cache_buff[0] = timp`. En la carga siguiente de la misma textura, si el alias del renderer ya se evictó (`asset_cache_hit == 0`), la rama `timp == Ps2_tex_cache_buff[0]` tampoco sube nada. Invariante rota: "buff[0] == imagen residente en VRAM".
+- **Consecuencia:** `get_texture()` falla el alias y decodifica de la VRAM la imagen de otra textura con la paleta de la nueva → índices desincronizados / caras con textura equivocada.
+- **Solución:** `pc_vram_image_resident` registra qué TIM2 se subió de verdad; para texturas elegibles, si `timp != residente` se fuerza la ruta de subida.
+- **Verificación:** solo lectura de código + revisión del diff. No se pudo compilar (`ninja.h`/MSVC) ni ejecutar. Confirmar con `RECVX_PS2_TEX_CACHE=0` (si desaparece, apunta a esta ruta) y comparando antes/después.

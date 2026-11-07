@@ -2593,6 +2593,11 @@ int Ps2GlobalIndexTexLoad(unsigned int index)
 #endif
 }
 
+#ifdef TARGET_PC
+/* TIM2 whose image plane was really uploaded to VRAM at 190*64 (an asset-cache hit skips the upload). */
+static void* pc_vram_image_resident;
+#endif
+
 static int Ps2EnsureTextureImage(NJS_TEXMEMLIST* addr, TIM2_PICTUREHEADER_EX* timp,
                                   int asset_cache_eligible, int asset_cache_hit
 #ifdef TARGET_PC
@@ -2631,6 +2636,11 @@ static int Ps2EnsureTextureImage(NJS_TEXMEMLIST* addr, TIM2_PICTUREHEADER_EX* ti
 #ifdef TARGET_PC
         /* Another material can overwrite shared CLUT VRAM while this image plane remains cached. */
         if (asset_cache_eligible && asset_cache_hit)
+            goto label;
+        /* An asset-cache hit skips the image upload while still recording this TIM2 in
+         * Ps2_tex_cache_buff[0]. If the renderer alias has since been evicted, the image is
+         * not in VRAM and the draw would decode whatever texture was uploaded last. */
+        if (asset_cache_eligible && (timp != pc_vram_image_resident))
             goto label;
 #endif
     } 
@@ -2672,6 +2682,7 @@ label:
                     pcGameProfileSetTextureUploadScope(1);
                 }
                 Send_Tim2_dataEx(Ps2_tex_cache_buff[0], 190 * 64, 254 * 64);
+                pc_vram_image_resident = Ps2_tex_cache_buff[0];
                 if (profile_texture)
                 {
                     pcGameProfileSetTextureUploadScope(0);
