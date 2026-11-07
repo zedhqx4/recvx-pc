@@ -106,6 +106,12 @@ static void pcGsGlStateResetCache(void)
     memset(&pcGsGlState, 0, sizeof(pcGsGlState));
 }
 
+/* The auxiliary PC-native pass shares this context; invalidate cached bindings after it runs. */
+void gsRendererInvalidateGlStateCache(void)
+{
+    pcGsGlStateResetCache();
+}
+
 static int pcGsGlCapIndex(GLenum cap)
 {
     switch (cap)

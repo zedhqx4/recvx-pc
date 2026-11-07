@@ -3,6 +3,7 @@
 #include <string.h>
 #include "../../../../pc/include/pc_game_profile.h"
 #include "../../../../pc/include/pc_texture_cache.h"
+#include "../../../../pc/include/pc_native_renderer.h"
 extern int Send_Tim2_dataExClutOnly(void* tim2_top_adr, unsigned long send_image_adr, unsigned long send_clut_adr);
 #endif
 #include "../../../ps2/veronica/prog/ps2_dummy.h"
@@ -1811,6 +1812,10 @@ void Ps2AddPrim3DEx(unsigned long prim, void* dp, unsigned int num)
 
     if ((prim & 0x20000000000000)) 
     {
+        /* Copy post-VU1 geometry before Ps2_DRAW_TMP is reused; retain this OT slot as its key. */
+#ifdef TARGET_PC
+        pcNativeRendererCapture(Ps2_ot_list_no, dp, num, (unsigned int)((prim >> 47) & 7));
+#endif
         Ps2AddOT((void*)0x70000000, num, ((float*)p)[(12 * num) + 3], prim);
     }
     else 
@@ -2157,6 +2162,9 @@ void Ps2ClearOT()
     Ps2_ot_list->tp = NULL;
     
     Ps2_ot_list_no = 0;
+#ifdef TARGET_PC
+    pcNativeRendererBeginFrame();
+#endif
     
 #ifdef TARGET_PC
     Ps2_PP = (void*)Ps2_PBUFF;
@@ -2302,6 +2310,9 @@ void Ps2DrawOTag()
     } 
     
     Ps2ZbuffOn();
+#ifdef TARGET_PC
+    pcNativeRendererEndFrame();
+#endif
     
     Ps2_current_texbreak = 1;
 }
@@ -2351,6 +2362,10 @@ int Ps2DrawOTagSub(int start_no)
     { 
         for (p = Ps2_OT[i][0]; p != NULL; ) 
         { 
+#ifdef TARGET_PC
+            /* Consume the saved geometry in the same depth-bucket/list order as the GS path. */
+            pcNativeRendererAccumulate((unsigned int)(p - Ps2_ot_list));
+#endif
             if (old_p != NULL) 
             { 
 #ifdef TARGET_PC

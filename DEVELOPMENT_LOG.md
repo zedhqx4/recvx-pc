@@ -298,9 +298,9 @@ Other operational variables for input replay, screenshots, logging, audio dumps,
 **Maintenance rule:** update this file when a change lands in `alpha`, and describe the behavior verified in the resulting tree. Mark experiments as experiments, and explicitly mark them reverted when that happens. Keep GPU texture-content caching, TIM2 image-upload avoidance, OpenGL state caching, GS VRAM transfer optimizations, CNK profiling and movie playback as separate topics unless the implementation actually couples them.
 
 
-## render-nativo: first parallel CPU renderer milestone
+## render-nativo: CPU rasterizer experiment (superseded)
 
-**Status:** Experimental shadow path; not a replacement for the existing GS/OpenGL renderer.
+**Status:** Test-only reference experiment. It is disconnected from the game runtime and is not the target renderer.
 
 - New pc/src/gs/gs_native.c receives the same completed GsDrawState and GsVertex batches as the current OpenGL renderer.
 - The established gsRendererDraw() and gsRendererPresent() calls remain active. The native path runs alongside them and owns separate linear CPU framebuffers; it never writes to gsVram.
@@ -311,3 +311,16 @@ Other operational variables for input replay, screenshots, logging, audio dumps,
 
 **Validation boundary:** standalone CPU tests and Windows compilation are separate from runtime equivalence. The initial CPU image is a partial reference, not proof of GS equivalence. Keep this branch isolated; do not merge into OpenGl-3.3 or alpha before broader comparison.
 
+
+
+## render-nativo: first OpenGL GPU geometry probe
+
+**Status:** Experimental diagnostic path, separate from the live GS/OpenGL output. This is not yet a parity renderer.
+
+- Added `pc/src/pc_native_renderer.c`, an OpenGL 3.3 VAO/VBO + framebuffer path. Triangle rasterization is performed by the GPU; the old CPU rasterizer is no longer called by the game.
+- Captures the post-VU1 `VU1_PRIM_BUF` data passed to `Ps2AddPrim3DEx()`, associates it with its `PS2_OT` entry, and consumes it from `Ps2DrawOTagSub()` in the same ordering-table traversal as the GS path.
+- First supported diagnostic output is cyan wireframe for CNK triangle-list/strip/fan geometry. It deliberately ignores textures, materials, fog, blending, and depth; it is a geometry-coverage probe, not expected to resemble the finished frame.
+- `RECVX_NATIVE_GEOMETRY_DUMP=1` enables the probe and writes `recvx-native-geometry.png` plus the paired `recvx-gs-reference.png` every 60 frames next to the executable.
+- The previous CPU rasterizer remains only for its standalone unit tests. It has been disconnected from `gsFlushPrims()`, `pcGsInit()`, and `pcGsPresent()`.
+
+**Validation boundary:** source-level implementation only until the Windows compile workflow and an in-game run complete. Successful compilation will not establish geometry coverage, correct screen coordinates, or visual parity. The first runtime log and both PNGs are required to verify those.

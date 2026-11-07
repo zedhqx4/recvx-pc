@@ -81,8 +81,9 @@ void gsRendererInit(void);
 void gsRendererDraw(const GsDrawState* st, const GsVertex* v, int nverts);   /* triangle list / line list / points */
 void gsRendererPresent(unsigned int dispfb_fbp, unsigned int dispfb_fbw);
 void gsRendererFlush(void);
+void gsRendererInvalidateGlStateCache(void);
 
-/* gs_native.c: independent CPU shadow renderer (parallel validation path). */
+/* gs_native.c: CPU-only reference rasterizer tests; not part of the runtime renderer. */
 void gsNativeInit(void);
 void gsNativeDraw(const GsDrawState* st, const GsVertex* v, int nverts);
 void gsNativePresent(unsigned int dispfb_fbp, unsigned int dispfb_fbw);

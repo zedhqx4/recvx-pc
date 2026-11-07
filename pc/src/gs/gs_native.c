@@ -1,11 +1,7 @@
-/* Native CPU shadow renderer.
+/* CPU-only rasterizer reference used by standalone unit tests.
  *
- * Parallel reference path: the established OpenGL renderer receives every batch first, then the
- * same GsDrawState/GsVertex batch is sent here. This first milestone rasterizes only untextured,
- * unblended, depth-disabled primitives into private linear CPU framebuffers. It never writes to
- * gsVram, so it cannot perturb the live GS/OpenGL path.
- *
- * Unsupported GS state is counted and skipped rather than silently approximated.
+ * This experimental path is deliberately disconnected from the game runtime. The production
+ * renderer experiment is pc_native_renderer.c, which uses OpenGL 3.3 on the GPU.
  */
 #include <math.h>
 #include <stdio.h>

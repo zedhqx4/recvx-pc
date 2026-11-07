@@ -110,7 +110,7 @@ Environment variables for testing:
 | `RECVX_SPEED=<n>` | run n times faster |
 | `RECVX_SHOTS=<seconds>` | save screenshots to `shots/` periodically |
 | `RECVX_GSDUMP=<frame>` | log every GS draw of that frame |
-| `RECVX_NATIVE_DUMP=1` | save the partial CPU shadow image as `recvx-native-reference.ppm` and the matching OpenGL target as `recvx-gs-reference.png` (experimental; unsupported draws remain absent from the CPU image) |
+| `RECVX_NATIVE_GEOMETRY_DUMP=1` | enable the experimental OpenGL GPU geometry probe; writes a cyan wireframe capture (`recvx-native-geometry.png`) and a matching GS reference (`recvx-gs-reference.png`) every 60 frames; materials/textures are not implemented yet |
 | `RECVX_DATA`, `RECVX_ISO`, `RECVX_SAVES`, `RECVX_HDTEX`, `RECVX_MOD` | override the `recvx.ini` paths |
 | `RECVX_WARP=<stage>,<room>[,<entrance>[,<room case>[,<player>]]]` | a new game starts in that room instead of the first one (stage 7 room 11 is `RM_7110.RDX`; player 0 Claire, 1 Chris); the input script's presses still apply |
 | `RECVX_TEST_DOOR=<area>[,<presses>]` | action press number `<presses>` in play (default 1) uses trigger area `<area>` of the current room: a door area as if walked through, any other area as if examined (for testing random doors) |
