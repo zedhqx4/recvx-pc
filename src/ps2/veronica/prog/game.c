@@ -422,12 +422,12 @@ static void pcGameProfileEnd(int loop_ct, double total_ms)
               texture_profile.sum_image_skips / n, texture_profile.max_image_skips,
               texture_profile.sum_clut_only_ms / n, texture_profile.max_clut_only_ms);
         {
-            unsigned int fp_lookups, fp_rehashes, fp_guard;
+            unsigned int fp_lookups, fp_rehashes, fp_guard, fp_verified, fp_stale;
             double fp_bytes, fp_ms;
 
-            pcPs2TexLoadStatsTake(&fp_lookups, &fp_rehashes, &fp_bytes, &fp_ms, &fp_guard);
-            pcLog("PROFILE TEX fingerprint per frame: lookups %.1f re-hashes %.2f (%.0f KB, %.3f ms) | stale-VRAM guard fired %u times in window",
-                  (double)fp_lookups / n, (double)fp_rehashes / n, fp_bytes / 1024.0 / n, fp_ms / n, fp_guard);
+            pcPs2TexLoadStatsTake(&fp_lookups, &fp_rehashes, &fp_bytes, &fp_ms, &fp_guard, &fp_verified, &fp_stale);
+            pcLog("PROFILE TEX fingerprint per frame: lookups %.1f re-hashes %.2f (%.0f KB, %.3f ms) | stale-VRAM guard fired %u times in window | content re-checks %u, STALE fingerprints found (total) %u",
+                  (double)fp_lookups / n, (double)fp_rehashes / n, fp_bytes / 1024.0 / n, fp_ms / n, fp_guard, fp_verified, fp_stale);
         }
         pcLog("PROFILE TEX GS IMAGE upload avg/max ms %.2f/%.2f calls/frame %.2f/%.2f QWC/frame %.0f/%.0f",
               texture_profile.sum_gs_ms / n, texture_profile.max_gs_ms,

@@ -17,6 +17,7 @@ extern int Send_Tim2_dataExClutOnly(void* tim2_top_adr, unsigned long send_image
 #include "../../../ps2/veronica/prog/main.h"
 
 #ifdef TARGET_PC
+#include <stdlib.h>
 #define PC_TIM2_FINGERPRINT_SLOTS 4096   /* was 1024: ~390 live textures collided and re-hashed whole images */
 typedef struct {
     int valid;
@@ -26,6 +27,7 @@ typedef struct {
     unsigned short header_size, image_width, image_height;
     unsigned char format_id, image_type, clut_type, pict_format;
     uint64_t image_hash, clut_hash;
+    double verified_ms;   /* last time the hashes were re-checked against the real bytes */
 } PcTim2SourceFingerprint;
 static PcTim2SourceFingerprint pc_tim2_fingerprints[PC_TIM2_FINGERPRINT_SLOTS];
 
@@ -45,13 +47,31 @@ static double pc_texstat_rehash_ms;
 static unsigned int pc_texstat_guard_fired;   /* stale-VRAM guard (CGL-012) forced an upload */
 
 void pcPs2TexLoadStatsTake(unsigned int* lookups, unsigned int* rehashes, double* rehash_bytes,
-                           double* rehash_ms, unsigned int* guard_fired)
+                           double* rehash_ms, unsigned int* guard_fired, unsigned int* verified, unsigned int* stale)
 {
+    *verified = pc_texstat_verified; pc_texstat_verified = 0;
+    *stale = pc_texstat_stale;       /* cumulative: a single stale event matters */
     *lookups = pc_texstat_lookups;        pc_texstat_lookups = 0;
     *rehashes = pc_texstat_rehashes;      pc_texstat_rehashes = 0;
     *rehash_bytes = pc_texstat_rehash_bytes; pc_texstat_rehash_bytes = 0.0;
     *rehash_ms = pc_texstat_rehash_ms;    pc_texstat_rehash_ms = 0.0;
     *guard_fired = pc_texstat_guard_fired; pc_texstat_guard_fired = 0;
+}
+
+#define PC_TIM2_VERIFY_MS 2000.0
+static unsigned int pc_texstat_verified;
+static unsigned int pc_texstat_stale;
+
+static int pc_tim2_verify_enabled(void)
+{
+    static int enabled = -1;
+
+    if (enabled < 0)
+    {
+        const char* value = getenv("RECVX_TEX_VERIFY");
+        enabled = (value != NULL && value[0] == '0' && value[1] == '\0') ? 0 : 1;
+    }
+    return enabled;
 }
 
 static uint64_t pc_tim2_hash_bytes(const unsigned char* data, unsigned int size)
@@ -96,6 +116,40 @@ static int pc_tim2_source_hashes(TIM2_PICTUREHEADER_EX* tim, uint64_t* image_has
         cached->image_type == picture->ImageType && cached->clut_type == picture->ClutType &&
         cached->pict_format == picture->PictFormat)
     {
+        /* The header fields above cannot tell that a source address now holds different bytes
+         * (a new room can reuse an address with a same-size image and the same Gindex). Re-check
+         * the real content every PC_TIM2_VERIFY_MS; a stale hash would bind another texture's
+         * cached index plane. RECVX_TEX_VERIFY=0 disables the check. */
+        if (pc_tim2_verify_enabled())
+        {
+            double now = pcGameProfileNowMs();
+
+            if ((now - cached->verified_ms) >= PC_TIM2_VERIFY_MS)
+            {
+                const unsigned char* v_image = (const unsigned char*)picture + picture->HeaderSize;
+                uint64_t v_image_hash = pc_tim2_hash_bytes(v_image, picture->ImageSize);
+                uint64_t v_clut_hash = pc_tim2_hash_bytes(v_image + picture->ImageSize, picture->ClutSize);
+
+                cached->verified_ms = now;
+                pc_texstat_verified++;
+                if ((v_image_hash != cached->image_hash) || (v_clut_hash != cached->clut_hash))
+                {
+                    pc_texstat_stale++;
+                    if (pc_texstat_stale <= 100)
+                        pcLog("texture: STALE TIM2 fingerprint surface=%p Gindex=%u %ux%u type=%u image %s clut %s (cached %08x%08x/%08x%08x, real %08x%08x/%08x%08x); corrected",
+                              (const void*)tim, tim->Gindex, (unsigned int)picture->ImageWidth,
+                              (unsigned int)picture->ImageHeight, (unsigned int)picture->ImageType,
+                              (v_image_hash != cached->image_hash) ? "CHANGED" : "same",
+                              (v_clut_hash != cached->clut_hash) ? "CHANGED" : "same",
+                              (unsigned int)(cached->image_hash >> 32), (unsigned int)cached->image_hash,
+                              (unsigned int)(cached->clut_hash >> 32), (unsigned int)cached->clut_hash,
+                              (unsigned int)(v_image_hash >> 32), (unsigned int)v_image_hash,
+                              (unsigned int)(v_clut_hash >> 32), (unsigned int)v_clut_hash);
+                    cached->image_hash = v_image_hash;
+                    cached->clut_hash = v_clut_hash;
+                }
+            }
+        }
         *image_hash = cached->image_hash;
         *clut_hash = cached->clut_hash;
         return 1;
@@ -125,6 +179,7 @@ static int pc_tim2_source_hashes(TIM2_PICTUREHEADER_EX* tim, uint64_t* image_has
     cached->pict_format = picture->PictFormat;
     cached->image_hash = *image_hash;
     cached->clut_hash = *clut_hash;
+    cached->verified_ms = pcGameProfileNowMs();
     return 1;
 }
 

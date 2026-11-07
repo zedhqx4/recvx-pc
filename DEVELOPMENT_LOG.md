@@ -289,3 +289,11 @@ From a user run (`recvx.log`, 161 profile windows, game at ~33 ms/frame): `Ps2Te
 Host benchmark of the GS side of one bind (`gs.c` + `gs_mem.c`): ~1.9 us (T8 CLUT load), packet path and direct A+D path identical. So the direct-apply change above is neutral for speed; the cost is elsewhere in `Ps2TexLoad`.
 
 Hypothesis (not yet measured): the TIM2 fingerprint table had 1024 direct-mapped slots for ~390 live textures; colliding textures evict each other and the whole image is re-hashed with byte-wise FNV on every miss. Changes: table raised to 4096, and `PROFILE TEX fingerprint per frame` logs lookups, re-hashes, KB hashed, ms spent and how often the CGL-012 stale-VRAM guard fired. A single run with `PROFILE` enabled confirms or rules out the hypothesis.
+
+### Claude-alpha: second user log, wrong texture reproduced (2026-11-07)
+
+`recvx.log` of a run where a wrong texture appeared: stale-VRAM guard (CGL-012) fired 0 times in 161 windows, so that mechanism did not cause it in this run. Fingerprint re-hashes were <= 2 per frame (table collisions are not the main `Ps2TexLoad` cost; mean 2.71 ms/frame vs 3.0 before).
+
+Remaining candidate, from code reading: `pc_tim2_source_hashes` trusts a cached fingerprint when pointer, Gindex, sizes and formats match, without looking at the bytes. A room load that reuses a source address with a same-size image and the same Gindex keeps the old hash, and the renderer asset alias then returns the previous texture's index plane. The 4096-slot table (previous commit) can keep such stale entries longer than the old 1024-slot one.
+
+Change: each cached fingerprint is re-verified against the real bytes every 2 s (`RECVX_TEX_VERIFY=0` disables). A mismatch logs `texture: STALE TIM2 fingerprint ...` (first 100) and corrects the hash; the `PROFILE TEX fingerprint` line reports re-checks and the cumulative stale count. Not compiled or run here (game build needs the MSVC/Katana toolchain). It bounds a stale texture to about 2 s; it does not prove this is the cause: the next wrong-texture run should show a STALE line if it is.
