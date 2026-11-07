@@ -75,9 +75,10 @@ Internal render-resolution test (in `recvx.ini`, next to `recvx.exe`; restart th
 - `scale=1` is needed to test the selected dimensions directly. Higher `scale` values multiply them; `window=WxH` changes only the PC window size.
 - Game coordinates remain 640x480. The GS renderer resamples VRAM-to-render-target loads and render-target readback to accommodate the custom backing resolution.
 
-Debug mode (in `recvx.ini`, next to `recvx.exe`):
-- `debug=0` is the normal/release default. Diagnostic hotkeys are inert and cannot toggle overlays or edit UV crop values.
-- Set `debug=1` to enable developer diagnostics: F10 enters/leaves live UV crop tuning; F12 toggles the cyan wireframe. These keys remain reserved while debug mode is on.
+Rendering diagnostics (in `recvx.ini`, next to `recvx.exe`):
+- `renderdebug=0` is the default. Rendering diagnostic hotkeys are inert.
+- Set `renderdebug=1` to enable F10 live UV crop tuning, F12 UI wireframe, and Ctrl+F12 to cycle 3D geometry views: NORMAL → WHITE → WIREFRAME → NORMAL.
+- WHITE draws only 3D triangle geometry as opaque white and skips texture lookup/decoding. WIREFRAME draws only 3D triangle edges in opaque black and also skips texture lookup/decoding. 2D sprites, backgrounds and UI keep their normal rendering. Both modes retain depth testing and scissor clipping; each new run starts in NORMAL.
 - Default game controls remain F11 fullscreen, F9 return to title and F5 save anywhere.
 
 Automatic UI atlas-edge correction:
@@ -91,11 +92,11 @@ Developer diagnostics (in `recvx.ini`, next to `recvx.exe`):
 - The legacy `ui_uv_crop` key, if present, supplies a fallback for edge keys not specified.
 - `ui_snap_uv=0` disables the older PC-side UV snapping workaround; `ui_uv_inset=0` disables the GS renderer's half-texel inset. Keep these as A/B diagnostics rather than prerequisites for normal use.
 
-Live tuning (requires `debug=1`; no restart required after the initial config is read):
+Live tuning (requires `renderdebug=1`; no restart required after the initial config is read):
 - Press `F10` to enter or leave UV crop tuning. While tuning, the game does not receive keyboard input.
 - `Tab` selects the edge in order: left, right, top, bottom.
 - `Up` increases the selected crop by `1/16` texel; `Down` decreases it. Hold `Shift` for steps of `4/16` texel.
-- `Backspace` resets the selected edge to zero; `Shift+Backspace` resets all four edges to zero. `F12` toggles the wireframe while tuning.
+- `Backspace` resets the selected edge to zero; `Shift+Backspace` resets all four edges to zero. `F12` toggles the 2D UI wireframe while tuning. `Ctrl+F12` cycles the 3D geometry view.
 - Every live change takes effect on the next UI draw and is written to `recvx.ini` automatically.
 
 Environment variables for testing:
