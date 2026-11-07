@@ -568,6 +568,23 @@ static const void* dma_ptr(unsigned int addr, int spr)
     return (const void*)(size_t)addr;
 }
 
+/* Apply A+D register writes directly (PC port). Equivalent to sending them as one PACKED A+D GIF
+ * packet (packed_write case 0x0e), minus the DMA chain walk and GIF tag parsing. ad[2*i] is the
+ * 64-bit data, ad[2*i+1] the register address. Returns 0 (nothing written) when a GIF packet is
+ * still in progress, so the caller can fall back to the packet path. */
+int pcGsApplyAdList(const uint64_t* ad, int n)
+{
+    int i;
+
+    if (gif.in_packet)
+        return 0;
+
+    for (i = 0; i < n; i++)
+        gsWriteReg((int)(ad[2 * i + 1] & 0xFF), ad[2 * i]);
+
+    return 1;
+}
+
 void gsDmaChain(const void* tag_ptr)
 {
     int ntags = 0, nqwc = 0, k0 = kicks;

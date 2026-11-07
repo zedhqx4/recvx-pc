@@ -274,3 +274,10 @@ Other operational variables for input replay, screenshots, logging, audio dumps,
 ---
 
 **Maintenance rule:** update this file when a change lands in `alpha`, and describe the behavior verified in the resulting tree. Mark experiments as experiments, and explicitly mark them reverted when that happens. Keep GPU texture-content caching, TIM2 image-upload avoidance, OpenGL state caching, GS VRAM transfer optimizations, CNK profiling and movie playback as separate topics unless the implementation actually couples them.
+
+## Claude-alpha: native texture binding, step 1 (2026-11-07)
+
+- `Ps2BindTextureState` (PC): the six A+D writes (TEXFLUSH, TEX0 x2, TEX1, CLAMP, TEST) are applied with `pcGsApplyAdList()` instead of building a DMA/GIF packet that `gsDmaChain`/`gsGifTransfer` walk and decode. Same `gsWriteReg` calls in the same order; falls back to the packet if a GIF packet is open.
+- Verified (host): `pc/tests/gs_direct_ad_test.c`, 108 configurations of the four bind variants; GS registers, CLUT view, binding generation and asset hint identical to the packet path. Not verified: full game build, runtime, framerate effect.
+- `Ps2EnsureTextureImage` (PC): an asset-cache hit skips the image upload but left `Ps2_tex_cache_buff[0]` set, so a later same-texture load with an evicted alias uploaded nothing and drew another texture's pixels. `pc_vram_image_resident` records what was really uploaded; eligible textures not resident are uploaded. Found by code reading; not reproduced at runtime.
+- Not done yet: per-texture native binding object and `GsDrawState` handle (skipping the per-call hash/compare steps and `get_texture`). Needs profile data from `PROFILE TEX Ps2TexLoad` to pick the next cut.

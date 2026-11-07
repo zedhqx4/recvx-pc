@@ -9,4 +9,5 @@ int pcGsTextureAssetCacheContains(unsigned int asset_id, uint64_t content_hash, 
 void pcGsSetTextureAssetIdentity(unsigned int asset_id, int valid, uint64_t content_hash);
 uint64_t pcGsGetTextureBindingGeneration(void);
 void pcGsResetTextureAssetCache(void);
+int pcGsApplyAdList(const uint64_t* ad, int n);   /* direct A+D writes; 0 = GIF busy, use the packet path */
 #endif
