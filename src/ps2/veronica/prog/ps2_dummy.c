@@ -40,6 +40,8 @@ typedef struct {
 static PcPs2TextureBindCache pc_ps2_texture_bind_cache;
 
 /* Cumulative counters read (as deltas) by the PROFILE TEX log in game.c. */
+static unsigned int pc_texstat_verified;
+static unsigned int pc_texstat_stale;
 static unsigned int pc_texstat_lookups;
 static unsigned int pc_texstat_rehashes;
 static double pc_texstat_rehash_bytes;
@@ -59,8 +61,6 @@ void pcPs2TexLoadStatsTake(unsigned int* lookups, unsigned int* rehashes, double
 }
 
 #define PC_TIM2_VERIFY_MS 2000.0
-static unsigned int pc_texstat_verified;
-static unsigned int pc_texstat_stale;
 
 static int pc_tim2_verify_enabled(void)
 {
