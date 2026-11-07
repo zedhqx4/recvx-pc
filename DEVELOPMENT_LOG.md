@@ -257,12 +257,34 @@ These notes are included to keep reverted tests and related-but-different caches
 
 Other operational variables for input replay, screenshots, logging, audio dumps, data paths and room warping are documented in `pc/README.md`.
 
+## OpenGl-3.3: GS PSMT8 / PSMT4 IMAGE block uploads
+
+**Status:** Ported from `experimental/opengl-4.3`; OpenGL context requirement remains 3.3 Core.
+
+- Added `transfer8Blocks()`: complete aligned PSMT8 blocks are assembled in GS swizzled order as 256-byte copies. One block covers 16×16 texels.
+- Added `transfer4Blocks()`: complete aligned PSMT4 blocks are assembled in GS swizzled order as 256-byte copies. One block covers 32×16 texels.
+- Partial, unaligned, and packet-tail data continues through the existing per-pixel `mem_write()` path.
+- Enabled both paths by default. `GS_BLOCK_FASTPATH=0` retains the per-pixel reference implementation for A/B equivalence testing.
+- PSMT8H, PSMT4HL/HH, other PSM formats, and Local-to-Local / GS-to-Host paths remain unchanged.
+- Added `pc/tests/gs_mem_blockpath_test.c` and `.github/workflows/test-gs-block-transfer.yml`. The test compares complete GS VRAM, page-generation counters, and transfer notifications across 4,000 randomized transfers.
+
+**Validation:** The equivalence workflow must pass on this branch. Windows compilation and in-game performance/visual checks remain separate validation steps.
+
+## OpenGl-3.3: SDL3 gamepad mappings and decal targeting
+
+**Status:** Ported as an experiment; runtime validation pending.
+
+- Added optional `gamecontrollerdb.txt` loading beside `recvx.exe`, using `SDL_AddGamepadMappingsFromFile()` before SDL enumerates gamepads. If the file is absent or cannot be loaded, SDL's built-in mappings remain available.
+- Replaced the broad blended-textured-3D decal predicate with the exact GS material-signature matcher, using the captured TEX0/ALPHA signatures and shared GS state fields.
+- Reduced draw-order polygon offset from 1–4 full units to 0.5–2 depth units. The existing GL state wrappers and per-frame draw-order reset remain in place.
+- These changes do not require OpenGL 4.3; this branch retains the OpenGL 3.3 Core context request from its common starting commit.
+
 ## 12. Source map for future work
 
 | Topic | Primary source files / functions |
 |---|---|
 | GS register and primitive path | `pc/src/gs/gs.c`: `gsWriteReg()`, `gsFlushPrims()`, `emit()`, `clut_load()` |
-| GS memory and transfers | `pc/src/gs/gs_mem.c`: `mem_write()`, `touch()`, `transfer32Run()`, `gsMemTransferData()` |
+| GS memory and transfers | `pc/src/gs/gs_mem.c`: `mem_write()`, `touch()`, `transfer32Run()`, `transfer8Blocks()`, `transfer4Blocks()`, `gsMemTransferData()` |
 | GPU texture/palette caches | `pc/src/gs/gs_gl.c`: `get_texture()`, `get_indexed_atlas_slot()`, `get_palette_texture()` |
 | OpenGL state cache | `pc/src/gs/gs_gl.c`: `PcGsGlState`, `pcGsBindFramebuffer()`, `pcGsActiveTexture()`, `pcGsBindTexture()` |
 | TIM2 asset reuse | `src/ps2/veronica/prog/ps2_dummy.c`: `Ps2TexLoad()`, `Ps2EnsureTextureImage()`, `Ps2BindTextureState()` |
