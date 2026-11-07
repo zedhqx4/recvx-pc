@@ -697,11 +697,15 @@ static void save_window(void)
 #define PC_GL_CONTEXT_PROFILE_MASK 0x9126
 #define PC_GL_CONTEXT_CORE_PROFILE_BIT 0x00000001
 
-#ifndef APIENTRY
-#define APIENTRY
+/* OpenGL entry points use APIENTRY/WINAPI on Windows. This project builds a
+ * 32-bit executable, where omitting __stdcall corrupts the stack after each call. */
+#if defined(_WIN32)
+#define PC_GL_APIENTRY __stdcall
+#else
+#define PC_GL_APIENTRY
 #endif
-typedef const unsigned char* (APIENTRY* PcPfnGlGetString)(unsigned int name);
-typedef void (APIENTRY* PcPfnGlGetIntegerv)(unsigned int pname, int* data);
+typedef const unsigned char* (PC_GL_APIENTRY* PcPfnGlGetString)(unsigned int name);
+typedef void (PC_GL_APIENTRY* PcPfnGlGetIntegerv)(unsigned int pname, int* data);
 
 static void verify_gl_context(void)
 {
