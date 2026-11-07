@@ -13,6 +13,7 @@
 #include <string.h>
 
 #include "gs_internal.h"
+#include "gs_native.h"
 #include "gl_funcs.h"
 #include "../../include/pc_platform.h"
 #include "../../include/pc_texture_cache.h"
@@ -1021,6 +1022,12 @@ int pcGsTextureAssetCacheContains(unsigned int asset_id, uint64_t content_hash, 
         return 0;
 
     /* Query by Gindex + source image hash, then verify the native texture layout. */
+    if (gsNativeEnabled())
+    {
+        /* Native mode: the decoded index plane, not an atlas/alias, is the source of truth. */
+        return gsNativeIndexFind(asset_id, content_hash, (int)GSF(tex0, 20, 6), width, height) != NULL;
+    }
+
     key0 = tex0 & 0x0000001FFFFFFFFFULL & ~(0x3ULL << 35) & ~(1ULL << 34);
     cpsm_key = ((unsigned long long)GSF(tex0, 51, 4) << 37);
     key0 |= cpsm_key;
@@ -1256,6 +1263,7 @@ static GLuint get_palette_texture(u64 tex0, u64 texa, int entries, u64 palette_h
 /* Cache the raw index plane without a CLUT. Palette variants then bind a small lookup texture
  * instead of decoding and uploading another full RGBA atlas. */
 static int get_indexed_atlas_slot(u64 key0, u64 gen, u64 tex0, int w, int h, int diagnostics,
+                                  unsigned int asset_id, int native_asset, uint64_t content_hash,
                                   double* create_elapsed, double* decode_elapsed, double* upload_elapsed)
 {
     int i, slot = -1, oldest = 0;
@@ -1355,7 +1363,17 @@ static int get_indexed_atlas_slot(u64 key0, u64 gen, u64 tex0, int w, int h, int
 
     {
         double t0 = pcOsTime();
-        gsDecodeIndices(tex0, w, h, index_buf);
+        const unsigned char* native_plane = native_asset ?
+            gsNativeIndexFind(asset_id, content_hash, (int)GSF(tex0, 20, 6), w, h) : NULL;
+
+        if (native_plane)
+            memcpy(index_buf, native_plane, (size_t)w * (size_t)h);   /* no VRAM involved */
+        else
+        {
+            gsDecodeIndices(tex0, w, h, index_buf);
+            if (native_asset)
+                gsNativeIndexStore(asset_id, content_hash, (int)GSF(tex0, 20, 6), w, h, index_buf);
+        }
         *decode_elapsed = pcOsTime() - t0;
 
         stats.tex_decodes++;
@@ -1408,6 +1426,7 @@ static GLuint get_texture(unsigned int asset_id, int asset_id_valid, uint64_t co
     unsigned int page_lo, page_hi, clut_page, stride;
     unsigned long long gen, coverage_area = ~0ULL;
     int coverage_slot = -1;
+    int native_asset;
     CachedTex* t;
 
     diagnostics = gsTextureDiagnosticsEnabled();
@@ -1482,7 +1501,9 @@ static GLuint get_texture(unsigned int asset_id, int asset_id_valid, uint64_t co
     /* A TBP that is not page aligned (tbp & 31) shifts the texture inside its first page, so it
      * spills into one extra page row and column that the plain ceil() misses. The OT texture pool
      * advances by ImageSize >> 8 blocks per texture, so small textures leave the next one unaligned. */
-    gen = gen_sum_rect(page_lo, stride, (rows + ph - 1) / ph + ((tbp & 31) ? 1 : 0),
+    native_asset = gsNativeEnabled() && is_indexed && asset_id_valid;
+    gen = native_asset ? gsNativeIdentityGen(asset_id, content_hash) :   /* identity, not VRAM pages */
+          gen_sum_rect(page_lo, stride, (rows + ph - 1) / ph + ((tbp & 31) ? 1 : 0),
                        (cols + pw - 1) / pw + ((tbp & 31) ? 1 : 0));
     cached_slot = texture_cache_find(gen, key0, key1, key2, w, h, rows, cols);
     if (cached_slot >= 0)
@@ -1530,7 +1551,7 @@ static GLuint get_texture(unsigned int asset_id, int asset_id_valid, uint64_t co
             (t->w == w) && (t->h == h) && (t->page_lo == page_lo) &&
             (t->rows >= rows) && (t->cols >= cols))
         {
-            unsigned long long cached_gen =
+            unsigned long long cached_gen = native_asset ? gen :
                 gen_sum_rect(page_lo, stride, (t->rows + ph - 1) / ph + ((tbp & 31) ? 1 : 0),
                              (t->cols + pw - 1) / pw + ((tbp & 31) ? 1 : 0));
 
@@ -1640,6 +1661,7 @@ static GLuint get_texture(unsigned int asset_id, int asset_id_valid, uint64_t co
     if (is_indexed)
     {
         int atlas_slot = get_indexed_atlas_slot(index_key0, gen, tex0, w, h, diagnostics,
+                                                asset_id, native_asset, content_hash,
                                                 &create_elapsed, &decode_elapsed, &upload_elapsed);
         if (atlas_slot >= 0)
         {

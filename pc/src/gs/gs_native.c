@@ -85,3 +85,70 @@ void gsNativeTexClear(void)
     for (i = 0; i < GS_NATIVE_MAX_TEX; i++) tex_free(&tex_tab[i]);
     tex_next = 0;
 }
+
+/* ---- index-plane store ------------------------------------------------------------------- */
+#define GS_NATIVE_MAX_PLANES 1024
+#define GS_NATIVE_MAX_PLANE_BYTES (256u * 1024u * 1024u)
+
+typedef struct { unsigned int asset_id; uint64_t hash; int psm, w, h; unsigned char* data; } GsNativePlane;
+static GsNativePlane planes[GS_NATIVE_MAX_PLANES];
+static int planes_next;
+static size_t planes_bytes;
+
+static void plane_free(GsNativePlane* p)
+{
+    if (p->data) planes_bytes -= (size_t)p->w * (size_t)p->h;
+    free(p->data);
+    memset(p, 0, sizeof *p);
+}
+
+const unsigned char* gsNativeIndexFind(unsigned int asset_id, uint64_t content_hash, int psm, int w, int h)
+{
+    int i;
+    for (i = 0; i < GS_NATIVE_MAX_PLANES; i++)
+    {
+        const GsNativePlane* p = &planes[i];
+        if (p->data && p->asset_id == asset_id && p->hash == content_hash && p->psm == psm && p->w == w && p->h == h)
+            return p->data;
+    }
+    return NULL;
+}
+
+int gsNativeIndexStore(unsigned int asset_id, uint64_t content_hash, int psm, int w, int h, const unsigned char* indices)
+{
+    size_t bytes = (size_t)w * (size_t)h;
+    GsNativePlane* p;
+
+    if (!indices || w <= 0 || h <= 0) return -1;
+    if (gsNativeIndexFind(asset_id, content_hash, psm, w, h)) return 0;
+    while (planes_bytes + bytes > GS_NATIVE_MAX_PLANE_BYTES)
+    {
+        int guard = 0;
+        while (guard++ < GS_NATIVE_MAX_PLANES && !planes[planes_next].data) planes_next = (planes_next + 1) % GS_NATIVE_MAX_PLANES;
+        if (!planes[planes_next].data) return -1;
+        plane_free(&planes[planes_next]);
+    }
+    p = &planes[planes_next];
+    plane_free(p);
+    p->data = (unsigned char*)malloc(bytes);
+    if (!p->data) return -1;
+    memcpy(p->data, indices, bytes);
+    p->asset_id = asset_id; p->hash = content_hash; p->psm = psm; p->w = w; p->h = h;
+    planes_bytes += bytes;
+    planes_next = (planes_next + 1) % GS_NATIVE_MAX_PLANES;
+    return 1;
+}
+
+uint64_t gsNativeIdentityGen(unsigned int asset_id, uint64_t content_hash)
+{
+    uint64_t h = 0x9E3779B97F4A7C15ULL ^ content_hash;
+    h = (h ^ asset_id) * 0x100000001B3ULL;
+    return h ? h : 1;
+}
+
+void gsNativeIndexClear(void)
+{
+    int i;
+    for (i = 0; i < GS_NATIVE_MAX_PLANES; i++) plane_free(&planes[i]);
+    planes_next = 0;
+}
