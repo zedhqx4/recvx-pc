@@ -1384,12 +1384,13 @@ void Ps2AddPrim(unsigned long prim, void* dp, unsigned int num, unsigned int cli
                 sprite[i].x = x - 1728.0f;
                 sprite[i].y = y - 1808.0f;
                 sprite[i].z = 0.5f;
-                sprite[i].r = fminf(fmaxf(color[0] / 128.0f, 0.0f), 1.0f);
-                sprite[i].g = fminf(fmaxf(color[1] / 128.0f, 0.0f), 1.0f);
-                sprite[i].b = fminf(fmaxf(color[2] / 128.0f, 0.0f), 1.0f);
+                sprite[i].r = fminf(fmaxf(color[0] / 255.0f, 0.0f), 1.0f);
+                sprite[i].g = fminf(fmaxf(color[1] / 255.0f, 0.0f), 1.0f);
+                sprite[i].b = fminf(fmaxf(color[2] / 255.0f, 0.0f), 1.0f);
                 sprite[i].a = fminf(fmaxf(color[3] / 128.0f, 0.0f), 1.0f);
                 sprite[i].u = u;
                 sprite[i].v = v;
+                sprite[i].q = 1.0f;
                 sprite[i].fog = 1.0f;
             }
             vertices = sprite;
@@ -1412,9 +1413,9 @@ void Ps2AddPrim(unsigned long prim, void* dp, unsigned int num, unsigned int cli
                 vertices[i].x = x - 1728.0f;
                 vertices[i].y = y - 1808.0f;
                 vertices[i].z = 0.5f;
-                vertices[i].r = fminf(fmaxf(source[4] / 128.0f, 0.0f), 1.0f);
-                vertices[i].g = fminf(fmaxf(source[5] / 128.0f, 0.0f), 1.0f);
-                vertices[i].b = fminf(fmaxf(source[6] / 128.0f, 0.0f), 1.0f);
+                vertices[i].r = fminf(fmaxf(source[4] / 255.0f, 0.0f), 1.0f);
+                vertices[i].g = fminf(fmaxf(source[5] / 255.0f, 0.0f), 1.0f);
+                vertices[i].b = fminf(fmaxf(source[6] / 255.0f, 0.0f), 1.0f);
                 vertices[i].a = fminf(fmaxf(source[7] / 128.0f, 0.0f), 1.0f);
                 vertices[i].u = use_uv ? source[0] : source[0];
                 vertices[i].v = use_uv ? source[1] : source[1];
@@ -1609,8 +1610,106 @@ void Ps2AddPrim2D(unsigned long prim, void* dp, unsigned int num)
 }
 
 // 100% matching!
+#ifdef TARGET_PC
+static void pcNativeSubmitPrepared3D(unsigned long prim, const void* data, unsigned int count, int floating_color)
+{
+    const float* source = (const float*)data;
+    PcNativeVertex* vertices;
+    PcNativeDrawState state;
+    unsigned int i, topology = (unsigned int)((prim >> 47) & 7u);
+    float tex_width = 1.0f, tex_height = 1.0f;
+    int textured = (prim & 0x8000000000000ULL) != 0;
+    int transparent = (prim & 0x20000000000000ULL) != 0;
+    unsigned int texture = pcRendererCurrentTexture();
+
+    if (source == NULL || count < 1 || count > 16384)
+        return;
+    if (textured && texture == 0)
+        return;
+
+    vertices = (PcNativeVertex*)malloc((size_t)count * sizeof(*vertices));
+    if (vertices == NULL)
+        return;
+
+    pcRendererCurrentTextureSize(&tex_width, &tex_height);
+    for (i = 0; i < count; i++, source += 12) {
+        float r, g, b, a;
+        if (floating_color) {
+            r = source[4]; g = source[5]; b = source[6]; a = source[7];
+        } else {
+            uint32_t rgba[4];
+            memcpy(rgba, source + 4, sizeof(rgba));
+            r = (float)(rgba[0] & 0xFFu);
+            g = (float)(rgba[1] & 0xFFu);
+            b = (float)(rgba[2] & 0xFFu);
+            a = (float)(rgba[3] & 0xFFu);
+        }
+
+        vertices[i].x = source[8] - 1728.0f;
+        vertices[i].y = source[9] - 1808.0f;
+        vertices[i].z = pcRendererDepthFromReciprocalZ(source[2]);
+        vertices[i].r = fminf(fmaxf(r / 255.0f, 0.0f), 1.0f);
+        vertices[i].g = fminf(fmaxf(g / 255.0f, 0.0f), 1.0f);
+        vertices[i].b = fminf(fmaxf(b / 255.0f, 0.0f), 1.0f);
+        vertices[i].a = fminf(fmaxf(a / 128.0f, 0.0f), 1.0f);
+        vertices[i].u = source[0];
+        vertices[i].v = source[1];
+        vertices[i].q = source[2];
+        vertices[i].fog = floating_color ?
+            fminf(fmaxf(source[11] / 128.0f, 0.0f), 1.0f) : 1.0f;
+    }
+
+    memset(&state, 0, sizeof(state));
+    state.texture = texture;
+    state.texture_width = tex_width;
+    state.texture_height = tex_height;
+    pcRendererCurrentTextureCombine(&state.texture_function, &state.texture_alpha);
+    state.textured = textured;
+    state.blend = transparent;
+    state.depth_test = 1;
+    state.depth_write = !transparent;
+    state.alpha_test = 1;
+    state.alpha_ref = 0.0f;
+    state.linear_filter = 1;
+    state.screen_space = 1;
+    state.texture_perspective = (prim & 0x80000000000000ULL) == 0;
+    state.cull_backfaces = 0;
+
+    switch (topology) {
+    case 0: pcRendererDrawPoints(vertices, (int)count, &state); break;
+    case 1: pcRendererDrawLines(vertices, (int)count, &state); break;
+    case 2: pcRendererDrawLineStrip(vertices, (int)count, &state); break;
+    case 3: pcRendererDrawTriangles(vertices, (int)count, &state); break;
+    case 4: pcRendererDrawTriangleStrip(vertices, (int)count, &state); break;
+    case 5:
+        if (count >= 3) {
+            PcNativeVertex* fan = (PcNativeVertex*)malloc((size_t)(count - 2u) * 3u * sizeof(*fan));
+            if (fan != NULL) {
+                unsigned int t, n = 0;
+                for (t = 1; t + 1 < count; t++) {
+                    fan[n++] = vertices[0]; fan[n++] = vertices[t]; fan[n++] = vertices[t + 1];
+                }
+                pcRendererDrawTriangles(fan, (int)n, &state);
+                free(fan);
+            }
+        }
+        break;
+    default:
+        pcRendererDrawTriangles(vertices, (int)count, &state);
+        break;
+    }
+
+    free(vertices);
+}
+#endif
+
 void Ps2AddPrim3D(unsigned long prim, void* dp, unsigned int num)
 {
+#ifdef TARGET_PC
+    pcNativeSubmitPrepared3D(prim, dp, num, 0);
+    return;
+#endif
+
     unsigned long* p;             
     TIM2_PICTUREHEADER_EX* timp;  
     unsigned int clip_flag;    // needs use   
@@ -1786,6 +1885,11 @@ l_002CBF9C:
 // 100% matching!
 void Ps2AddPrim3DEx(unsigned long prim, void* dp, unsigned int num)
 {
+#ifdef TARGET_PC
+    pcNativeSubmitPrepared3D(prim, dp, num, 1);
+    return;
+#endif
+
     unsigned long* p;             
     TIM2_PICTUREHEADER_EX* timp;  
     unsigned int clip_flag;    // needs use   
@@ -1963,6 +2067,11 @@ l_002CC2B0:
 // 100% matching!
 void Ps2AddPrim3DEx1P(unsigned long prim, void* dp, unsigned int num)
 {
+#ifdef TARGET_PC
+    pcNativeSubmitPrepared3D(prim, dp, num, 1);
+    return;
+#endif
+
     unsigned long* p;             
     TIM2_PICTUREHEADER_EX* timp;  
     unsigned int clip_flag;    // needs use   
@@ -2148,6 +2257,11 @@ l_002CC600:
 // 100% matching!
 void Ps2AddPrim3DMod(unsigned long prim, void* dp, unsigned int num)
 {
+#ifdef TARGET_PC
+    pcNativeSubmitPrepared3D(prim, dp, num, 1);
+    return;
+#endif
+
     unsigned long* p;             
     unsigned int clip_flag;      
     unsigned int st_clip_flag;    
@@ -3708,6 +3822,11 @@ void Ps2Vu1ProgSend(unsigned int prog_no)
 // 100% matching!
 void Ps2AddPrim3DExI(unsigned long prim, void* dp, unsigned int num)
 {
+#ifdef TARGET_PC
+    pcNativeSubmitPrepared3D(prim, dp, num, 1);
+    return;
+#endif
+
     unsigned long* p;                
     TIM2_PICTUREHEADER_EX* timp;      
     unsigned int clip_flag;        

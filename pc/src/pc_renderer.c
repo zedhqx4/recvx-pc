@@ -15,6 +15,7 @@ typedef struct {
     float x, y, z;
     float r, g, b, a;
     float u, v;
+    float q;
     float fog;
 } NativeGpuVertex;
 
@@ -44,7 +45,7 @@ static GLuint vertex_buffer;
 static GLuint program;
 static GLint u_target, u_projection, u_aspect, u_offset, u_near, u_far;
 static GLint u_textured, u_texture, u_fog_enabled, u_fog_color, u_alpha_test, u_alpha_ref;
-static GLint u_screen_space, u_texture_size, u_texture_function, u_texture_alpha;
+static GLint u_screen_space, u_texture_size, u_texture_function, u_texture_alpha, u_texture_perspective;
 static int output_width = 640;
 static int output_height = 480;
 static int render_width = 640;
@@ -68,32 +69,32 @@ static const char* vertex_shader =
     "layout(location=1) in vec4 aColor;\n"
     "layout(location=2) in vec2 aTexCoord;\n"
     "layout(location=3) in float aFog;\n"
+    "layout(location=4) in float aQ;\n"
     "uniform vec2 uTarget; uniform float uProjection; uniform vec2 uAspect; uniform vec2 uOffset;\n"
     "uniform float uNear; uniform float uFar; uniform int uScreenSpace;\n"
-    "out vec4 vColor; out vec2 vTexCoord; out float vFog;\n"
+    "out vec4 vColor; out vec2 vTexCoord; out float vFog; out float vQ;\n"
     "void main(){\n"
-    "  vColor=aColor; vTexCoord=aTexCoord; vFog=aFog;\n"
+    "  vColor=aColor; vTexCoord=aTexCoord; vFog=aFog; vQ=aQ;\n"
     "  if(uScreenSpace!=0){ vec2 n=(aViewPosition.xy/uTarget)*2.0-1.0;\n"
     "    gl_Position=vec4(n,aViewPosition.z*2.0-1.0,1.0); return; }\n"
-    "  if(aViewPosition.z<=uNear){ gl_Position=vec4(2.0,2.0,2.0,1.0); return; }\n"
-    "  float z=aViewPosition.z;\n"
+    "  float z=max(aViewPosition.z,0.00001);\n"
     "  vec2 s=vec2(aViewPosition.x*uProjection*uAspect.x/z, aViewPosition.y*uProjection*uAspect.y/z)+uOffset;\n"
     "  vec2 n=(s/uTarget)*2.0-1.0;\n"
-    "  float depth=clamp((uFar/(uFar-uNear))-((uFar*uNear)/(uFar-uNear))/z,0.0,1.0);\n"
+    "  float depth=(uFar/(uFar-uNear))-((uFar*uNear)/(uFar-uNear))/z;\n"
     "  gl_Position=vec4(n*z,(depth*2.0-1.0)*z,z);\n"
     "}\n";
 
 static const char* fragment_shader =
     "#version 330 core\n"
-    "in vec4 vColor; in vec2 vTexCoord; in float vFog;\n"
+    "in vec4 vColor; in vec2 vTexCoord; in float vFog; in float vQ;\n"
     "uniform sampler2D uTexture; uniform int uTextured; uniform int uFogEnabled;\n"
-    "uniform vec3 uFogColor; uniform int uAlphaTest; uniform float uAlphaRef; uniform vec2 uTextureSize; uniform int uTextureFunction, uTextureAlpha;\n"
+    "uniform vec3 uFogColor; uniform int uAlphaTest; uniform float uAlphaRef; uniform vec2 uTextureSize; uniform int uTextureFunction, uTextureAlpha, uTexturePerspective, uScreenSpace;\n"
     "out vec4 oColor;\n"
-    "void main(){ vec4 c=vColor; if(uTextured!=0){ vec4 t=texture(uTexture,vTexCoord/uTextureSize);\n"
-    "    if(uTextureFunction==0){ c.rgb=t.rgb*c.rgb*2.0; if(uTextureAlpha!=0)c.a=t.a*c.a*2.0; }\n"
-    "    else if(uTextureFunction==1){ c.rgb=t.rgb; if(uTextureAlpha!=0)c.a=t.a; }\n"
-    "    else if(uTextureFunction==2){ c.rgb=clamp(t.rgb*c.rgb*2.0+vec3(c.a),0.0,1.0); if(uTextureAlpha!=0)c.a=clamp(t.a+c.a,0.0,1.0); }\n"
-    "    else { c.rgb=clamp(t.rgb*c.rgb*2.0+vec3(c.a),0.0,1.0); if(uTextureAlpha!=0)c.a=t.a; } }\n"
+    "void main(){ vec4 c=vColor; if(uTextured!=0){ vec2 uv=vTexCoord; if(uScreenSpace!=0 && uTexturePerspective!=0)uv/=max(vQ,0.000001); vec4 t=texture(uTexture,uv/uTextureSize);\n"
+    "    if(uTextureFunction==0){ c.rgb=t.rgb*c.rgb*1.9921875; if(uTextureAlpha!=0)c.a=t.a*c.a*1.9921875; }\n"
+    "    else if(uTextureFunction==1){ c.rgb=t.rgb; if(uTextureAlpha!=0)c.a=t.a*1.9921875; }\n"
+    "    else if(uTextureFunction==2){ c.rgb=clamp(t.rgb*c.rgb*1.9921875+vec3(c.a*0.5019608),0.0,1.0); if(uTextureAlpha!=0)c.a=clamp(t.a*1.9921875+c.a,0.0,1.0); }\n"
+    "    else { c.rgb=clamp(t.rgb*c.rgb*1.9921875+vec3(c.a*0.5019608),0.0,1.0); if(uTextureAlpha!=0)c.a=t.a*1.9921875; } }\n"
     "  if(uAlphaTest!=0 && c.a<uAlphaRef)discard;\n"
     "  if(uFogEnabled!=0)c.rgb=mix(uFogColor,c.rgb,clamp(vFog,0.0,1.0));\n"
     "  oColor=c; }\n";
@@ -216,6 +217,7 @@ int pcRendererInit(int width, int height)
     u_texture_size = glGetUniformLocation(program, "uTextureSize");
     u_texture_function = glGetUniformLocation(program, "uTextureFunction");
     u_texture_alpha = glGetUniformLocation(program, "uTextureAlpha");
+    u_texture_perspective = glGetUniformLocation(program, "uTexturePerspective");
 
     glGenVertexArrays(1, &vertex_array);
     glBindVertexArray(vertex_array);
@@ -225,10 +227,12 @@ int pcRendererInit(int width, int height)
     glVertexAttribPointer(1, 4, GL_FLOAT, GL_FALSE, sizeof(NativeGpuVertex), (void*)offsetof(NativeGpuVertex, r));
     glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, sizeof(NativeGpuVertex), (void*)offsetof(NativeGpuVertex, u));
     glVertexAttribPointer(3, 1, GL_FLOAT, GL_FALSE, sizeof(NativeGpuVertex), (void*)offsetof(NativeGpuVertex, fog));
+    glVertexAttribPointer(4, 1, GL_FLOAT, GL_FALSE, sizeof(NativeGpuVertex), (void*)offsetof(NativeGpuVertex, q));
     glEnableVertexAttribArray(0);
     glEnableVertexAttribArray(1);
     glEnableVertexAttribArray(2);
     glEnableVertexAttribArray(3);
+    glEnableVertexAttribArray(4);
     glBindVertexArray(0);
 
     if (!create_targets(width, height)) return 0;
@@ -262,6 +266,25 @@ void pcRendererBeginFrame(void)
     glClearColor(clear_color[0], clear_color[1], clear_color[2], clear_color[3]);
     glClearDepth(1.0);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+}
+
+float pcRendererDepthFromViewZ(float z)
+{
+    float depth;
+    if (z <= near_clip) return 0.0f;
+    if (z >= far_clip) return 1.0f;
+    depth = (far_clip / (far_clip - near_clip)) -
+            ((far_clip * near_clip) / (far_clip - near_clip)) / z;
+    return depth < 0.0f ? 0.0f : depth > 1.0f ? 1.0f : depth;
+}
+
+float pcRendererDepthFromReciprocalZ(float reciprocal_z)
+{
+    float depth;
+    if (reciprocal_z <= 0.0f) return 1.0f;
+    depth = (far_clip / (far_clip - near_clip)) -
+            ((far_clip * near_clip) / (far_clip - near_clip)) * reciprocal_z;
+    return depth < 0.0f ? 0.0f : depth > 1.0f ? 1.0f : depth;
 }
 
 void pcRendererSetProjection(float projection, float aw, float ah,
@@ -361,6 +384,7 @@ static void apply_state(const PcNativeDrawState* st)
                 st->texture_height > 0.0f ? st->texture_height : 1.0f);
     glUniform1i(u_texture_function, st->texture_function);
     glUniform1i(u_texture_alpha, st->texture_alpha != 0);
+    glUniform1i(u_texture_perspective, st->texture_perspective != 0);
 
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, st->texture);
@@ -386,6 +410,7 @@ static void draw_immediate(const PcNativeVertex* vertices, int count, const PcNa
         upload[i].a = vertices[i].a;
         upload[i].u = vertices[i].u;
         upload[i].v = vertices[i].v;
+        upload[i].q = vertices[i].q;
         upload[i].fog = vertices[i].fog;
     }
     apply_state(state);

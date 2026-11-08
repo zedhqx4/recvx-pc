@@ -8,6 +8,7 @@ typedef struct {
     float x, y, z;             /* view-space position; z is positive in front of the camera */
     float r, g, b, a;          /* linear vertex color, 0..1 */
     float u, v;                /* source texture coordinates, in texels */
+    float q;                   /* source Q for screen-space perspective interpolation */
     float fog;                 /* fog visibility, 0..1 */
 } PcNativeVertex;
 
@@ -15,6 +16,7 @@ typedef struct {
     unsigned int texture;
     float texture_width, texture_height;
     int texture_function, texture_alpha;
+    int texture_perspective;
     int textured;
     int blend;
     int depth_test;
@@ -30,6 +32,8 @@ int pcRendererInit(int width, int height);
 void pcRendererShutdown(void);
 void pcRendererBeginFrame(void);
 void pcRendererPresent(void);
+float pcRendererDepthFromViewZ(float view_z);
+float pcRendererDepthFromReciprocalZ(float reciprocal_z);
 void pcRendererSetProjection(float projection, float aspect_w, float aspect_h,
                              float offset_x, float offset_y, float near_clip, float far_clip);
 void pcRendererSetRenderScale(float scale_x, float scale_y);
