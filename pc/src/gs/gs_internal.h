@@ -61,6 +61,7 @@ extern unsigned char gsVram[GS_VRAM_SIZE];
 extern unsigned int gsPageGen[GS_PAGES];
 
 void gsMemInit(void);
+int gsMemDecodeTim2Indices(const unsigned char* src, int is_t4, int p32, int w, int h, int t_bw, unsigned char* out);
 unsigned int gsMemRead(int psm, unsigned int bp, unsigned int bw, unsigned int x, unsigned int y);
 void gsMemWrite(int psm, unsigned int bp, unsigned int bw, unsigned int x, unsigned int y, unsigned int v);
 int  gsPsmBits(int psm);

@@ -789,3 +789,77 @@ void gsMemReadImage(const GsRegs* r, unsigned char* out)
         }
     }
 }
+
+
+/* ---- native TIM2 index decode (PC port) -------------------------------------------------------
+ * Linear 8-bit index plane of a TIM2 image, computed from the file bytes without touching gsVram.
+ * Mirrors what the game does today (Send_Tim2_dataEx) followed by gsDecodeIndices:
+ *  - p32 == 0: the bytes are the raster image and are transferred as PSMT8 / PSMT4 directly;
+ *  - p32 != 0 (both sides > 128): the bytes are already in GS block order and are transferred
+ *    as a PSMCT32 rectangle of (w/2) x (h/2) (8-bit) or (w/2) x (h/4) (4-bit) pixels, then the
+ *    GS reads them back as PSMT8 / PSMT4 with buffer width t_bw. A private buffer plays the role
+ *    of GS memory, so nothing shared is written and nothing can go stale.
+ * Returns 1 on success, 0 when the arguments are not supported. */
+static unsigned char native_scratch[GS_VRAM_SIZE];
+
+int gsMemDecodeTim2Indices(const unsigned char* src, int is_t4, int p32, int w, int h, int t_bw, unsigned char* out)
+{
+    int x, y;
+
+    if (!src || !out || w <= 0 || h <= 0)
+        return 0;
+
+    if (!p32)
+    {
+        for (y = 0; y < h; y++)
+        {
+            for (x = 0; x < w; x++)
+            {
+                if (is_t4)
+                {
+                    unsigned int n = (unsigned int)y * (unsigned int)w + (unsigned int)x;
+                    out[y * w + x] = (unsigned char)((src[n >> 1] >> ((n & 1) * 4)) & 15);
+                }
+                else
+                {
+                    out[y * w + x] = src[y * w + x];
+                }
+            }
+        }
+        return 1;
+    }
+
+    {
+        int rrw = w / 2;
+        int rrh = is_t4 ? h / 4 : h / 2;
+        unsigned int bw_ct = (unsigned int)(w / 128);
+        const unsigned int* words = (const unsigned int*)src;
+
+        if (bw_ct == 0 || rrh <= 0 || t_bw <= 0 || (w & 127) || (h & 63))
+            return 0;
+
+        memset(native_scratch, 0, sizeof native_scratch);
+
+        for (y = 0; y < rrh; y++)
+            for (x = 0; x < rrw; x++)
+                *(unsigned int*)&native_scratch[addr32(0, bw_ct, (unsigned int)x, (unsigned int)y, blockTable32)] =
+                    words[y * rrw + x];
+
+        for (y = 0; y < h; y++)
+        {
+            for (x = 0; x < w; x++)
+            {
+                if (is_t4)
+                {
+                    unsigned int a = addr4(0, (unsigned int)t_bw, (unsigned int)x, (unsigned int)y);
+                    out[y * w + x] = (unsigned char)((native_scratch[a >> 1] >> ((a & 1) * 4)) & 15);
+                }
+                else
+                {
+                    out[y * w + x] = native_scratch[addr8(0, (unsigned int)t_bw, (unsigned int)x, (unsigned int)y)];
+                }
+            }
+        }
+    }
+    return 1;
+}

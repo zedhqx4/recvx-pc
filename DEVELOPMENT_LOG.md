@@ -307,3 +307,9 @@ Mechanism found by code reading + host test: depth-sorted draws go through `Ps2D
 Host test (`gs_mem.c` writes each pixel, compares pages touched vs pages hashed): 140 cases, 92 left pages uncovered before the fix, 0 after. The fix (+1 page row/column when `tbp & 31`) was already on `review/claude-opengl-4.3` as CGL-009 and is now ported here.
 
 Not verified: that this is what the user saw. The game build is not compiled here; only `gs_gl.c` was syntax-checked.
+
+### Claude-alpha: native TIM2 decode (GS-less textures, slice 1a) (2026-11-08)
+
+Direction (user): scene textures decoded once into native GPU textures, no shared emulated VRAM that gets rewritten per draw. First piece: `gsMemDecodeTim2Indices()` (gs_mem.c) produces the linear 8-bit index plane of a TIM2 straight from its bytes, using a private buffer (raw images are copied/unpacked, pre-swizzled "P32" images go through the same GS address tables in scratch memory). Host test `pc/tests/gs_tim2_native_decode_test.c` compares it with the real path (LoadToVram-style GIF upload + `gsDecodeIndices`): 24 cases (T8/T4, 16x64 to 1024x256, both branches), 0 mismatches. Not wired into the game yet.
+
+Observation for the next slices: the OT pool path (`Ps2DrawOTagSub`) builds each entry's TEX0 as `p->TEX0` (TBW/PSM/TW/TH captured when the entry was recorded) OR'ed with the pool address. Size and format therefore come from record-time state, not from the texture bound at replay, which can produce a texture of one size drawn with another's dimensions (user report: 256x256 shown where 512x512 was expected). A native texture handle carries its own size, so this class disappears once the OT path binds handles instead of TEX0 fragments.
