@@ -18,9 +18,6 @@ extern int Send_Tim2_dataExClutOnly(void* tim2_top_adr, unsigned long send_image
 #ifdef TARGET_PC
 #include "pc_renderer.h"
 #endif
-#ifdef TARGET_PC
-#include "pc_renderer.h"
-#endif
 
 #ifdef TARGET_PC
 #define PC_TIM2_FINGERPRINT_SLOTS 1024
@@ -3187,9 +3184,9 @@ int Ps2TexLoad(NJS_TEXMEMLIST* addr)
 void Ps2SetFogColor()
 {
 #ifdef TARGET_PC
-    extern unsigned int ulNaFogR, ulNaFogG, ulNaFogB;
+    extern float fNaFogR, fNaFogG, fNaFogB;
     extern unsigned int ulNaFogState;
-    pcRendererSetGlobalFog(ulNaFogState != 0, ulNaFogR / 255.0f, ulNaFogG / 255.0f, ulNaFogB / 255.0f);
+    pcRendererSetGlobalFog(ulNaFogState != 0, fNaFogR, fNaFogG, fNaFogB);
     return;
 #endif
 	D2_SyncTag();

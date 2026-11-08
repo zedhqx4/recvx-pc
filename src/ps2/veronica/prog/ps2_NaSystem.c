@@ -398,6 +398,18 @@ void njColorBlendingModeSys(int s_mode, int d_mode) // this function is not on t
         while (TRUE); 
     }
     
+#ifdef TARGET_PC
+    {
+        int sr = 2, dr = 3, sa = 1, da = 3;
+        if (alpha_value == 0x0000000000000044ULL) { sr=2; dr=3; sa=1; da=3; }
+        else if (alpha_value == 0x0000000000000048ULL) { sr=2; dr=1; sa=1; da=1; }
+        else if (alpha_value == 0x0000000000000046ULL) { sr=0; dr=3; sa=1; da=3; }
+        else if (alpha_value == 0x0000000000000068ULL) { sr=2; dr=1; sa=6; da=1; }
+        else if (alpha_value == 0x0000000000000026ULL || alpha_value == 0x0000000100000026ULL) { sr=1; dr=3; sa=1; da=3; }
+        pcRendererSetBlendFactors(sr, dr, sa, da);
+        return;
+    }
+#endif
     D2_SyncTag(); 
     
     ((u_long*)WORKBASE)[0] = DMAend | 0x4; 
@@ -474,18 +486,7 @@ void	njUserClipping(Int mode ,NJS_POINT2 *p)
 
     np = (unsigned long*)WORKBASE;
     
-#ifdef TARGET_PC
-    {
-        int sr = 2, dr = 3, sa = 1, da = 3;
-        if (alpha_value == 0x0000000000000044ULL) { sr=2; dr=3; sa=1; da=3; }
-        else if (alpha_value == 0x0000000000000048ULL) { sr=2; dr=1; sa=1; da=1; }
-        else if (alpha_value == 0x0000000000000046ULL) { sr=0; dr=3; sa=1; da=3; }
-        else if (alpha_value == 0x0000000000000068ULL) { sr=2; dr=1; sa=6; da=1; }
-        else if (alpha_value == 0x0000000000000026ULL || alpha_value == 0x0000000100000026ULL) { sr=1; dr=3; sa=1; da=3; }
-        pcRendererSetBlendFactors(sr, dr, sa, da);
-        return;
-    }
-#endif
+
     D2_SyncTag(); 
     
     *np++ = DMAend | 0x2; 
