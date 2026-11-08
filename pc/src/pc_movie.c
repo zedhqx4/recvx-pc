@@ -10,13 +10,13 @@
  *
  * Upscaled movies (MOVIE_HD/MV_*.MPG, made by recvx-config.exe's "Upscale movies") are used when
  * present and movies_hd= is not 0 in recvx.ini. Their frames are 4x the originals and do not fit
- * in GS memory: the game still draws its sprite as on the PS2, and the renderer samples the
- * upscaled frame instead (pcGsMovieFrame), the way HD texture packs replace textures.
+ * in GS memory: the game still draws its sprite as on the PS2, and the native renderer samples the upscaled frame directly.
  */
 #include "../../include/ps2/veronica/prog/ps2_MovieFunc.h"
 #include "../../include/ps2/veronica/prog/main.h"
 
 #include "pc_platform.h"
+#include "pc_renderer.h"
 
 extern unsigned int Ps2_vcount;
 
@@ -32,9 +32,6 @@ VoBuf voBuf;
 #define MOVIE_STATE_PLAYING 2
 #define MOVIE_STATE_END     3
 
-/* GS texture identifier used by the movie sprite (TBP 14208) */
-#define MOVIE_TBP 14208
-#define MOVIE_TBW 5
 
 int pcMpegOpen(const char* path);
 void pcMpegClose(void);
@@ -42,10 +39,7 @@ void pcMpegPause(int on);
 void pcMpegSetVolume(int vol);
 int pcMpegUpdate(unsigned char* rgba, int max_bytes, int* w, int* h);
 int pcMpegSize(int* w, int* h);
-void pcGsMovieFrame(unsigned int tbp, const unsigned char* rgba, int w, int h, int scale);
-void gsRendererFlush(void);
 const char* pcCdDataDir(void);
-void gsGifTransfer(const void* data, int qwc);
 
 static int playing;                 /* a converted movie is open */
 static int image_w, image_h, image_new;
@@ -55,15 +49,17 @@ static int image_cap = 512 * 512 * 4;
 #define HD_SCALE 4                  /* upscaled movies are 4x the originals */
 static int hd;                      /* playing an upscaled movie */
 static int hd_w, hd_h;              /* its frame size */
-static int movie_gl_active;         /* the dedicated GL texture currently holds a movie frame */
+static int movie_gl_active;         /* the dedicated native texture currently holds a movie frame */
+static unsigned int movie_texture;
+static int movie_texture_w, movie_texture_h;
 
 void initAll()
 {
-    if (movie_gl_active)
-    {
-        gsRendererFlush();
-        pcGsMovieFrame(0, NULL, 0, 0, 0);
+    if (movie_texture != 0) {
+        pcRendererDeleteTexture(movie_texture);
+        movie_texture = 0;
         movie_gl_active = 0;
+        movie_texture_w = movie_texture_h = 0;
     }
 
     rmi.iMovieState = MOVIE_STATE_PREP;
@@ -197,11 +193,11 @@ void termAll()
         playing = 0;
     }
 
-    if (movie_gl_active)
-    {
-        gsRendererFlush();
-        pcGsMovieFrame(0, NULL, 0, 0, 0);
+    if (movie_texture != 0) {
+        pcRendererDeleteTexture(movie_texture);
+        movie_texture = 0;
         movie_gl_active = 0;
+        movie_texture_w = movie_texture_h = 0;
     }
 
     hd = 0;
@@ -220,63 +216,93 @@ void setImageTag(unsigned int* tags, void* unused)
 
     image_new = 0;
 
-    /* The sprite remains a GS draw, but both original and HD frames are sampled from this
-     * dedicated texture. Avoid the per-frame GIF IMAGE transfer into GS VRAM. */
-    gsRendererFlush();   /* the previous frame's sprite may still be queued */
-
-    if (hd)
-    {
-        pcGsMovieFrame(MOVIE_TBP, image + 16, hd_w, hd_h, HD_SCALE);
-    }
-    else
-    {
-        pcGsMovieFrame(MOVIE_TBP, image + 16, image_w, image_h, 1);
+    /* Movie frames are standalone native OpenGL assets. No GIF IMAGE transfer or GS texture slot. */
+    if (movie_texture != 0) {
+        pcRendererDeleteTexture(movie_texture);
+        movie_texture = 0;
     }
 
+    movie_texture_w = hd ? hd_w : image_w;
+    movie_texture_h = hd ? hd_h : image_h;
+    if (movie_texture_w <= 0 || movie_texture_h <= 0) {
+        movie_gl_active = 0;
+        return;
+    }
+
+    /* Decoder marks alpha 0x80 to match PS2 TEXA; movie presentation is opaque. */
+    {
+        unsigned char* rgba = image + 16;
+        size_t count = (size_t)movie_texture_w * (size_t)movie_texture_h;
+        size_t i;
+        for (i = 0; i < count; i++)
+            rgba[i * 4 + 3] = 255;
+    }
+    movie_texture = pcRendererLoadTextureRGBA(image + 16, movie_texture_w, movie_texture_h, 1);
+    if (movie_texture == 0) {
+        pcLog("movie: native OpenGL texture upload failed (%dx%d)", movie_texture_w, movie_texture_h);
+        movie_gl_active = 0;
+        return;
+    }
     movie_gl_active = 1;
 }
 
 /* the original's sprite: decoded image (TBP 14208) stretched to the movie's display rectangle */
 void vbrank_draw()
 {
-    u_long gif[18];
-    int u, v, x0, x1, y, w, h;
+    PcNativeVertex vertices[6];
+    PcNativeDrawState state;
     float k = pcVideoWideScale();
+    float x0, x1, y0, y1;
+    float uv_scale = hd ? (float)HD_SCALE : 1.0f;
+    float u0, u1, v0, v1;
+    static const unsigned char corner_map[6] = { 0, 1, 2, 0, 2, 3 };
+    unsigned int i;
 
-    if (!playing || (image_w == 0))
-    {
+    if (!playing || !movie_gl_active || movie_texture == 0 || image_w == 0)
         return;
+
+    /* The PS2 code sends positions in 1/16-pixel GS units with XYOFFSET already present. */
+    x0 = (float)(32768 + (int)((27648 - 32768) * k)) / 16.0f - 1728.0f;
+    x1 = (float)(32768 + (int)((27648 + (int)(mdSize.sWidth * 16.0f) - 32768) * k)) / 16.0f - 1728.0f;
+    y0 = (float)(mdSize.sDispY + 1824);
+    y1 = y0 + (float)mdSize.sHeight;
+    y0 -= 1808.0f;
+    y1 -= 1808.0f;
+
+    /* Pixel-center sampling, scaled into the HD source when present. */
+    u0 = 0.5f * uv_scale;
+    v0 = 0.5f * uv_scale;
+    u1 = ((float)image_w - 0.5f) * uv_scale;
+    v1 = ((float)image_h - 0.5f) * uv_scale;
+
+    for (i = 0; i < 6; i++) {
+        unsigned int corner = corner_map[i];
+        PcNativeVertex* v = &vertices[i];
+        if (corner == 0) { v->x=x0; v->y=y0; v->u=u0; v->v=v0; }
+        else if (corner == 1) { v->x=x1; v->y=y0; v->u=u1; v->v=v0; }
+        else if (corner == 2) { v->x=x1; v->y=y1; v->u=u1; v->v=v1; }
+        else { v->x=x0; v->y=y1; v->u=u0; v->v=v1; }
+        v->z = 0.5f;
+        v->r = v->g = v->b = v->a = 1.0f;
+        v->q = 1.0f;
+        v->fog = 1.0f;
     }
 
-    u = (image_w - 1) * 16;
-    v = (image_h - 1) * 16;
-    y = (int)(mdSize.sDispY + 1824) * 16;
-    w = (int)mdSize.sWidth * 16;
-    h = (int)mdSize.sHeight * 16;
-
-    /* widescreen: keep the 4:3 movie at 4:3 in the middle of the stretched frame */
-    x0 = 32768 + (int)((27648 - 32768) * k);
-    x1 = 32768 + (int)((27648 + w - 32768) * k);
-
-    gif[0] = SCE_GIF_SET_TAG(8, SCE_GS_TRUE, SCE_GS_FALSE, 0, SCE_GIF_PACKED, 1);
-    gif[1] = SCE_GIF_PACKED_AD;
-    gif[2] = 0;
-    gif[3] = SCE_GS_TEXFLUSH;
-    gif[4] = SCE_GS_SET_TEX1_1(0, 0, 1, 1, 0, 0, 0);
-    gif[5] = SCE_GS_TEX1_2;
-    gif[6] = SCE_GS_SET_TEX0_2(MOVIE_TBP, MOVIE_TBW, SCE_GS_PSMCT32, 9, 9, 0, SCE_GS_DECAL, 0, SCE_GS_PSMCT32, 0, 0, 0);
-    gif[7] = SCE_GS_TEX0_2;
-    gif[8] = SCE_GS_SET_PRIM(SCE_GS_PRIM_SPRITE, 0, 1, 0, 0, 0, 1, 1, 0);
-    gif[9] = SCE_GS_PRIM;
-    gif[10] = SCE_GS_SET_UV(8, 8);
-    gif[11] = SCE_GS_UV;
-    gif[12] = SCE_GS_SET_XYZ2(x0, y, 0);
-    gif[13] = SCE_GS_XYZ2;
-    gif[14] = SCE_GS_SET_UV(u + 8, v + 8);
-    gif[15] = SCE_GS_UV;
-    gif[16] = SCE_GS_SET_XYZ2(x1, y + h, 0);
-    gif[17] = SCE_GS_XYZ2;
-    gsGifTransfer(gif, 9);
+    memset(&state, 0, sizeof(state));
+    state.texture = movie_texture;
+    state.texture_width = (float)movie_texture_w;
+    state.texture_height = (float)movie_texture_h;
+    state.texture_function = 1; /* TEXF=DECAL */
+    state.texture_alpha = 0;     /* movie RGB replaces framebuffer RGB; vertex alpha remains */
+    state.textured = 1;
+    state.blend = 0;
+    state.depth_test = 0;
+    state.depth_write = 0;
+    state.alpha_test = 0;
+    state.linear_filter = 1;
+    state.screen_space = 1;
+    state.texture_perspective = 0;
+    pcRendererDrawScreenTriangles(vertices, 6, &state);
 }
 
 int sendToIOP(int dst, u_char* src, int size)
