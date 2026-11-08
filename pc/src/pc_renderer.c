@@ -451,9 +451,19 @@ void pcRendererDrawTriangles(const PcNativeVertex* v, int n, const PcNativeDrawS
     draw(v, n, s, GL_TRIANGLES);
 }
 
+void pcRendererDrawPoints(const PcNativeVertex* v, int n, const PcNativeDrawState* s)
+{
+    draw(v, n, s, GL_POINTS);
+}
+
 void pcRendererDrawLines(const PcNativeVertex* v, int n, const PcNativeDrawState* s)
 {
     draw(v, n, s, GL_LINES);
+}
+
+void pcRendererDrawLineStrip(const PcNativeVertex* v, int n, const PcNativeDrawState* s)
+{
+    draw(v, n, s, GL_LINE_STRIP);
 }
 
 void pcRendererDrawScreenTriangles(const PcNativeVertex* v, int n, const PcNativeDrawState* state)

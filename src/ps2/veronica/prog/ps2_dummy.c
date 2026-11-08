@@ -1337,6 +1337,136 @@ void Ps2AddPrim(unsigned long prim, void* dp, unsigned int num, unsigned int cli
         }
     }
 #endif
+
+#ifdef TARGET_PC
+    /* Native 2D path: consume Ninja's screen-space vertices directly. No VU1 packet,
+       GIF tag, scratchpad DMA, GS register write or GS ordering-table submission. */
+    if (clip_3d_on == 0)
+    {
+        PcNativeVertex* vertices;
+        PcNativeVertex sprite[6];
+        PcNativeDrawState state;
+        unsigned int topology = (unsigned int)((prim >> 47) & 7u);
+        unsigned int i;
+        int textured = (prim & 0x8000000000000ULL) != 0;
+        int transparent = (prim & 0x20000000000000ULL) != 0;
+        int use_uv = (prim & 0x80000000000000ULL) != 0;
+        int count = (int)num;
+        int owned = 0;
+        float texture_width = 1.0f, texture_height = 1.0f;
+
+        if (count < 1 || count > 16384)
+            return;
+        if (textured && (Ps2_now_tex == NULL))
+            return;
+
+        if ((topology == 6u) && (count >= 2))
+        {
+            const float* a = (const float*)dp;
+            const float* b = a + 12;
+            float x0 = a[8], y0 = a[9], x1 = b[8], y1 = b[9];
+            float u0 = a[0], v0 = a[1], u1 = b[0], v1 = b[1];
+            const float* color = b + 4;
+
+            if (wide_2d < 1.0f) {
+                x0 = 2048.0f + (x0 - 2048.0f) * wide_2d;
+                x1 = 2048.0f + (x1 - 2048.0f) * wide_2d;
+            }
+            memset(sprite, 0, sizeof(sprite));
+            for (i = 0; i < 6; i++) {
+                static const unsigned char corner_map[6] = { 0, 1, 2, 0, 2, 3 };
+                unsigned int corner = corner_map[i];
+                float x, y, u, v;
+                if (corner == 0) { x=x0; y=y0; u=u0; v=v0; }
+                else if (corner == 1) { x=x1; y=y0; u=u1; v=v0; }
+                else if (corner == 2) { x=x1; y=y1; u=u1; v=v1; }
+                else { x=x0; y=y1; u=u0; v=v1; }
+                sprite[i].x = x - 1728.0f;
+                sprite[i].y = y - 1808.0f;
+                sprite[i].z = 0.5f;
+                sprite[i].r = fminf(fmaxf(color[0] / 128.0f, 0.0f), 1.0f);
+                sprite[i].g = fminf(fmaxf(color[1] / 128.0f, 0.0f), 1.0f);
+                sprite[i].b = fminf(fmaxf(color[2] / 128.0f, 0.0f), 1.0f);
+                sprite[i].a = fminf(fmaxf(color[3] / 128.0f, 0.0f), 1.0f);
+                sprite[i].u = u;
+                sprite[i].v = v;
+                sprite[i].fog = 1.0f;
+            }
+            vertices = sprite;
+            count = 6;
+            topology = 3u;
+        }
+        else
+        {
+            const float* source = (const float*)dp;
+            vertices = (PcNativeVertex*)malloc((size_t)count * sizeof(*vertices));
+            if (vertices == NULL)
+                return;
+            owned = 1;
+
+            for (i = 0; i < (unsigned int)count; i++, source += 12) {
+                float x = source[8];
+                float y = source[9];
+                if (wide_2d < 1.0f)
+                    x = 2048.0f + (x - 2048.0f) * wide_2d;
+                vertices[i].x = x - 1728.0f;
+                vertices[i].y = y - 1808.0f;
+                vertices[i].z = 0.5f;
+                vertices[i].r = fminf(fmaxf(source[4] / 128.0f, 0.0f), 1.0f);
+                vertices[i].g = fminf(fmaxf(source[5] / 128.0f, 0.0f), 1.0f);
+                vertices[i].b = fminf(fmaxf(source[6] / 128.0f, 0.0f), 1.0f);
+                vertices[i].a = fminf(fmaxf(source[7] / 128.0f, 0.0f), 1.0f);
+                vertices[i].u = use_uv ? source[0] : source[0];
+                vertices[i].v = use_uv ? source[1] : source[1];
+                vertices[i].fog = 1.0f;
+            }
+        }
+
+        memset(&state, 0, sizeof(state));
+        state.texture = pcRendererCurrentTexture();
+        pcRendererCurrentTextureSize(&texture_width, &texture_height);
+        state.texture_width = texture_width;
+        state.texture_height = texture_height;
+        pcRendererCurrentTextureCombine(&state.texture_function, &state.texture_alpha);
+        state.textured = textured && (state.texture != 0);
+        state.blend = transparent;
+        state.depth_test = 0;
+        state.depth_write = 0;
+        state.alpha_test = 1;
+        state.alpha_ref = 0.0f;
+        state.linear_filter = 1;
+        state.screen_space = 1;
+        state.cull_backfaces = 0;
+
+        switch (topology) {
+        case 0: pcRendererDrawPoints(vertices, count, &state); break;
+        case 1: pcRendererDrawLines(vertices, count, &state); break;
+        case 2: pcRendererDrawLineStrip(vertices, count, &state); break;
+        case 3: pcRendererDrawTriangles(vertices, count, &state); break;
+        case 4: pcRendererDrawTriangleStrip(vertices, count, &state); break;
+        case 5:
+            if (count >= 3) {
+                PcNativeVertex* fan = (PcNativeVertex*)malloc((size_t)(count - 2) * 3u * sizeof(*fan));
+                if (fan != NULL) {
+                    unsigned int t, n = 0;
+                    for (t = 1; t + 1 < (unsigned int)count; t++) {
+                        fan[n++] = vertices[0]; fan[n++] = vertices[t]; fan[n++] = vertices[t + 1];
+                    }
+                    pcRendererDrawTriangles(fan, (int)n, &state);
+                    free(fan);
+                }
+            }
+            break;
+        default:
+            pcRendererDrawTriangles(vertices, count, &state);
+            break;
+        }
+
+        if (owned)
+            free(vertices);
+        return;
+    }
+#endif
     
     p = (unsigned long*)WORKBASE; 
     
