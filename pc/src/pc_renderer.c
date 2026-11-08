@@ -81,11 +81,11 @@ static const char* vertex_shader =
     "out vec4 vColor; out vec2 vTexCoord; out float vFog; out float vQ;\n"
     "void main(){\n"
     "  vColor=aColor; vTexCoord=aTexCoord; vFog=aFog; vQ=aQ;\n"
-    "  if(uScreenSpace!=0){ vec2 n=(aViewPosition.xy/uTarget)*2.0-1.0;\n"
+    "  if(uScreenSpace!=0){ vec2 n=vec2(aViewPosition.x/uTarget.x*2.0-1.0, 1.0-aViewPosition.y/uTarget.y*2.0);\n"
     "    gl_Position=vec4(n,aViewPosition.z*2.0-1.0,1.0); return; }\n"
     "  float z=max(aViewPosition.z,0.00001);\n"
     "  vec2 s=vec2(aViewPosition.x*uProjection*uAspect.x/z, aViewPosition.y*uProjection*uAspect.y/z)+uOffset;\n"
-    "  vec2 n=(s/uTarget)*2.0-1.0;\n"
+    "  vec2 n=vec2(s.x/uTarget.x*2.0-1.0, 1.0-s.y/uTarget.y*2.0);\n"
     "  float depth=(uFar/(uFar-uNear))-((uFar*uNear)/(uFar-uNear))/z;\n"
     "  gl_Position=vec4(n*z,(depth*2.0-1.0)*z,z);\n"
     "}\n";
@@ -100,7 +100,8 @@ static const char* fragment_shader =
     "    if(uTextureFunction==0){ c.rgb=t.rgb*c.rgb*1.9921875; if(uTextureAlpha!=0)c.a=t.a*c.a*1.9921875; }\n"
     "    else if(uTextureFunction==1){ c.rgb=t.rgb; if(uTextureAlpha!=0)c.a=t.a*1.9921875; }\n"
     "    else if(uTextureFunction==2){ c.rgb=clamp(t.rgb*c.rgb*1.9921875+vec3(c.a*0.5019608),0.0,1.0); if(uTextureAlpha!=0)c.a=clamp(t.a*1.9921875+c.a,0.0,1.0); }\n"
-    "    else { c.rgb=clamp(t.rgb*c.rgb*1.9921875+vec3(c.a*0.5019608),0.0,1.0); if(uTextureAlpha!=0)c.a=t.a*1.9921875; } }\n"
+    "    else if(uTextureFunction==3){ c.rgb=clamp(t.rgb*c.rgb*1.9921875+vec3(c.a*0.5019608),0.0,1.0); if(uTextureAlpha!=0)c.a=t.a*1.9921875; }\n"
+    "    else { c=t; } }\n"
     "  if(uAlphaTest!=0 && c.a<uAlphaRef)discard;\n"
     "  if(uFogEnabled!=0)c.rgb=mix(uFogColor,c.rgb,clamp(vFog,0.0,1.0));\n"
     "  oColor=c; }\n";
@@ -673,9 +674,16 @@ void pcRendererPresent(void)
         PcNativeVertex v[6];
         PcNativeDrawState state;
         int image_index;
+        int saved_scissor = scissor_enabled;
+        int saved_scissor_rect[4] = { scissor_rect[0], scissor_rect[1], scissor_rect[2], scissor_rect[3] };
+        int saved_depth_test = depth_override_test;
+        int saved_depth_write = depth_override_write;
 
         glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
         glViewport(0, 0, render_width, render_height);
+        scissor_enabled = 0;
+        depth_override_test = -1;
+        depth_override_write = -1;
 
         for (image_index = 0; image_index < 2; image_index++) {
             int transparent = (image_index == 1);
@@ -715,7 +723,8 @@ void pcRendererPresent(void)
             state.texture = *texture;
             state.texture_width = (float)iw;
             state.texture_height = (float)ih;
-            state.texture_function = 1;
+            state.texture_function = transparent ? 4 : 1;
+            state.texture_alpha = transparent;
             state.textured = 1;
             state.blend = transparent;
             state.premultiplied_alpha = transparent;
@@ -727,6 +736,13 @@ void pcRendererPresent(void)
             pcRendererDrawScreenTriangles(v, 6, &state);
         }
         pcRendererFlushTransparent();
+        scissor_enabled = saved_scissor;
+        scissor_rect[0] = saved_scissor_rect[0];
+        scissor_rect[1] = saved_scissor_rect[1];
+        scissor_rect[2] = saved_scissor_rect[2];
+        scissor_rect[3] = saved_scissor_rect[3];
+        depth_override_test = saved_depth_test;
+        depth_override_write = saved_depth_write;
     }
 
     SDL_Window* window;
