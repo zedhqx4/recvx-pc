@@ -1,0 +1,46 @@
+/* Native OpenGL renderer interface. No PS2 command streams or emulated GPU state. */
+#pragma once
+
+#include <stdint.h>
+#include <stddef.h>
+
+typedef struct {
+    float x, y, z;             /* view-space position; z is positive in front of the camera */
+    float r, g, b, a;          /* linear vertex color, 0..1 */
+    float u, v;                /* source texture coordinates, in texels */
+    float fog;                 /* fog visibility, 0..1 */
+} PcNativeVertex;
+
+typedef struct {
+    unsigned int texture;
+    int textured;
+    int blend;
+    int depth_test;
+    int depth_write;
+    int alpha_test;
+    float alpha_ref;
+    int linear_filter;
+    int screen_space;
+    int cull_backfaces;
+} PcNativeDrawState;
+
+int pcRendererInit(int width, int height);
+void pcRendererShutdown(void);
+void pcRendererBeginFrame(void);
+void pcRendererPresent(void);
+void pcRendererSetProjection(float projection, float aspect_w, float aspect_h,
+                             float offset_x, float offset_y, float near_clip, float far_clip);
+void pcRendererSetRenderScale(float scale_x, float scale_y);
+void pcRendererSetClearColor(float r, float g, float b, float a);
+void pcRendererSetScissor(int enabled, int x, int y, int width, int height);
+void pcRendererSetGlobalFog(int enabled, float r, float g, float b);
+void pcRendererSetBlendFactors(int src_rgb, int dst_rgb, int src_alpha, int dst_alpha);
+void pcRendererDrawTriangleStrip(const PcNativeVertex* vertices, int count, const PcNativeDrawState* state);
+void pcRendererDrawTriangles(const PcNativeVertex* vertices, int count, const PcNativeDrawState* state);
+void pcRendererDrawLines(const PcNativeVertex* vertices, int count, const PcNativeDrawState* state);
+void pcRendererDrawScreenTriangles(const PcNativeVertex* vertices, int count, const PcNativeDrawState* state);
+void pcRendererFlushTransparent(void);
+unsigned int pcRendererLoadTextureRGBA(const unsigned char* rgba, int width, int height, int linear);
+void pcRendererDeleteTexture(unsigned int texture);
+void pcRendererBindTexture(unsigned int texture);
+int pcRendererGetOutputSize(int* width, int* height);

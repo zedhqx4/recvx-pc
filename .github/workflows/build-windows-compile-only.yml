@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - OpenGl-3.3
+      - render-nativo
     paths:
       - 'pc/src/**'
       - 'pc/include/**'
