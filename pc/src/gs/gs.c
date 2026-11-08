@@ -8,6 +8,7 @@
 #include <string.h>
 
 #include "gs_internal.h"
+#include "gs_native.h"
 #include "../../include/pc_platform.h"
 #include "../../include/pc_texture_cache.h"
 #include "../pc_os.h"
@@ -93,6 +94,30 @@ static void current_state(GsDrawState* st)
     st->texture_asset_id = gsTextureAssetId[c];
     st->texture_asset_content_hash = gsTextureAssetContentHash[c];
     st->texture_asset_valid = gsTextureAssetValid[c];
+
+    /* Native OT-pool binding: the plane bound to this TBP carries its own identity and geometry,
+     * so the image never has to be in (or be decoded from) emulated VRAM, and a width/height or
+     * format captured at record time cannot disagree with the texture that is really bound. */
+    if (!st->texture_asset_valid && st->tme && gsNativeEnabled())
+    {
+        unsigned int n_gindex;
+        uint64_t n_hash;
+        int n_psm, n_w, n_h, n_tbw;
+
+        if (gsNativeTbpLookup((unsigned int)GSF(st->tex0, 0, 14), &n_gindex, &n_hash, &n_psm, &n_w, &n_h, &n_tbw))
+        {
+            u64 t = st->tex0;
+            int tw = 0, th = 0;
+            while ((1 << tw) < n_w) tw++;
+            while ((1 << th) < n_h) th++;
+            t &= ~((0x3FULL << 14) | (0x3FULL << 20) | (0xFULL << 26) | (0xFULL << 30));
+            t |= ((u64)n_tbw << 14) | ((u64)n_psm << 20) | ((u64)tw << 26) | ((u64)th << 30);
+            st->tex0 = t;
+            st->texture_asset_id = n_gindex;
+            st->texture_asset_content_hash = n_hash;
+            st->texture_asset_valid = 1;
+        }
+    }
 }
 
 static unsigned int frameClutLoads;

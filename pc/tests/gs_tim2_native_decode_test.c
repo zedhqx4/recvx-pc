@@ -14,6 +14,7 @@ void pcGameProfileRecordTextureTransfer(double a,unsigned b){(void)a;(void)b;}
 void gsXferDone(unsigned a,unsigned b,unsigned c,unsigned d,unsigned e,unsigned f,unsigned g,int h){(void)a;(void)b;(void)c;(void)d;(void)e;(void)f;(void)g;(void)h;}
 void gsFlushLocalToLocal(unsigned a,unsigned b,unsigned c,unsigned d,unsigned e,unsigned f,unsigned g){(void)a;(void)b;(void)c;(void)d;(void)e;(void)f;(void)g;}
 #include "../src/gs/gs_mem.c"
+#include "../src/gs/gs_native.c"
 
 
 static uint64_t tex0(unsigned tbp,unsigned tbw,unsigned psm,unsigned tw,unsigned th){
@@ -50,7 +51,28 @@ int main(void){
     /* native path */
     int ok=gsMemDecodeTim2Indices(data,t4,p32,w,h,(int)tbw,b);
     cases++;
+    /* HD replacement hashes block bytes: the swizzled plane must equal the real VRAM blocks */
+    { int bx=t4?32:16, by=16;
+      if(w>=bx && h>=by){
+        const unsigned char* img=gsMemSwizzleIndices((int)psm,w,h,(int)tbw,a);
+        int bad=0; for(int yy=0;yy<h;yy+=by) for(int xx=0;xx<w;xx+=bx){
+          int br=gsBlockNumber((int)psm,190*64,tbw,xx,yy), bn=gsBlockNumber((int)psm,0,tbw,xx,yy);
+          if(!img||memcmp(&gsVram[br*256],&img[bn*256],256)) bad++; }
+        if(bad){fails++;printf("SWIZZLE MISMATCH %dx%d %s: %d blocks differ\n",w,h,t4?"T4":"T8",bad);} } }
     if(!ok||memcmp(a,b,(size_t)w*h)){ fails++; size_t bad=0; if(ok) while(a[bad]==b[bad])bad++; printf("MISMATCH %dx%d %s p32=%d ok=%d first diff at %zu\n",w,h,t4?"T4":"T8",p32,ok,bad);}
     free(a);free(b);free(data);
+  }
+  { /* TBP bindings: valid until a real GS write touches the covered pages */
+    unsigned g; uint64_t hsh; int psm,w,h,tbw; unsigned char plane[128*64]; memset(plane,7,sizeof plane);
+    setenv("RECVX_GS_NATIVE","1",1);
+    if(pcGsNativeEnsureTim2Plane(plane,sizeof plane,42,0x1234,0,128,64)!=1){fails++;printf("ensure plane failed\n");}
+    pcGsNativeBindTbp(12160+16,42,0x1234,0,128,64);
+    if(!gsNativeTbpLookup(12160+16,&g,&hsh,&psm,&w,&h,&tbw)||g!=42||w!=128||h!=64||psm!=GS_PSMT8){fails++;printf("bind lookup failed\n");}
+    if(gsNativeTbpLookup(12160,&g,&hsh,&psm,&w,&h,&tbw)){fails++;printf("lookup of unbound TBP succeeded\n");}
+    gsMemWrite(GS_PSMCT32,12160+16,2,5,5,0xFFFFFFFFu);                 /* a real write into the bound pages */
+    if(gsNativeTbpLookup(12160+16,&g,&hsh,&psm,&w,&h,&tbw)){fails++;printf("binding survived a real GS write\n");}
+    pcGsNativeBindTbp(12160+16,42,0x1234,0,128,64); pcGsNativeBindClear();
+    if(gsNativeTbpLookup(12160+16,&g,&hsh,&psm,&w,&h,&tbw)){fails++;printf("binding survived clear\n");}
+    if(pcGsNativeEnsureTim2Plane(plane,10,43,0x9,0,128,64)!=0){fails++;printf("short image accepted\n");}
   }
   printf("tim2 index decode: %d cases, %d mismatches\n",cases,fails); return fails!=0; }

@@ -186,6 +186,24 @@ static int pc_tim2_source_hashes(TIM2_PICTUREHEADER_EX* tim, uint64_t* image_has
 extern void* Ps2_tex_cache_buff[4];
 extern unsigned int Ps2_tex_cache_beflag[4];
 
+/* Native plane for an indexed TIM2 (RECVX_GS_NATIVE=1): decoded once from the TIM2 bytes into the
+ * plane store, keyed by Gindex + content hash. Returns 1 and the image hash when the plane exists. */
+static int pc_native_ensure_plane(TIM2_PICTUREHEADER_EX* tim, uint64_t* image_hash)
+{
+    uint64_t clut_hash;
+    const TIM2_PICTUREHEADER* picture;
+
+    if (!pcGsNativeEnabled() || (tim == NULL) || ((tim->ImageType != 4) && (tim->ImageType != 5)))
+        return 0;
+    if (!pc_tim2_source_hashes(tim, image_hash, &clut_hash))
+        return 0;
+
+    picture = (const TIM2_PICTUREHEADER*)((const unsigned char*)tim + 128);
+    return pcGsNativeEnsureTim2Plane((const unsigned char*)picture + picture->HeaderSize, picture->ImageSize,
+                                     tim->Gindex, *image_hash, tim->ImageType == 4,
+                                     (int)tim->ImageWidth, (int)tim->ImageHeight);
+}
+
 void Ps2PcTextureSourceCacheReset(void)
 {
     unsigned int i;
@@ -2381,6 +2399,9 @@ void Ps2DrawOTag()
     } 
     
     Ps2ZbuffOn();
+#ifdef TARGET_PC
+    pcGsNativeBindClear();
+#endif
     
     Ps2_current_texbreak = 1;
 }
@@ -2414,6 +2435,9 @@ int Ps2DrawOTagSub(int start_no)
     
     tex_addr = 0x2F80; 
     clt_addr = 0x2E44;
+#ifdef TARGET_PC
+    pcGsNativeBindClear();   /* pool layout restarts: previous TBP bindings are void */
+#endif
     
     exit_no = 4096; 
     
@@ -2506,7 +2530,26 @@ int Ps2DrawOTagSub(int start_no)
                     } 
                     else 
                     {
+#ifdef TARGET_PC
+                        {
+                            uint64_t pool_hash = 0;
+
+                            if (pc_native_ensure_plane(timp, &pool_hash))
+                            {
+                                /* palette + metadata only: the image plane is native, nothing is
+                                 * written into the shared pool VRAM */
+                                Send_Tim2_dataExClutOnly(timp, (int)tex_addr, (int)clt_addr);
+                                pcGsNativeBindTbp(tex_addr, timp->Gindex, pool_hash, timp->ImageType == 4,
+                                                  (int)timp->ImageWidth, (int)timp->ImageHeight);
+                            }
+                            else
+                            {
+                                Send_Tim2_dataEx(timp, (int)tex_addr, (int)clt_addr);
+                            }
+                        }
+#else
                         Send_Tim2_dataEx(timp, (int)tex_addr, (int)clt_addr); 
+#endif
                         
                         timp->TpFlag = 1; 
                         
@@ -2928,6 +2971,8 @@ int Ps2TexLoad(NJS_TEXMEMLIST* addr)
         asset_cache_tex0 = SCE_GS_SET_TEX0_1(190 * 64, tbw, psm, tw, th, 1,
                                              SCE_GS_MODULATE, 254 * 64,
                                              SCE_GS_PSMCT32, 0, 0, 2);
+        if (pcGsNativeEnabled())
+            pc_native_ensure_plane(timp, &image_content_hash);   /* no VRAM image needed from here on */
         asset_cache_hit = pcGsTextureAssetCacheContains(
             timp->Gindex, image_content_hash, asset_cache_tex0,
             (int)(1U << tw), (int)(1U << th));
@@ -3213,6 +3258,15 @@ int Ps2CheckTextureAlpha(void* pp)
     }
  
     Ps2PxlconvCheck(pp);
+#ifdef TARGET_PC
+    {
+        /* The TIM2 bytes are final here (alpha fixed, pre-swizzle done): decode the native plane now
+         * so drawing never has to load or decode it. */
+        uint64_t prewarm_hash;
+
+        pc_native_ensure_plane((TIM2_PICTUREHEADER_EX*)pp, &prewarm_hash);
+    }
+#endif
     
     return flag;
 }

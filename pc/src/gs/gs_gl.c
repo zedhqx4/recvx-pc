@@ -1631,12 +1631,17 @@ static GLuint get_texture(unsigned int asset_id, int asset_id_valid, uint64_t co
 
     {
         extern GLuint gsReplaceLookup(u64 tex0, u64 texa);
+        extern GLuint gsReplaceLookupPlane(u64 tex0, u64 texa, const unsigned char* plane);
         GLuint r;
+        const unsigned char* native_plane = native_asset ?
+            gsNativeIndexFind(asset_id, content_hash, (int)GSF(tex0, 20, 6), w, h) : NULL;
 
         double replacement_t0 = diagnostics ? pcOsTime() : 0.0;
 
         pcGsInvalidateTextureBindings();
-        r = gsReplaceLookup(tex0, texa);
+        /* a native texture's image is not in gsVram: hash its plane, never stale VRAM */
+        r = native_asset ? (native_plane ? gsReplaceLookupPlane(tex0, texa, native_plane) : 0) :
+            gsReplaceLookup(tex0, texa);
         if (diagnostics)
         {
             texFrameStats.replacement_seconds += pcOsTime() - replacement_t0;

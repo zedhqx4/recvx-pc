@@ -34,3 +34,15 @@ const unsigned char* gsNativeIndexFind(unsigned int asset_id, uint64_t content_h
 int gsNativeIndexStore(unsigned int asset_id, uint64_t content_hash, int psm, int w, int h, const unsigned char* indices);
 uint64_t gsNativeIdentityGen(unsigned int asset_id, uint64_t content_hash);   /* cache key independent of VRAM pages */
 void gsNativeIndexClear(void);
+
+/* ---- game-facing API (declared for game sources in pc_texture_cache.h) ---- */
+int pcGsNativeEnabled(void);
+/* Decode a TIM2 index image straight from its bytes and keep the plane. image_size is checked. */
+int pcGsNativeEnsureTim2Plane(const unsigned char* image, unsigned int image_size, unsigned int gindex,
+                              uint64_t image_hash, int is_t4, int w, int h);
+/* While the OT texture pool is laid out, tell the renderer which plane lives at which pool TBP. */
+void pcGsNativeBindTbp(unsigned int tbp, unsigned int gindex, uint64_t image_hash, int is_t4, int w, int h);
+void pcGsNativeBindClear(void);
+
+/* Renderer side: plane bound to a TBP, valid only while no real GS write touched its pages. */
+int gsNativeTbpLookup(unsigned int tbp, unsigned int* gindex, uint64_t* image_hash, int* psm, int* w, int* h, int* tbw);

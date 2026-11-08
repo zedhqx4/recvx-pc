@@ -285,7 +285,7 @@ static GLuint load_dds(Replacement* r)
 /* ------------------------------------------------------------------------------------------- */
 /* lookup */
 
-static unsigned long long hash_texture(unsigned int psm, unsigned int tbp, unsigned int tbw, int tw, int th)
+static unsigned long long hash_texture_mem(const unsigned char* mem, unsigned int psm, unsigned int tbp, unsigned int tbw, int tw, int th)
 {
     XXH3_state_t st;
     int bx = (psm == GS_PSMT4) ? 32 : (psm == GS_PSMT8) ? 16 : 8;
@@ -300,15 +300,33 @@ static unsigned long long hash_texture(unsigned int psm, unsigned int tbp, unsig
         {
             int b = gsBlockNumber(psm, tbp, tbw, x, y);
 
-            XXH3_64bits_update(&st, &gsVram[b * 256], 256);
+            XXH3_64bits_update(&st, &mem[b * 256], 256);
         }
     }
 
     return XXH3_64bits_digest(&st);
 }
 
+static unsigned long long hash_texture(unsigned int psm, unsigned int tbp, unsigned int tbw, int tw, int th)
+{
+    return hash_texture_mem(gsVram, psm, tbp, tbw, tw, th);
+}
+
+static GLuint replace_lookup(u64 tex0, u64 texa, const unsigned char* plane);
+
 /* Returns the replacement texture for a texture about to be decoded, or 0. */
 GLuint gsReplaceLookup(u64 tex0, u64 texa)
+{
+    return replace_lookup(tex0, texa, NULL);
+}
+
+/* Same, for a native texture whose image is not in gsVram: hashes the swizzled plane instead. */
+GLuint gsReplaceLookupPlane(u64 tex0, u64 texa, const unsigned char* plane)
+{
+    return replace_lookup(tex0, texa, plane);
+}
+
+static GLuint replace_lookup(u64 tex0, u64 texa, const unsigned char* plane)
 {
     unsigned int psm = GSF(tex0, 20, 6);
     unsigned int tw = GSF(tex0, 26, 4), th = GSF(tex0, 30, 4);
@@ -330,7 +348,20 @@ GLuint gsReplaceLookup(u64 tex0, u64 texa)
     gsReadClut32(tex0, texa, entries, clut);
 
     memset(&key, 0, sizeof(key));
-    key.tex_hash = hash_texture(psm, GSF(tex0, 0, 14), GSF(tex0, 14, 6), 1 << tw, 1 << th);
+    if (plane != NULL)
+    {
+        const unsigned char* img = gsMemSwizzleIndices((int)psm, 1 << tw, 1 << th, (int)GSF(tex0, 14, 6), plane);
+
+        if (img == NULL)
+        {
+            return 0;
+        }
+        key.tex_hash = hash_texture_mem(img, psm, 0, GSF(tex0, 14, 6), 1 << tw, 1 << th);
+    }
+    else
+    {
+        key.tex_hash = hash_texture(psm, GSF(tex0, 0, 14), GSF(tex0, 14, 6), 1 << tw, 1 << th);
+    }
     key.clut_hash = XXH3_64bits(clut, entries * 4);
     key.bits = psm | (tw << 6) | (th << 10);
 

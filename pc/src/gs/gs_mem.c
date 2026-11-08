@@ -863,3 +863,40 @@ int gsMemDecodeTim2Indices(const unsigned char* src, int is_t4, int p32, int w, 
     }
     return 1;
 }
+
+
+/* Swizzle a linear index plane into a private GS-memory image at block 0 and return it. The bytes
+ * of every block of the w x h rectangle equal what a real upload to that rectangle would leave in
+ * gsVram, so content hashes over blocks (HD texture replacement) match without a VRAM write.
+ * Valid until the next call. Returns NULL for unsupported arguments. */
+const unsigned char* gsMemSwizzleIndices(int psm, int w, int h, int bw, const unsigned char* plane)
+{
+    int x, y;
+
+    if (!plane || w <= 0 || h <= 0 || bw <= 0 || ((psm != GS_PSMT8) && (psm != GS_PSMT4)))
+        return NULL;
+
+    memset(native_scratch, 0, sizeof native_scratch);
+
+    for (y = 0; y < h; y++)
+    {
+        for (x = 0; x < w; x++)
+        {
+            unsigned char v = plane[y * w + x];
+
+            if (psm == GS_PSMT8)
+            {
+                native_scratch[addr8(0, (unsigned int)bw, (unsigned int)x, (unsigned int)y)] = v;
+            }
+            else
+            {
+                unsigned int a = addr4(0, (unsigned int)bw, (unsigned int)x, (unsigned int)y);
+
+                native_scratch[a >> 1] = (unsigned char)((native_scratch[a >> 1] & ~(15 << ((a & 1) * 4))) |
+                                                          ((v & 15) << ((a & 1) * 4)));
+            }
+        }
+    }
+
+    return native_scratch;
+}

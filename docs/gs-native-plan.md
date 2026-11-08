@@ -13,3 +13,12 @@ Estado actual: el renderer recibe `GsDrawState` + `GsVertex` (`gsRendererDraw`),
 5. Retirar la dependencia de la VRAM emulada solo donde haya equivalencia demostrada.
 
 Pendiente sin decidir: invalidación cuando el juego sobrescribe un TBP (el registro reemplaza por TBP+PSM; falta definir qué pasa si el GS lo sobrescribe por transferencia o render target).
+
+
+## Estado en Claude-alpha (2026-11-08), con RECVX_GS_NATIVE=1
+- **Paso 1 (carga):** `Ps2CheckTextureAlpha` (los bytes del TIM2 ya son finales) decodifica el plano de índices con `gsMemDecodeTim2Indices` y lo guarda por (Gindex, hash de contenido). Ningún dibujo vuelve a decodificar desde VRAM.
+- **Paso 2 (pool del OT):** `Ps2DrawOTagSub` ya no sube la imagen al pool: sube solo paleta + metadatos (`Send_Tim2_dataExClutOnly`) y registra `pcGsNativeBindTbp(tex_addr, ...)`. `current_state()` del GS sustituye, para ese TBP, la identidad y también TBW/PSM/TW/TH por los del plano real (ya no valen los capturados al registrar el dibujo). El enlace se invalida si una escritura real toca sus páginas, y se limpia al reiniciar el pool y al terminar `Ps2DrawOTag`.
+- `Ps2TexLoad` asegura el plano antes de consultar la caché, así que nunca sube la imagen.
+- Reemplazo HD: el hash se calcula sobre el plano swizzleado (`gsMemSwizzleIndices`), idéntico bloque a bloque a la VRAM real (prueba de host).
+- Sin cambios: paletas (CLUT) siguen por el GS; texturas no indexadas, PictFormat sin hashes válidos y todo lo que no sea TIM2 indexado siguen por la ruta emulada.
+- Pendiente: la identidad global de `Ps2TexLoad` sigue borrándose con cualquier escritura TEX0 posterior (hoy inofensivo porque el plano ya existe, pero un enlace por TBP también ahí lo haría robusto); paletas nativas; sprites/UI/render targets.
