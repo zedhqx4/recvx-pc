@@ -76,6 +76,7 @@ typedef ptrdiff_t GLintptr;
     X(void, glScissor, (GLint x, GLint y, GLsizei w, GLsizei h)) \
     X(void, glEnable, (GLenum cap)) \
     X(void, glDisable, (GLenum cap)) \
+    X(void, glCullFace, (GLenum mode)) \
     X(void, glBlendFuncSeparate, (GLenum sc, GLenum dc, GLenum sa, GLenum da)) \
     X(void, glBlendEquationSeparate, (GLenum c, GLenum a)) \
     X(void, glBlendColor, (GLfloat r, GLfloat g, GLfloat b, GLfloat a)) \
