@@ -62,7 +62,10 @@ def game_sources():
 
 
 def pc_sources():
-    return sorted(glob.glob(os.path.join(ROOT, "pc/src/*.c")) + glob.glob(os.path.join(ROOT, "pc/src/gs/*.c")) + glob.glob(os.path.join(ROOT, "pc/src/vu/*.c")))
+    files = sorted(glob.glob(os.path.join(ROOT, "pc/src/*.c")) + glob.glob(os.path.join(ROOT, "pc/src/vu/*.c")))
+    # The native renderer replaces the complete PC GS interpreter and its self-test.
+    files = [f for f in files if os.path.basename(f) != "pc_gs_selftest.c"]
+    return files
 
 
 # PC platform files that never include game headers: they talk to Windows/SDL and keep the
