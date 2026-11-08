@@ -1,5 +1,8 @@
 #include "../../../ps2/veronica/prog/ps2_NaFog.h"
 #include "../../../ps2/veronica/prog/ps2_dummy.h"
+#ifdef TARGET_PC
+#include "pc_renderer.h"
+#endif
 
 float fNaFogNear;
 float fNaFogFar;
@@ -18,15 +21,21 @@ unsigned int ulNaFogState;
 /* float fNaFogDist; - unused */
 
 // 100% matching! 
-void	njFogEnable()
-{ 
-    ulNaFogState = 1; 
+void njFogEnable()
+{
+    ulNaFogState = 1;
+#ifdef TARGET_PC
+    pcRendererSetGlobalFog(1, fNaFogR, fNaFogG, fNaFogB);
+#endif
 } 
 
 // 100% matching! 
-void	njFogDisable()
-{ 
-    ulNaFogState = 0; 
+void njFogDisable()
+{
+    ulNaFogState = 0;
+#ifdef TARGET_PC
+    pcRendererSetGlobalFog(0, fNaFogR, fNaFogG, fNaFogB);
+#endif
 } 
 
 // 100% matching! 

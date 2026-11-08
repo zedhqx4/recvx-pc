@@ -3186,6 +3186,12 @@ int Ps2TexLoad(NJS_TEXMEMLIST* addr)
 // 100% matching!
 void Ps2SetFogColor()
 {
+#ifdef TARGET_PC
+    extern unsigned int ulNaFogR, ulNaFogG, ulNaFogB;
+    extern unsigned int ulNaFogState;
+    pcRendererSetGlobalFog(ulNaFogState != 0, ulNaFogR / 255.0f, ulNaFogG / 255.0f, ulNaFogB / 255.0f);
+    return;
+#endif
 	D2_SyncTag();
     
     ((u_long*)WORKBASE)[0] = DMAend | 0x2;
@@ -3205,6 +3211,11 @@ void Ps2SetFogColor()
 // 100% matching!
 void Ps2SetFogColorSys(unsigned int r, unsigned int g, unsigned int b)
 {
+#ifdef TARGET_PC
+    extern unsigned int ulNaFogState;
+    pcRendererSetGlobalFog(ulNaFogState != 0, r / 255.0f, g / 255.0f, b / 255.0f);
+    return;
+#endif
     D2_SyncTag();
     
     ((u_long*)WORKBASE)[0] = DMAend | 0x2;
@@ -3424,6 +3435,10 @@ void Ps2InitPS2_GS_SAVE()
 // 100% matching! 
 void Ps2ScreenClear()
 {
+#ifdef TARGET_PC
+    pcRendererClear(0.0f, 0.0f, 0.0f, 1.0f, 1);
+    return;
+#endif
     SyncPath();
 
     ((u_long*)WORKBASE)[0] = DMAend | 0x8; 
@@ -3462,6 +3477,10 @@ void Ps2ScreenClear()
 // 100% matching! 
 void Ps2DispScreenClear()
 {
+#ifdef TARGET_PC
+    pcRendererClear(0.0f, 0.0f, 0.0f, 1.0f, 1);
+    return;
+#endif
     SyncPath();
 
     ((u_long*)WORKBASE)[0] = DMAend | 0x8; 
@@ -3500,6 +3519,10 @@ void Ps2DispScreenClear()
 // 100% matching! 
 void Ps2ZbuffOff()
 {
+#ifdef TARGET_PC
+    pcRendererSetDepthMode(0, 0);
+    return;
+#endif
     D2_SyncTag();
     
     ((u_long*)WORKBASE)[0] = DMAend | 0x2;
@@ -3519,6 +3542,10 @@ void Ps2ZbuffOff()
 // 100% matching!
 void Ps2ZbuffOff2()
 {
+#ifdef TARGET_PC
+    pcRendererSetDepthMode(1, 0);
+    return;
+#endif
 	D2_SyncTag();
     
     ((u_long*)WORKBASE)[0] = DMAend | 0x3;
@@ -3541,6 +3568,10 @@ void Ps2ZbuffOff2()
 // 100% matching! 
 void Ps2ZbuffOn()
 {
+#ifdef TARGET_PC
+    pcRendererSetDepthMode(1, 1);
+    return;
+#endif
     D2_SyncTag();
     
     ((u_long*)WORKBASE)[0] = DMAend | 0x3;

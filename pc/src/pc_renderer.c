@@ -59,6 +59,12 @@ static int global_fog_enabled;
 static float global_fog_color[3];
 static int ready;
 static GLuint current_texture;
+static int depth_override_test = -1;
+static int depth_override_write = -1;
+static GLenum blend_src_rgb = GL_SRC_ALPHA;
+static GLenum blend_dst_rgb = GL_ONE_MINUS_SRC_ALPHA;
+static GLenum blend_src_alpha = GL_ONE;
+static GLenum blend_dst_alpha = GL_ONE_MINUS_SRC_ALPHA;
 static int scissor_enabled;
 static int scissor_rect[4];
 static unsigned long long frame_number;
@@ -315,6 +321,29 @@ void pcRendererSetClearColor(float r, float g, float b, float a)
     clear_color[0] = r; clear_color[1] = g; clear_color[2] = b; clear_color[3] = a;
 }
 
+void pcRendererClear(float r, float g, float b, float a, int clear_depth)
+{
+    GLbitfield mask = GL_COLOR_BUFFER_BIT;
+    if (!ready) return;
+    glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
+    glViewport(0, 0, render_width, render_height);
+    glDisable(GL_SCISSOR_TEST);
+    glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+    glClearColor(r, g, b, a);
+    if (clear_depth) {
+        glClearDepth(1.0);
+        mask |= GL_DEPTH_BUFFER_BIT;
+    }
+    glClear(mask);
+}
+
+void pcRendererSetDepthMode(int depth_test, int depth_write)
+{
+    depth_override_test = depth_test < 0 ? -1 : (depth_test != 0);
+    depth_override_write = depth_write < 0 ? -1 : (depth_write != 0);
+}
+
+
 void pcRendererSetScissor(int enabled, int x, int y, int width, int height)
 {
     scissor_enabled = enabled != 0;
@@ -329,13 +358,18 @@ void pcRendererSetGlobalFog(int enabled, float r, float g, float b)
 
 void pcRendererSetBlendFactors(int sr, int dr, int sa, int da)
 {
-    GLenum map[4] = { GL_ZERO, GL_ONE, GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA };
-    if (sr < 0 || sr > 3) sr = 2;
-    if (dr < 0 || dr > 3) dr = 3;
-    if (sa < 0 || sa > 3) sa = sr;
-    if (da < 0 || da > 3) da = dr;
-    (void)map;
-    /* Per-draw state applies blending. The mapping is stored as the conventional source-alpha path. */
+    static const GLenum map[] = {
+        GL_ZERO, GL_ONE, GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA,
+        GL_DST_ALPHA, GL_ONE_MINUS_DST_ALPHA, GL_CONSTANT_ALPHA, GL_ONE_MINUS_CONSTANT_ALPHA
+    };
+    if (sr < 0 || sr >= (int)(sizeof(map) / sizeof(map[0]))) sr = 2;
+    if (dr < 0 || dr >= (int)(sizeof(map) / sizeof(map[0]))) dr = 3;
+    if (sa < 0 || sa >= (int)(sizeof(map) / sizeof(map[0]))) sa = 1;
+    if (da < 0 || da >= (int)(sizeof(map) / sizeof(map[0]))) da = 3;
+    blend_src_rgb = map[sr];
+    blend_dst_rgb = map[dr];
+    blend_src_alpha = map[sa];
+    blend_dst_alpha = map[da];
 }
 
 static void apply_state(const PcNativeDrawState* st)
@@ -348,12 +382,12 @@ static void apply_state(const PcNativeDrawState* st)
         st = &d;
     }
 
-    if (st->depth_test) glEnable(GL_DEPTH_TEST); else glDisable(GL_DEPTH_TEST);
-    glDepthMask(st->depth_write ? GL_TRUE : GL_FALSE);
+    if ((depth_override_test >= 0 ? depth_override_test : st->depth_test) != 0) glEnable(GL_DEPTH_TEST); else glDisable(GL_DEPTH_TEST);
+    glDepthMask((depth_override_write >= 0 ? depth_override_write : st->depth_write) ? GL_TRUE : GL_FALSE);
     if (st->blend) {
         glEnable(GL_BLEND);
         glBlendEquationSeparate(GL_FUNC_ADD, GL_FUNC_ADD);
-        glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
+        glBlendFuncSeparate(blend_src_rgb, blend_dst_rgb, blend_src_alpha, blend_dst_alpha);
     } else glDisable(GL_BLEND);
     if (st->cull_backfaces) {
         glEnable(GL_CULL_FACE);
@@ -362,8 +396,11 @@ static void apply_state(const PcNativeDrawState* st)
 
     if (scissor_enabled) {
         glEnable(GL_SCISSOR_TEST);
-        glScissor(scissor_rect[0], render_height - scissor_rect[1] - scissor_rect[3],
-                  scissor_rect[2], scissor_rect[3]);
+        int sx = (int)((float)scissor_rect[0] * (float)render_width / (float)output_width + 0.5f);
+        int sy = (int)((float)scissor_rect[1] * (float)render_height / (float)output_height + 0.5f);
+        int sw = (int)((float)scissor_rect[2] * (float)render_width / (float)output_width + 0.5f);
+        int sh = (int)((float)scissor_rect[3] * (float)render_height / (float)output_height + 0.5f);
+        glScissor(sx, render_height - sy - sh, sw, sh);
     } else glDisable(GL_SCISSOR_TEST);
 
     glUseProgram(program);

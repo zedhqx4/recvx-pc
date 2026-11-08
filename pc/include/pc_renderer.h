@@ -38,6 +38,8 @@ void pcRendererSetProjection(float projection, float aspect_w, float aspect_h,
                              float offset_x, float offset_y, float near_clip, float far_clip);
 void pcRendererSetRenderScale(float scale_x, float scale_y);
 void pcRendererSetClearColor(float r, float g, float b, float a);
+void pcRendererClear(float r, float g, float b, float a, int clear_depth);
+void pcRendererSetDepthMode(int depth_test, int depth_write);
 void pcRendererSetScissor(int enabled, int x, int y, int width, int height);
 void pcRendererSetGlobalFog(int enabled, float r, float g, float b);
 void pcRendererSetBlendFactors(int src_rgb, int dst_rgb, int src_alpha, int dst_alpha);

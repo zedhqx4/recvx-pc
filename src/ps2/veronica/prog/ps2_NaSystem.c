@@ -2,6 +2,9 @@
 #include "../../../ps2/veronica/prog/ps2_dummy.h"
 #include "../../../ps2/veronica/prog/ps2_loadtim2.h"
 #include "../../../ps2/veronica/prog/main.h"
+#ifdef TARGET_PC
+#include "pc_renderer.h"
+#endif
 
 
 PS2_NJ_SAVE Ps2_nj_save_current;
@@ -386,6 +389,8 @@ void njColorBlendingModeSys(int s_mode, int d_mode) // this function is not on t
         alpha_value = alpha_tbl[Ps2_gs_save.mode_bk[0]][Ps2_gs_save.mode_bk[1]]; 
     }
     
+
+
     if (alpha_value == ULONG_MAX) 
     { 
         printf("CALL ISHIKAWA ! ALPHA ERROR !!!!!!! MODE %d %d", Ps2_gs_save.mode_bk[0], Ps2_gs_save.mode_bk[1]); 
@@ -441,13 +446,46 @@ void    njSetCheapShadowMode( Int mode )
 
 // 99.95% matching 
 void	njUserClipping(Int mode ,NJS_POINT2 *p)
-{ 
+{
+#ifdef TARGET_PC
+    if (mode == 0) {
+        pcRendererSetScissor(0, 0, 0, 640, 480);
+        return;
+    }
+    if (mode == 2 && p != NULL) {
+        int x0 = (int)(p[0].x + 0.5f);
+        int y0 = (int)(p[0].y + 0.5f);
+        int x1 = (int)(p[1].x + 0.5f);
+        int y1 = (int)(p[1].y + 0.5f);
+        if (x1 < x0) { int t=x0; x0=x1; x1=t; }
+        if (y1 < y0) { int t=y0; y0=y1; y1=t; }
+        if (x0 < 0) x0=0; if (y0 < 0) y0=0;
+        if (x1 > 640) x1=640; if (y1 > 480) y1=480;
+        pcRendererSetScissor(1, x0, y0, x1-x0, y1-y0);
+        return;
+    }
+    pcRendererSetScissor(0, 0, 0, 640, 480);
+    return;
+#endif
+ 
     unsigned long* np; // changed the original var name from the debugging symbols 
     sceVu0FVECTOR posf;
     sceVu0IVECTOR posi;
 
     np = (unsigned long*)WORKBASE;
     
+#ifdef TARGET_PC
+    {
+        int sr = 2, dr = 3, sa = 1, da = 3;
+        if (alpha_value == 0x0000000000000044ULL) { sr=2; dr=3; sa=1; da=3; }
+        else if (alpha_value == 0x0000000000000048ULL) { sr=2; dr=1; sa=1; da=1; }
+        else if (alpha_value == 0x0000000000000046ULL) { sr=0; dr=3; sa=1; da=3; }
+        else if (alpha_value == 0x0000000000000068ULL) { sr=2; dr=1; sa=6; da=1; }
+        else if (alpha_value == 0x0000000000000026ULL || alpha_value == 0x0000000100000026ULL) { sr=1; dr=3; sa=1; da=3; }
+        pcRendererSetBlendFactors(sr, dr, sa, da);
+        return;
+    }
+#endif
     D2_SyncTag(); 
     
     *np++ = DMAend | 0x2; 
