@@ -387,7 +387,10 @@ static void apply_state(const PcNativeDrawState* st)
     if (st->blend) {
         glEnable(GL_BLEND);
         glBlendEquationSeparate(GL_FUNC_ADD, GL_FUNC_ADD);
-        glBlendFuncSeparate(blend_src_rgb, blend_dst_rgb, blend_src_alpha, blend_dst_alpha);
+        if (st->premultiplied_alpha)
+            glBlendFuncSeparate(GL_ONE, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
+        else
+            glBlendFuncSeparate(blend_src_rgb, blend_dst_rgb, blend_src_alpha, blend_dst_alpha);
     } else glDisable(GL_BLEND);
     if (st->cull_backfaces) {
         glEnable(GL_CULL_FACE);
@@ -585,6 +588,33 @@ unsigned int pcRendererLoadTextureRGBA(const unsigned char* rgba, int width, int
     return texture;
 }
 
+int pcRendererUpdateTextureRGBA(unsigned int texture, const unsigned char* rgba, int width, int height)
+{
+    int i;
+    if (!ready || texture == 0 || rgba == NULL || width <= 0 || height <= 0)
+        return 0;
+
+    glBindTexture(GL_TEXTURE_2D, (GLuint)texture);
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+    for (i = 0; i < native_texture_count; i++) {
+        if (native_textures[i].id == (GLuint)texture) {
+            if (native_textures[i].width != width || native_textures[i].height != height) {
+                glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, rgba);
+                native_textures[i].width = width;
+                native_textures[i].height = height;
+            } else {
+                glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, rgba);
+            }
+            if (current_texture == (GLuint)texture) {
+                current_texture_width = (float)width;
+                current_texture_height = (float)height;
+            }
+            return 1;
+        }
+    }
+    return 0;
+}
+
 void pcRendererDeleteTexture(unsigned int texture)
 {
     GLuint t = (GLuint)texture;
@@ -633,6 +663,72 @@ int pcRendererGetOutputSize(int* w, int* h)
 
 void pcRendererPresent(void)
 {
+    /* Native GDI overlays are composed into the same framebuffer before the final blit. */
+    {
+        extern const unsigned char* pcOverlayImage(int height, int* width, int* image_height);
+        extern const unsigned char* pcOverlayBuildImage(int height, int* width, int* image_height);
+        static unsigned int notice_texture, build_texture;
+        const unsigned char* rgba;
+        int iw = 0, ih = 0;
+        PcNativeVertex v[6];
+        PcNativeDrawState state;
+        int image_index;
+
+        glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
+        glViewport(0, 0, render_width, render_height);
+
+        for (image_index = 0; image_index < 2; image_index++) {
+            int transparent = (image_index == 1);
+            unsigned int* texture = transparent ? &build_texture : &notice_texture;
+            rgba = transparent ? pcOverlayBuildImage(14, &iw, &ih) : pcOverlayImage(24, &iw, &ih);
+            if (rgba == NULL || iw <= 0 || ih <= 0)
+                continue;
+            if (*texture == 0) {
+                *texture = pcRendererLoadTextureRGBA(rgba, iw, ih, 1);
+            } else {
+                pcRendererUpdateTextureRGBA(*texture, rgba, iw, ih);
+            }
+            if (*texture == 0)
+                continue;
+
+            {
+                float x0 = transparent ? (float)(output_width - iw - 8) : (float)((output_width - iw) / 2);
+                float y0 = transparent ? (float)(output_height - ih - 8) : (float)((output_height - ih) / 2);
+                float x1 = x0 + (float)iw;
+                float y1 = y0 + (float)ih;
+                static const unsigned char corner[6] = { 0, 1, 2, 0, 2, 3 };
+                int k;
+                for (k = 0; k < 6; k++) {
+                    unsigned int c = corner[k];
+                    v[k].x = (c == 0 || c == 3) ? x0 : x1;
+                    v[k].y = (c < 2) ? y0 : y1;
+                    v[k].z = 0.0f;
+                    v[k].r = v[k].g = v[k].b = v[k].a = 1.0f;
+                    v[k].u = (c == 0 || c == 3) ? 0.0f : (float)iw;
+                    v[k].v = (c == 0 || c == 1) ? 0.0f : (float)ih;
+                    v[k].q = 1.0f;
+                    v[k].fog = 1.0f;
+                }
+            }
+
+            memset(&state, 0, sizeof(state));
+            state.texture = *texture;
+            state.texture_width = (float)iw;
+            state.texture_height = (float)ih;
+            state.texture_function = 1;
+            state.textured = 1;
+            state.blend = transparent;
+            state.premultiplied_alpha = transparent;
+            state.depth_test = 0;
+            state.depth_write = 0;
+            state.alpha_test = 0;
+            state.linear_filter = 1;
+            state.screen_space = 1;
+            pcRendererDrawScreenTriangles(v, 6, &state);
+        }
+        pcRendererFlushTransparent();
+    }
+
     SDL_Window* window;
     int ww = 0, wh = 0;
     float aspect;

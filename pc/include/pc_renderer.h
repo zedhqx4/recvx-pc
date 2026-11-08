@@ -17,6 +17,7 @@ typedef struct {
     float texture_width, texture_height;
     int texture_function, texture_alpha;
     int texture_perspective;
+    int premultiplied_alpha;
     int textured;
     int blend;
     int depth_test;
@@ -51,6 +52,7 @@ void pcRendererDrawLineStrip(const PcNativeVertex* vertices, int count, const Pc
 void pcRendererDrawScreenTriangles(const PcNativeVertex* vertices, int count, const PcNativeDrawState* state);
 void pcRendererFlushTransparent(void);
 unsigned int pcRendererLoadTextureRGBA(const unsigned char* rgba, int width, int height, int linear);
+int pcRendererUpdateTextureRGBA(unsigned int texture, const unsigned char* rgba, int width, int height);
 void pcRendererDeleteTexture(unsigned int texture);
 void pcRendererBindTexture(unsigned int texture);
 unsigned int pcRendererCurrentTexture(void);
