@@ -34,6 +34,7 @@ static unsigned long long transparent_sequence;
 static NativeTextureInfo* native_textures;
 static int native_texture_count, native_texture_capacity;
 static float current_texture_width = 1.0f, current_texture_height = 1.0f;
+static int current_texture_function, current_texture_alpha = 1;
 
 static GLuint framebuffer;
 static GLuint color_target;
@@ -43,7 +44,7 @@ static GLuint vertex_buffer;
 static GLuint program;
 static GLint u_target, u_projection, u_aspect, u_offset, u_near, u_far;
 static GLint u_textured, u_texture, u_fog_enabled, u_fog_color, u_alpha_test, u_alpha_ref;
-static GLint u_screen_space, u_texture_size;
+static GLint u_screen_space, u_texture_size, u_texture_function, u_texture_alpha;
 static int output_width = 640;
 static int output_height = 480;
 static int render_width = 640;
@@ -86,9 +87,13 @@ static const char* fragment_shader =
     "#version 330 core\n"
     "in vec4 vColor; in vec2 vTexCoord; in float vFog;\n"
     "uniform sampler2D uTexture; uniform int uTextured; uniform int uFogEnabled;\n"
-    "uniform vec3 uFogColor; uniform int uAlphaTest; uniform float uAlphaRef; uniform vec2 uTextureSize;\n"
+    "uniform vec3 uFogColor; uniform int uAlphaTest; uniform float uAlphaRef; uniform vec2 uTextureSize; uniform int uTextureFunction, uTextureAlpha;\n"
     "out vec4 oColor;\n"
-    "void main(){ vec4 c=vColor; if(uTextured!=0)c*=texture(uTexture,vTexCoord/uTextureSize);\n"
+    "void main(){ vec4 c=vColor; if(uTextured!=0){ vec4 t=texture(uTexture,vTexCoord/uTextureSize);\n"
+    "    if(uTextureFunction==0){ c.rgb=t.rgb*c.rgb*2.0; if(uTextureAlpha!=0)c.a=t.a*c.a*2.0; }\n"
+    "    else if(uTextureFunction==1){ c.rgb=t.rgb; if(uTextureAlpha!=0)c.a=t.a; }\n"
+    "    else if(uTextureFunction==2){ c.rgb=clamp(t.rgb*c.rgb*2.0+vec3(c.a),0.0,1.0); if(uTextureAlpha!=0)c.a=clamp(t.a+c.a,0.0,1.0); }\n"
+    "    else { c.rgb=clamp(t.rgb*c.rgb*2.0+vec3(c.a),0.0,1.0); if(uTextureAlpha!=0)c.a=t.a; } }\n"
     "  if(uAlphaTest!=0 && c.a<uAlphaRef)discard;\n"
     "  if(uFogEnabled!=0)c.rgb=mix(uFogColor,c.rgb,clamp(vFog,0.0,1.0));\n"
     "  oColor=c; }\n";
@@ -209,6 +214,8 @@ int pcRendererInit(int width, int height)
     u_alpha_ref = glGetUniformLocation(program, "uAlphaRef");
     u_screen_space = glGetUniformLocation(program, "uScreenSpace");
     u_texture_size = glGetUniformLocation(program, "uTextureSize");
+    u_texture_function = glGetUniformLocation(program, "uTextureFunction");
+    u_texture_alpha = glGetUniformLocation(program, "uTextureAlpha");
 
     glGenVertexArrays(1, &vertex_array);
     glBindVertexArray(vertex_array);
@@ -352,6 +359,8 @@ static void apply_state(const PcNativeDrawState* st)
     glUniform1i(u_screen_space, st->screen_space != 0);
     glUniform2f(u_texture_size, st->texture_width > 0.0f ? st->texture_width : 1.0f,
                 st->texture_height > 0.0f ? st->texture_height : 1.0f);
+    glUniform1i(u_texture_function, st->texture_function);
+    glUniform1i(u_texture_alpha, st->texture_alpha != 0);
 
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, st->texture);
@@ -583,4 +592,28 @@ void pcRendererPresent(void)
     glBlitFramebuffer(0, 0, render_width, render_height,
                       x, y, x + vw, y + vh, GL_COLOR_BUFFER_BIT, GL_LINEAR);
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
+}
+
+void pcRendererSetTextureCombine(int function, int texture_alpha)
+{
+    current_texture_function = (function >= 0 && function <= 3) ? function : 0;
+    current_texture_alpha = texture_alpha != 0;
+}
+
+void pcRendererCurrentTextureCombine(int* function, int* texture_alpha)
+{
+    if (function) *function = current_texture_function;
+    if (texture_alpha) *texture_alpha = current_texture_alpha;
+}
+
+void pcRendererConfigureTexture(unsigned int texture, int linear, int wrap_u, int wrap_v)
+{
+    GLenum wu = (wrap_u == 1 || wrap_u == 2) ? GL_CLAMP_TO_EDGE : GL_REPEAT;
+    GLenum wv = (wrap_v == 1 || wrap_v == 2) ? GL_CLAMP_TO_EDGE : GL_REPEAT;
+    if (!ready || texture == 0) return;
+    glBindTexture(GL_TEXTURE_2D, (GLuint)texture);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, linear ? GL_LINEAR : GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, linear ? GL_LINEAR : GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, (GLint)wu);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, (GLint)wv);
 }

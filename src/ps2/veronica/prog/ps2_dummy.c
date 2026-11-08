@@ -18,6 +18,9 @@ extern int Send_Tim2_dataExClutOnly(void* tim2_top_adr, unsigned long send_image
 #ifdef TARGET_PC
 #include "pc_renderer.h"
 #endif
+#ifdef TARGET_PC
+#include "pc_renderer.h"
+#endif
 
 #ifdef TARGET_PC
 #define PC_TIM2_FINGERPRINT_SLOTS 1024
@@ -2763,6 +2766,19 @@ static void Ps2BindTextureState(NJS_TEXMEMLIST* addr, TIM2_PICTUREHEADER_EX* tim
 // 97.17% matching
 int Ps2TexLoad(NJS_TEXMEMLIST* addr)
 {
+#ifdef TARGET_PC
+    extern int pcNativeTextureLoad(NJS_TEXMEMLIST* source);
+    if (addr == NULL) {
+        Ps2_now_tex = NULL;
+        Ps2_now_bank = 0;
+        pcRendererBindTexture(0);
+        return 0;
+    }
+    Ps2_now_tex = addr;
+    Ps2_now_bank = addr->bank;
+    return pcNativeTextureLoad(addr);
+#else
+
     unsigned int tbw;       
     unsigned int psm;     
     unsigned int tw;       
@@ -2920,6 +2936,7 @@ int Ps2TexLoad(NJS_TEXMEMLIST* addr)
     }
 #endif
     return cache_flag;
+#endif
 }
 
 // 100% matching!

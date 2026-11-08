@@ -87,6 +87,7 @@ static void pcNativeSubmitVu1Strip(unsigned long ulType, VU1_STRIP_BUF* strip,
     state.texture = texture;
     state.texture_width = tex_width;
     state.texture_height = tex_height;
+    pcRendererCurrentTextureCombine(&state.texture_function, &state.texture_alpha);
     state.textured = textured && texture != 0;
     state.blend = transparent;
     state.depth_test = 1;

@@ -14,6 +14,7 @@ typedef struct {
 typedef struct {
     unsigned int texture;
     float texture_width, texture_height;
+    int texture_function, texture_alpha;
     int textured;
     int blend;
     int depth_test;
@@ -46,4 +47,7 @@ void pcRendererDeleteTexture(unsigned int texture);
 void pcRendererBindTexture(unsigned int texture);
 unsigned int pcRendererCurrentTexture(void);
 void pcRendererCurrentTextureSize(float* width, float* height);
+void pcRendererSetTextureCombine(int function, int texture_alpha);
+void pcRendererCurrentTextureCombine(int* function, int* texture_alpha);
+void pcRendererConfigureTexture(unsigned int texture, int linear, int wrap_u, int wrap_v);
 int pcRendererGetOutputSize(int* width, int* height);
