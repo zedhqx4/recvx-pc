@@ -8,6 +8,7 @@
 
 #include "pc_platform.h"
 #include "pc_os.h"
+#include "pc_renderer.h"
 
 extern unsigned char Ps2_tex_mem[10485760];
 
@@ -18,89 +19,20 @@ void _builtin_set_imask(int mask)
 void Ps2Init()
 {
     Ps2_tex_buff = &Ps2_tex_mem;
-
     pcOsStartupLog("Ps2Init: before pcVideoInit");
     pcVideoInit();
-    pcOsStartupLog("Ps2Init: after pcVideoInit");
-
-    sceGsResetPath();
-    sceGsResetGraph(0, SCE_GS_INTERLACE, SCE_GS_NTSC, SCE_GS_FIELD);
-
-    sceGsSetDefDBuffDc(&Db, SCE_GS_PSMCT32, DISP_WIDTH, DISP_HEIGHT, SCE_GS_ZGEQUAL, SCE_GS_PSMZ16S, 1);
-
-    Db.disp[0].dispfb.FBP = 150;
-    Db.disp[0].dispfb.PSM = SCE_GS_PSMCT32;
-
-    Db.draw01.frame1.FBP = 0;
-    Db.draw01.frame1.PSM = SCE_GS_PSMCT32;
-
-    Db.draw01.zbuf1.ZBP = 300;
-
-    Db.draw02.frame2.FBP = 0;
-    Db.draw02.frame2.PSM = SCE_GS_PSMCT32;
-
-    Db.draw02.zbuf2.ZBP = 300;
-
-    Db.disp[1].dispfb.FBP = 150;
-    Db.disp[1].dispfb.PSM = SCE_GS_PSMCT32;
-
-    Db.draw11.frame1.FBP = 0;
-    Db.draw11.frame1.PSM = SCE_GS_PSMCT32;
-
-    Db.draw11.zbuf1.ZBP = 300;
-
-    Db.draw12.frame2.FBP = 0;
-    Db.draw12.frame2.PSM = SCE_GS_PSMCT32;
-
-    Db.draw12.zbuf2.ZBP = 300;
-
-    Db.disp[0].display.DY = 636;
-    Db.disp[1].display.DY = 32;
-
-    {
-        extern void pcGsSelfTest(void);
-
-        pcOsStartupLog("Ps2Init: before pcGsSelfTest");
-        pcGsSelfTest();
-        pcOsStartupLog("Ps2Init: after pcGsSelfTest");
-    }
-
-    pcOsStartupLog("Ps2Init: before ClearVram");
-    ClearVram();
-    pcOsStartupLog("Ps2Init: after ClearVram");
+    pcOsStartupLog("Ps2Init: native renderer ready");
 
     pcOsStartupLog("Ps2Init: before pcCdOpen");
     pcCdOpen();
     pcOsStartupLog("Ps2Init: after pcCdOpen");
 
     Ps2SetVSyncCounter();
-
-    pcOsStartupLog("Ps2Init: before Ps2InitFunc");
     Ps2InitFunc();
-    pcOsStartupLog("Ps2Init: after Ps2InitFunc");
-
-    Ps2DispScreenClear();
-    Ps2ScreenClear();
-
-    Db.disp[0].pmode.EN2 = 0;
-    Db.disp[1].pmode.EN2 = 0;
-
-    Ps2SwapDBuff();
-
-    Db.disp[0].pmode.EN2 = 1;
-    Db.disp[1].pmode.EN2 = 1;
-
-    Ps2InitTexCache();
-    Ps2InitPS2_GS_SAVE();
-
-    njColorBlendingMode(0, 8);
-    njColorBlendingMode(1, 6);
-
-    njUserClipping(0, NULL);
-
+    Ps2ClearOT();
+    pcRendererSetClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+    pcRendererSetScissor(0, 0, 0, 0, 0);
     _Make_SinTable();
-
-    /* Ps2Vu0ProgSend / Ps2Vu1ProgSend: the VU microprograms are C code on PC */
 }
 
 void Ps2LoadModule(char* p)

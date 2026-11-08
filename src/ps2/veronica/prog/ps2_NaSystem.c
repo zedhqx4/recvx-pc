@@ -69,49 +69,29 @@ void 	njSetEORFunction( void (*func)(void) )
 #pragma optimization_level 0
 
 // 100% matching!
-void Ps2SwapDBuff() 
-{ 
-    SyncPath(); 
-    
-    Ps2DrawOTag(); 
-    Ps2ClearOT(); 
-    
-    SyncPath(); 
-
-    EorFunc(); 
-    
-    while (Ps2_vcount < 2) 
-    { 
+void Ps2SwapDBuff()
+{
 #ifdef TARGET_PC
-        pcKernelBusyWait();
+    Ps2DrawOTag();
+    Ps2ClearOT();
+    EorFunc();
+    pcVideoPresent();
+    Ps2_vcount = 0;
+    VsyncFunc();
 #else
-        asm("nop");
-#endif
-#ifdef TARGET_PC
-
-#else
-        asm("nop");
-#endif
-    } 
-    
-    PS2_swap(); 
-    
+    SyncPath();
+    Ps2DrawOTag();
+    Ps2ClearOT();
+    SyncPath();
+    EorFunc();
+    while (Ps2_vcount < 2) { asm("nop"); }
+    PS2_swap();
     sceGsSwapDBuffDc(&Db, Ps2_dbuff);
-    
     Ps2_dbuff = (Ps2_dbuff + 1) & 0x1;
-    
-    Ps2_vcount = 0; 
-
-#ifdef TARGET_PC
-    /* PC: no COP0 tick counter */
-#else
-    printf("TICK = %d\n", *(volatile unsigned int*)SR_CU0); 
-    
-    *(volatile unsigned int*)SR_CU0 = 0; 
+    Ps2_vcount = 0;
+    VsyncFunc();
 #endif
-    
-    VsyncFunc(); 
-} 
+}
 
 // 100% matching! 
 #ifdef TARGET_PC

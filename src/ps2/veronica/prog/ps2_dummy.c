@@ -15,6 +15,9 @@ extern int Send_Tim2_dataExClutOnly(void* tim2_top_adr, unsigned long send_image
 #include "../../../ps2/veronica/prog/ps2_texture.h"
 #include "../../../ps2/veronica/prog/sdfunc.h"
 #include "../../../ps2/veronica/prog/main.h"
+#ifdef TARGET_PC
+#include "pc_renderer.h"
+#endif
 
 #ifdef TARGET_PC
 #define PC_TIM2_FINGERPRINT_SLOTS 1024
@@ -2292,18 +2295,16 @@ void Ps2AddOT(void* p, unsigned int num, float z, unsigned long prim)
 // 100% matching! 
 void Ps2DrawOTag()
 {
-    int i;
-
-    Ps2ZbuffOff();
-    
-    for (i = 0; i < 4096; )
-    {
-        i = Ps2DrawOTagSub(i);
-    } 
-    
-    Ps2ZbuffOn();
-    
+#ifdef TARGET_PC
+    pcRendererFlushTransparent();
     Ps2_current_texbreak = 1;
+#else
+    int i;
+    Ps2ZbuffOff();
+    for (i = 0; i < 4096; ) i = Ps2DrawOTagSub(i);
+    Ps2ZbuffOn();
+    Ps2_current_texbreak = 1;
+#endif
 }
 
 // 98.96% matching

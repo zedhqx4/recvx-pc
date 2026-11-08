@@ -12,12 +12,15 @@
 
 #include "pc_platform.h"
 #include "pc_os.h"
-#include "pc_gs.h"
+#include "pc_renderer.h"
 #include "pc_bindings.h"
 #include "pc_audio.h"
 
 static unsigned int frames;   /* frames presented */
 static struct { double last, sum, worst, swap, present; int n; } frame_time;
+static int pcRenderScale = 3;
+static float pcRenderScaleX = 3.0f;
+static float pcRenderScaleY = 3.0f;
 
 #define PS2_WIDTH  640
 #define PS2_HEIGHT 480
@@ -501,11 +504,11 @@ static void video_settings(void)
     video_cfg.render_h = PS2_HEIGHT;
 
     pcOsStartupLog("video_settings: before scale lookup");
-    pcGsScale = pcIniGetInt("scale", pcGsScale);
+    pcRenderScale = pcIniGetInt("scale", pcRenderScale);
     pcOsStartupLog("video_settings: after scale lookup");
 
-    if (pcGsScale < 1) pcGsScale = 1;
-    if (pcGsScale > 8) pcGsScale = 8;
+    if (pcRenderScale < 1) pcRenderScale = 1;
+    if (pcRenderScale > 8) pcRenderScale = 8;
 
     /* Experimental lower internal render resolution; keep the game's logical 640x480 coordinates. */
     pcOsStartupLog("video_settings: before render lookup");
@@ -564,9 +567,9 @@ static void video_settings(void)
 
     /* Keep the existing aspect-derived horizontal multiplier, then scale the backing buffer
      * to the requested internal render dimensions. The default 640x480 remains unchanged. */
-    pcGsScaleX = (float)((int)(pcGsScale * video_cfg.aspect / (4.0f / 3.0f) + 0.5f)) *
+    pcRenderScaleX = (float)((int)(pcRenderScale * video_cfg.aspect / (4.0f / 3.0f) + 0.5f)) *
                  ((float)video_cfg.render_w / PS2_WIDTH);
-    pcGsScaleY = (float)pcGsScale * ((float)video_cfg.render_h / PS2_HEIGHT);
+    pcRenderScaleY = (float)pcRenderScale * ((float)video_cfg.render_h / PS2_HEIGHT);
 }
 
 float pcVideoAspect(void)
@@ -804,9 +807,15 @@ void pcVideoInit(void)
         }
     }
 
-    pcOsStartupLog("pcVideoInit: initializing GS renderer");
-    pcGsInit(spr);
-    pcOsStartupLog("pcVideoInit: GS renderer initialized");
+    pcOsStartupLog("pcVideoInit: initializing native OpenGL renderer");
+    if (!pcRendererInit(PS2_WIDTH, PS2_HEIGHT))
+    {
+        pcPlatformFatal("Could not initialize the native OpenGL renderer.");
+    }
+    pcRendererSetRenderScale(pcRenderScaleX, pcRenderScaleY);
+    pcRendererSetClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+    pcRendererBeginFrame();
+    pcOsStartupLog("pcVideoInit: native renderer initialized");
 
     pcPadInit();
     pcOsStartupLog("pcVideoInit: controller initialized");
@@ -861,7 +870,8 @@ static int pause_until_active(void)
 
             if ((pc_window_event(ev.type) == PC_WINDOW_EVENT_EXPOSED) || (pc_window_event(ev.type) == PC_WINDOW_EVENT_SIZE_CHANGED))
             {
-                pcGsPresent();   /* redraw the frozen picture */
+                pcRendererFlushTransparent();
+                pcRendererPresent();   /* redraw the frozen picture */
                 SDL_GL_SwapWindow(window);
             }
         }
@@ -1010,7 +1020,7 @@ static int ui_uv_crop_handle_event(const SDL_Event* ev)
         break;
 
     case SDL_SCANCODE_F12:
-        pcGsToggleUiWireframe();
+        /* GS diagnostic removed */
         ui_uv_crop_show_status("WIREFRAME TOGGLED");
         break;
 
@@ -1065,9 +1075,8 @@ int pcVideoPumpEvents(void)
          * F12 is not one of the default game bindings (F11 fullscreen, F9 title, F5 save). */
         if ((ev.type == SDL_EVENT_KEY_DOWN) && !ev.key.repeat && (ev.key.scancode == SDL_SCANCODE_F12))
         {
-            int enabled = pcGsToggleUiWireframe();
-            title_notice_show(enabled ? "UI WIREFRAME ON (F12)" : "UI WIREFRAME OFF (F12)");
-            continue;   /* do not forward the diagnostic hotkey to the game */
+            title_notice_show("NATIVE OPENGL RENDERER");
+            continue;
         }
 
         /* Alt+Enter: fullscreen on/off, like other Windows games */
@@ -1121,33 +1130,8 @@ void pcVideoPresent(void)
     pcOsHeartbeat();
     fps_tick();
 
-    pcGsPresent();
-
-    /* testing aid: RECVX_SHOTS=<seconds> saves the display buffer to shots/ periodically */
-    {
-        static int interval = -1;
-        static unsigned int last;
-
-        if (interval < 0)
-        {
-            const char* e = SDL_getenv("RECVX_SHOTS");
-
-            interval = (e != NULL) ? atoi(e) * 1000 : 0;
-        }
-
-        if ((interval > 0) && (SDL_GetTicks() - last >= (unsigned int)interval))
-        {
-            extern void pcGsScreenshot(const char* path, unsigned int fbp);
-            extern unsigned int pcGsDisplayFbp(void);
-            char path[1100], dir[1024];
-
-            last = SDL_GetTicks();
-            pcPlatformExeDir(dir, sizeof(dir));
-            snprintf(path, sizeof(path), "%s/shots/shot_%05u.png", dir, frames);
-            pcGsScreenshot(path, pcGsDisplayFbp());
-        }
-    }
-
+    pcRendererFlushTransparent();
+        pcRendererPresent();
 
     frame_time.present += pcOsTime() - present_start;
 
@@ -1155,6 +1139,7 @@ void pcVideoPresent(void)
         double t0 = pcOsTime();
 
         SDL_GL_SwapWindow(window);
+        pcRendererBeginFrame();
         frame_time.swap += pcOsTime() - t0;
     }
 
@@ -1214,11 +1199,8 @@ void pcVideoPresent(void)
         }
         {
             extern void pcGameStateLog(void);
-            extern void pcGsLogStats(void);
-
             pcGameStateLog();
-            pcGsLogStats();
-        }
+            }
         last_report = SDL_GetTicks();
     }
 }
@@ -1364,7 +1346,7 @@ static int title_event(const SDL_Event* ev)
     while (answer < 0)
     {
         pcOsHeartbeat();   /* paused on purpose, not hung */
-        pcGsPresent();
+        pcRendererPresent();
         SDL_GL_SwapWindow(window);
 
         if (!SDL_WaitEventTimeout(&e, 100))
