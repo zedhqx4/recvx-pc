@@ -138,6 +138,7 @@ PC_GL_FUNCS(PC_GL_DECLARE)
 #define glScissor pc_glScissor
 #define glEnable pc_glEnable
 #define glDisable pc_glDisable
+#define glCullFace pc_glCullFace
 #define glBlendFuncSeparate pc_glBlendFuncSeparate
 #define glBlendEquationSeparate pc_glBlendEquationSeparate
 #define glBlendColor pc_glBlendColor

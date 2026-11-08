@@ -24,8 +24,16 @@ typedef struct {
     PcNativeDrawState state;
     float sort_depth;
     GLenum topology;
-    struct NativeQueuedDraw* unused;
+    unsigned long long sequence;
 } NativeQueuedDraw;
+
+typedef struct { GLuint id; int width, height; } NativeTextureInfo;
+static NativeQueuedDraw* transparent_queue;
+static int transparent_count, transparent_capacity;
+static unsigned long long transparent_sequence;
+static NativeTextureInfo* native_textures;
+static int native_texture_count, native_texture_capacity;
+static float current_texture_width = 1.0f, current_texture_height = 1.0f;
 
 static GLuint framebuffer;
 static GLuint color_target;
@@ -35,7 +43,7 @@ static GLuint vertex_buffer;
 static GLuint program;
 static GLint u_target, u_projection, u_aspect, u_offset, u_near, u_far;
 static GLint u_textured, u_texture, u_fog_enabled, u_fog_color, u_alpha_test, u_alpha_ref;
-static GLint u_screen_space, u_fog_visibility;
+static GLint u_screen_space, u_texture_size;
 static int output_width = 640;
 static int output_height = 480;
 static int render_width = 640;
@@ -66,7 +74,8 @@ static const char* vertex_shader =
     "  vColor=aColor; vTexCoord=aTexCoord; vFog=aFog;\n"
     "  if(uScreenSpace!=0){ vec2 n=(aViewPosition.xy/uTarget)*2.0-1.0;\n"
     "    gl_Position=vec4(n,aViewPosition.z*2.0-1.0,1.0); return; }\n"
-    "  float z=max(aViewPosition.z,0.00001);\n"
+    "  if(aViewPosition.z<=uNear){ gl_Position=vec4(2.0,2.0,2.0,1.0); return; }\n"
+    "  float z=aViewPosition.z;\n"
     "  vec2 s=vec2(aViewPosition.x*uProjection*uAspect.x/z, aViewPosition.y*uProjection*uAspect.y/z)+uOffset;\n"
     "  vec2 n=(s/uTarget)*2.0-1.0;\n"
     "  float depth=clamp((uFar/(uFar-uNear))-((uFar*uNear)/(uFar-uNear))/z,0.0,1.0);\n"
@@ -77,9 +86,9 @@ static const char* fragment_shader =
     "#version 330 core\n"
     "in vec4 vColor; in vec2 vTexCoord; in float vFog;\n"
     "uniform sampler2D uTexture; uniform int uTextured; uniform int uFogEnabled;\n"
-    "uniform vec3 uFogColor; uniform int uAlphaTest; uniform float uAlphaRef;\n"
+    "uniform vec3 uFogColor; uniform int uAlphaTest; uniform float uAlphaRef; uniform vec2 uTextureSize;\n"
     "out vec4 oColor;\n"
-    "void main(){ vec4 c=vColor; if(uTextured!=0)c*=texture(uTexture,vTexCoord);\n"
+    "void main(){ vec4 c=vColor; if(uTextured!=0)c*=texture(uTexture,vTexCoord/uTextureSize);\n"
     "  if(uAlphaTest!=0 && c.a<uAlphaRef)discard;\n"
     "  if(uFogEnabled!=0)c.rgb=mix(uFogColor,c.rgb,clamp(vFog,0.0,1.0));\n"
     "  oColor=c; }\n";
@@ -199,6 +208,7 @@ int pcRendererInit(int width, int height)
     u_alpha_test = glGetUniformLocation(program, "uAlphaTest");
     u_alpha_ref = glGetUniformLocation(program, "uAlphaRef");
     u_screen_space = glGetUniformLocation(program, "uScreenSpace");
+    u_texture_size = glGetUniformLocation(program, "uTextureSize");
 
     glGenVertexArrays(1, &vertex_array);
     glBindVertexArray(vertex_array);
@@ -340,12 +350,14 @@ static void apply_state(const PcNativeDrawState* st)
     glUniform1i(u_alpha_test, st->alpha_test != 0);
     glUniform1f(u_alpha_ref, st->alpha_ref);
     glUniform1i(u_screen_space, st->screen_space != 0);
+    glUniform2f(u_texture_size, st->texture_width > 0.0f ? st->texture_width : 1.0f,
+                st->texture_height > 0.0f ? st->texture_height : 1.0f);
 
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, st->texture);
 }
 
-static void draw(const PcNativeVertex* vertices, int count, const PcNativeDrawState* state, GLenum topology)
+static void draw_immediate(const PcNativeVertex* vertices, int count, const PcNativeDrawState* state, GLenum topology)
 {
     NativeGpuVertex* upload;
     int i;
@@ -376,6 +388,50 @@ static void draw(const PcNativeVertex* vertices, int count, const PcNativeDrawSt
     free(upload);
 }
 
+static void queue_transparent(const PcNativeVertex* vertices, int count, const PcNativeDrawState* state, GLenum topology)
+{
+    NativeQueuedDraw* item;
+    float depth = 0.0f;
+    int i;
+    if (!ready || !vertices || count <= 0 || !state) return;
+    if (transparent_count == transparent_capacity) {
+        int cap = transparent_capacity ? transparent_capacity * 2 : 128;
+        NativeQueuedDraw* grown = (NativeQueuedDraw*)realloc(transparent_queue, (size_t)cap * sizeof(*grown));
+        if (!grown) { pcLog("native renderer: transparent queue allocation failed"); return; }
+        transparent_queue = grown;
+        transparent_capacity = cap;
+    }
+    item = &transparent_queue[transparent_count];
+    memset(item, 0, sizeof(*item));
+    item->vertices = (PcNativeVertex*)malloc((size_t)count * sizeof(*vertices));
+    if (!item->vertices) return;
+    memcpy(item->vertices, vertices, (size_t)count * sizeof(*vertices));
+    item->count = count;
+    item->state = *state;
+    item->topology = topology;
+    item->sequence = transparent_sequence++;
+    for (i = 0; i < count; i++) depth += vertices[i].z;
+    item->sort_depth = depth / (float)count;
+    transparent_count++;
+}
+
+static int compare_transparent(const void* a, const void* b)
+{
+    const NativeQueuedDraw* x = (const NativeQueuedDraw*)a;
+    const NativeQueuedDraw* y = (const NativeQueuedDraw*)b;
+    if (x->sort_depth > y->sort_depth) return -1;
+    if (x->sort_depth < y->sort_depth) return 1;
+    if (x->sequence < y->sequence) return -1;
+    if (x->sequence > y->sequence) return 1;
+    return 0;
+}
+
+static void draw(const PcNativeVertex* v, int n, const PcNativeDrawState* state, GLenum topology)
+{
+    if (state && state->blend) queue_transparent(v, n, state, topology);
+    else draw_immediate(v, n, state, topology);
+}
+
 void pcRendererDrawTriangleStrip(const PcNativeVertex* v, int n, const PcNativeDrawState* s)
 {
     draw(v, n, s, GL_TRIANGLE_STRIP);
@@ -393,15 +449,43 @@ void pcRendererDrawLines(const PcNativeVertex* v, int n, const PcNativeDrawState
 
 void pcRendererDrawScreenTriangles(const PcNativeVertex* v, int n, const PcNativeDrawState* state)
 {
-    PcNativeDrawState screen_state;
-    if (state) screen_state = *state; else memset(&screen_state, 0, sizeof(screen_state));
-    screen_state.screen_space = 1;
-    draw(v, n, &screen_state, GL_TRIANGLES);
+    PcNativeDrawState ss;
+    if (state) ss = *state; else memset(&ss, 0, sizeof(ss));
+    ss.screen_space = 1;
+    draw(v, n, &ss, GL_TRIANGLES);
 }
 
 void pcRendererFlushTransparent(void)
 {
-    /* Transparent command ordering is owned by the native draw queue, not by a GS ordering table. */
+    int i;
+    if (!ready || transparent_count <= 0) return;
+    qsort(transparent_queue, (size_t)transparent_count, sizeof(*transparent_queue), compare_transparent);
+    for (i = 0; i < transparent_count; i++) {
+        NativeQueuedDraw* item = &transparent_queue[i];
+        draw_immediate(item->vertices, item->count, &item->state, item->topology);
+        free(item->vertices);
+        item->vertices = NULL;
+    }
+    transparent_count = 0;
+}
+
+static void remember_texture(GLuint id, int width, int height)
+{
+    int i;
+    for (i = 0; i < native_texture_count; i++) {
+        if (native_textures[i].id == id) { native_textures[i].width = width; native_textures[i].height = height; return; }
+    }
+    if (native_texture_count == native_texture_capacity) {
+        int cap = native_texture_capacity ? native_texture_capacity * 2 : 64;
+        NativeTextureInfo* grown = (NativeTextureInfo*)realloc(native_textures, (size_t)cap * sizeof(*grown));
+        if (!grown) return;
+        native_textures = grown;
+        native_texture_capacity = cap;
+    }
+    native_textures[native_texture_count].id = id;
+    native_textures[native_texture_count].width = width;
+    native_textures[native_texture_count].height = height;
+    native_texture_count++;
 }
 
 unsigned int pcRendererLoadTextureRGBA(const unsigned char* rgba, int width, int height, int linear)
@@ -416,18 +500,47 @@ unsigned int pcRendererLoadTextureRGBA(const unsigned char* rgba, int width, int
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, linear ? GL_LINEAR : GL_NEAREST);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+    remember_texture(texture, width, height);
     return texture;
 }
 
 void pcRendererDeleteTexture(unsigned int texture)
 {
     GLuint t = (GLuint)texture;
+    int i;
     if (t) glDeleteTextures(1, &t);
+    for (i = 0; i < native_texture_count; i++) {
+        if (native_textures[i].id == t) {
+            native_textures[i] = native_textures[--native_texture_count];
+            break;
+        }
+    }
+    if (current_texture == t) pcRendererBindTexture(0);
 }
 
 void pcRendererBindTexture(unsigned int texture)
 {
+    int i;
     current_texture = (GLuint)texture;
+    current_texture_width = current_texture_height = 1.0f;
+    for (i = 0; i < native_texture_count; i++) {
+        if (native_textures[i].id == current_texture) {
+            current_texture_width = (float)native_textures[i].width;
+            current_texture_height = (float)native_textures[i].height;
+            break;
+        }
+    }
+}
+
+unsigned int pcRendererCurrentTexture(void)
+{
+    return (unsigned int)current_texture;
+}
+
+void pcRendererCurrentTextureSize(float* width, float* height)
+{
+    if (width) *width = current_texture_width;
+    if (height) *height = current_texture_height;
 }
 
 int pcRendererGetOutputSize(int* w, int* h)

@@ -13,6 +13,7 @@ typedef struct {
 
 typedef struct {
     unsigned int texture;
+    float texture_width, texture_height;
     int textured;
     int blend;
     int depth_test;
@@ -43,4 +44,6 @@ void pcRendererFlushTransparent(void);
 unsigned int pcRendererLoadTextureRGBA(const unsigned char* rgba, int width, int height, int linear);
 void pcRendererDeleteTexture(unsigned int texture);
 void pcRendererBindTexture(unsigned int texture);
+unsigned int pcRendererCurrentTexture(void);
+void pcRendererCurrentTextureSize(float* width, float* height);
 int pcRendererGetOutputSize(int* width, int* height);
