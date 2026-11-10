@@ -297,13 +297,42 @@ float pcRendererDepthFromReciprocalZ(float reciprocal_z)
 void pcRendererSetProjection(float projection, float aw, float ah,
                              float ox, float oy, float near_value, float far_value)
 {
+    static int projection_log_valid;
+    static float logged_projection, logged_aspect_w, logged_aspect_h;
+    static float logged_offset_x, logged_offset_y, logged_near, logged_far;
+
     projection_value = projection;
     aspect_w = aw;
     aspect_h = ah;
-    offset_x = ox;
-    offset_y = oy;
+
+    /* Ninja/GS projection offsets are in the GS 4096x4096 coordinate space.
+       The native renderer works in the game's 640x480 pixel space, just like
+       the native 2D path (which subtracts 1728,1808 from its screen vertices). */
+    offset_x = ox - 1728.0f;
+    offset_y = oy - 1808.0f;
     near_clip = (near_value > 0.0f) ? near_value : 1.0f;
     far_clip = (far_value > near_clip) ? far_value : near_clip + 1.0f;
+
+    if (!projection_log_valid ||
+        fabsf(logged_projection - projection_value) > 0.001f ||
+        fabsf(logged_aspect_w - aspect_w) > 0.001f ||
+        fabsf(logged_aspect_h - aspect_h) > 0.001f ||
+        fabsf(logged_offset_x - offset_x) > 0.5f ||
+        fabsf(logged_offset_y - offset_y) > 0.5f ||
+        fabsf(logged_near - near_clip) > 0.5f ||
+        fabsf(logged_far - far_clip) > 0.5f) {
+        pcLog("native projection: dist=%.3f aspect=(%.4f,%.4f) GS offset=(%.2f,%.2f) -> pixel offset=(%.2f,%.2f) clip=(%.2f,%.2f)",
+              projection_value, aspect_w, aspect_h, ox, oy, offset_x, offset_y,
+              near_clip, far_clip);
+        logged_projection = projection_value;
+        logged_aspect_w = aspect_w;
+        logged_aspect_h = aspect_h;
+        logged_offset_x = offset_x;
+        logged_offset_y = offset_y;
+        logged_near = near_clip;
+        logged_far = far_clip;
+        projection_log_valid = 1;
+    }
 }
 
 void pcRendererSetRenderScale(float sx, float sy)
