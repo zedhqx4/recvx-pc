@@ -2,7 +2,6 @@
 #include <stdio.h>
 #include <string.h>
 #include "../../../../pc/include/pc_game_profile.h"
-#include "../../../../pc/include/pc_texture_cache.h"
 extern int Send_Tim2_dataExClutOnly(void* tim2_top_adr, unsigned long send_image_adr, unsigned long send_clut_adr);
 #endif
 #include "../../../ps2/veronica/prog/ps2_dummy.h"
@@ -2813,8 +2812,7 @@ void Ps2InitTexCache()
     Ps2_tex_cache_num = 4;
 #ifdef TARGET_PC
     Ps2PcTextureSourceCacheReset();
-    pcGsResetTextureAssetCache();
-    pcGsSetTextureAssetIdentity(0, 0, 0);
+    pcRendererBindTexture(0);
 #endif
 }
 
