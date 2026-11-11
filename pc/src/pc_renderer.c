@@ -78,6 +78,7 @@ static GLenum blend_dst_alpha = GL_ONE_MINUS_SRC_ALPHA;
 static int scissor_enabled;
 static int scissor_rect[4];
 static unsigned long long frame_number;
+static void flush_pending_deletes(void);
 static unsigned stat_immediate, stat_queued, stat_vertices, stat_screen_space;
 static int debug_magenta = -1;
 
@@ -295,6 +296,7 @@ void pcRendererBeginFrame(void)
               stat_immediate, stat_screen_space, stat_vertices, stat_queued);
     }
     stat_immediate = stat_queued = stat_vertices = stat_screen_space = 0;
+    flush_pending_deletes();
     glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
     glViewport(0, 0, render_width, render_height);
     glEnable(GL_DEPTH_TEST);
@@ -760,11 +762,31 @@ int pcRendererUpdateTextureRGBA(unsigned int texture, const unsigned char* rgba,
     return 0;
 }
 
+/* CLAUDE-FIX: las transparencias se encolan y se pintan en el flush; si una textura se reemplazaba (misma Gindex con otro
+ * contenido, p.ej. 2222000) antes del flush, glDeleteTextures dejaba al draw encolado con un id muerto o reutilizado
+ * (sin textura / textura equivocada). Ahora el borrado real se difiere al inicio del siguiente frame. */
+static GLuint* pending_delete;
+static int pending_delete_count, pending_delete_capacity;
+
+static void flush_pending_deletes(void)
+{
+    if (pending_delete_count > 0) glDeleteTextures(pending_delete_count, pending_delete);
+    pending_delete_count = 0;
+}
+
 void pcRendererDeleteTexture(unsigned int texture)
 {
     GLuint t = (GLuint)texture;
     int i;
-    if (t) glDeleteTextures(1, &t);
+    if (t) {
+        if (pending_delete_count == pending_delete_capacity) {
+            int cap = pending_delete_capacity ? pending_delete_capacity * 2 : 64;
+            GLuint* grown = (GLuint*)realloc(pending_delete, (size_t)cap * sizeof(*grown));
+            if (grown) { pending_delete = grown; pending_delete_capacity = cap; }
+        }
+        if (pending_delete_count < pending_delete_capacity) pending_delete[pending_delete_count++] = t;
+        else glDeleteTextures(1, &t);
+    }
     for (i = 0; i < native_texture_count; i++) {
         if (native_textures[i].id == t) {
             native_textures[i] = native_textures[--native_texture_count];

@@ -103,8 +103,9 @@ static void pcNativeSubmitVu1Strip(unsigned long ulType, VU1_STRIP_BUF* strip,
     state.blend = transparent;
     state.depth_test = 1;
     state.depth_write = !transparent;
-    state.alpha_test = 0;
-    state.alpha_ref = 0.0f;
+    /* GS: TEST con ATE=1, ALPHA_GREATER, AREF=0 -> se descartan los pixeles con alfa 0 (texturas con mascara) */
+    state.alpha_test = 1;
+    state.alpha_ref = 0.004f;
     state.linear_filter = 1;
     state.cull_backfaces = 0;
     pcRendererDrawTriangleStrip(vertices, (int)count, &state);

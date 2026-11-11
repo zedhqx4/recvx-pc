@@ -1480,7 +1480,7 @@ void Ps2AddPrim(unsigned long prim, void* dp, unsigned int num, unsigned int cli
         state.depth_test = 1;
         state.depth_write = 1;
         state.alpha_test = 1;
-        state.alpha_ref = 0.0f;
+        state.alpha_ref = 0.004f;
         state.linear_filter = 1;
         state.screen_space = 1;
         state.cull_backfaces = 0;
@@ -1728,7 +1728,7 @@ static void pcNativeSubmitPrepared3D(unsigned long prim, const void* data, unsig
     state.ot_z_valid = 1;
     state.ot_z = 65537.0f * ((const float*)data)[(size_t)(count - 1u) * 12u + 2u] + 1.0f;
     state.alpha_test = 1;
-    state.alpha_ref = 0.0f;
+    state.alpha_ref = 0.004f;
     state.linear_filter = 1;
     state.screen_space = 1;
     state.texture_perspective = (prim & 0x80000000000000ULL) == 0;
