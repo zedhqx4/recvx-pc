@@ -1174,6 +1174,16 @@ static void pc_wide_clip(unsigned int* v, unsigned int num, int uv)
  * difieren al flush (ver pc_renderer.c queue_transparent). Con clip_3d_on != 0 se cae al codigo PS2 original, que termina
  * en Ps2AddOT/loadImage (ambos inertes en PC): esos primitivos no se dibujan.
  * CLAUDE-NOTE[N11]: en la rama no-sprite de la ruta nativa, vertices[i].q no se inicializa (malloc sin memset). */
+#ifdef TARGET_PC
+static void pcPrimLog(const char* what, unsigned long prim, unsigned int num)
+{
+    static unsigned calls, drops;
+    extern void pcLog(const char* fmt, ...);
+    if (what == NULL) { if ((calls++ % 300) < 6) pcLog("Ps2AddPrim: prim=%016llx num=%u tex=%s", (unsigned long long)prim, num, Ps2_now_tex ? "set" : "NULL"); }
+    else if (drops++ < 40) pcLog("Ps2AddPrim DROP (%s): prim=%016llx num=%u", what, (unsigned long long)prim, num);
+}
+#endif
+
 void Ps2AddPrim(unsigned long prim, void* dp, unsigned int num, unsigned int clip_3d_on)
 {
     unsigned long* p;           
@@ -1193,6 +1203,9 @@ void Ps2AddPrim(unsigned long prim, void* dp, unsigned int num, unsigned int cli
     static unsigned int wide_buf[64 * 12];
 #endif
 
+#ifdef TARGET_PC
+    pcPrimLog(NULL, prim, num);
+#endif
     clip_flag = 0; 
     sc_flag = 0;
     st_clip_flag = 0x8000;
@@ -1202,6 +1215,7 @@ void Ps2AddPrim(unsigned long prim, void* dp, unsigned int num, unsigned int cli
     { 
         if (Ps2_now_tex == NULL) 
         { 
+            pcPrimLog("textured, no current texture", prim, num);
             return;
         }
         
@@ -1323,6 +1337,7 @@ void Ps2AddPrim(unsigned long prim, void* dp, unsigned int num, unsigned int cli
             {
                 if ((x1 <= 1728.0f) || (x0 >= 2368.0f))
                 {
+                    pcPrimLog("wide2D off-screen", prim, num);
                     return;
                 }
 
@@ -1359,9 +1374,9 @@ void Ps2AddPrim(unsigned long prim, void* dp, unsigned int num, unsigned int cli
         float texture_width = 1.0f, texture_height = 1.0f;
 
         if (count < 1 || count > 16384)
-            return;
+            { pcPrimLog("bad count", prim, num); return; }
         if (textured && (Ps2_now_tex == NULL))
-            return;
+            { pcPrimLog("native textured, no texture", prim, num); return; }
 
         if ((topology == 6u) && (count >= 2))
         {

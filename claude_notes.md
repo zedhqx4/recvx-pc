@@ -146,6 +146,19 @@ el override depende de quién llame (`sub1.c` los llama sueltos). Mejor: que el 
 **Siguen pendientes:** N6 (culling por `fNz`), N7 (render-to-texture real), N8 (orden de pintado / OT), y el resto de N9
 (que el 3D preparado descarte sin log cuando falta la textura). La pantalla negra **no está verificada como resuelta**.
 
+## 3c. Análisis del primer `recvx.log` (build con contadores)
+
+- `native renderer: last frame draws=1 (2D=1) vertices=4 queued_blend=1` en **todos** los frames: el renderer recibe una única
+  primitiva por frame, un quad 2D de 4 vértices con blend (un fade o panel). **El renderer no está recibiendo nada más**,
+  así que el fallo está antes de él (el juego no envía, o `Ps2AddPrim` descarta).
+- `tk 300002` constante durante ~1200 frames: el juego no sale de `bhSysCallWarning()` → `Adv_FirstWarningMessage()`
+  (pantalla de advertencia / carga de datos de sistema / mensaje "Press START"). No es la pantalla de título ni gameplay.
+- No hay líneas `native texture:` → ninguna textura fue rechazada (o `pcNativeTextureLoad` nunca se llamó).
+- Frames de 4–11 s (`worst ...`) y el watchdog en `ZwFlushBuffersFile`: bloqueos de E/S de disco (probablemente el volcado de
+  `last_run_input.txt` o la memory card en `saves`), independientes del render pero que agravan la sensación de cuelgue.
+- Añadido para el próximo log: `adv: mode ...` (modo de la pantalla Adv), `Ps2AddPrim: prim=... tex=...` (muestreo) y
+  `Ps2AddPrim DROP (...)` (razón de cada descarte), y `native draw #n` (estado de cada draw).
+
 ## 4. Orden de trabajo sugerido
 
 1. Instrumentar (sección 2). Confirmar si hay draws y si el FBO sale magenta/negro.

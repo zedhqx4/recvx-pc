@@ -5,6 +5,7 @@
 #include "../../include/ps2/veronica/prog/ps2_loadtim2.h"
 #include "../../include/ps2/veronica/prog/ps2_NaTextureFunction.h"
 #include "../../include/ps2/veronica/prog/main.h"
+#include "../../include/ps2/veronica/prog/adv.h"
 
 #include "pc_platform.h"
 #include "pc_os.h"
@@ -65,6 +66,12 @@ void pcGameStateLog(void)
 
     pcLog("state tk %06x ts %06x gm %08x st %08x stg %d rom %d gm_mode %d", sys->tk_flg, sys->ts_flg, sys->gm_flg,
           sys->st_flg, sys->stg_no, sys->rom_no, sys->gm_mode);
+    {
+        extern ADV_WORK AdvWork;
+        pcLog("adv: mode %d next %d active %d fadeType %d fadeRate %.3f fadeSpeed %.4f count %d timer %.1f",
+              AdvWork.Mode, AdvWork.NextMode, (int)AdvWork.Active, (int)AdvWork.FadeType, AdvWork.FadeRate,
+              AdvWork.FadeSpeed, (int)AdvWork.Count, AdvWork.Timer);
+    }
 }
 
 /* debug: nonzero while the title screen task is running */

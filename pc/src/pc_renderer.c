@@ -534,6 +534,12 @@ static void draw_immediate(const PcNativeVertex* vertices, int count, const PcNa
         upload[i].fog = vertices[i].fog;
     }
     stat_immediate++; stat_vertices += (unsigned)count; if (state && state->screen_space) stat_screen_space++;
+    if (frame_number % 120 == 119 && stat_immediate <= 12 && state) {
+        pcLog("native draw #%u: topo=0x%x n=%d tex=%u textured=%d blend=%d screen=%d depth=%d/%d v0=(%.1f,%.1f,%.3f) rgba=(%.2f,%.2f,%.2f,%.2f)",
+              stat_immediate, (unsigned)topology, count, state->texture, state->textured, state->blend, state->screen_space,
+              state->depth_test, state->depth_write, vertices[0].x, vertices[0].y, vertices[0].z,
+              vertices[0].r, vertices[0].g, vertices[0].b, vertices[0].a);
+    }
     apply_state(state);
     glBindVertexArray(vertex_array);
     glBindBuffer(GL_ARRAY_BUFFER, vertex_buffer);
