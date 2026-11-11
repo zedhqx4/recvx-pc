@@ -1178,9 +1178,10 @@ static void pc_wide_clip(unsigned int* v, unsigned int num, int uv)
 static void pcPrimLog(const char* what, unsigned long prim, unsigned int num)
 {
     static unsigned calls, drops;
-    extern void pcLog(const char* fmt, ...);
-    if (what == NULL) { if ((calls++ % 300) < 6) pcLog("Ps2AddPrim: prim=%016llx num=%u tex=%s", (unsigned long long)prim, num, Ps2_now_tex ? "set" : "NULL"); }
-    else if (drops++ < 40) pcLog("Ps2AddPrim DROP (%s): prim=%016llx num=%u", what, (unsigned long long)prim, num);
+    /* no "long long" / extern pcLog here: "long" is a 64-bit macro in game code under MSVC */
+    unsigned int hi = (unsigned int)(prim >> 32), lo = (unsigned int)prim;
+    if (what == NULL) { if ((calls++ % 300) < 6) pcLog("Ps2AddPrim: prim=%08x%08x num=%u tex=%s", hi, lo, num, Ps2_now_tex ? "set" : "NULL"); }
+    else if (drops++ < 40) pcLog("Ps2AddPrim DROP (%s): prim=%08x%08x num=%u", what, hi, lo, num);
 }
 #endif
 
