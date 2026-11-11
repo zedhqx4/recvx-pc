@@ -783,6 +783,63 @@ int pcRendererGetOutputSize(int* w, int* h)
 
 /* CLAUDE-NOTE[N1]: el blit de abajo copia el FBO tal cual; no hay ninguna comprobacion (glGetError, glReadPixels) que diga
  * si el FBO tiene contenido. Es el mejor sitio para volcar un pixel/frame cuando se depure la pantalla negra. */
+/* Diagnostico: cada 240 frames mide el color medio del FBO y guarda los 3 primeros volcados como recvx_frame_N.bmp. */
+static void debug_dump_frame(void)
+{
+    static int dumps;
+    unsigned char* px;
+    size_t n, i;
+    double sum[3] = {0, 0, 0};
+    unsigned nonblack = 0;
+    if (frame_number % 240 != 239) return;
+    n = (size_t)render_width * (size_t)render_height;
+    px = (unsigned char*)malloc(n * 4);
+    if (!px) return;
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, framebuffer);
+    glPixelStorei(GL_PACK_ALIGNMENT, 1);
+    glReadPixels(0, 0, render_width, render_height, GL_RGBA, GL_UNSIGNED_BYTE, px);
+    for (i = 0; i < n; i++) {
+        sum[0] += px[i*4]; sum[1] += px[i*4+1]; sum[2] += px[i*4+2];
+        if (px[i*4] | px[i*4+1] | px[i*4+2]) nonblack++;
+    }
+    pcLog("native frame dump: frame %llu avg rgb=(%.1f,%.1f,%.1f) nonblack=%.1f%% size=%dx%d",
+          (unsigned long long)frame_number, sum[0]/(double)n, sum[1]/(double)n, sum[2]/(double)n,
+          100.0 * (double)nonblack / (double)n, render_width, render_height);
+    if (dumps < 3) {
+        char name[64];
+        FILE* f;
+        int row_bytes = render_width * 3, pad = (4 - (row_bytes & 3)) & 3, y;
+        unsigned int fsize = (unsigned int)(54 + (row_bytes + pad) * render_height);
+        unsigned char hdr[54];
+        memset(hdr, 0, sizeof(hdr));
+        hdr[0] = 'B'; hdr[1] = 'M';
+        memcpy(hdr + 2, &fsize, 4);
+        hdr[10] = 54; hdr[14] = 40;
+        memcpy(hdr + 18, &render_width, 4);
+        memcpy(hdr + 22, &render_height, 4);
+        hdr[26] = 1; hdr[28] = 24;
+        snprintf(name, sizeof(name), "recvx_frame_%d.bmp", dumps);
+        f = fopen(name, "wb");
+        if (f) {
+            unsigned char zero[4] = {0, 0, 0, 0};
+            fwrite(hdr, 1, 54, f);
+            for (y = 0; y < render_height; y++) {   /* GL rows are bottom-up, like BMP */
+                int x;
+                const unsigned char* row = px + (size_t)y * (size_t)render_width * 4;
+                for (x = 0; x < render_width; x++) {
+                    unsigned char bgr[3] = { row[x*4+2], row[x*4+1], row[x*4] };
+                    fwrite(bgr, 1, 3, f);
+                }
+                if (pad) fwrite(zero, 1, (size_t)pad, f);
+            }
+            fclose(f);
+            pcLog("native frame dump: wrote %s", name);
+        }
+        dumps++;
+    }
+    free(px);
+}
+
 void pcRendererPresent(void)
 {
     /* Native GDI overlays are composed into the same framebuffer before the final blit. */
@@ -869,6 +926,7 @@ void pcRendererPresent(void)
     SDL_Window* window;
     int ww = 0, wh = 0;
     float aspect;
+    if (ready) debug_dump_frame();
     int vw, vh, x, y;
     if (!ready) return;
 
