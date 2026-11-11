@@ -143,7 +143,9 @@ static int build_palette(const TIM2_PICTUREHEADER* ph, const unsigned char* clut
 {
     unsigned int i, n = ph->ClutColors;
     unsigned int base = ((bank & 0x30u) / 4u) * 16u;
-    unsigned int type = ph->ClutType;
+    unsigned int type = ph->ClutType & 0x7Fu;
+    int csm1 = (ph->ClutType & 0x80u) == 0 && ph->ImageType == TIM2_IDTEX8 && n >= 256;
+    if (ph->ImageType != TIM2_IDTEX4) base = 0;
     if (n == 0) n = (ph->ImageType == TIM2_IDTEX4) ? 16u : 256u;
     if (n > palette_capacity) n = palette_capacity;
     if (type == TIM2_NONE || clut == NULL) return 0;
@@ -151,15 +153,17 @@ static int build_palette(const TIM2_PICTUREHEADER* ph, const unsigned char* clut
     for (i = 0; i < n; i++) {
         unsigned char* out = rgba + (size_t)i * 4u;
         const unsigned char* src;
+        /* CLUT de 8 bits en formato GS (CSM1): se permutan los bits 3 y 4 del indice */
+        unsigned int si = csm1 ? ((i & 0xE7u) | ((i & 8u) << 1) | ((i & 16u) >> 1)) : i;
         if (type == TIM2_RGB32) {
-            src = clut + (size_t)i * 4u;
+            src = clut + (size_t)si * 4u;
             rgba32(src, out);
         } else if (type == TIM2_RGB24) {
-            src = clut + (size_t)i * 3u;
+            src = clut + (size_t)si * 3u;
             out[0] = src[0]; out[1] = src[1]; out[2] = src[2]; out[3] = 255;
         } else if (type == TIM2_RGB16) {
             unsigned short v;
-            src = clut + (size_t)i * 2u;
+            src = clut + (size_t)si * 2u;
             memcpy(&v, src, sizeof(v));
             color16(v, org_type, out);
         } else {
@@ -179,8 +183,8 @@ static int decode_tim2(const TIM2_PICTUREHEADER_EX* ext, const TIM2_PICTUREHEADE
                        unsigned char* rgba)
 {
     unsigned int w = ph->ImageWidth, h = ph->ImageHeight, x, y;
-    unsigned int bw;
-    size_t offset;
+    unsigned int bw = 0;
+    size_t offset = 0;
     unsigned char palette[256 * 4];
     unsigned int palette_count = 0;
 
@@ -193,41 +197,37 @@ static int decode_tim2(const TIM2_PICTUREHEADER_EX* ext, const TIM2_PICTUREHEADE
         if (palette_count == 0) return 0;
     }
 
+    /* CLAUDE-FIX: Tim2_Image_Load sube la imagen con transferencias PSMT8/PSMT4/PSMCT32 desde memoria lineal; el swizzle
+     * lo hace la GS al escribir. Los datos del archivo son raster LINEAL, no el layout de VRAM (antes se des-swizzleaba mal). */
+    (void)bw; (void)offset;
     if (ph->ImageType == TIM2_RGB32) {
-        bw = (w + 63u) / 64u;
         for (y = 0; y < h; y++) for (x = 0; x < w; x++) {
-            offset = addr32(bw, x, y);
-            if (offset + 4u > ph->ImageSize) return 0;
-            rgba32(image + offset, rgba + ((size_t)y * w + x) * 4u);
+            size_t o = ((size_t)y * w + x) * 4u;
+            if (o + 4u > ph->ImageSize) return 0;
+            rgba32(image + o, rgba + o);
         }
         return 1;
     }
-
     if (ph->ImageType == TIM2_IDTEX8) {
-        bw = (w + 63u) / 64u;
-        if (bw & 1u) bw++;
         for (y = 0; y < h; y++) for (x = 0; x < w; x++) {
+            size_t o = (size_t)y * w + x;
             unsigned int index;
-            offset = addr8(bw, x, y);
-            if (offset >= ph->ImageSize) return 0;
-            index = image[offset];
+            if (o >= ph->ImageSize) return 0;
+            index = image[o];
             if (index >= palette_count) index = 0;
-            memcpy(rgba + ((size_t)y * w + x) * 4u, palette + (size_t)index * 4u, 4);
+            memcpy(rgba + o * 4u, palette + (size_t)index * 4u, 4);
         }
         return 1;
     }
-
     if (ph->ImageType == TIM2_IDTEX4) {
-        bw = (w + 63u) / 64u;
-        if (bw & 1u) bw++;
         for (y = 0; y < h; y++) for (x = 0; x < w; x++) {
+            size_t o = (size_t)y * w + x;
             unsigned int index;
-            offset = addr4(bw, x, y);
-            if ((offset >> 1) >= ph->ImageSize) return 0;
-            index = image[offset >> 1];
-            index = (offset & 1u) ? (index >> 4) : (index & 15u);
+            if ((o >> 1) >= ph->ImageSize) return 0;
+            index = image[o >> 1];
+            index = (o & 1u) ? (index >> 4) : (index & 15u);
             if (index >= palette_count) index = 0;
-            memcpy(rgba + ((size_t)y * w + x) * 4u, palette + (size_t)index * 4u, 4);
+            memcpy(rgba + o * 4u, palette + (size_t)index * 4u, 4);
         }
         return 1;
     }
