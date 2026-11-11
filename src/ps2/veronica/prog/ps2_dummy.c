@@ -1386,6 +1386,17 @@ void Ps2AddPrim(unsigned long prim, void* dp, unsigned int num, unsigned int cli
             float x0 = a[8], y0 = a[9], x1 = b[8], y1 = b[9];
             float u0 = a[0], v0 = a[1], u1 = b[0], v1 = b[1];
             const float* color = b + 4;
+            float cf[4];
+            unsigned int ci[4];
+
+            /* CLAUDE-FIX: njDraw*2D guarda el color como ENTEROS (0..255, alfa 0..128) en esas palabras, no como float.
+             * Leerlos como float daba ~0 (UI negra/transparente). Las UV (ST) van normalizadas como u/256 (ITOF12). */
+            pcRendererCurrentTextureSize(&texture_width, &texture_height);
+            memcpy(ci, color, sizeof(ci));
+            cf[0] = (float)(ci[0] & 0xFFu); cf[1] = (float)(ci[1] & 0xFFu);
+            cf[2] = (float)(ci[2] & 0xFFu); cf[3] = (float)(ci[3] & 0xFFu);
+            u0 *= texture_width; u1 *= texture_width; v0 *= texture_height; v1 *= texture_height;
+            color = cf;
 
             if (wide_2d < 1.0f) {
                 x0 = 2048.0f + (x0 - 2048.0f) * wide_2d;
@@ -1424,20 +1435,23 @@ void Ps2AddPrim(unsigned long prim, void* dp, unsigned int num, unsigned int cli
                 return;
             owned = 1;
 
+            pcRendererCurrentTextureSize(&texture_width, &texture_height);
             for (i = 0; i < (unsigned int)count; i++, source += 12) {
                 float x = source[8];
                 float y = source[9];
+                unsigned int ci[4];
+                memcpy(ci, source + 4, sizeof(ci));
                 if (wide_2d < 1.0f)
                     x = 2048.0f + (x - 2048.0f) * wide_2d;
                 vertices[i].x = x - 1728.0f;
                 vertices[i].y = y - 1808.0f;
                 vertices[i].z = 0.5f;
-                vertices[i].r = fminf(fmaxf(source[4] / 255.0f, 0.0f), 1.0f);
-                vertices[i].g = fminf(fmaxf(source[5] / 255.0f, 0.0f), 1.0f);
-                vertices[i].b = fminf(fmaxf(source[6] / 255.0f, 0.0f), 1.0f);
-                vertices[i].a = fminf(fmaxf(source[7] / 128.0f, 0.0f), 1.0f);
-                vertices[i].u = use_uv ? source[0] : source[0];
-                vertices[i].v = use_uv ? source[1] : source[1];
+                vertices[i].r = fminf(fmaxf((float)(ci[0] & 0xFFu) / 255.0f, 0.0f), 1.0f);
+                vertices[i].g = fminf(fmaxf((float)(ci[1] & 0xFFu) / 255.0f, 0.0f), 1.0f);
+                vertices[i].b = fminf(fmaxf((float)(ci[2] & 0xFFu) / 255.0f, 0.0f), 1.0f);
+                vertices[i].a = fminf(fmaxf((float)(ci[3] & 0xFFu) / 128.0f, 0.0f), 1.0f);
+                vertices[i].u = source[0] * texture_width;
+                vertices[i].v = source[1] * texture_height;
                 vertices[i].fog = 1.0f;
                 vertices[i].q = 1.0f;
             }
@@ -1677,8 +1691,8 @@ static void pcNativeSubmitPrepared3D(unsigned long prim, const void* data, unsig
         vertices[i].g = fminf(fmaxf(g / 255.0f, 0.0f), 1.0f);
         vertices[i].b = fminf(fmaxf(b / 255.0f, 0.0f), 1.0f);
         vertices[i].a = fminf(fmaxf(a / 128.0f, 0.0f), 1.0f);
-        vertices[i].u = source[0];
-        vertices[i].v = source[1];
+        vertices[i].u = source[0] * tex_width;   /* ST normalizado -> texels */
+        vertices[i].v = source[1] * tex_height;
         vertices[i].q = source[2];
         vertices[i].fog = floating_color ?
             fminf(fmaxf(source[11] / 255.0f, 0.0f), 1.0f) : 1.0f;

@@ -88,8 +88,8 @@ static void pcNativeSubmitVu1Strip(unsigned long ulType, VU1_STRIP_BUF* strip,
         vertices[i].g = fminf(fmaxf(shaded.fG / 255.0f, 0.0f), 1.0f);
         vertices[i].b = fminf(fmaxf(shaded.fB / 255.0f, 0.0f), 1.0f);
         vertices[i].a = fminf(fmaxf(shaded.fA / 128.0f, 0.0f), 1.0f);
-        vertices[i].u = strip[i].fU;
-        vertices[i].v = strip[i].fV;
+        vertices[i].u = strip[i].fU * tex_width;   /* fU/fV normalizados (0..1) -> texels */
+        vertices[i].v = strip[i].fV * tex_height;
         vertices[i].q = 1.0f;
         vertices[i].fog = fminf(fmaxf(strip[i].fFog / 255.0f, 0.0f), 1.0f);
     }
