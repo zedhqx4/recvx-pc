@@ -173,6 +173,17 @@ El commit `d00e17a` ("start and present through native OpenGL") reescribió `Ps2
 Restaurado. El único draw por frame era el quad de fade (alpha 0) de la pantalla de advertencia: todo el resto no se
 dibujaba porque la pantalla ni siquiera había cargado sus datos.
 
+## 3e. Tercer log (ya hay gameplay)
+
+- El juego llega a `rom 4/9`, `gm 2`; el renderer dibuja hasta ~925 draws/frame con textura y profundidad. El render nativo funciona.
+- 114 504 líneas `native texture: invalid/unsupported TIM2 header`: Gindex 100044 (76 834×), 101017, 107140, 101015 → son texturas con
+  `PictFormat` 5..8 (las "no-VQ", ver `isVQ()` en `ps2_texture.c`), que el cargador nativo rechazaba. Con textura 0 los draws
+  salían planos o se omitían (personajes/objetos). Además hay Gindex "basura" (1073941826, 2147683650…): esos tienen `FileId != "TIM2"`.
+- Cambio: `PictFormat` 5..8 ya no se rechaza; se intenta decodificar como TIM2 normal y se loguea **una vez por Gindex** con
+  ImageType/ClutType/tamaño/bank. Los rechazos reales (FileId/FormatId) también se loguean una sola vez, con el motivo.
+  Si la decodificación sale mal (colores raros), esas líneas dicen qué formato es para escribir un decoder correcto.
+- Frames de ~33 ms: el juego corre a 30 fps (espera `Ps2_vcount >= 2`), coherente con el original.
+
 ## 4. Orden de trabajo sugerido
 
 1. Instrumentar (sección 2). Confirmar si hay draws y si el FBO sale magenta/negro.

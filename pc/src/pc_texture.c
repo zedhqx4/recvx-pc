@@ -252,7 +252,19 @@ static PcNativeTextureEntry* allocate_entry(void)
     return NULL;
 }
 
-/* CLAUDE-NOTE[N9][TpFlag CORREGIDO]: puntos de rechazo que dejan bind(0) y hacen que los primitivos con textura se omitan o salgan planos:
+/* log each (gindex, reason) once: the same texture is requested every frame */
+static int log_once(unsigned int gindex, unsigned int reason)
+{
+    static unsigned int seen[512][2];
+    static unsigned int count;
+    unsigned int i;
+    for (i = 0; i < count; i++)
+        if (seen[i][0] == gindex && seen[i][1] == reason) return 0;
+    if (count < 512) { seen[count][0] = gindex; seen[count][1] = reason; count++; }
+    return 1;
+}
+
+/* CLAUDE-NOTE[N9][TpFlag y PictFormat 5..8 ya no se rechazan]: puntos de rechazo que dejan bind(0) y hacen que los primitivos con textura se omitan o salgan planos:
  *   - pSurface NULL, FileId != "TIM2", FormatId > 1, PictFormat 5..8
  *   - ext->TpFlag != 0  <- el codigo original TRATABA este caso (Ps2_tex_load_tp_cancel + Ps2TexLoad), aqui se rechaza
  *   - cabecera mal formada / decode_tim2() sin soporte
@@ -280,13 +292,17 @@ int pcNativeTextureLoad(NJS_TEXMEMLIST* addr)
     }
 
     ext = (TIM2_PICTUREHEADER_EX*)addr->texinfo.texsurface.pSurface;
-    if (memcmp(ext->FileId, "TIM2", 4) != 0 || ext->FormatId > 1 ||
-        (ext->PictFormat >= 5 && ext->PictFormat <= 8)) {
+    if (memcmp(ext->FileId, "TIM2", 4) != 0 || ext->FormatId > 1) {
         /* TpFlag is a PS2 "already resident in VRAM" bookkeeping flag, not a texture property: never reject on it. */
         pcRendererBindTexture(0);
-        pcLog("native texture: invalid/unsupported TIM2 header (Gindex %u)", ext->Gindex);
+        if (log_once(ext->Gindex, 1))
+            pcLog("native texture: bad TIM2 header (Gindex %u FileId %02x%02x%02x%02x FormatId %u PictFormat %u)",
+                  ext->Gindex, ext->FileId[0], ext->FileId[1], ext->FileId[2], ext->FileId[3],
+                  (unsigned int)ext->FormatId, (unsigned int)ext->PictFormat);
         return 0;
     }
+    /* PictFormat 5..8 are the game's non-VQ textures. They used to be rejected outright (114k rejections per
+     * 4600 frames in gameplay: characters/objects drew flat). Try to decode them as plain indexed/RGB TIM2. */
 
     ph = (TIM2_PICTUREHEADER*)((unsigned char*)ext + ((ext->FormatId != 0) ? 128 : 16));
     if (ph->HeaderSize < sizeof(TIM2_PICTUREHEADER) ||
@@ -296,9 +312,14 @@ int pcNativeTextureLoad(NJS_TEXMEMLIST* addr)
         ph->ImageSize > ph->TotalSize - ph->HeaderSize ||
         ph->ClutSize > ph->TotalSize - ph->HeaderSize - ph->ImageSize) {
         pcRendererBindTexture(0);
-        pcLog("native texture: malformed TIM2 payload (Gindex %u)", ext->Gindex);
+        if (log_once(ext->Gindex, 3)) pcLog("native texture: malformed TIM2 payload (Gindex %u)", ext->Gindex);
         return 0;
     }
+
+    if (ext->PictFormat >= 5 && ext->PictFormat <= 8 && log_once(ext->Gindex, 2))
+        pcLog("native texture: non-VQ PictFormat=%u Gindex=%u ImageType=%u ClutType=%u %ux%u bank=%u",
+              (unsigned int)ext->PictFormat, ext->Gindex, (unsigned int)ph->ImageType, (unsigned int)ph->ClutType,
+              (unsigned int)ph->ImageWidth, (unsigned int)ph->ImageHeight, (unsigned int)addr->bank);
 
     image = (const unsigned char*)ph + ph->HeaderSize;
     clut = image + ph->ImageSize;
@@ -326,8 +347,9 @@ int pcNativeTextureLoad(NJS_TEXMEMLIST* addr)
         if (!decode_tim2(ext, ph, image, clut, bank, rgba)) {
             free(rgba);
             pcRendererBindTexture(0);
-            pcLog("native texture: unsupported TIM2 image Gindex=%u type=%u CLUT=%u format=%u size=%ux%u",
-                  gindex, ph->ImageType, ph->ClutType, ph->PictFormat, ph->ImageWidth, ph->ImageHeight);
+            if (log_once(gindex, 4))
+                pcLog("native texture: unsupported TIM2 image Gindex=%u type=%u CLUT=%u format=%u size=%ux%u",
+                      gindex, ph->ImageType, ph->ClutType, ph->PictFormat, ph->ImageWidth, ph->ImageHeight);
             return 0;
         }
         texture = pcRendererLoadTextureRGBA(rgba, ph->ImageWidth, ph->ImageHeight, linear);
