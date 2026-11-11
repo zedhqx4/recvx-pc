@@ -78,6 +78,12 @@ void Ps2SwapDBuff()
     Ps2DrawOTag();
     Ps2ClearOT();
     EorFunc();
+    /* The emulated EE kernel (VBLANK interrupt, ADX file-server threads, IOP) only runs when the kernel is entered.
+     * Without this wait nothing else advances and every file read stays pending forever. */
+    while (Ps2_vcount < 2)
+    {
+        pcKernelBusyWait();
+    }
     pcVideoPresent();
     Ps2_vcount = 0;
     VsyncFunc();

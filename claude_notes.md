@@ -159,6 +159,20 @@ el override depende de quién llame (`sub1.c` los llama sueltos). Mejor: que el 
 - Añadido para el próximo log: `adv: mode ...` (modo de la pantalla Adv), `Ps2AddPrim: prim=... tex=...` (muestreo) y
   `Ps2AddPrim DROP (...)` (razón de cada descarte), y `native draw #n` (estado de cada draw).
 
+## 3d. CAUSA RAÍZ del "pantalla negra" (segundo log)
+
+`adv: mode 2 ... active 1` constante en miles de frames: `Adv_FirstWarningMessage` esperaba (modo 2) a que terminara
+`RequestReadInsideFile(SYSTEM.AFS)`, y **la lectura nunca terminaba**. No era un problema de render.
+
+El commit `d00e17a` ("start and present through native OpenGL") reescribió `Ps2SwapDBuff` y `Ps2Init` y perdió:
+- `while (Ps2_vcount < 2) pcKernelBusyWait();` — el kernel EE emulado (`pc_kernel.c`: fibers, VBLANK, hilos del servidor ADX, IOP)
+  **solo se ejecuta cuando se entra en él**. Sin esta espera nunca corren el VBLANK ni los hilos de ADX y toda lectura de
+  archivo queda pendiente para siempre.
+- `Ps2InitTexCache()`, `Ps2InitPS2_GS_SAVE()`, `njColorBlendingMode(0,8)`, `njColorBlendingMode(1,6)`, `njUserClipping(0,NULL)`.
+
+Restaurado. El único draw por frame era el quad de fade (alpha 0) de la pantalla de advertencia: todo el resto no se
+dibujaba porque la pantalla ni siquiera había cargado sus datos.
+
 ## 4. Orden de trabajo sugerido
 
 1. Instrumentar (sección 2). Confirmar si hay draws y si el FBO sale magenta/negro.

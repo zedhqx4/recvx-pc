@@ -33,6 +33,16 @@ void Ps2Init()
     Ps2ClearOT();
     pcRendererSetClearColor(0.0f, 0.0f, 0.0f, 1.0f);
     pcRendererSetScissor(0, 0, 0, 0, 0);
+
+    /* state initialised by the original Ps2Init that the native-renderer rewrite dropped */
+    Ps2InitTexCache();
+    Ps2InitPS2_GS_SAVE();
+
+    njColorBlendingMode(0, 8);
+    njColorBlendingMode(1, 6);
+
+    njUserClipping(0, NULL);
+
     _Make_SinTable();
 }
 
