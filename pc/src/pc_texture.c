@@ -252,6 +252,13 @@ static PcNativeTextureEntry* allocate_entry(void)
     return NULL;
 }
 
+/* CLAUDE-NOTE[N9]: puntos de rechazo que dejan bind(0) y hacen que los primitivos con textura se omitan o salgan planos:
+ *   - pSurface NULL, FileId != "TIM2", FormatId > 1, PictFormat 5..8
+ *   - ext->TpFlag != 0  <- el codigo original TRATABA este caso (Ps2_tex_load_tp_cancel + Ps2TexLoad), aqui se rechaza
+ *   - cabecera mal formada / decode_tim2() sin soporte
+ * Cada rechazo solo hace pcLog(); buscar "native texture:" en recvx.log. Si aparece para casi todo, esta es la causa.
+ * CLAUDE-NOTE[N11]: pcRendererConfigureTexture() cambia filtro/wrap de la textura COMPARTIDA en cada carga, asi que el
+ * sampler depende de quien la cargo ultima. */
 int pcNativeTextureLoad(NJS_TEXMEMLIST* addr)
 {
     TIM2_PICTUREHEADER_EX* ext;

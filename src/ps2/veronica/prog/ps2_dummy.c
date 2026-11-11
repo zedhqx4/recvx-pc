@@ -1167,6 +1167,13 @@ static void pc_wide_clip(unsigned int* v, unsigned int num, int uv)
 }
 #endif
 
+/* CLAUDE-NOTE[N9]: dos descartes silenciosos al principio: (1) textured && Ps2_now_tex == NULL -> return sin log;
+ * (2) mas abajo, en la ruta nativa 2D: count<1 || count>16384 -> return. Anadir contadores/log aqui.
+ * CLAUDE-NOTE[N8]: la ruta nativa (clip_3d_on == 0) dibuja INMEDIATAMENTE en orden de llamada. El original metia el 2D en
+ * el OT (Ps2AddOT, 4096 buckets por z) y lo pintaba en Ps2DrawOTag; esa prioridad se perdio. Los 2D con blend, ademas, se
+ * difieren al flush (ver pc_renderer.c queue_transparent). Con clip_3d_on != 0 se cae al codigo PS2 original, que termina
+ * en Ps2AddOT/loadImage (ambos inertes en PC): esos primitivos no se dibujan.
+ * CLAUDE-NOTE[N11]: en la rama no-sprite de la ruta nativa, vertices[i].q no se inicializa (malloc sin memset). */
 void Ps2AddPrim(unsigned long prim, void* dp, unsigned int num, unsigned int clip_3d_on)
 {
     unsigned long* p;           
@@ -1600,6 +1607,7 @@ void Ps2AddPrim(unsigned long prim, void* dp, unsigned int num, unsigned int cli
 } 
 
 // 100% matching!
+/* CLAUDE-NOTE[N8]: ver nota en Ps2AddPrim sobre el orden de pintado perdido. */
 void Ps2AddPrim2D(unsigned long prim, void* dp, unsigned int num)
 {
     Ps2AddPrim(prim, dp, num, 0);
@@ -1607,6 +1615,10 @@ void Ps2AddPrim2D(unsigned long prim, void* dp, unsigned int num)
 
 // 100% matching!
 #ifdef TARGET_PC
+/* CLAUDE-NOTE[N4]: fog = source[11] / 128.0f es la escala equivocada; el fog de GS/fNaFogTbl es 0..255 (usar /255.0f).
+ * CLAUDE-NOTE[N9]: if (textured && texture == 0) return; descarta el primitivo SIN log. Si pcNativeTextureLoad rechaza muchas
+ * texturas (TpFlag != 0, PictFormat 5..8, cabeceras raras), la escena 3D queda vacia. Las rutas 2D y VU1 en cambio dibujan
+ * sin textura en ese caso: comportamiento inconsistente. */
 static void pcNativeSubmitPrepared3D(unsigned long prim, const void* data, unsigned int count, int floating_color)
 {
     const float* source = (const float*)data;
@@ -2536,6 +2548,8 @@ void Ps2AddOT(void* p, unsigned int num, float z, unsigned long prim)
 } 
 
 // 100% matching! 
+/* CLAUDE-NOTE[N8]: en PC esto ya NO recorre el OT; solo vacia la cola de transparencias. El orden de pintado por prioridad
+ * (otz) que implementaba Ps2DrawOTagSub no existe. Ademas ya no envuelve el dibujo con Ps2ZbuffOff()/Ps2ZbuffOn(). */
 void Ps2DrawOTag()
 {
 #ifdef TARGET_PC
@@ -3428,6 +3442,8 @@ void Ps2InitPS2_GS_SAVE()
 }
 
 // 100% matching! 
+/* CLAUDE-NOTE[N2]: en PC limpia el FBO ahora mismo (pcRendererClear). Originalmente iba por GIF antes de que el OT
+ * diferido dibujara. Llamarla despues de dibujar (StoreRenderTex, PS2_Render_Tex_Sub, Ps2Init...) borra el frame. */
 void Ps2ScreenClear()
 {
 #ifdef TARGET_PC
@@ -3470,6 +3486,7 @@ void Ps2ScreenClear()
 }
 
 // 100% matching! 
+/* CLAUDE-NOTE[N2]: igual que Ps2ScreenClear: limpieza inmediata del FBO, incluida la profundidad. */
 void Ps2DispScreenClear()
 {
 #ifdef TARGET_PC
@@ -3512,6 +3529,9 @@ void Ps2DispScreenClear()
 }
 
 // 100% matching! 
+/* CLAUDE-NOTE[N10]: Ps2ZbuffOff/Off2/On fijan un override GLOBAL de profundidad en el renderer (pcRendererSetDepthMode)
+ * que pisa el estado de cada draw. Ps2ZbuffOn() deja (test=1, write=1) -> las transparencias escriben profundidad y el 2D
+ * se prueba contra el buffer de profundidad 3D. Revisar los llamadores sueltos en sub1.c. */
 void Ps2ZbuffOff()
 {
 #ifdef TARGET_PC
@@ -4127,6 +4147,8 @@ l_002CF178:
 }
 
 // 100% matching!
+/* CLAUDE-NOTE[N2]/[N7]: termina llamando a Ps2ScreenClear() (limpieza inmediata) y depende de render-to-texture, que en
+ * PC no esta implementado (sceGsExecStoreImage es un no-op). */
 void PS2_Render_Tex_Sub() 
 {
     PS2_Render_tex_sub_flag = 1;

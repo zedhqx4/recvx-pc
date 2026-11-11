@@ -184,6 +184,11 @@ u_long128* MakeRenderTexHeader(void* tex_adr)
 }
 
 // 100% matching! 
+/* CLAUDE-NOTE[N7]: en PC esta funcion NO crea ninguna textura GL: sceGsExecStoreImage() es un no-op (pc_libgraph.c), asi
+ * que la "textura de render" que usan bhDrawFullScreenRenderTexture() (gm_flg&0x100) y bhDrawSmallScreenRenderTexture()
+ * (gm_flg&0x200) nunca existe. Falta copiar el FBO a una textura GL y asociarla al NJS_TEXMEMLIST.
+ * CLAUDE-NOTE[N2]: ademas termina con Ps2ScreenClear(), que en PC limpia el FBO al instante: borra lo que acaba de
+ * dibujarse. Candidato a "pantalla negra" en las escenas con render texture. */
 void StoreRenderTex(void* tex_adr)
 {
     sceGsStoreImage gs_simage; 

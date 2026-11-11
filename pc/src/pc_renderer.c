@@ -69,6 +69,12 @@ static int scissor_enabled;
 static int scissor_rect[4];
 static unsigned long long frame_number;
 
+/* CLAUDE-NOTE[N5]: vertex shader con problemas de clipping.
+ *  - max(z, 0.00001) MUEVE los vertices con z<=0 en vez de recortarlos: un triangulo que cruza el plano de la
+ *    camara cambia de forma. El recorte original (ScissorTriangle de la VU1) tampoco se ejecuta en la ruta nativa.
+ *  - Correcto: no dividir aqui. clip.xy = (x*proj*aspect)*2/target + (offset*2/target - 1)*z ; clip.z lineal en z ;
+ *    clip.w = z. La GPU recorta contra near/far sola.
+ * CLAUDE-NOTE[N12]: la formula de proyeccion en si SI coincide con la de la VU1 (x*proj/z*aspect + offset). */
 static const char* vertex_shader =
     "#version 330 core\n"
     "layout(location=0) in vec3 aViewPosition;\n"
@@ -248,6 +254,7 @@ int pcRendererInit(int width, int height)
     return 1;
 }
 
+/* CLAUDE-NOTE[N11]: no borra vertex_array, program ni las texturas de native_textures (fugas al cerrar/recrear). */
 void pcRendererShutdown(void)
 {
     if (!ready) return;
@@ -259,6 +266,9 @@ void pcRendererShutdown(void)
     ready = 0;
 }
 
+/* CLAUDE-NOTE[N1]: para distinguir "no se dibuja nada" de "se dibuja negro", poner temporalmente clear_color a magenta
+ * (1,0,1,1) aqui. Si la pantalla sale magenta el blit funciona y el problema esta en lo que se dibuja o en quien limpia
+ * despues (ver N2). Tambien conviene contar draws por frame y hacer glGetError()/glReadPixels() en debug=1. */
 void pcRendererBeginFrame(void)
 {
     if (!ready) return;
@@ -351,6 +361,9 @@ void pcRendererSetClearColor(float r, float g, float b, float a)
     clear_color[0] = r; clear_color[1] = g; clear_color[2] = b; clear_color[3] = a;
 }
 
+/* CLAUDE-NOTE[N2]: esta funcion limpia el FBO AL INSTANTE. Ps2ScreenClear()/Ps2DispScreenClear() la llaman, y en PS2 esos
+ * clears se ejecutaban antes de que el OT diferido dibujara. Aqui el dibujo ya es inmediato, asi que un clear a mitad de
+ * frame (p.ej. al final de StoreRenderTex / PS2_Render_Tex_Sub) borra todo lo dibujado antes: pantalla negra. */
 void pcRendererClear(float r, float g, float b, float a, int clear_depth)
 {
     GLbitfield mask = GL_COLOR_BUFFER_BIT;
@@ -367,6 +380,8 @@ void pcRendererClear(float r, float g, float b, float a, int clear_depth)
     glClear(mask);
 }
 
+/* CLAUDE-NOTE[N10]: override GLOBAL y persistente (Ps2ZbuffOff/Off2/On). Se queda "pegado" si nadie lo restaura. Debe ser
+ * parte del estado de cada draw/pasada, no un global que pisa al estado del draw. */
 void pcRendererSetDepthMode(int depth_test, int depth_write)
 {
     depth_override_test = depth_test < 0 ? -1 : (depth_test != 0);
@@ -402,6 +417,13 @@ void pcRendererSetBlendFactors(int sr, int dr, int sa, int da)
     blend_dst_alpha = map[da];
 }
 
+/* CLAUDE-NOTE[N3]: apply_state() lee GLOBALES (projection_value, aspect, offset, near/far, global_fog_*,
+ * blend_*_rgb/alpha, scissor_*, depth_override_*), no el estado del draw. Para los draws opacos da igual (se dibujan al
+ * momento), pero las transparencias se encolan y se dibujan en pcRendererFlushTransparent() con el estado de ESE instante.
+ * Cualquier cambio de camara/fog/blend/scissor entre el envio y el flush las estropea. Hay que guardar todo esto dentro
+ * de NativeQueuedDraw.
+ * CLAUDE-NOTE[N10]: depth_override_* gana siempre sobre st->depth_*; Ps2ZbuffOn() lo deja en (1,1) y fuerza escritura de
+ * profundidad tambien en transparentes y test de profundidad en 2D. */
 static void apply_state(const PcNativeDrawState* st)
 {
     PcNativeDrawState d;
@@ -492,6 +514,8 @@ static void draw_immediate(const PcNativeVertex* vertices, int count, const PcNa
     free(upload);
 }
 
+/* CLAUDE-NOTE[N8]: toda primitiva con blend se difiere hasta el flush, incluido el 2D (fades, paneles, UI translucida), por
+ * lo que se pinta DESPUES de todo el 2D opaco aunque el juego la enviara antes. En PS2 el orden lo daba el OT. */
 static void queue_transparent(const PcNativeVertex* vertices, int count, const PcNativeDrawState* state, GLenum topology)
 {
     NativeQueuedDraw* item;
@@ -519,6 +543,9 @@ static void queue_transparent(const PcNativeVertex* vertices, int count, const P
     transparent_count++;
 }
 
+/* CLAUDE-NOTE[N8]: sort_depth mezcla espacios distintos: z de vista (unidades de mundo, 3D por VU1) contra profundidad
+ * 0..1 (screen-space: 2D z=0.5 y 3D preparado). Los 2D translucidos siempre caen "delante" de los 3D y entre ambos grupos
+ * el orden relativo no significa nada. Convertir todo a un unico espacio antes de ordenar. */
 static int compare_transparent(const void* a, const void* b)
 {
     const NativeQueuedDraw* x = (const NativeQueuedDraw*)a;
@@ -691,6 +718,8 @@ int pcRendererGetOutputSize(int* w, int* h)
     return ready;
 }
 
+/* CLAUDE-NOTE[N1]: el blit de abajo copia el FBO tal cual; no hay ninguna comprobacion (glGetError, glReadPixels) que diga
+ * si el FBO tiene contenido. Es el mejor sitio para volcar un pixel/frame cuando se depure la pantalla negra. */
 void pcRendererPresent(void)
 {
     /* Native GDI overlays are composed into the same framebuffer before the final blit. */

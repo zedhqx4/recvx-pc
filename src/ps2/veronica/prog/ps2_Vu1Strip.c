@@ -46,6 +46,16 @@ static void pcNativeUpdateProjection(void)
 
 /* The old VU1 endpoint produced screen coordinates and GS-ready packets.
  * The native endpoint preserves view-space position and forwards the strip to the GPU. */
+/* CLAUDE-NOTE[N4]: strip[i].fFog viene de njCalcFogPower()/fNaFogTbl y esta en 0..255 (255 = sin niebla). Aqui se hace
+ * clamp(fFog,0,1) SIN dividir, asi que casi todo queda en 1.0 (niebla inexistente). Debe ser fFog/255.0f. La ruta 3D
+ * preparada (ps2_dummy.c) divide por 128: tambien mal. Hay que unificar.
+ * CLAUDE-NOTE[N6]: se ignora strip[].fNz. La ruta original (vu1DrawTriangleStripOpaqueSingle y similares) marcaba como no
+ * dibujable (ulKick=32768) el triangulo cuando 0<fNz en sus 3 vertices (culling). Aqui cull_backfaces=0 y se dibujan las
+ * caras traseras. Tampoco se ejecutan _Clip_ViewVolume2 / ScissorTriangle (ver N5).
+ * CLAUDE-NOTE[N9]: state.textured = textured && texture!=0 -> si la textura no cargo (pcNativeTextureLoad devolvio 0) esto
+ * dibuja el strip SIN textura en vez de omitirlo o avisar; revisar recvx.log buscando "native texture:".
+ * CLAUDE-NOTE[N3]: el estado de proyeccion se toma de globales del renderer; si el strip es transparente se dibuja luego
+ * con la proyeccion vigente al flush, no con la actual. */
 static void pcNativeSubmitVu1Strip(unsigned long ulType, VU1_STRIP_BUF* strip,
                                    unsigned short count, unsigned short mode)
 {

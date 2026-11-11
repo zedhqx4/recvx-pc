@@ -1110,6 +1110,9 @@ int pcVideoPumpEvents(void)
     return 1;
 }
 
+/* CLAUDE-NOTE[N1]: este es el origen de los "60 fps": el bucle presenta y hace BeginFrame (clear) cada frame aunque no se
+ * haya dibujado nada. Un frame vacio es indistinguible de un frame con contenido; falta un contador de draws por frame y
+ * un glReadPixels de comprobacion antes de pcRendererPresent(). */
 void pcVideoPresent(void)
 {
     static double last_report;

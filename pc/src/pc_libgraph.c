@@ -70,6 +70,8 @@ void sceGsSetDefStoreImage(sceGsStoreImage* sp, short sbp, short sbw, short spsm
     if (sp != NULL) memset(sp, 0, sizeof(*sp));
 }
 
+/* CLAUDE-NOTE[N7]: no-op. Es el camino por el que el juego leia el framebuffer a una textura (render texture, espejos,
+ * efectos de agua/gas). Sin implementarlo, esas escenas salen vacias. Ver StoreRenderTex() en ps2_loadtim2.c. */
 int sceGsExecStoreImage(sceGsStoreImage* sp, u_long128* dstaddr)
 {
     (void)sp; (void)dstaddr;
