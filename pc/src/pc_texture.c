@@ -318,24 +318,30 @@ static void debug_dump_texture(const TIM2_PICTUREHEADER_EX* ext, const TIM2_PICT
     int row_bytes, pad;
     unsigned int fsize;
     char hex[3 * 32 + 1], chex[3 * 32 + 1];
-    if (dumped >= 16 || (env && env[0] == '0')) return;
-    dumped++;
+    const char* want = getenv("RECVX_TEXDUMP_GINDEX");   /* volcar tambien las primeras 8 versiones de esta Gindex */
+    static int dumped_want;
+    int idx;
+    int is_want = want && (unsigned int)strtoul(want, NULL, 10) == ext->Gindex && dumped_want < 8;
+    if (is_want) { dumped_want++; }
+    else if (dumped >= 16 || (env && env[0] == '0')) return;
+    if (!is_want) dumped++;
+    idx = is_want ? 100 + dumped_want : dumped;
     for (k = 0; k < 32; k++) {
         snprintf(hex + k * 3, 4, "%02x ", image[k]);
         snprintf(chex + k * 3, 4, "%02x ", clut ? clut[k] : 0);
     }
     pcLog("texdump #%d: Gindex=%u PictFormat=%u ImageType=%u ClutType=%u ClutColors=%u ImageSize=%u ClutSize=%u HeaderSize=%u %ux%u bank=%u clampflag=%u",
-          dumped, ext->Gindex, (unsigned int)ext->PictFormat, (unsigned int)ph->ImageType, (unsigned int)ph->ClutType,
+          idx, ext->Gindex, (unsigned int)ext->PictFormat, (unsigned int)ph->ImageType, (unsigned int)ph->ClutType,
           (unsigned int)ph->ClutColors, (unsigned int)ph->ImageSize, (unsigned int)ph->ClutSize, (unsigned int)ph->HeaderSize,
           w, h, bank, (unsigned int)ext->ClampFlag);
-    pcLog("texdump #%d: image[0..31]=%s", dumped, hex);
-    pcLog("texdump #%d: clut[0..31]=%s", dumped, chex);
+    pcLog("texdump #%d: image[0..31]=%s", idx, hex);
+    pcLog("texdump #%d: clut[0..31]=%s", idx, chex);
     row_bytes = (int)(w * 3u); pad = (4 - (row_bytes & 3)) & 3;
     fsize = (unsigned int)(54 + (row_bytes + pad) * (int)h);
     memset(hdr, 0, sizeof(hdr));
     hdr[0] = 'B'; hdr[1] = 'M'; memcpy(hdr + 2, &fsize, 4); hdr[10] = 54; hdr[14] = 40;
     memcpy(hdr + 18, &w, 4); memcpy(hdr + 22, &h, 4); hdr[26] = 1; hdr[28] = 24;
-    snprintf(name, sizeof(name), "recvx_tex_%02d_g%u_f%u.bmp", dumped, ext->Gindex, (unsigned int)ext->PictFormat);
+    snprintf(name, sizeof(name), "recvx_tex_%02d_g%u_f%u.bmp", idx, ext->Gindex, (unsigned int)ext->PictFormat);
     f = fopen(name, "wb");
     if (!f) return;
     fwrite(hdr, 1, 54, f);
