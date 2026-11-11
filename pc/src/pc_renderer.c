@@ -308,13 +308,17 @@ void pcRendererBeginFrame(void)
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 }
 
+/* CLAUDE-FIX[N8/N10]: la GS usaba UN solo espacio Z (near 1, far 65535, ver CalcPs2ZbuffAB) para 3D y 2D. Aqui cada draw
+ * usaba el near/far de su camara (2/20000, 10/1000...), asi que 3D y 2D no eran comparables. Todo usa ahora near=1, far=65535. */
+#define GS_NEAR 1.0f
+#define GS_FAR 65535.0f
 float pcRendererDepthFromViewZ(float z)
 {
     float depth;
-    if (z <= near_clip) return 0.0f;
-    if (z >= far_clip) return 1.0f;
-    depth = (far_clip / (far_clip - near_clip)) -
-            ((far_clip * near_clip) / (far_clip - near_clip)) / z;
+    if (z <= GS_NEAR) return 0.0f;
+    if (z >= GS_FAR) return 1.0f;
+    depth = (GS_FAR / (GS_FAR - GS_NEAR)) -
+            ((GS_FAR * GS_NEAR) / (GS_FAR - GS_NEAR)) / z;
     return depth < 0.0f ? 0.0f : depth > 1.0f ? 1.0f : depth;
 }
 
@@ -322,8 +326,8 @@ float pcRendererDepthFromReciprocalZ(float reciprocal_z)
 {
     float depth;
     if (reciprocal_z <= 0.0f) return 1.0f;
-    depth = (far_clip / (far_clip - near_clip)) -
-            ((far_clip * near_clip) / (far_clip - near_clip)) * reciprocal_z;
+    depth = (GS_FAR / (GS_FAR - GS_NEAR)) -
+            ((GS_FAR * GS_NEAR) / (GS_FAR - GS_NEAR)) * reciprocal_z;
     return depth < 0.0f ? 0.0f : depth > 1.0f ? 1.0f : depth;
 }
 
@@ -458,11 +462,19 @@ static void apply_state(const PcNativeDrawState* st)
     }
 
     {
-        /* The global Ps2Zbuff* override must not turn depth on for 2D (no depth test) nor make blended draws write depth. */
-        int ov_test = (st->screen_space && !st->depth_test) ? -1 : depth_override_test;
-        int ov_write = (st->blend || (st->screen_space && !st->depth_test)) ? -1 : depth_override_write;
-        if ((ov_test >= 0 ? ov_test : st->depth_test) != 0) glEnable(GL_DEPTH_TEST); else glDisable(GL_DEPTH_TEST);
-        glDepthMask((ov_write >= 0 ? ov_write : st->depth_write) ? GL_TRUE : GL_FALSE);
+        /* La GS siempre hacia test de Z (ZTE=1, GEQUAL); Ps2ZbuffOn/Off solo cambian la MASCARA de escritura (ZMSK).
+         * Los draws de pantalla sin depth (overlays propios) quedan sin test ni escritura. */
+        int test, write;
+        if (st->screen_space && !st->depth_test) { test = 0; write = 0; }
+        else {
+            test = st->depth_test;
+            write = st->depth_write;
+            if (!st->screen_space && depth_override_test >= 0) test = depth_override_test;
+            if (depth_override_write >= 0) write = depth_override_write;
+            if (st->blend) write = 0;
+        }
+        if (test) glEnable(GL_DEPTH_TEST); else glDisable(GL_DEPTH_TEST);
+        glDepthMask(write ? GL_TRUE : GL_FALSE);
     }
     if (st->blend) {
         glEnable(GL_BLEND);
@@ -491,8 +503,8 @@ static void apply_state(const PcNativeDrawState* st)
     glUniform1f(u_projection, projection_value);
     glUniform2f(u_aspect, aspect_w, aspect_h);
     glUniform2f(u_offset, offset_x, offset_y);
-    glUniform1f(u_near, near_clip);
-    glUniform1f(u_far, far_clip);
+    glUniform1f(u_near, GS_NEAR);
+    glUniform1f(u_far, GS_FAR);
     glUniform1i(u_textured, st->textured != 0);
     glUniform1i(u_texture, 0);
     glUniform1i(u_fog_enabled, global_fog_enabled);
@@ -597,8 +609,19 @@ static void queue_transparent(const PcNativeVertex* vertices, int count, const P
     capture_frame_state(&item->frame);
     item->topology = topology;
     item->sequence = transparent_sequence++;
-    for (i = 0; i < count; i++) depth += vertices[i].z;
-    item->sort_depth = depth / (float)count;
+    /* Clave del OT original (Ps2AddOT): bucket = (int)sz >> 4 (0..4095), sz = Z de la GS del ULTIMO vertice, mayor = mas cerca.
+     * Se pinta de bucket menor (lejos) a mayor (cerca); dentro de un bucket, por orden de envio. */
+    {
+        float sz = 0.0f;
+        if (state->ot_z_valid) sz = state->ot_z;
+        else if (!state->screen_space) sz = (vertices[count - 1].z > 1.0f) ? (65537.0f / vertices[count - 1].z + 1.0f) : 65534.0f;
+        if (sz < 0.0f) sz = 0.0f;
+        if (sz > 65534.0f) sz = 65534.0f;
+        depth = (float)((int)sz >> 4);
+        if (depth > 4095.0f) depth = 4095.0f;
+    }
+    (void)i;
+    item->sort_depth = depth;
     transparent_count++;
 }
 
@@ -609,8 +632,8 @@ static int compare_transparent(const void* a, const void* b)
 {
     const NativeQueuedDraw* x = (const NativeQueuedDraw*)a;
     const NativeQueuedDraw* y = (const NativeQueuedDraw*)b;
-    if (x->sort_depth > y->sort_depth) return -1;
-    if (x->sort_depth < y->sort_depth) return 1;
+    if (x->sort_depth < y->sort_depth) return -1;
+    if (x->sort_depth > y->sort_depth) return 1;
     if (x->sequence < y->sequence) return -1;
     if (x->sequence > y->sequence) return 1;
     return 0;
@@ -665,6 +688,8 @@ void pcRendererFlushTransparent(void)
     for (i = 0; i < transparent_count; i++) {
         NativeQueuedDraw* item = &transparent_queue[i];
         restore_frame_state(&item->frame);
+        depth_override_test = 1;   /* Ps2DrawOTag original: Ps2ZbuffOff = test de Z activo, escritura enmascarada */
+        depth_override_write = 0;
         draw_immediate(item->vertices, item->count, &item->state, item->topology);
         free(item->vertices);
         item->vertices = NULL;

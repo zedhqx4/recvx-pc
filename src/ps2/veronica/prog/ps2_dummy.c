@@ -1175,6 +1175,15 @@ static void pc_wide_clip(unsigned int* v, unsigned int num, int uv)
  * en Ps2AddOT/loadImage (ambos inertes en PC): esos primitivos no se dibujan.
  * CLAUDE-NOTE[N11]: en la rama no-sprite de la ruta nativa, vertices[i].q no se inicializa (malloc sin memset). */
 #ifdef TARGET_PC
+/* pri de njDraw*2D (<= -1; -1 = mas cerca): la GS lo convertia con sz = a + b/pri, equivalente a un Z de vista = -pri */
+static float pcPriToViewZ(float pri)
+{
+    float z = -pri;
+    if (!(z >= 1.0f)) z = 1.0f;
+    if (z > 65535.0f) z = 65535.0f;
+    return z;
+}
+
 static void pcPrimLog(const char* what, unsigned long prim, unsigned int num)
 {
     static unsigned calls, drops;
@@ -1373,6 +1382,7 @@ void Ps2AddPrim(unsigned long prim, void* dp, unsigned int num, unsigned int cli
         int count = (int)num;
         int owned = 0;
         float texture_width = 1.0f, texture_height = 1.0f;
+        float use_last_pri = ((const float*)dp)[(size_t)(count > 0 ? count - 1 : 0) * 12u + 10u];
 
         if (count < 1 || count > 16384)
             { pcPrimLog("bad count", prim, num); return; }
@@ -1387,6 +1397,7 @@ void Ps2AddPrim(unsigned long prim, void* dp, unsigned int num, unsigned int cli
             float u0 = a[0], v0 = a[1], u1 = b[0], v1 = b[1];
             const float* color = b + 4;
             float cf[4];
+            float pri_depth = pcRendererDepthFromViewZ(pcPriToViewZ(b[10]));
             unsigned int ci[4];
 
             /* CLAUDE-FIX: njDraw*2D guarda el color como ENTEROS (0..255, alfa 0..128) en esas palabras, no como float.
@@ -1413,7 +1424,7 @@ void Ps2AddPrim(unsigned long prim, void* dp, unsigned int num, unsigned int cli
                 else { x=x0; y=y1; u=u0; v=v1; }
                 sprite[i].x = x - 1728.0f;
                 sprite[i].y = y - 1808.0f;
-                sprite[i].z = 0.5f;
+                sprite[i].z = pri_depth;
                 sprite[i].r = fminf(fmaxf(color[0] / 255.0f, 0.0f), 1.0f);
                 sprite[i].g = fminf(fmaxf(color[1] / 255.0f, 0.0f), 1.0f);
                 sprite[i].b = fminf(fmaxf(color[2] / 255.0f, 0.0f), 1.0f);
@@ -1445,7 +1456,7 @@ void Ps2AddPrim(unsigned long prim, void* dp, unsigned int num, unsigned int cli
                     x = 2048.0f + (x - 2048.0f) * wide_2d;
                 vertices[i].x = x - 1728.0f;
                 vertices[i].y = y - 1808.0f;
-                vertices[i].z = 0.5f;
+                vertices[i].z = pcRendererDepthFromViewZ(pcPriToViewZ(source[10]));
                 vertices[i].r = fminf(fmaxf((float)(ci[0] & 0xFFu) / 255.0f, 0.0f), 1.0f);
                 vertices[i].g = fminf(fmaxf((float)(ci[1] & 0xFFu) / 255.0f, 0.0f), 1.0f);
                 vertices[i].b = fminf(fmaxf((float)(ci[2] & 0xFFu) / 255.0f, 0.0f), 1.0f);
@@ -1465,13 +1476,20 @@ void Ps2AddPrim(unsigned long prim, void* dp, unsigned int num, unsigned int cli
         pcRendererCurrentTextureCombine(&state.texture_function, &state.texture_alpha);
         state.textured = textured && (state.texture != 0);
         state.blend = transparent;
-        state.depth_test = 0;
-        state.depth_write = 0;
+        /* GS: 2D con ZTE=1/GEQUAL y Z = f(pri) (mismo espacio que el 3D); la prioridad decide quien queda delante. */
+        state.depth_test = 1;
+        state.depth_write = 1;
         state.alpha_test = 1;
         state.alpha_ref = 0.0f;
         state.linear_filter = 1;
         state.screen_space = 1;
         state.cull_backfaces = 0;
+        {
+            /* Ps2AddOT usa el sz del ultimo vertice como clave del OT */
+            float zv = pcPriToViewZ(use_last_pri);
+            state.ot_z_valid = 1;
+            state.ot_z = 65537.0f / zv + 1.0f;
+        }
 
         switch (topology) {
         case 0: pcRendererDrawPoints(vertices, count, &state); break;
@@ -1707,6 +1725,8 @@ static void pcNativeSubmitPrepared3D(unsigned long prim, const void* data, unsig
     state.blend = transparent;
     state.depth_test = 1;
     state.depth_write = !transparent;
+    state.ot_z_valid = 1;
+    state.ot_z = 65537.0f * ((const float*)data)[(size_t)(count - 1u) * 12u + 2u] + 1.0f;
     state.alpha_test = 1;
     state.alpha_ref = 0.0f;
     state.linear_filter = 1;
@@ -3567,7 +3587,7 @@ void Ps2DispScreenClear()
 void Ps2ZbuffOff()
 {
 #ifdef TARGET_PC
-    pcRendererSetDepthMode(0, 0);
+    pcRendererSetDepthMode(1, 0);   /* GS: ZTE=1 GEQUAL + ZMSK=1 */
     return;
 #endif
     D2_SyncTag();
