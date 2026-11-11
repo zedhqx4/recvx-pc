@@ -1,6 +1,7 @@
 /* Native TIM2 asset loader. Decodes source image/CLUT data directly into linear RGBA
  * and uploads a standalone OpenGL texture; it has no GS VRAM, TEX0 packet or GIF dependency. */
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -208,6 +209,44 @@ static int decode_tim2(const TIM2_PICTUREHEADER_EX* ext, const TIM2_PICTUREHEADE
         }
         return 1;
     }
+    /* Ps2PxlconvCheck (ps2_loadtim2.c) convierte EN SITIO las texturas de 4/8 bits con 128 < w,h < 1024: el juego las sube luego
+     * como imagen PSMCT32 (w/2 x h/2 para 8 bits, w/2 x h/4 para 4 bits, ver el cargador con LoadToVram(...,0,...)), de modo que
+     * la memoria de la GS queda en layout PSMT8/PSMT4. Para decodificarlas: (1) swizzle PSMCT32 del raster -> memoria GS,
+     * (2) lectura swizzle PSMT8/PSMT4 de esa memoria. Las pequenas (<=128) se suben lineales por PSMT8/PSMT4. */
+    if ((ph->ImageType == TIM2_IDTEX8 || ph->ImageType == TIM2_IDTEX4) && w > 128 && h > 128 && w < 1024 && h < 1024) {
+        int is8 = (ph->ImageType == TIM2_IDTEX8);
+        unsigned int w32 = w / 2, h32 = is8 ? h / 2 : h / 4;
+        unsigned int bw32 = w / 128;
+        size_t mem_size = (size_t)w * h / (is8 ? 1u : 2u);
+        size_t total = mem_size + 8192u;
+        unsigned char* mem;
+        if (bw32 == 0) bw32 = 1;
+        if (ph->ImageSize < mem_size) return 0;
+        mem = (unsigned char*)calloc(total, 1);
+        if (!mem) return 0;
+        for (y = 0; y < h32; y++) for (x = 0; x < w32; x++) {
+            size_t o = addr32(bw32, x, y);
+            if (o + 4u <= total) memcpy(mem + o, image + ((size_t)y * w32 + x) * 4u, 4);
+        }
+        bw = (w + 63u) / 64u;
+        if (bw & 1u) bw++;
+        for (y = 0; y < h; y++) for (x = 0; x < w; x++) {
+            unsigned int index;
+            size_t px = (size_t)y * w + x;
+            if (is8) {
+                offset = addr8(bw, x, y);
+                index = (offset < total) ? mem[offset] : 0;
+            } else {
+                offset = addr4(bw, x, y);
+                index = ((offset >> 1) < total) ? mem[offset >> 1] : 0;
+                index = (offset & 1u) ? (index >> 4) : (index & 15u);
+            }
+            if (index >= palette_count) index = 0;
+            memcpy(rgba + px * 4u, palette + (size_t)index * 4u, 4);
+        }
+        free(mem);
+        return 1;
+    }
     if (ph->ImageType == TIM2_IDTEX8) {
         for (y = 0; y < h; y++) for (x = 0; x < w; x++) {
             size_t o = (size_t)y * w + x;
@@ -262,6 +301,54 @@ static int log_once(unsigned int gindex, unsigned int reason)
         if (seen[i][0] == gindex && seen[i][1] == reason) return 0;
     if (count < 512) { seen[count][0] = gindex; seen[count][1] = reason; count++; }
     return 1;
+}
+
+/* Diagnostico: vuelca (por defecto) las primeras 16 texturas decodificadas como BMP y registra datos de cabecera/paleta.
+ * RECVX_TEXDUMP=0 lo desactiva. */
+static void debug_dump_texture(const TIM2_PICTUREHEADER_EX* ext, const TIM2_PICTUREHEADER* ph,
+                               const unsigned char* image, const unsigned char* clut,
+                               const unsigned char* rgba, unsigned int bank)
+{
+    static int dumped;
+    char name[96];
+    FILE* f;
+    unsigned int w = ph->ImageWidth, h = ph->ImageHeight, y, x, k;
+    const char* env = getenv("RECVX_TEXDUMP");
+    unsigned char hdr[54];
+    int row_bytes, pad;
+    unsigned int fsize;
+    char hex[3 * 32 + 1], chex[3 * 32 + 1];
+    if (dumped >= 16 || (env && env[0] == '0')) return;
+    dumped++;
+    for (k = 0; k < 32; k++) {
+        snprintf(hex + k * 3, 4, "%02x ", image[k]);
+        snprintf(chex + k * 3, 4, "%02x ", clut ? clut[k] : 0);
+    }
+    pcLog("texdump #%d: Gindex=%u PictFormat=%u ImageType=%u ClutType=%u ClutColors=%u ImageSize=%u ClutSize=%u HeaderSize=%u %ux%u bank=%u clampflag=%u",
+          dumped, ext->Gindex, (unsigned int)ext->PictFormat, (unsigned int)ph->ImageType, (unsigned int)ph->ClutType,
+          (unsigned int)ph->ClutColors, (unsigned int)ph->ImageSize, (unsigned int)ph->ClutSize, (unsigned int)ph->HeaderSize,
+          w, h, bank, (unsigned int)ext->ClampFlag);
+    pcLog("texdump #%d: image[0..31]=%s", dumped, hex);
+    pcLog("texdump #%d: clut[0..31]=%s", dumped, chex);
+    row_bytes = (int)(w * 3u); pad = (4 - (row_bytes & 3)) & 3;
+    fsize = (unsigned int)(54 + (row_bytes + pad) * (int)h);
+    memset(hdr, 0, sizeof(hdr));
+    hdr[0] = 'B'; hdr[1] = 'M'; memcpy(hdr + 2, &fsize, 4); hdr[10] = 54; hdr[14] = 40;
+    memcpy(hdr + 18, &w, 4); memcpy(hdr + 22, &h, 4); hdr[26] = 1; hdr[28] = 24;
+    snprintf(name, sizeof(name), "recvx_tex_%02d_g%u_f%u.bmp", dumped, ext->Gindex, (unsigned int)ext->PictFormat);
+    f = fopen(name, "wb");
+    if (!f) return;
+    fwrite(hdr, 1, 54, f);
+    for (y = h; y-- > 0;) {
+        unsigned char zero[4] = {0, 0, 0, 0};
+        for (x = 0; x < w; x++) {
+            const unsigned char* px = rgba + ((size_t)y * w + x) * 4u;
+            unsigned char bgr[3] = { px[2], px[1], px[0] };
+            fwrite(bgr, 1, 3, f);
+        }
+        if (pad) fwrite(zero, 1, (size_t)pad, f);
+    }
+    fclose(f);
 }
 
 /* CLAUDE-NOTE[N9][TpFlag y PictFormat 5..8 ya no se rechazan]: puntos de rechazo que dejan bind(0) y hacen que los primitivos con textura se omitan o salgan planos:
@@ -352,6 +439,7 @@ int pcNativeTextureLoad(NJS_TEXMEMLIST* addr)
                       gindex, ph->ImageType, ph->ClutType, ph->PictFormat, ph->ImageWidth, ph->ImageHeight);
             return 0;
         }
+        debug_dump_texture(ext, ph, image, clut, rgba, bank);
         texture = pcRendererLoadTextureRGBA(rgba, ph->ImageWidth, ph->ImageHeight, linear);
         free(rgba);
         if (texture == 0) {
