@@ -410,8 +410,10 @@ void njColorBlendingModeSys(int s_mode, int d_mode) // this function is not on t
         if (alpha_value == 0x0000000000000044ULL) { sr=2; dr=3; sa=1; da=3; }
         else if (alpha_value == 0x0000000000000048ULL) { sr=2; dr=1; sa=1; da=1; }
         else if (alpha_value == 0x0000000000000046ULL) { sr=0; dr=3; sa=1; da=3; }
-        else if (alpha_value == 0x0000000000000068ULL) { sr=2; dr=1; sa=6; da=1; }
-        else if (alpha_value == 0x0000000000000026ULL || alpha_value == 0x0000000100000026ULL) { sr=1; dr=3; sa=1; da=3; }
+        /* 0x68: Cs*FIX + Cd con FIX=0x80 (=1.0) -> suma pura ONE,ONE (antes usaba SRC_ALPHA y quedaba translucido) */
+        else if (alpha_value == 0x0000008000000068ULL || alpha_value == 0x0000000000000068ULL) { sr=1; dr=1; sa=1; da=1; }
+        /* 0x26: Cs - Cd*FIX/128 con FIX 0 o 1 ~= Cs -> opaco (ONE,ZERO) */
+        else if (alpha_value == 0x0000000000000026ULL || alpha_value == 0x0000000100000026ULL) { sr=1; dr=0; sa=1; da=0; }
         pcRendererSetBlendFactors(sr, dr, sa, da);
         return;
     }
