@@ -46,7 +46,7 @@ static void pcNativeUpdateProjection(void)
 
 /* The old VU1 endpoint produced screen coordinates and GS-ready packets.
  * The native endpoint preserves view-space position and forwards the strip to the GPU. */
-/* CLAUDE-NOTE[N4]: strip[i].fFog viene de njCalcFogPower()/fNaFogTbl y esta en 0..255 (255 = sin niebla). Aqui se hace
+/* CLAUDE-NOTE[N4][CORREGIDO]: strip[i].fFog viene de njCalcFogPower()/fNaFogTbl y esta en 0..255 (255 = sin niebla). Aqui se hace
  * clamp(fFog,0,1) SIN dividir, asi que casi todo queda en 1.0 (niebla inexistente). Debe ser fFog/255.0f. La ruta 3D
  * preparada (ps2_dummy.c) divide por 128: tambien mal. Hay que unificar.
  * CLAUDE-NOTE[N6]: se ignora strip[].fNz. La ruta original (vu1DrawTriangleStripOpaqueSingle y similares) marcaba como no
@@ -91,7 +91,7 @@ static void pcNativeSubmitVu1Strip(unsigned long ulType, VU1_STRIP_BUF* strip,
         vertices[i].u = strip[i].fU;
         vertices[i].v = strip[i].fV;
         vertices[i].q = 1.0f;
-        vertices[i].fog = fminf(fmaxf(strip[i].fFog, 0.0f), 1.0f);
+        vertices[i].fog = fminf(fmaxf(strip[i].fFog / 255.0f, 0.0f), 1.0f);
     }
 
     memset(&state, 0, sizeof(state));

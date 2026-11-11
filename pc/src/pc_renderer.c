@@ -20,8 +20,18 @@ typedef struct {
 } NativeGpuVertex;
 
 typedef struct {
+    float projection, aspect_w, aspect_h, offset_x, offset_y, near_clip, far_clip;
+    int fog_enabled;
+    float fog_color[3];
+    GLenum blend[4];
+    int scissor_enabled, scissor_rect[4];
+    int depth_test, depth_write;
+} NativeFrameState;
+
+typedef struct {
     PcNativeVertex* vertices;
     int count;
+    NativeFrameState frame;
     PcNativeDrawState state;
     float sort_depth;
     GLenum topology;
@@ -68,8 +78,10 @@ static GLenum blend_dst_alpha = GL_ONE_MINUS_SRC_ALPHA;
 static int scissor_enabled;
 static int scissor_rect[4];
 static unsigned long long frame_number;
+static unsigned stat_immediate, stat_queued, stat_vertices, stat_screen_space;
+static int debug_magenta = -1;
 
-/* CLAUDE-NOTE[N5]: vertex shader con problemas de clipping.
+/* CLAUDE-NOTE[N5][CORREGIDO]: vertex shader con problemas de clipping.
  *  - max(z, 0.00001) MUEVE los vertices con z<=0 en vez de recortarlos: un triangulo que cruza el plano de la
  *    camara cambia de forma. El recorte original (ScissorTriangle de la VU1) tampoco se ejecuta en la ruta nativa.
  *  - Correcto: no dividir aqui. clip.xy = (x*proj*aspect)*2/target + (offset*2/target - 1)*z ; clip.z lineal en z ;
@@ -89,11 +101,13 @@ static const char* vertex_shader =
     "  vColor=aColor; vTexCoord=aTexCoord; vFog=aFog; vQ=aQ;\n"
     "  if(uScreenSpace!=0){ vec2 n=vec2(aViewPosition.x/uTarget.x*2.0-1.0, 1.0-aViewPosition.y/uTarget.y*2.0);\n"
     "    gl_Position=vec4(n,aViewPosition.z*2.0-1.0,1.0); return; }\n"
-    "  float z=max(aViewPosition.z,0.00001);\n"
-    "  vec2 s=vec2(aViewPosition.x*uProjection*uAspect.x/z, aViewPosition.y*uProjection*uAspect.y/z)+uOffset;\n"
-    "  vec2 n=vec2(s.x/uTarget.x*2.0-1.0, 1.0-s.y/uTarget.y*2.0);\n"
-    "  float depth=(uFar/(uFar-uNear))-((uFar*uNear)/(uFar-uNear))/z;\n"
-    "  gl_Position=vec4(n*z,(depth*2.0-1.0)*z,z);\n"
+    "  float z=aViewPosition.z;\n"
+    "  vec2 sp=vec2(aViewPosition.x*uProjection*uAspect.x, aViewPosition.y*uProjection*uAspect.y);\n"
+    "  float cx=sp.x*2.0/uTarget.x + (uOffset.x*2.0/uTarget.x-1.0)*z;\n"
+    "  float cy=z*(1.0-uOffset.y*2.0/uTarget.y) - sp.y*2.0/uTarget.y;\n"
+    "  float k=uFar/(uFar-uNear);\n"
+    "  float cz=2.0*(k*z-k*uNear)-z;\n"
+    "  gl_Position=vec4(cx,cy,cz,z);\n"
     "}\n";
 
 static const char* fragment_shader =
@@ -259,6 +273,7 @@ void pcRendererShutdown(void)
 {
     if (!ready) return;
     glDeleteBuffers(1, &vertex_buffer);
+    glDeleteVertexArrays(1, &vertex_array);
     glDeleteFramebuffers(1, &framebuffer);
     glDeleteTextures(1, &color_target);
     glDeleteTextures(1, &depth_target);
@@ -273,6 +288,13 @@ void pcRendererBeginFrame(void)
 {
     if (!ready) return;
     frame_number++;
+    if (debug_magenta < 0) { const char* e = getenv("RECVX_CLEAR_DEBUG"); debug_magenta = (e && *e && *e != '0'); }
+    if (frame_number % 120 == 0) {
+        /* A frame with 0 draws means the problem is before the renderer; >0 means it is in the renderer. */
+        pcLog("native renderer: last frame draws=%u (2D/screen-space=%u) vertices=%u queued_blend=%u",
+              stat_immediate, stat_screen_space, stat_vertices, stat_queued);
+    }
+    stat_immediate = stat_queued = stat_vertices = stat_screen_space = 0;
     glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
     glViewport(0, 0, render_width, render_height);
     glEnable(GL_DEPTH_TEST);
@@ -280,7 +302,8 @@ void pcRendererBeginFrame(void)
     glDepthMask(GL_TRUE);
     glDisable(GL_BLEND);
     glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
-    glClearColor(clear_color[0], clear_color[1], clear_color[2], clear_color[3]);
+    if (debug_magenta) glClearColor(1.0f, 0.0f, 1.0f, 1.0f); /* RECVX_CLEAR_DEBUG=1: magenta = blit works, nothing drawn */
+    else glClearColor(clear_color[0], clear_color[1], clear_color[2], clear_color[3]);
     glClearDepth(1.0);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 }
@@ -380,7 +403,7 @@ void pcRendererClear(float r, float g, float b, float a, int clear_depth)
     glClear(mask);
 }
 
-/* CLAUDE-NOTE[N10]: override GLOBAL y persistente (Ps2ZbuffOff/Off2/On). Se queda "pegado" si nadie lo restaura. Debe ser
+/* CLAUDE-NOTE[N10][PARCIAL]: override GLOBAL y persistente (Ps2ZbuffOff/Off2/On). Se queda "pegado" si nadie lo restaura. Debe ser
  * parte del estado de cada draw/pasada, no un global que pisa al estado del draw. */
 void pcRendererSetDepthMode(int depth_test, int depth_write)
 {
@@ -417,12 +440,12 @@ void pcRendererSetBlendFactors(int sr, int dr, int sa, int da)
     blend_dst_alpha = map[da];
 }
 
-/* CLAUDE-NOTE[N3]: apply_state() lee GLOBALES (projection_value, aspect, offset, near/far, global_fog_*,
+/* CLAUDE-NOTE[N3][CORREGIDO]: apply_state() lee GLOBALES (projection_value, aspect, offset, near/far, global_fog_*,
  * blend_*_rgb/alpha, scissor_*, depth_override_*), no el estado del draw. Para los draws opacos da igual (se dibujan al
  * momento), pero las transparencias se encolan y se dibujan en pcRendererFlushTransparent() con el estado de ESE instante.
  * Cualquier cambio de camara/fog/blend/scissor entre el envio y el flush las estropea. Hay que guardar todo esto dentro
  * de NativeQueuedDraw.
- * CLAUDE-NOTE[N10]: depth_override_* gana siempre sobre st->depth_*; Ps2ZbuffOn() lo deja en (1,1) y fuerza escritura de
+ * CLAUDE-NOTE[N10][PARCIAL]: depth_override_* gana siempre sobre st->depth_*; Ps2ZbuffOn() lo deja en (1,1) y fuerza escritura de
  * profundidad tambien en transparentes y test de profundidad en 2D. */
 static void apply_state(const PcNativeDrawState* st)
 {
@@ -434,8 +457,13 @@ static void apply_state(const PcNativeDrawState* st)
         st = &d;
     }
 
-    if ((depth_override_test >= 0 ? depth_override_test : st->depth_test) != 0) glEnable(GL_DEPTH_TEST); else glDisable(GL_DEPTH_TEST);
-    glDepthMask((depth_override_write >= 0 ? depth_override_write : st->depth_write) ? GL_TRUE : GL_FALSE);
+    {
+        /* The global Ps2Zbuff* override must not turn depth on for 2D (no depth test) nor make blended draws write depth. */
+        int ov_test = (st->screen_space && !st->depth_test) ? -1 : depth_override_test;
+        int ov_write = (st->blend || (st->screen_space && !st->depth_test)) ? -1 : depth_override_write;
+        if ((ov_test >= 0 ? ov_test : st->depth_test) != 0) glEnable(GL_DEPTH_TEST); else glDisable(GL_DEPTH_TEST);
+        glDepthMask((ov_write >= 0 ? ov_write : st->depth_write) ? GL_TRUE : GL_FALSE);
+    }
     if (st->blend) {
         glEnable(GL_BLEND);
         glBlendEquationSeparate(GL_FUNC_ADD, GL_FUNC_ADD);
@@ -505,6 +533,7 @@ static void draw_immediate(const PcNativeVertex* vertices, int count, const PcNa
         upload[i].q = vertices[i].q;
         upload[i].fog = vertices[i].fog;
     }
+    stat_immediate++; stat_vertices += (unsigned)count; if (state && state->screen_space) stat_screen_space++;
     apply_state(state);
     glBindVertexArray(vertex_array);
     glBindBuffer(GL_ARRAY_BUFFER, vertex_buffer);
@@ -516,6 +545,28 @@ static void draw_immediate(const PcNativeVertex* vertices, int count, const PcNa
 
 /* CLAUDE-NOTE[N8]: toda primitiva con blend se difiere hasta el flush, incluido el 2D (fades, paneles, UI translucida), por
  * lo que se pinta DESPUES de todo el 2D opaco aunque el juego la enviara antes. En PS2 el orden lo daba el OT. */
+static void capture_frame_state(NativeFrameState* f)
+{
+    f->projection = projection_value; f->aspect_w = aspect_w; f->aspect_h = aspect_h;
+    f->offset_x = offset_x; f->offset_y = offset_y; f->near_clip = near_clip; f->far_clip = far_clip;
+    f->fog_enabled = global_fog_enabled;
+    memcpy(f->fog_color, global_fog_color, sizeof(f->fog_color));
+    f->blend[0] = blend_src_rgb; f->blend[1] = blend_dst_rgb; f->blend[2] = blend_src_alpha; f->blend[3] = blend_dst_alpha;
+    f->scissor_enabled = scissor_enabled; memcpy(f->scissor_rect, scissor_rect, sizeof(f->scissor_rect));
+    f->depth_test = depth_override_test; f->depth_write = depth_override_write;
+}
+
+static void restore_frame_state(const NativeFrameState* f)
+{
+    projection_value = f->projection; aspect_w = f->aspect_w; aspect_h = f->aspect_h;
+    offset_x = f->offset_x; offset_y = f->offset_y; near_clip = f->near_clip; far_clip = f->far_clip;
+    global_fog_enabled = f->fog_enabled;
+    memcpy(global_fog_color, f->fog_color, sizeof(global_fog_color));
+    blend_src_rgb = f->blend[0]; blend_dst_rgb = f->blend[1]; blend_src_alpha = f->blend[2]; blend_dst_alpha = f->blend[3];
+    scissor_enabled = f->scissor_enabled; memcpy(scissor_rect, f->scissor_rect, sizeof(scissor_rect));
+    depth_override_test = f->depth_test; depth_override_write = f->depth_write;
+}
+
 static void queue_transparent(const PcNativeVertex* vertices, int count, const PcNativeDrawState* state, GLenum topology)
 {
     NativeQueuedDraw* item;
@@ -529,6 +580,7 @@ static void queue_transparent(const PcNativeVertex* vertices, int count, const P
         transparent_queue = grown;
         transparent_capacity = cap;
     }
+    stat_queued++;
     item = &transparent_queue[transparent_count];
     memset(item, 0, sizeof(*item));
     item->vertices = (PcNativeVertex*)malloc((size_t)count * sizeof(*vertices));
@@ -536,6 +588,7 @@ static void queue_transparent(const PcNativeVertex* vertices, int count, const P
     memcpy(item->vertices, vertices, (size_t)count * sizeof(*vertices));
     item->count = count;
     item->state = *state;
+    capture_frame_state(&item->frame);
     item->topology = topology;
     item->sequence = transparent_sequence++;
     for (i = 0; i < count; i++) depth += vertices[i].z;
@@ -600,13 +653,17 @@ void pcRendererFlushTransparent(void)
 {
     int i;
     if (!ready || transparent_count <= 0) return;
+    NativeFrameState live;
+    capture_frame_state(&live);
     qsort(transparent_queue, (size_t)transparent_count, sizeof(*transparent_queue), compare_transparent);
     for (i = 0; i < transparent_count; i++) {
         NativeQueuedDraw* item = &transparent_queue[i];
+        restore_frame_state(&item->frame);
         draw_immediate(item->vertices, item->count, &item->state, item->topology);
         free(item->vertices);
         item->vertices = NULL;
     }
+    restore_frame_state(&live);
     transparent_count = 0;
 }
 

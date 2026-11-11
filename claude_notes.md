@@ -130,6 +130,22 @@ el override depende de quién llame (`sub1.c` los llama sueltos). Mejor: que el 
 
 ---
 
+## 3b. Correcciones ya aplicadas (sin poder ejecutar el juego: verificar en runtime)
+
+| Nota | Qué se cambió |
+|---|---|
+| N1 | Contadores de draws por frame (log cada 120 frames: `native renderer: last frame draws=...`) y `RECVX_CLEAR_DEBUG=1` (clear magenta) |
+| N2 | `Ps2ScreenClear()` ya no limpia el FBO en PC (el frame se limpia en `BeginFrame`) |
+| N3 | Cada transparencia guarda proyección, fog, blend, scissor y override de profundidad y se dibuja con ese estado |
+| N4 | Fog `/255` en las rutas VU1 y 3D preparada |
+| N5 | Vertex shader en espacio de clip real (sin `max(z,…)`, sin división): la GPU recorta contra el plano cercano |
+| N9 | `pcNativeTextureLoad` ya no rechaza por `TpFlag` (es una marca de VRAM de la PS2) |
+| N10 | El override de `Ps2Zbuff*` ya no activa profundidad en 2D ni hace escribir profundidad a las transparencias |
+| N11 | `q` inicializado en 2D; `Shutdown` borra el VAO |
+
+**Siguen pendientes:** N6 (culling por `fNz`), N7 (render-to-texture real), N8 (orden de pintado / OT), y el resto de N9
+(que el 3D preparado descarte sin log cuando falta la textura). La pantalla negra **no está verificada como resuelta**.
+
 ## 4. Orden de trabajo sugerido
 
 1. Instrumentar (sección 2). Confirmar si hay draws y si el FBO sale magenta/negro.

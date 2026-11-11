@@ -106,6 +106,7 @@ typedef ptrdiff_t GLintptr;
     X(void, glUniform4f, (GLint l, GLfloat a, GLfloat b, GLfloat c, GLfloat d)) \
     X(void, glGenVertexArrays, (GLsizei n, GLuint* a)) \
     X(void, glBindVertexArray, (GLuint a)) \
+    X(void, glDeleteVertexArrays, (GLsizei n, const GLuint* a)) \
     X(void, glGenBuffers, (GLsizei n, GLuint* b)) \
     X(void, glDeleteBuffers, (GLsizei n, const GLuint* b)) \
     X(void, glBindBuffer, (GLenum t, GLuint b)) \
@@ -169,6 +170,7 @@ PC_GL_FUNCS(PC_GL_DECLARE)
 #define glUniform4f pc_glUniform4f
 #define glGenVertexArrays pc_glGenVertexArrays
 #define glBindVertexArray pc_glBindVertexArray
+#define glDeleteVertexArrays pc_glDeleteVertexArrays
 #define glGenBuffers pc_glGenBuffers
 #define glDeleteBuffers pc_glDeleteBuffers
 #define glBindBuffer pc_glBindBuffer

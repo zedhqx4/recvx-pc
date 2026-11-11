@@ -1423,6 +1423,7 @@ void Ps2AddPrim(unsigned long prim, void* dp, unsigned int num, unsigned int cli
                 vertices[i].u = use_uv ? source[0] : source[0];
                 vertices[i].v = use_uv ? source[1] : source[1];
                 vertices[i].fog = 1.0f;
+                vertices[i].q = 1.0f;
             }
         }
 
@@ -1615,7 +1616,7 @@ void Ps2AddPrim2D(unsigned long prim, void* dp, unsigned int num)
 
 // 100% matching!
 #ifdef TARGET_PC
-/* CLAUDE-NOTE[N4]: fog = source[11] / 128.0f es la escala equivocada; el fog de GS/fNaFogTbl es 0..255 (usar /255.0f).
+/* CLAUDE-NOTE[N4][CORREGIDO]: fog = source[11] / 128.0f es la escala equivocada; el fog de GS/fNaFogTbl es 0..255 (usar /255.0f).
  * CLAUDE-NOTE[N9]: if (textured && texture == 0) return; descarta el primitivo SIN log. Si pcNativeTextureLoad rechaza muchas
  * texturas (TpFlag != 0, PictFormat 5..8, cabeceras raras), la escena 3D queda vacia. Las rutas 2D y VU1 en cambio dibujan
  * sin textura en ese caso: comportamiento inconsistente. */
@@ -1664,7 +1665,7 @@ static void pcNativeSubmitPrepared3D(unsigned long prim, const void* data, unsig
         vertices[i].v = source[1];
         vertices[i].q = source[2];
         vertices[i].fog = floating_color ?
-            fminf(fmaxf(source[11] / 128.0f, 0.0f), 1.0f) : 1.0f;
+            fminf(fmaxf(source[11] / 255.0f, 0.0f), 1.0f) : 1.0f;
     }
 
     memset(&state, 0, sizeof(state));
@@ -3447,7 +3448,8 @@ void Ps2InitPS2_GS_SAVE()
 void Ps2ScreenClear()
 {
 #ifdef TARGET_PC
-    pcRendererClear(0.0f, 0.0f, 0.0f, 1.0f, 1);
+    /* Native drawing is immediate: clearing here wipes what was already drawn this frame (StoreRenderTex,
+     * PS2_Render_Tex_Sub). The FBO is cleared at the start of every frame (pcRendererBeginFrame). */
     return;
 #endif
     SyncPath();

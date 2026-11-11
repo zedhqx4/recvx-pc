@@ -252,7 +252,7 @@ static PcNativeTextureEntry* allocate_entry(void)
     return NULL;
 }
 
-/* CLAUDE-NOTE[N9]: puntos de rechazo que dejan bind(0) y hacen que los primitivos con textura se omitan o salgan planos:
+/* CLAUDE-NOTE[N9][TpFlag CORREGIDO]: puntos de rechazo que dejan bind(0) y hacen que los primitivos con textura se omitan o salgan planos:
  *   - pSurface NULL, FileId != "TIM2", FormatId > 1, PictFormat 5..8
  *   - ext->TpFlag != 0  <- el codigo original TRATABA este caso (Ps2_tex_load_tp_cancel + Ps2TexLoad), aqui se rechaza
  *   - cabecera mal formada / decode_tim2() sin soporte
@@ -281,7 +281,8 @@ int pcNativeTextureLoad(NJS_TEXMEMLIST* addr)
 
     ext = (TIM2_PICTUREHEADER_EX*)addr->texinfo.texsurface.pSurface;
     if (memcmp(ext->FileId, "TIM2", 4) != 0 || ext->FormatId > 1 ||
-        (ext->PictFormat >= 5 && ext->PictFormat <= 8) || ext->TpFlag != 0) {
+        (ext->PictFormat >= 5 && ext->PictFormat <= 8)) {
+        /* TpFlag is a PS2 "already resident in VRAM" bookkeeping flag, not a texture property: never reject on it. */
         pcRendererBindTexture(0);
         pcLog("native texture: invalid/unsupported TIM2 header (Gindex %u)", ext->Gindex);
         return 0;
