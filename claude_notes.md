@@ -194,3 +194,40 @@ dibujaba porque la pantalla ni siquiera había cargado sus datos.
 6. N8: reintroducir un orden de pintado para 2D (capas por prioridad) y ordenar transparencias en un único espacio.
 7. N7 completo: render-to-texture real.
 8. Rendimiento: un VBO persistente / buffer mapeado en lugar de `malloc + glBufferData` por draw.
+
+---
+
+## 5. Auditoria GS -> OpenGL (que hacia la GS y que hace hoy el renderer nativo)
+
+Objetivo acordado: el renderer debe reproducir el **comportamiento** de la GS (estado de registros + orden de pintado), no
+parchear sintomas. Registros que el juego escribe realmente (conteo de `SCE_GS_SET_*` en `src/`): TEST_1/2 (25), TEX0_1/2 (18),
+PRIM (18), RGBAQ (10), UV (8), FRAME_2 (8), ALPHA_2 (3), TRX* (3), ZBUF_1/2 (4), TEX1_1/2 (4), CLAMP_1 (2), PABE (2), SCISSOR (2), TEXA (1).
+
+| Registro / mecanismo | Que hacia la GS | Estado en PC |
+|---|---|---|
+| TEST (ATE/ATST/AREF/AFAIL) | alpha test por pixel (GREATER 0 para mascaras; GEQUAL 128 en ZbuffOff; AFAIL_FB_ONLY) | **Parcial**: ahora GREATER~0 en 3D/2D. Falta GEQUAL 128 (+AFAIL) y DATE/DATM |
+| TEST (ZTE/ZTST) + ZBUF.ZMSK | test de Z siempre activo, ZbuffOn/Off solo cambian la mascara de escritura | **Corregido** (commits 3fcac93, 4d6de8b) |
+| Z de 2D | sz = f(pri) en el mismo espacio que el 3D | **Corregido** |
+| OT (Ps2AddOT/Ps2DrawOTag) | transparentes a 4096 buckets por sz>>4, FIFO dentro del bucket, pintados con ZbuffOff | **Corregido** (cola por bucket) |
+| ALPHA (A,B,C,D,FIX) | ecuacion de blend general | **Parcial**: tabla de ~6 valores conocidos (0x44,0x48,0x46,0x68,0x26...) en `njColorBlendingMode`; no es la ecuacion general |
+| PABE | blend por pixel segun alfa MSB | **Falta** |
+| TEX0 TFX/TCC | MODULATE/DECAL/HIGHLIGHT, alfa de textura | Parcial (modulate/decal con TCC) |
+| TEX0 CLUT / CSM1 / bank | seleccion de paleta (CLD, CBP) | Parcial: 8 bits permutado; `bank` ignorado para 8 bits (hay texturas con 512 colores) |
+| TEXA | expansion de alfa en formatos 16/24 bits (AEM, TA0/TA1) | **Falta** (solo se usa en el sistema de sombras) |
+| TEX1 (MMAG/MMIN/L/K) + MIPTBP | filtro y mipmaps | Parcial: lineal/nearest, sin mipmaps |
+| CLAMP | repeat/clamp/region-clamp (MINU/MAXU) | Parcial (region clamp no) |
+| FOG/FOGCOL, FGE | niebla por vertice | Parcial (global fog) |
+| SCISSOR | recorte | Implementado (njUserClipping) |
+| **FRAME_2 + ZBUF_2 (contexto 2)** | **render a buffers fuera de pantalla** (FBP 150, 380, 476) | **Falta por completo** |
+| Ps2ShadowStart/Draw/End/Main0/Main1 | sombras: se dibujan a un buffer 16 bits (FBP 380) y luego se aplican a la escena | **Falta** (sin rama PC): explica la sombra gris del personaje |
+| PS2_Render_Tex_Sub (FRAME_2 476) | render-to-texture (espejos, agua, pantallas) | **Falta** |
+| PS2_swap contexto 2 (FBP 150) | efectos de post-proceso al cambiar de buffer (fades/blur) | **Falta** |
+| TRXPOS/TRXREG/TRXDIR + loadImage/sceGsExecLoadImage | subida/lectura de VRAM (texto dinamico, framebuffer->textura) | **No-op**: todo texto generado en runtime y todo render-to-texture queda vacio |
+
+Conclusion: ya no quedan "parches de color"; lo que falta son **tres subsistemas completos** que escriben en contexto 2
+(sombras, render-to-texture, post-proceso) y la **ecuacion de blend general** (ALPHA+PABE). Orden propuesto de trabajo:
+1. ALPHA/PABE generales (reemplazar la tabla por la ecuacion de la GS con shader de blend en dos pasos / dual-source).
+2. Framebuffers fuera de pantalla (FRAME_2/ZBUF_2) como FBO + `loadImage` de lectura (`sceGsExecStoreImage`).
+3. Sombras sobre esa base.
+4. Render-to-texture / post-proceso.
+5. Texto dinamico (TRX* de subida).
