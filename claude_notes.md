@@ -209,7 +209,7 @@ PRIM (18), RGBAQ (10), UV (8), FRAME_2 (8), ALPHA_2 (3), TRX* (3), ZBUF_1/2 (4),
 | TEST (ZTE/ZTST) + ZBUF.ZMSK | test de Z siempre activo, ZbuffOn/Off solo cambian la mascara de escritura | **Corregido** (commits 3fcac93, 4d6de8b) |
 | Z de 2D | sz = f(pri) en el mismo espacio que el 3D | **Corregido** |
 | OT (Ps2AddOT/Ps2DrawOTag) | transparentes a 4096 buckets por sz>>4, FIFO dentro del bucket, pintados con ZbuffOff | **Corregido** (cola por bucket) |
-| ALPHA (A,B,C,D,FIX) | ecuacion de blend general | **Parcial**: tabla de ~6 valores conocidos (0x44,0x48,0x46,0x68,0x26...) en `njColorBlendingMode`; no es la ecuacion general |
+| ALPHA (A,B,C,D,FIX) | ecuacion de blend general | **Hecho** (`pcRendererSetGsAlpha`): (A-B)*C/128+D descompuesto en factores GL + SUBTRACT/REVERSE_SUBTRACT + glBlendColor para FIX |
 | PABE | blend por pixel segun alfa MSB | **Falta** |
 | TEX0 TFX/TCC | MODULATE/DECAL/HIGHLIGHT, alfa de textura | Parcial (modulate/decal con TCC) |
 | TEX0 CLUT / CSM1 / bank | seleccion de paleta (CLD, CBP) | Parcial: 8 bits permutado; `bank` ignorado para 8 bits (hay texturas con 512 colores) |
@@ -220,7 +220,7 @@ PRIM (18), RGBAQ (10), UV (8), FRAME_2 (8), ALPHA_2 (3), TRX* (3), ZBUF_1/2 (4),
 | SCISSOR | recorte | Implementado (njUserClipping) |
 | **FRAME_2 + ZBUF_2 (contexto 2)** | **render a buffers fuera de pantalla** (FBP 150, 380, 476) | **Falta por completo** |
 | Ps2ShadowStart/Draw/End/Main0/Main1 | sombras: se dibujan a un buffer 16 bits (FBP 380) y luego se aplican a la escena | **Falta** (sin rama PC): explica la sombra gris del personaje |
-| PS2_Render_Tex_Sub (FRAME_2 476) | render-to-texture (espejos, agua, pantallas) | **Falta** |
+| PS2_Render_Tex_Sub (FRAME_2 476) | copia reducida de la pantalla a 256x256 usada como textura por efectos de pantalla | **Hecho** (`pcRendererCopyScreenToRenderTexture` + enlace en `Ps2TexLoad` con el flag). Pendiente: `sceGsExecStoreImage` (lectura de VRAM) |
 | PS2_swap contexto 2 (FBP 150) | efectos de post-proceso al cambiar de buffer (fades/blur) | **Falta** |
 | TRXPOS/TRXREG/TRXDIR + loadImage/sceGsExecLoadImage | subida/lectura de VRAM (texto dinamico, framebuffer->textura) | **No-op**: todo texto generado en runtime y todo render-to-texture queda vacio |
 

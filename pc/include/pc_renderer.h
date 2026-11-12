@@ -64,3 +64,6 @@ void pcRendererSetTextureCombine(int function, int texture_alpha);
 void pcRendererCurrentTextureCombine(int* function, int* texture_alpha);
 void pcRendererConfigureTexture(unsigned int texture, int linear, int wrap_u, int wrap_v);
 int pcRendererGetOutputSize(int* width, int* height);
+/* Superficie de render-to-texture (la copia reducida de la pantalla que el juego usa como textura de 256x256). */
+void pcRendererCopyScreenToRenderTexture(int sx0, int sy0, int sx1, int sy1, int dx0, int dy0, int dx1, int dy1);
+void pcRendererBindRenderTexture(void);

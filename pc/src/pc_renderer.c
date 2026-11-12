@@ -54,6 +54,7 @@ static float current_texture_width = 1.0f, current_texture_height = 1.0f;
 static int current_texture_function, current_texture_alpha = 1;
 
 static GLuint framebuffer;
+static GLuint render_texture, render_texture_fbo;   /* copia reducida de la pantalla usada como textura */
 static GLuint color_target;
 static GLuint depth_target;
 static GLuint vertex_array;
@@ -278,6 +279,9 @@ void pcRendererShutdown(void)
     if (!ready) return;
     glDeleteBuffers(1, &vertex_buffer);
     glDeleteVertexArrays(1, &vertex_array);
+    if (render_texture_fbo) glDeleteFramebuffers(1, &render_texture_fbo);
+    if (render_texture) glDeleteTextures(1, &render_texture);
+    render_texture = render_texture_fbo = 0;
     glDeleteFramebuffers(1, &framebuffer);
     glDeleteTextures(1, &color_target);
     glDeleteTextures(1, &depth_target);
@@ -761,6 +765,54 @@ unsigned int pcRendererLoadTextureRGBA(const unsigned char* rgba, int width, int
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
     remember_texture(texture, width, height);
     return texture;
+}
+
+/* ---- Superficie de render-to-texture -------------------------------------------------------------------------------
+ * En la PS2 el juego copiaba la pantalla (reducida) a otra zona de VRAM (FRAME_2 / FBP 476) y despues la usaba como textura
+ * de 256x256. Aqui esa zona es una textura propia con su FBO: capturar = blit con escala desde el FBO de la escena. */
+#define RENDER_TEXTURE_SIZE 256
+
+static int ensure_render_texture(void)
+{
+    if (render_texture) return 1;
+    if (!ready) return 0;
+    glGenTextures(1, &render_texture);
+    glBindTexture(GL_TEXTURE_2D, render_texture);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, RENDER_TEXTURE_SIZE, RENDER_TEXTURE_SIZE, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+    remember_texture(render_texture, RENDER_TEXTURE_SIZE, RENDER_TEXTURE_SIZE);
+    glGenFramebuffers(1, &render_texture_fbo);
+    glBindFramebuffer(GL_FRAMEBUFFER, render_texture_fbo);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, render_texture, 0);
+    glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
+    glClear(GL_COLOR_BUFFER_BIT);
+    glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
+    return 1;
+}
+
+/* Copia el rectangulo (sx0,sy0)-(sx1,sy1) de la pantalla de juego (640x480, y hacia abajo) al rectangulo (dx0,dy0)-(dx1,dy1)
+ * de la textura (texels, fila 0 arriba), con filtro lineal. Los trozos fuera de la textura se recortan como en la GS. */
+void pcRendererCopyScreenToRenderTexture(int sx0, int sy0, int sx1, int sy1, int dx0, int dy0, int dx1, int dy1)
+{
+    float kx, ky;
+    if (!ensure_render_texture()) return;
+    kx = (float)render_width / 640.0f;
+    ky = (float)render_height / 480.0f;
+    glDisable(GL_SCISSOR_TEST);
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, framebuffer);
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, render_texture_fbo);
+    glBlitFramebuffer((GLint)(sx0 * kx), render_height - (GLint)(sy0 * ky), (GLint)(sx1 * kx), render_height - (GLint)(sy1 * ky),
+                      dx0, dy0, dx1, dy1, GL_COLOR_BUFFER_BIT, GL_LINEAR);
+    glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
+}
+
+void pcRendererBindRenderTexture(void)
+{
+    if (!ensure_render_texture()) return;
+    pcRendererBindTexture(render_texture);
 }
 
 int pcRendererUpdateTextureRGBA(unsigned int texture, const unsigned char* rgba, int width, int height)

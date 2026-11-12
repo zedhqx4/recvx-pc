@@ -3080,6 +3080,18 @@ int Ps2TexLoad(NJS_TEXMEMLIST* addr)
     }
     Ps2_now_tex = addr;
     Ps2_now_bank = addr->bank;
+    {
+        /* Con el flag de render-tex activo, una textura RGB32 (no paletizada y no PictFormat 5..8) se sustituye por la copia
+         * de pantalla y el flag se consume (rama final de Ps2BindTextureState). */
+        const TIM2_PICTUREHEADER_EX* timp = (const TIM2_PICTUREHEADER_EX*)addr->texinfo.texsurface.pSurface;
+        if (PS2_Render_tex_sub_flag != 0 && timp != NULL &&
+            !((timp->PictFormat >= 5) && (timp->PictFormat <= 8)) && timp->ImageType != 4 && timp->ImageType != 5)
+        {
+            pcRendererBindRenderTexture();
+            PS2_Render_tex_sub_flag = 0;
+            return 0;
+        }
+    }
     return pcNativeTextureLoad(addr);
 #else
 
@@ -4204,7 +4216,13 @@ l_002CF178:
 void PS2_Render_Tex_Sub() 
 {
     PS2_Render_tex_sub_flag = 1;
-    
+
+#ifdef TARGET_PC
+    /* La GS copiaba la pantalla (sprite UV 0..640x480 -> XY 0,-16..320,240) a la zona de VRAM de 256x256 que despues se
+     * enlazaba como textura (Ps2BindTextureState con el flag activo). Ver pcRendererCopyScreenToRenderTexture. */
+    pcRendererCopyScreenToRenderTexture(0, 0, SCR_WIDTH2, SCR_HEIGHT2, 0, -16, SCR_WIDTH2 / 2, SCR_HEIGHT2 / 2);
+    return;
+#endif
     D2_SyncTag();
     
     ((u_long*)WORKBASE)[0] = DMAend | 0xE;
