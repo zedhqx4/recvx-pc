@@ -19,11 +19,17 @@ typedef struct {
     float fog;
 } NativeGpuVertex;
 
+/* Estado de mezcla equivalente al registro ALPHA de la GS (ver pcRendererSetGsAlpha). */
+typedef struct {
+    GLenum equation;           /* GL_FUNC_ADD / GL_FUNC_SUBTRACT / GL_FUNC_REVERSE_SUBTRACT */
+    GLenum src, dst;           /* factores sobre Cs y Cd */
+    float fix;                 /* ALPHA.FIX normalizado (128 = 1.0) */
+} GsBlend;
 typedef struct {
     float projection, aspect_w, aspect_h, offset_x, offset_y, near_clip, far_clip;
     int fog_enabled;
     float fog_color[3];
-    GLenum blend[4];
+    GsBlend blend;
     int scissor_enabled, scissor_rect[4];
     int depth_test, depth_write;
 } NativeFrameState;
@@ -71,10 +77,7 @@ static int ready;
 static GLuint current_texture;
 static int depth_override_test = -1;
 static int depth_override_write = -1;
-static GLenum blend_src_rgb = GL_SRC_ALPHA;
-static GLenum blend_dst_rgb = GL_ONE_MINUS_SRC_ALPHA;
-static GLenum blend_src_alpha = GL_ONE;
-static GLenum blend_dst_alpha = GL_ONE_MINUS_SRC_ALPHA;
+static GsBlend gs_blend = { GL_FUNC_ADD, GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, 1.0f };
 static int scissor_enabled;
 static int scissor_rect[4];
 static unsigned long long frame_number;
@@ -430,20 +433,39 @@ void pcRendererSetGlobalFog(int enabled, float r, float g, float b)
     global_fog_color[0] = r; global_fog_color[1] = g; global_fog_color[2] = b;
 }
 
-void pcRendererSetBlendFactors(int sr, int dr, int sa, int da)
+/* Coeficiente de un termino de la ecuacion de la GS sobre Cs o Cd: coef = ka*C + kb. */
+typedef struct { int ka, kb; } GsCoef;
+
+/* Traduce un coeficiente a un factor de glBlendFunc. c: 0=As, 1=Ad, 2=FIX. Devuelve 1 si el coeficiente es negativo
+ * (se resuelve con SUBTRACT/REVERSE_SUBTRACT). */
+static int gs_coef_to_factor(GsCoef k, int c, GLenum* factor)
 {
-    static const GLenum map[] = {
-        GL_ZERO, GL_ONE, GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA,
-        GL_DST_ALPHA, GL_ONE_MINUS_DST_ALPHA, GL_CONSTANT_ALPHA, GL_ONE_MINUS_CONSTANT_ALPHA
-    };
-    if (sr < 0 || sr >= (int)(sizeof(map) / sizeof(map[0]))) sr = 2;
-    if (dr < 0 || dr >= (int)(sizeof(map) / sizeof(map[0]))) dr = 3;
-    if (sa < 0 || sa >= (int)(sizeof(map) / sizeof(map[0]))) sa = 1;
-    if (da < 0 || da >= (int)(sizeof(map) / sizeof(map[0]))) da = 3;
-    blend_src_rgb = map[sr];
-    blend_dst_rgb = map[dr];
-    blend_src_alpha = map[sa];
-    blend_dst_alpha = map[da];
+    GLenum plain = (c == 1) ? GL_DST_ALPHA : (c == 2) ? GL_CONSTANT_ALPHA : GL_SRC_ALPHA;
+    GLenum inverse = (c == 1) ? GL_ONE_MINUS_DST_ALPHA : (c == 2) ? GL_ONE_MINUS_CONSTANT_ALPHA : GL_ONE_MINUS_SRC_ALPHA;
+    if (k.ka == 0) { *factor = k.kb ? GL_ONE : GL_ZERO; return 0; }
+    if (k.ka > 0) { *factor = k.kb ? GL_ONE : plain; return 0; }          /* C  (1+C se satura a 1) */
+    if (k.kb) { *factor = inverse; return 0; }                           /* 1-C */
+    *factor = plain; return 1;                                           /* -C  */
+}
+
+/* ALPHA = (A - B) * C / 128 + D con A,B,D en {Cs,Cd,0} y C en {As,Ad,FIX}. La suma de a lo mas dos terminos (uno por Cs y
+ * otro por Cd) cabe en la mezcla fija de OpenGL: cada coeficiente es ka*C + kb con ka en {-1,0,1} y kb en {0,1}. El canal
+ * alfa se escribe tal cual (la GS guarda As en el framebuffer; Ad lo lee de ahi). */
+void pcRendererSetGsAlpha(unsigned long long reg)
+{
+    int a = (int)(reg & 3u), b = (int)((reg >> 2) & 3u), c = (int)((reg >> 4) & 3u), d = (int)((reg >> 6) & 3u);
+    unsigned int fix = (unsigned int)((reg >> 32) & 0xFFu);
+    GsCoef cs, cd;
+    int neg_s, neg_d;
+    if (c > 2) c = 0;
+    cs.ka = (a == 0) - (b == 0); cs.kb = (d == 0);
+    cd.ka = (a == 1) - (b == 1); cd.kb = (d == 1);
+    neg_s = gs_coef_to_factor(cs, c, &gs_blend.src);
+    neg_d = gs_coef_to_factor(cd, c, &gs_blend.dst);
+    gs_blend.equation = GL_FUNC_ADD;
+    if (neg_d && !neg_s) gs_blend.equation = GL_FUNC_SUBTRACT;          /* Cs*f - Cd*g */
+    else if (neg_s && !neg_d) gs_blend.equation = GL_FUNC_REVERSE_SUBTRACT; /* Cd*g - Cs*f */
+    gs_blend.fix = (float)fix / 128.0f;
 }
 
 /* CLAUDE-NOTE[N3][CORREGIDO]: apply_state() lee GLOBALES (projection_value, aspect, offset, near/far, global_fog_*,
@@ -480,11 +502,14 @@ static void apply_state(const PcNativeDrawState* st)
     }
     if (st->blend) {
         glEnable(GL_BLEND);
-        glBlendEquationSeparate(GL_FUNC_ADD, GL_FUNC_ADD);
-        if (st->premultiplied_alpha)
+        glBlendColor(0.0f, 0.0f, 0.0f, gs_blend.fix);
+        if (st->premultiplied_alpha) {
+            glBlendEquationSeparate(GL_FUNC_ADD, GL_FUNC_ADD);
             glBlendFuncSeparate(GL_ONE, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
-        else
-            glBlendFuncSeparate(blend_src_rgb, blend_dst_rgb, blend_src_alpha, blend_dst_alpha);
+        } else {
+            glBlendEquationSeparate(gs_blend.equation, GL_FUNC_ADD);
+            glBlendFuncSeparate(gs_blend.src, gs_blend.dst, GL_ONE, GL_ZERO);   /* alfa: lo escribe la fuente, como la GS */
+        }
     } else glDisable(GL_BLEND);
     if (st->cull_backfaces) {
         glEnable(GL_CULL_FACE);
@@ -574,7 +599,7 @@ static void capture_frame_state(NativeFrameState* f)
     f->offset_x = offset_x; f->offset_y = offset_y; f->near_clip = near_clip; f->far_clip = far_clip;
     f->fog_enabled = global_fog_enabled;
     memcpy(f->fog_color, global_fog_color, sizeof(f->fog_color));
-    f->blend[0] = blend_src_rgb; f->blend[1] = blend_dst_rgb; f->blend[2] = blend_src_alpha; f->blend[3] = blend_dst_alpha;
+    f->blend = gs_blend;
     f->scissor_enabled = scissor_enabled; memcpy(f->scissor_rect, scissor_rect, sizeof(f->scissor_rect));
     f->depth_test = depth_override_test; f->depth_write = depth_override_write;
 }
@@ -585,7 +610,7 @@ static void restore_frame_state(const NativeFrameState* f)
     offset_x = f->offset_x; offset_y = f->offset_y; near_clip = f->near_clip; far_clip = f->far_clip;
     global_fog_enabled = f->fog_enabled;
     memcpy(global_fog_color, f->fog_color, sizeof(global_fog_color));
-    blend_src_rgb = f->blend[0]; blend_dst_rgb = f->blend[1]; blend_src_alpha = f->blend[2]; blend_dst_alpha = f->blend[3];
+    gs_blend = f->blend;
     scissor_enabled = f->scissor_enabled; memcpy(scissor_rect, f->scissor_rect, sizeof(scissor_rect));
     depth_override_test = f->depth_test; depth_override_write = f->depth_write;
 }
