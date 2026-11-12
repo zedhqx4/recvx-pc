@@ -323,7 +323,7 @@ static void debug_dump_texture(const TIM2_PICTUREHEADER_EX* ext, const TIM2_PICT
     int idx;
     int is_want = want && (unsigned int)strtoul(want, NULL, 10) == ext->Gindex && dumped_want < 8;
     if (is_want) { dumped_want++; }
-    else if (dumped >= 16 || (env && env[0] == '0')) return;
+    else if (dumped >= ((env && strcmp(env, "all") == 0) ? 400 : 16) || (env && env[0] == '0')) return;   /* RECVX_TEXDUMP=all: hasta 400 */
     if (!is_want) dumped++;
     idx = is_want ? 100 + dumped_want : dumped;
     for (k = 0; k < 32; k++) {
