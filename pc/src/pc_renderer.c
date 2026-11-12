@@ -455,7 +455,7 @@ static int gs_coef_to_factor(GsCoef k, int c, GLenum* factor)
 /* ALPHA = (A - B) * C / 128 + D con A,B,D en {Cs,Cd,0} y C en {As,Ad,FIX}. La suma de a lo mas dos terminos (uno por Cs y
  * otro por Cd) cabe en la mezcla fija de OpenGL: cada coeficiente es ka*C + kb con ka en {-1,0,1} y kb en {0,1}. El canal
  * alfa se escribe tal cual (la GS guarda As en el framebuffer; Ad lo lee de ahi). */
-void pcRendererSetGsAlpha(unsigned long long reg)
+void pcRendererSetGsAlpha(uint64_t reg)
 {
     int a = (int)(reg & 3u), b = (int)((reg >> 2) & 3u), c = (int)((reg >> 4) & 3u), d = (int)((reg >> 6) & 3u);
     unsigned int fix = (unsigned int)((reg >> 32) & 0xFFu);

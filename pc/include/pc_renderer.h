@@ -46,7 +46,7 @@ void pcRendererSetDepthMode(int depth_test, int depth_write);
 void pcRendererSetScissor(int enabled, int x, int y, int width, int height);
 void pcRendererSetGlobalFog(int enabled, float r, float g, float b);
 /* Registro ALPHA de la GS (A,B,C,D en los bits 0..7, FIX en 32..39): mezcla (A-B)*C/128 + D. */
-void pcRendererSetGsAlpha(unsigned long long reg);
+void pcRendererSetGsAlpha(uint64_t reg);
 void pcRendererDrawTriangleStrip(const PcNativeVertex* vertices, int count, const PcNativeDrawState* state);
 void pcRendererDrawTriangles(const PcNativeVertex* vertices, int count, const PcNativeDrawState* state);
 void pcRendererDrawPoints(const PcNativeVertex* vertices, int count, const PcNativeDrawState* state);

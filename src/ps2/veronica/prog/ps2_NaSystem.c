@@ -405,7 +405,7 @@ void njColorBlendingModeSys(int s_mode, int d_mode) // this function is not on t
     }
     
 #ifdef TARGET_PC
-    pcRendererSetGsAlpha((unsigned long long)alpha_value);   /* mismo registro ALPHA que recibia la GS */
+    pcRendererSetGsAlpha((uint64_t)alpha_value);   /* mismo registro ALPHA que recibia la GS */
     return;
 #endif
     D2_SyncTag(); 
