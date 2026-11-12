@@ -914,11 +914,17 @@ int pcRendererGetOutputSize(int* w, int* h)
 static void debug_dump_frame(void)
 {
     static int dumps;
+    static int max_dumps = -1;
     unsigned char* px;
     size_t n, i;
     double sum[3] = {0, 0, 0};
     unsigned nonblack = 0;
-    if (frame_number % 240 != 239) return;
+    if (max_dumps < 0) {   /* RECVX_FRAME_DUMP=N: guarda hasta N capturas (una cada 120 frames); por defecto 3 cada 240 */
+        const char* env = getenv("RECVX_FRAME_DUMP");
+        max_dumps = env ? atoi(env) : 3;
+        if (max_dumps < 0) max_dumps = 0;
+    }
+    if (frame_number % (getenv("RECVX_FRAME_DUMP") ? 120u : 240u) != (getenv("RECVX_FRAME_DUMP") ? 119u : 239u)) return;
     n = (size_t)render_width * (size_t)render_height;
     px = (unsigned char*)malloc(n * 4);
     if (!px) return;
@@ -932,7 +938,7 @@ static void debug_dump_frame(void)
     pcLog("native frame dump: frame %llu avg rgb=(%.1f,%.1f,%.1f) nonblack=%.1f%% size=%dx%d",
           (unsigned long long)frame_number, sum[0]/(double)n, sum[1]/(double)n, sum[2]/(double)n,
           100.0 * (double)nonblack / (double)n, render_width, render_height);
-    if (dumps < 3) {
+    if (dumps < max_dumps) {
         char name[64];
         FILE* f;
         int row_bytes = render_width * 3, pad = (4 - (row_bytes & 3)) & 3, y;
