@@ -19,6 +19,17 @@ typedef struct {
     float fog;
 } NativeGpuVertex;
 
+/* Buffer circular de vertices (ver draw_immediate). */
+#define STREAM_VERTICES (1u << 18)
+static unsigned stream_cursor;
+static NativeGpuVertex* scratch;
+static int scratch_capacity;
+
+/* Diagnostico: registros ALPHA distintos usados en el frame (se vuelcan junto a las estadisticas). */
+#define ALPHA_HISTOGRAM 24
+static struct { uint64_t reg; unsigned count; } alpha_histogram[ALPHA_HISTOGRAM];
+static int alpha_histogram_used;
+
 /* Estado de mezcla equivalente al registro ALPHA de la GS (ver pcRendererSetGsAlpha). */
 typedef struct {
     GLenum equation;           /* GL_FUNC_ADD / GL_FUNC_SUBTRACT / GL_FUNC_REVERSE_SUBTRACT */
@@ -280,6 +291,7 @@ int pcRendererInit(int width, int height)
     glBindVertexArray(vertex_array);
     glGenBuffers(1, &vertex_buffer);
     glBindBuffer(GL_ARRAY_BUFFER, vertex_buffer);
+    glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)(STREAM_VERTICES * sizeof(NativeGpuVertex)), NULL, GL_STREAM_DRAW);
     glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(NativeGpuVertex), (void*)offsetof(NativeGpuVertex, x));
     glVertexAttribPointer(1, 4, GL_FLOAT, GL_FALSE, sizeof(NativeGpuVertex), (void*)offsetof(NativeGpuVertex, r));
     glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, sizeof(NativeGpuVertex), (void*)offsetof(NativeGpuVertex, u));
@@ -321,6 +333,7 @@ void pcRendererShutdown(void)
  * despues (ver N2). Tambien conviene contar draws por frame y hacer glGetError()/glReadPixels() en debug=1. */
 void pcRendererBeginFrame(void)
 {
+    stream_cursor = 0;
     if (!ready) return;
     frame_number++;
     if (debug_magenta < 0) { const char* e = getenv("RECVX_CLEAR_DEBUG"); debug_magenta = (e && *e && *e != '0'); }
@@ -329,6 +342,15 @@ void pcRendererBeginFrame(void)
         pcLog("native renderer: last frame draws=%u (2D/screen-space=%u) vertices=%u queued_blend=%u",
               stat_immediate, stat_screen_space, stat_vertices, stat_queued);
     }
+    if (frame_number % 120 == 0 && alpha_histogram_used) {
+        char line[ALPHA_HISTOGRAM * 28 + 1];
+        int k, len = 0;
+        line[0] = 0;
+        for (k = 0; k < alpha_histogram_used; k++)
+            len += snprintf(line + len, sizeof(line) - (size_t)len, "%llx x%u ", (unsigned long long)alpha_histogram[k].reg, alpha_histogram[k].count);
+        pcLog("native renderer: ALPHA registers set in the last frame: %s", line);
+    }
+    alpha_histogram_used = 0;
     stat_immediate = stat_queued = stat_vertices = stat_screen_space = 0;
     flush_pending_deletes();
     active_target = TARGET_SCREEN;
@@ -506,7 +528,14 @@ static void gs_alpha_decode(uint64_t reg, GsBlend* out)
     out->fix = (float)fix / 128.0f;
 }
 
-void pcRendererSetGsAlpha(uint64_t reg) { gs_alpha_decode(reg, &gs_blend); }
+void pcRendererSetGsAlpha(uint64_t reg)
+{
+    int i;
+    for (i = 0; i < alpha_histogram_used && alpha_histogram[i].reg != reg; i++);
+    if (i == alpha_histogram_used && i < ALPHA_HISTOGRAM) { alpha_histogram[i].reg = reg; alpha_histogram[i].count = 0; alpha_histogram_used++; }
+    if (i < ALPHA_HISTOGRAM) alpha_histogram[i].count++;
+    gs_alpha_decode(reg, &gs_blend);
+}
 void pcRendererSetGsAlpha2(uint64_t reg) { gs_alpha_decode(reg, &gs_blend2); }
 
 /* CLAUDE-NOTE[N3][CORREGIDO]: apply_state() lee GLOBALES (projection_value, aspect, offset, near/far, global_fog_*,
@@ -516,6 +545,14 @@ void pcRendererSetGsAlpha2(uint64_t reg) { gs_alpha_decode(reg, &gs_blend2); }
  * de NativeQueuedDraw.
  * CLAUDE-NOTE[N10][PARCIAL]: depth_override_* gana siempre sobre st->depth_*; Ps2ZbuffOn() lo deja en (1,1) y fuerza escritura de
  * profundidad tambien en transparentes y test de profundidad en 2D. */
+/* Ultimos valores subidos al programa (ver apply_state). */
+typedef struct {
+    float target[2], projection, aspect[2], offset[2], fog_color[3], alpha_ref, texture_size[2];
+    int textured, fog_enabled, alpha_test, screen_space, texture_function, texture_alpha, texture_perspective;
+} UniformCache;
+static UniformCache uniform_cache;
+static int uniform_cache_valid;
+
 static void apply_state(const PcNativeDrawState* st)
 {
     PcNativeDrawState d;
@@ -571,39 +608,72 @@ static void apply_state(const PcNativeDrawState* st)
     } else glDisable(GL_SCISSOR_TEST);
 
     glUseProgram(program);
-    glUniform2f(u_target, (GLfloat)output_width, (GLfloat)output_height);
-    glUniform1f(u_projection, projection_value);
-    glUniform2f(u_aspect, aspect_w, aspect_h);
-    glUniform2f(u_offset, offset_x, offset_y);
-    glUniform1f(u_near, GS_NEAR);
-    glUniform1f(u_far, GS_FAR);
-    glUniform1i(u_textured, st->textured != 0);
-    glUniform1i(u_texture, 0);
-    glUniform1i(u_fog_enabled, global_fog_enabled && st->fog);   /* la GS solo aplica niebla con PRIM.FGE */
-    glUniform3f(u_fog_color, global_fog_color[0], global_fog_color[1], global_fog_color[2]);
-    glUniform1i(u_alpha_test, st->alpha_test != 0);
-    glUniform1f(u_alpha_ref, st->alpha_ref);
-    glUniform1i(u_screen_space, st->screen_space != 0);
-    glUniform2f(u_texture_size, st->texture_width > 0.0f ? st->texture_width : 1.0f,
-                st->texture_height > 0.0f ? st->texture_height : 1.0f);
-    glUniform1i(u_texture_function, st->texture_function);
-    glUniform1i(u_texture_alpha, st->texture_alpha != 0);
-    glUniform1i(u_texture_perspective, st->texture_perspective != 0);
+    {
+        /* Los uniformes pertenecen al programa: solo se suben los que cambian respecto al draw anterior
+         * (en escenas de ~1000 draws por frame esto es lo que mas CPU consumia). */
+        UniformCache n;
+        memset(&n, 0, sizeof(n));
+        n.target[0] = (float)output_width; n.target[1] = (float)output_height;
+        n.projection = projection_value;
+        n.aspect[0] = aspect_w; n.aspect[1] = aspect_h;
+        n.offset[0] = offset_x; n.offset[1] = offset_y;
+        n.textured = st->textured != 0;
+        n.fog_enabled = global_fog_enabled && st->fog;   /* la GS solo aplica niebla con PRIM.FGE */
+        memcpy(n.fog_color, global_fog_color, sizeof(n.fog_color));
+        n.alpha_test = st->alpha_test != 0;
+        n.alpha_ref = st->alpha_ref;
+        n.screen_space = st->screen_space != 0;
+        n.texture_size[0] = st->texture_width > 0.0f ? st->texture_width : 1.0f;
+        n.texture_size[1] = st->texture_height > 0.0f ? st->texture_height : 1.0f;
+        n.texture_function = st->texture_function;
+        n.texture_alpha = st->texture_alpha != 0;
+        n.texture_perspective = st->texture_perspective != 0;
+#define UNIFORM_CHANGED(f) (!uniform_cache_valid || memcmp(&uniform_cache.f, &n.f, sizeof(n.f)) != 0)
+        if (UNIFORM_CHANGED(target)) glUniform2f(u_target, n.target[0], n.target[1]);
+        if (UNIFORM_CHANGED(projection)) glUniform1f(u_projection, n.projection);
+        if (UNIFORM_CHANGED(aspect)) glUniform2f(u_aspect, n.aspect[0], n.aspect[1]);
+        if (UNIFORM_CHANGED(offset)) glUniform2f(u_offset, n.offset[0], n.offset[1]);
+        if (!uniform_cache_valid) {
+            glUniform1f(u_near, GS_NEAR);
+            glUniform1f(u_far, GS_FAR);
+            glUniform1i(u_texture, 0);
+        }
+        if (UNIFORM_CHANGED(textured)) glUniform1i(u_textured, n.textured);
+        if (UNIFORM_CHANGED(fog_enabled)) glUniform1i(u_fog_enabled, n.fog_enabled);
+        if (UNIFORM_CHANGED(fog_color)) glUniform3f(u_fog_color, n.fog_color[0], n.fog_color[1], n.fog_color[2]);
+        if (UNIFORM_CHANGED(alpha_test)) glUniform1i(u_alpha_test, n.alpha_test);
+        if (UNIFORM_CHANGED(alpha_ref)) glUniform1f(u_alpha_ref, n.alpha_ref);
+        if (UNIFORM_CHANGED(screen_space)) glUniform1i(u_screen_space, n.screen_space);
+        if (UNIFORM_CHANGED(texture_size)) glUniform2f(u_texture_size, n.texture_size[0], n.texture_size[1]);
+        if (UNIFORM_CHANGED(texture_function)) glUniform1i(u_texture_function, n.texture_function);
+        if (UNIFORM_CHANGED(texture_alpha)) glUniform1i(u_texture_alpha, n.texture_alpha);
+        if (UNIFORM_CHANGED(texture_perspective)) glUniform1i(u_texture_perspective, n.texture_perspective);
+#undef UNIFORM_CHANGED
+        uniform_cache = n;
+        uniform_cache_valid = 1;
+    }
 
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, st->texture);
 }
 
+/* Los vertices se escriben en un buffer circular grande (un glBufferSubData por draw, sin malloc ni reasignar el almacen);
+ * se reinicia al empezar cada frame. */
 static void draw_immediate(const PcNativeVertex* vertices, int count, const PcNativeDrawState* state, GLenum topology)
 {
     NativeGpuVertex* upload;
     int i;
-    if (!ready || vertices == NULL || count <= 0) return;
-    upload = (NativeGpuVertex*)malloc((size_t)count * sizeof(*upload));
-    if (!upload) {
-        pcLog("native renderer: vertex upload allocation failed for %d vertices", count);
-        return;
+    if (!ready || vertices == NULL || count <= 0 || (unsigned)count > STREAM_VERTICES) return;
+    if (count > scratch_capacity) {
+        NativeGpuVertex* grown = (NativeGpuVertex*)realloc(scratch, (size_t)count * 2 * sizeof(*scratch));
+        if (!grown) {
+            pcLog("native renderer: vertex upload allocation failed for %d vertices", count);
+            return;
+        }
+        scratch = grown;
+        scratch_capacity = count * 2;
     }
+    upload = scratch;
     for (i = 0; i < count; i++) {
         upload[i].x = vertices[i].x;
         upload[i].y = vertices[i].y;
@@ -618,22 +688,28 @@ static void draw_immediate(const PcNativeVertex* vertices, int count, const PcNa
         upload[i].fog = vertices[i].fog;
     }
     stat_immediate++; stat_vertices += (unsigned)count; if (state && state->screen_space) stat_screen_space++;
-    if (frame_number % 120 == 119 && stat_immediate <= 40 && state) {
+    if (frame_number % 120 == 119 && stat_immediate <= 150 && state) {
         const PcNativeVertex* last = &vertices[count - 1];
-        pcLog("native draw #%u: topo=0x%x n=%d tex=%u(%gx%g) fn=%d ta=%d textured=%d blend=%d screen=%d depth=%d/%d scissor=%d v0=(%.1f,%.1f,%.3f) vN=(%.1f,%.1f) uv0=(%.1f,%.1f) uvN=(%.1f,%.1f) rgba=(%.2f,%.2f,%.2f,%.2f)",
+        pcLog("native draw #%u: topo=0x%x n=%d tex=%u(%gx%g) fn=%d ta=%d textured=%d blend=%d screen=%d depth=%d/%d scissor=%d v0=(%.1f,%.1f,%.3f) vN=(%.1f,%.1f) uv0=(%.1f,%.1f) uvN=(%.1f,%.1f) rgba=(%.2f,%.2f,%.2f,%.2f) eq=0x%x src=0x%x dst=0x%x fix=%.2f",
               stat_immediate, (unsigned)topology, count, state->texture, state->texture_width, state->texture_height,
               state->texture_function, state->texture_alpha, state->textured, state->blend, state->screen_space,
               state->depth_test, state->depth_write, scissor_enabled, vertices[0].x, vertices[0].y, vertices[0].z,
               last->x, last->y, vertices[0].u, vertices[0].v, last->u, last->v,
-              vertices[0].r, vertices[0].g, vertices[0].b, vertices[0].a);
+              vertices[0].r, vertices[0].g, vertices[0].b, vertices[0].a,
+              (unsigned)gs_blend.equation, (unsigned)gs_blend.src, (unsigned)gs_blend.dst, gs_blend.fix);
     }
     apply_state(state);
     glBindVertexArray(vertex_array);
     glBindBuffer(GL_ARRAY_BUFFER, vertex_buffer);
-    glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)((size_t)count * sizeof(*upload)), upload, GL_STREAM_DRAW);
-    glDrawArrays(topology, 0, count);
+    if (stream_cursor + (unsigned)count > STREAM_VERTICES) {   /* buffer lleno: se suelta el almacen anterior (orphaning) */
+        glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)(STREAM_VERTICES * sizeof(NativeGpuVertex)), NULL, GL_STREAM_DRAW);
+        stream_cursor = 0;
+    }
+    glBufferSubData(GL_ARRAY_BUFFER, (GLintptr)((size_t)stream_cursor * sizeof(NativeGpuVertex)),
+                    (GLsizeiptr)((size_t)count * sizeof(NativeGpuVertex)), upload);
+    glDrawArrays(topology, (GLint)stream_cursor, count);
+    stream_cursor += (unsigned)count;
     glBindVertexArray(0);
-    free(upload);
 }
 
 /* CLAUDE-NOTE[N8]: toda primitiva con blend se difiere hasta el flush, incluido el 2D (fades, paneles, UI translucida), por

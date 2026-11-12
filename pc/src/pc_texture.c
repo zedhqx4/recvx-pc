@@ -336,6 +336,16 @@ static void debug_dump_texture(const TIM2_PICTUREHEADER_EX* ext, const TIM2_PICT
           w, h, bank, (unsigned int)ext->ClampFlag);
     pcLog("texdump #%d: image[0..31]=%s", idx, hex);
     pcLog("texdump #%d: clut[0..31]=%s", idx, chex);
+    {   /* bytes no nulos del TIM2 crudo por banda de 32 filas: distingue "el archivo no trae esas filas" de "las decodifique mal" */
+        char bands[16 * 12 + 1];
+        unsigned int per_row = h ? (unsigned int)ph->ImageSize / h : 0, b, n, i, len = 0;
+        bands[0] = 0;
+        for (b = 0; b < h / 32 && b < 16 && per_row; b++) {
+            for (n = 0, i = 0; i < per_row * 32; i++) n += image[b * per_row * 32 + i] != 0;
+            len += (unsigned int)snprintf(bands + len, sizeof(bands) - len, "%u ", n);
+        }
+        pcLog("texdump #%d: raw nonzero bytes per 32-row band: %s", idx, bands);
+    }
     row_bytes = (int)(w * 3u); pad = (4 - (row_bytes & 3)) & 3;
     fsize = (unsigned int)(54 + (row_bytes + pad) * (int)h);
     memset(hdr, 0, sizeof(hdr));
