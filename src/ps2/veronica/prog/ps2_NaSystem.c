@@ -164,6 +164,15 @@ void	njSetBackColor( Uint32 col1, Uint32 col2, Uint32 col3 )
     
     *(unsigned long*)UNCACHED(&Db.clear0.rgbaq) = tmp; 
     *(unsigned long*)UNCACHED(&Db.clear1.rgbaq) = tmp; 
+#ifdef TARGET_PC
+    /* Db.clear0/1 era el sprite con el que la GS limpiaba el frame buffer al cambiar de buffer (PS2_swap): el color de fondo.
+     * El renderer limpia el FBO al empezar cada frame con ese mismo color (el logo ADX y otras pantallas usan fondo blanco). */
+    {
+        float a = (float)((col1 >> 24) & 0xFF) / 128.0f;
+        pcRendererSetClearColor((float)((col1 >> 16) & 0xFF) / 255.0f, (float)((col1 >> 8) & 0xFF) / 255.0f,
+                                (float)(col1 & 0xFF) / 255.0f, a > 1.0f ? 1.0f : a);
+    }
+#endif
 } 
 
 // 100% matching! 
