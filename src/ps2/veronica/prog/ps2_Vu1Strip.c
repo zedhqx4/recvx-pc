@@ -4,7 +4,6 @@
 #include "../../../ps2/veronica/prog/ps2_dummy.h"
 #include "../../../ps2/veronica/prog/main.h"
 #ifdef TARGET_PC
-#include "pc_renderer.h"
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
@@ -37,81 +36,6 @@ void (*pColorCalcFuncTbl[11])(VU1_STRIP_BUF* pStrip, VU1_PRIM_BUF* pPrim) =
 	vu1GetVertexColorDifSpe3Amb
 };
 
-#ifdef TARGET_PC
-static void pcNativeUpdateProjection(void)
-{
-    pcRendererSetProjection(fVu1Projection, fVu1AspectW, fVu1AspectH,
-                            fVu1OffsetX, fVu1OffsetY, fVu1NearClip, fVu1FarClip);
-}
-
-/* The old VU1 endpoint produced screen coordinates and GS-ready packets.
- * The native endpoint preserves view-space position and forwards the strip to the GPU. */
-/* CLAUDE-NOTE[N4][CORREGIDO]: strip[i].fFog viene de njCalcFogPower()/fNaFogTbl y esta en 0..255 (255 = sin niebla). Aqui se hace
- * clamp(fFog,0,1) SIN dividir, asi que casi todo queda en 1.0 (niebla inexistente). Debe ser fFog/255.0f. La ruta 3D
- * preparada (ps2_dummy.c) divide por 128: tambien mal. Hay que unificar.
- * CLAUDE-NOTE[N6]: se ignora strip[].fNz. La ruta original (vu1DrawTriangleStripOpaqueSingle y similares) marcaba como no
- * dibujable (ulKick=32768) el triangulo cuando 0<fNz en sus 3 vertices (culling). Aqui cull_backfaces=0 y se dibujan las
- * caras traseras. Tampoco se ejecutan _Clip_ViewVolume2 / ScissorTriangle (ver N5).
- * CLAUDE-NOTE[N9]: state.textured = textured && texture!=0 -> si la textura no cargo (pcNativeTextureLoad devolvio 0) esto
- * dibuja el strip SIN textura en vez de omitirlo o avisar; revisar recvx.log buscando "native texture:".
- * CLAUDE-NOTE[N3]: el estado de proyeccion se toma de globales del renderer; si el strip es transparente se dibuja luego
- * con la proyeccion vigente al flush, no con la actual. */
-static void pcNativeSubmitVu1Strip(unsigned long ulType, VU1_STRIP_BUF* strip,
-                                   unsigned short count, unsigned short mode)
-{
-    PcNativeVertex* vertices;
-    PcNativeDrawState state;
-    void (*color_func)(VU1_STRIP_BUF*, VU1_PRIM_BUF*);
-    unsigned int color_mode = mode & 0x0F;
-    unsigned int i;
-    float tex_width = 1.0f, tex_height = 1.0f;
-    int textured = (ulType & 0x8000000000000ULL) != 0;
-    int transparent = (ulType & 0x20000000000000ULL) != 0;
-    unsigned int texture = pcRendererCurrentTexture();
-
-    if (strip == NULL || count < 3) return;
-    if (color_mode >= 11) color_mode = 2;
-    color_func = pColorCalcFuncTbl[color_mode];
-
-    pcRendererCurrentTextureSize(&tex_width, &tex_height);
-    vertices = (PcNativeVertex*)malloc((size_t)count * sizeof(*vertices));
-    if (vertices == NULL) return;
-
-    for (i = 0; i < count; i++) {
-        VU1_PRIM_BUF shaded;
-        memset(&shaded, 0, sizeof(shaded));
-        color_func(&strip[i], &shaded);
-        vertices[i].x = strip[i].fVx;
-        vertices[i].y = strip[i].fVy;
-        vertices[i].z = strip[i].fVz;
-        vertices[i].r = fminf(fmaxf(shaded.fR / 255.0f, 0.0f), 1.0f);
-        vertices[i].g = fminf(fmaxf(shaded.fG / 255.0f, 0.0f), 1.0f);
-        vertices[i].b = fminf(fmaxf(shaded.fB / 255.0f, 0.0f), 1.0f);
-        vertices[i].a = fminf(fmaxf(shaded.fA / 128.0f, 0.0f), 1.0f);
-        vertices[i].u = strip[i].fU * tex_width;   /* fU/fV normalizados (0..1) -> texels */
-        vertices[i].v = strip[i].fV * tex_height;
-        vertices[i].q = 1.0f;
-        vertices[i].fog = fminf(fmaxf(strip[i].fFog / 255.0f, 0.0f), 1.0f);
-    }
-
-    memset(&state, 0, sizeof(state));
-    state.texture = texture;
-    state.texture_width = tex_width;
-    state.texture_height = tex_height;
-    pcRendererCurrentTextureCombine(&state.texture_function, &state.texture_alpha);
-    state.textured = textured && texture != 0;
-    state.blend = transparent;
-    state.depth_test = 1;
-    state.depth_write = !transparent;
-    /* GS: TEST con ATE=1, ALPHA_GREATER, AREF=0 -> se descartan los pixeles con alfa 0 (texturas con mascara) */
-    state.alpha_test = 1;
-    state.alpha_ref = 0.004f;
-    state.linear_filter = 1;
-    state.cull_backfaces = 0;
-    pcRendererDrawTriangleStrip(vertices, (int)count, &state);
-    free(vertices);
-}
-#endif
 VU1_COLOR vu1Diffuse = { 1.0f, 1.0f, 1.0f, 1.0f };
 VU1_COLOR vu1Specula = { 1.0f, 1.0f, 1.0f, 1.0f };
 VU1_COLOR vu1Ambient = { 1.0f, 1.0f, 1.0f, 1.0f };
@@ -125,9 +49,6 @@ extern void VU0_INIT_CALC_COLOR() __attribute__((section(".vutext")));
 void vu1SetScreenProjection(float fProjection)
 {
     fVu1Projection = fProjection;
-#ifdef TARGET_PC
-    pcNativeUpdateProjection();
-#endif
     
 #ifdef TARGET_PC
     {
@@ -165,9 +86,6 @@ void vu1SetNearFarClip(float fNear, float fFar)
     fVu1FarClip = fFar;
     
     fVu1InvNearClip = 1.0f / fVu1NearClip;
-#ifdef TARGET_PC
-    pcNativeUpdateProjection();
-#endif
 
 #ifdef TARGET_PC
     {
@@ -211,9 +129,6 @@ void vu1SetScreenOffset(float fOffsetX, float fOffsetY)
 {
     fVu1OffsetX = fOffsetX;
     fVu1OffsetY = fOffsetY;
-#ifdef TARGET_PC
-    pcNativeUpdateProjection();
-#endif
     
 #ifdef TARGET_PC
     {
@@ -255,9 +170,6 @@ void vu1SetScreenAspect(float fAspectW, float fAspectH)
 {
     fVu1AspectW = fAspectW;
     fVu1AspectH = fAspectH;
-#ifdef TARGET_PC
-    pcNativeUpdateProjection();
-#endif
 
 #ifdef TARGET_PC
     {
@@ -1598,10 +1510,6 @@ void DrawScissorPolygonOpaque(SCISSOR* scissor, unsigned long ulType)
 // 100% matching! 
 void vu1DrawTriangleStripOpaqueSingle(unsigned long ulType, VU1_STRIP_BUF* pStripTop, unsigned short usStripMax, unsigned short usMode)
 {
-#ifdef TARGET_PC
-    pcNativeSubmitVu1Strip(ulType, pStripTop, usStripMax, usMode);
-    return;
-#endif
     VU1_PRIM_BUF* pP;                            
     VU1_STRIP_BUF* pS0, *pS1, *pS2;                         
     float fIz;                                   
@@ -1723,10 +1631,6 @@ void vu1DrawTriangleStripOpaqueSingle(unsigned long ulType, VU1_STRIP_BUF* pStri
 // 100% matching! 
 void vu1DrawTriangleStripOpaqueDouble(unsigned long ulType, VU1_STRIP_BUF* pS, unsigned short usStripMax, unsigned short usMode)
 {
-#ifdef TARGET_PC
-    pcNativeSubmitVu1Strip(ulType, pS, usStripMax, usMode);
-    return;
-#endif
     VU1_PRIM_BUF* pP;                            
     float fIz;                                   
     unsigned short usStripCnt;                  
@@ -1841,10 +1745,6 @@ void vu1DrawTriangleStripOpaqueDouble(unsigned long ulType, VU1_STRIP_BUF* pS, u
 // 100% matching! 
 void vu1DrawTriangleStripTransSingle(unsigned long ulType, VU1_STRIP_BUF* pStripTop, unsigned short usStripMax, unsigned short usMode)
 {
-#ifdef TARGET_PC
-    pcNativeSubmitVu1Strip(ulType, pStripTop, usStripMax, usMode);
-    return;
-#endif
     VU1_PRIM_BUF* pP;                            
     VU1_STRIP_BUF* pS0, *pS1, *pS2;                         
     float fIz;                                   
@@ -2020,10 +1920,6 @@ int _Clip_Screen(float* clip)
 // 97.44% matching
 void vu1DrawTriangleStripTransDouble(unsigned long ulType, VU1_STRIP_BUF* pS, unsigned short usStripMax, unsigned short usMode)
 {
-#ifdef TARGET_PC
-    pcNativeSubmitVu1Strip(ulType, pS, usStripMax, usMode);
-    return;
-#endif 
     VU1_PRIM_BUF* pP;                            
     float fIz;                                   
     unsigned short usStripCnt;                  
@@ -3310,10 +3206,6 @@ void vu1RotTransStripBuf(NJS_MATRIX* pMatrix, NJS_VECTOR* pVector, VU1_STRIP_BUF
 // 100% matching! 
 void vu1DrawTriangleStripTransDoubleI(unsigned long ulType, VU1_STRIP_BUF* pS, unsigned short usStripMax, unsigned short usMode)
 {
-#ifdef TARGET_PC
-    pcNativeSubmitVu1Strip(ulType, pS, usStripMax, usMode);
-    return;
-#endif 
     VU1_PRIM_BUF* pP;                              
     unsigned short usStripCnt;                      
     void (*pFunc)(VU1_STRIP_BUF*, VU1_PRIM_BUF*); 
@@ -3592,10 +3484,6 @@ void DrawScissorPolygonTrans1P(SCISSOR* scissor, unsigned long ulType)
 // 100% matching!
 void vu1DrawTriangleStripTransDouble1P(unsigned long ulType, VU1_STRIP_BUF* pS, unsigned short usStripMax, unsigned short usMode)
 {
-#ifdef TARGET_PC
-    pcNativeSubmitVu1Strip(ulType, pS, usStripMax, usMode);
-    return;
-#endif 
     VU1_PRIM_BUF* pP;                                      
     float fIz;                                    
     float sam;                                    

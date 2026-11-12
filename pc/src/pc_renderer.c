@@ -57,6 +57,9 @@ static GLuint framebuffer;
 static GLuint render_texture, render_texture_fbo;   /* copia reducida de la pantalla usada como textura */
 static GLuint color_target;
 static GLuint depth_target;
+static GLuint mask_target, mask_framebuffer;   /* contexto 2 de la GS: mascara de sombras, comparte la profundidad */
+enum { TARGET_SCREEN = 0, TARGET_MASK = 1 };
+static int active_target = TARGET_SCREEN;
 static GLuint vertex_array;
 static GLuint vertex_buffer;
 static GLuint program;
@@ -78,7 +81,8 @@ static int ready;
 static GLuint current_texture;
 static int depth_override_test = -1;
 static int depth_override_write = -1;
-static GsBlend gs_blend = { GL_FUNC_ADD, GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, 1.0f };
+static GsBlend gs_blend = { GL_FUNC_ADD, GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, 1.0f };    /* ALPHA_1 */
+static GsBlend gs_blend2 = { GL_FUNC_ADD, GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, 1.0f };   /* ALPHA_2 */
 static int scissor_enabled;
 static int scissor_rect[4];
 static unsigned long long frame_number;
@@ -185,7 +189,9 @@ static int create_targets(int width, int height)
     render_height = height;
 
     if (framebuffer) glDeleteFramebuffers(1, &framebuffer);
+    if (mask_framebuffer) glDeleteFramebuffers(1, &mask_framebuffer);
     if (color_target) glDeleteTextures(1, &color_target);
+    if (mask_target) glDeleteTextures(1, &mask_target);
     if (depth_target) glDeleteTextures(1, &depth_target);
 
     glGenTextures(1, &color_target);
@@ -207,9 +213,28 @@ static int create_targets(int width, int height)
     glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, color_target, 0);
     glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, depth_target, 0);
     status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
+    if (status != GL_FRAMEBUFFER_COMPLETE) {
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+        pcLog("native renderer: framebuffer incomplete (0x%04x)", (unsigned int)status);
+        return 0;
+    }
+
+    /* Mascara de sombras: mismo tamano que la escena y la MISMA textura de profundidad (ZBUF_2 = ZBUF_1 en la GS). */
+    glGenTextures(1, &mask_target);
+    glBindTexture(GL_TEXTURE_2D, mask_target);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glGenFramebuffers(1, &mask_framebuffer);
+    glBindFramebuffer(GL_FRAMEBUFFER, mask_framebuffer);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, mask_target, 0);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, depth_target, 0);
+    status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
     if (status != GL_FRAMEBUFFER_COMPLETE) {
-        pcLog("native renderer: framebuffer incomplete (0x%04x)", (unsigned int)status);
+        pcLog("native renderer: shadow mask framebuffer incomplete (0x%04x)", (unsigned int)status);
         return 0;
     }
     return 1;
@@ -283,9 +308,11 @@ void pcRendererShutdown(void)
     if (render_texture) glDeleteTextures(1, &render_texture);
     render_texture = render_texture_fbo = 0;
     glDeleteFramebuffers(1, &framebuffer);
+    glDeleteFramebuffers(1, &mask_framebuffer);
     glDeleteTextures(1, &color_target);
+    glDeleteTextures(1, &mask_target);
     glDeleteTextures(1, &depth_target);
-    vertex_buffer = framebuffer = color_target = depth_target = 0;
+    vertex_buffer = framebuffer = color_target = depth_target = mask_framebuffer = mask_target = 0;
     ready = 0;
 }
 
@@ -304,6 +331,7 @@ void pcRendererBeginFrame(void)
     }
     stat_immediate = stat_queued = stat_vertices = stat_screen_space = 0;
     flush_pending_deletes();
+    active_target = TARGET_SCREEN;
     glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
     glViewport(0, 0, render_width, render_height);
     glEnable(GL_DEPTH_TEST);
@@ -328,6 +356,12 @@ float pcRendererDepthFromViewZ(float z)
     if (z >= GS_FAR) return 1.0f;
     depth = (GS_FAR / (GS_FAR - GS_NEAR)) -
             ((GS_FAR * GS_NEAR) / (GS_FAR - GS_NEAR)) / z;
+    return depth < 0.0f ? 0.0f : depth > 1.0f ? 1.0f : depth;
+}
+
+float pcRendererDepthFromGsZ(float gs_z)
+{
+    float depth = 1.0f - gs_z / GS_FAR;
     return depth < 0.0f ? 0.0f : depth > 1.0f ? 1.0f : depth;
 }
 
@@ -455,7 +489,7 @@ static int gs_coef_to_factor(GsCoef k, int c, GLenum* factor)
 /* ALPHA = (A - B) * C / 128 + D con A,B,D en {Cs,Cd,0} y C en {As,Ad,FIX}. La suma de a lo mas dos terminos (uno por Cs y
  * otro por Cd) cabe en la mezcla fija de OpenGL: cada coeficiente es ka*C + kb con ka en {-1,0,1} y kb en {0,1}. El canal
  * alfa se escribe tal cual (la GS guarda As en el framebuffer; Ad lo lee de ahi). */
-void pcRendererSetGsAlpha(uint64_t reg)
+static void gs_alpha_decode(uint64_t reg, GsBlend* out)
 {
     int a = (int)(reg & 3u), b = (int)((reg >> 2) & 3u), c = (int)((reg >> 4) & 3u), d = (int)((reg >> 6) & 3u);
     unsigned int fix = (unsigned int)((reg >> 32) & 0xFFu);
@@ -464,13 +498,16 @@ void pcRendererSetGsAlpha(uint64_t reg)
     if (c > 2) c = 0;
     cs.ka = (a == 0) - (b == 0); cs.kb = (d == 0);
     cd.ka = (a == 1) - (b == 1); cd.kb = (d == 1);
-    neg_s = gs_coef_to_factor(cs, c, &gs_blend.src);
-    neg_d = gs_coef_to_factor(cd, c, &gs_blend.dst);
-    gs_blend.equation = GL_FUNC_ADD;
-    if (neg_d && !neg_s) gs_blend.equation = GL_FUNC_SUBTRACT;          /* Cs*f - Cd*g */
-    else if (neg_s && !neg_d) gs_blend.equation = GL_FUNC_REVERSE_SUBTRACT; /* Cd*g - Cs*f */
-    gs_blend.fix = (float)fix / 128.0f;
+    neg_s = gs_coef_to_factor(cs, c, &out->src);
+    neg_d = gs_coef_to_factor(cd, c, &out->dst);
+    out->equation = GL_FUNC_ADD;
+    if (neg_d && !neg_s) out->equation = GL_FUNC_SUBTRACT;          /* Cs*f - Cd*g */
+    else if (neg_s && !neg_d) out->equation = GL_FUNC_REVERSE_SUBTRACT; /* Cd*g - Cs*f */
+    out->fix = (float)fix / 128.0f;
 }
+
+void pcRendererSetGsAlpha(uint64_t reg) { gs_alpha_decode(reg, &gs_blend); }
+void pcRendererSetGsAlpha2(uint64_t reg) { gs_alpha_decode(reg, &gs_blend2); }
 
 /* CLAUDE-NOTE[N3][CORREGIDO]: apply_state() lee GLOBALES (projection_value, aspect, offset, near/far, global_fog_*,
  * blend_*_rgb/alpha, scissor_*, depth_override_*), no el estado del draw. Para los draws opacos da igual (se dibujan al
@@ -489,30 +526,34 @@ static void apply_state(const PcNativeDrawState* st)
         st = &d;
     }
 
+    glBindFramebuffer(GL_FRAMEBUFFER, active_target == TARGET_MASK ? mask_framebuffer : framebuffer);
+    glViewport(0, 0, render_width, render_height);
     {
         /* La GS siempre hacia test de Z (ZTE=1, GEQUAL); Ps2ZbuffOn/Off solo cambian la MASCARA de escritura (ZMSK).
          * Los draws de pantalla sin depth (overlays propios) quedan sin test ni escritura. */
         int test, write;
-        if (st->screen_space && !st->depth_test) { test = 0; write = 0; }
+        if (active_target == TARGET_MASK) { test = 1; write = 0; }          /* TEST_2: ZTE=1 GEQUAL, ZBUF_2.ZMSK=1 */
+        else if (st->screen_space && !st->depth_test) { test = 0; write = 0; }
         else {
             test = st->depth_test;
             write = st->depth_write;
             if (!st->screen_space && depth_override_test >= 0) test = depth_override_test;
             if (depth_override_write >= 0) write = depth_override_write;
-            if (st->blend) write = 0;
+            if (st->blend && !st->immediate) write = 0;
         }
         if (test) glEnable(GL_DEPTH_TEST); else glDisable(GL_DEPTH_TEST);
         glDepthMask(write ? GL_TRUE : GL_FALSE);
     }
     if (st->blend) {
+        const GsBlend* b = (active_target == TARGET_MASK) ? &gs_blend2 : &gs_blend;
         glEnable(GL_BLEND);
-        glBlendColor(0.0f, 0.0f, 0.0f, gs_blend.fix);
+        glBlendColor(0.0f, 0.0f, 0.0f, b->fix);
         if (st->premultiplied_alpha) {
             glBlendEquationSeparate(GL_FUNC_ADD, GL_FUNC_ADD);
             glBlendFuncSeparate(GL_ONE, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
         } else {
-            glBlendEquationSeparate(gs_blend.equation, GL_FUNC_ADD);
-            glBlendFuncSeparate(gs_blend.src, gs_blend.dst, GL_ONE, GL_ZERO);   /* alfa: lo escribe la fuente, como la GS */
+            glBlendEquationSeparate(b->equation, GL_FUNC_ADD);
+            glBlendFuncSeparate(b->src, b->dst, GL_ONE, GL_ZERO);   /* alfa: lo escribe la fuente, como la GS */
         }
     } else glDisable(GL_BLEND);
     if (st->cull_backfaces) {
@@ -538,7 +579,7 @@ static void apply_state(const PcNativeDrawState* st)
     glUniform1f(u_far, GS_FAR);
     glUniform1i(u_textured, st->textured != 0);
     glUniform1i(u_texture, 0);
-    glUniform1i(u_fog_enabled, global_fog_enabled);
+    glUniform1i(u_fog_enabled, global_fog_enabled && st->fog);   /* la GS solo aplica niebla con PRIM.FGE */
     glUniform3f(u_fog_color, global_fog_color[0], global_fog_color[1], global_fog_color[2]);
     glUniform1i(u_alpha_test, st->alpha_test != 0);
     glUniform1f(u_alpha_ref, st->alpha_ref);
@@ -651,7 +692,7 @@ static void queue_transparent(const PcNativeVertex* vertices, int count, const P
         else if (!state->screen_space) sz = (vertices[count - 1].z > 1.0f) ? (65537.0f / vertices[count - 1].z + 1.0f) : 65534.0f;
         if (sz < 0.0f) sz = 0.0f;
         if (sz > 65534.0f) sz = 65534.0f;
-        depth = (float)((int)sz >> 4);
+        depth = (float)((int)sz >> (state->ot_coarse ? 12 : 4));
         if (depth > 4095.0f) depth = 4095.0f;
     }
     (void)i;
@@ -675,7 +716,7 @@ static int compare_transparent(const void* a, const void* b)
 
 static void draw(const PcNativeVertex* v, int n, const PcNativeDrawState* state, GLenum topology)
 {
-    if (state && state->blend) queue_transparent(v, n, state, topology);
+    if (state && state->blend && !state->immediate && active_target == TARGET_SCREEN) queue_transparent(v, n, state, topology);
     else draw_immediate(v, n, state, topology);
 }
 
@@ -715,8 +756,10 @@ void pcRendererDrawScreenTriangles(const PcNativeVertex* v, int n, const PcNativ
 void pcRendererFlushTransparent(void)
 {
     int i;
+    int saved_target = active_target;
     if (!ready || transparent_count <= 0) return;
     NativeFrameState live;
+    active_target = TARGET_SCREEN;   /* el OT siempre dibuja en la pantalla, nunca en la mascara de sombras */
     capture_frame_state(&live);
     qsort(transparent_queue, (size_t)transparent_count, sizeof(*transparent_queue), compare_transparent);
     for (i = 0; i < transparent_count; i++) {
@@ -730,6 +773,94 @@ void pcRendererFlushTransparent(void)
     }
     restore_frame_state(&live);
     transparent_count = 0;
+    active_target = saved_target;
+}
+
+/* ---- Sombras: volumen (prisma) dibujado en la mascara, luego oscurecimiento de la pantalla ---------------------------- */
+
+void pcRendererShadowBegin(void)
+{
+    if (!ready) return;
+    active_target = TARGET_MASK;
+    glBindFramebuffer(GL_FRAMEBUFFER, mask_framebuffer);
+    glViewport(0, 0, render_width, render_height);
+    glDisable(GL_SCISSOR_TEST);
+    glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+    glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
+    glClear(GL_COLOR_BUFFER_BIT);   /* sprite RGBAQ=0 sobre toda la pantalla en FRAME_2 */
+}
+
+void pcRendererShadowEnd(void)
+{
+    if (!ready) return;
+    active_target = TARGET_SCREEN;
+    glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
+}
+
+/* Ps2ShadowDraw: sprite con la mascara como textura (MODULATE con RGB = shade, TCC=1, alfa de 1 bit expandido por TEXA), prueba
+ * de alfa GREATER 0, sin Z, mezcla ALPHA_2 = (Cd - Cs); despues el rectangulo de la mascara se limpia a 0. */
+void pcRendererShadowCompose(float x0, float y0, float x1, float y1, int shade)
+{
+    PcNativeVertex v[6];
+    PcNativeDrawState st;
+    GsBlend saved_blend = gs_blend;
+    int saved_target = active_target;
+    int cx0, cy0, cx1, cy1, i;
+    static const unsigned char corner[6] = { 0, 1, 2, 0, 2, 3 };
+    if (!ready || !(x1 > x0) || !(y1 > y0)) return;
+    if (shade > 255) shade = 255;
+
+    if (shade > 0) {
+        memset(v, 0, sizeof(v));
+        for (i = 0; i < 6; i++) {
+            float x = (corner[i] == 0 || corner[i] == 3) ? x0 : x1;
+            float y = (corner[i] < 2) ? y0 : y1;
+            v[i].x = x; v[i].y = y; v[i].z = 0.0f;
+            v[i].r = v[i].g = v[i].b = (float)shade / 255.0f;
+            v[i].a = 1.0f;
+            v[i].u = x;                                  /* texels de una mascara de 640x480 ... */
+            v[i].v = (float)output_height - y;           /* ... con el origen de GL abajo */
+            v[i].q = 1.0f;
+        }
+        memset(&st, 0, sizeof(st));
+        st.texture = mask_target;
+        st.texture_width = (float)output_width;
+        st.texture_height = (float)output_height;
+        st.texture_function = 0;
+        st.texture_alpha = 1;
+        st.textured = 1;
+        st.blend = 1;
+        st.immediate = 1;
+        st.alpha_test = 1;
+        st.alpha_ref = 0.004f;
+        st.screen_space = 1;                             /* depth_test = 0: ZTST ALWAYS, ZMSK = 1 */
+        gs_alpha_decode(0x80000000A1ULL, &gs_blend);     /* (Cd - Cs) * FIX/128 */
+        active_target = TARGET_SCREEN;
+        draw_immediate(v, 6, &st, GL_TRIANGLES);
+        gs_blend = saved_blend;
+        active_target = saved_target;
+    }
+
+    /* limpiar el rectangulo usado (sprite RGBAQ=0 sobre FRAME_2) */
+    cx0 = (int)floorf(x0 * (float)render_width / (float)output_width);
+    cx1 = (int)ceilf(x1 * (float)render_width / (float)output_width);
+    cy0 = (int)floorf(y0 * (float)render_height / (float)output_height);
+    cy1 = (int)ceilf(y1 * (float)render_height / (float)output_height);
+    if (cx0 < 0) cx0 = 0;
+    if (cy0 < 0) cy0 = 0;
+    if (cx1 > render_width) cx1 = render_width;
+    if (cy1 > render_height) cy1 = render_height;
+    if (cx1 > cx0 && cy1 > cy0) {
+        glBindFramebuffer(GL_FRAMEBUFFER, mask_framebuffer);
+        glViewport(0, 0, render_width, render_height);
+        glEnable(GL_SCISSOR_TEST);
+        glScissor(cx0, render_height - cy1, cx1 - cx0, cy1 - cy0);
+        glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+        glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
+        glClear(GL_COLOR_BUFFER_BIT);
+        glDisable(GL_SCISSOR_TEST);
+        glBindFramebuffer(GL_FRAMEBUFFER, saved_target == TARGET_MASK ? mask_framebuffer : framebuffer);
+    }
 }
 
 static void remember_texture(GLuint id, int width, int height)

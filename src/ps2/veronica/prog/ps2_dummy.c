@@ -1662,21 +1662,84 @@ void Ps2AddPrim2D(unsigned long prim, void* dp, unsigned int num)
     Ps2AddPrim(prim, dp, num, 0);
 }
 
-// 100% matching!
 #ifdef TARGET_PC
-/* CLAUDE-NOTE[N4][CORREGIDO]: fog = source[11] / 128.0f es la escala equivocada; el fog de GS/fNaFogTbl es 0..255 (usar /255.0f).
- * CLAUDE-NOTE[N9]: if (textured && texture == 0) return; descarta el primitivo SIN log. Si pcNativeTextureLoad rechaza muchas
- * texturas (TpFlag != 0, PictFormat 5..8, cabeceras raras), la escena 3D queda vacia. Las rutas 2D y VU1 en cambio dibujan
- * sin textura en ese caso: comportamiento inconsistente. */
-static void pcNativeSubmitPrepared3D(unsigned long prim, const void* data, unsigned int count, int floating_color)
+/* Etapa final del pipeline 3D (Ps2AddPrim3D*): lo que la GS recibia tras el empaquetador VU0.
+ *
+ * El juego (vu1DrawTriangleStrip*, njCnk*) entrega vertices ya proyectados a coordenadas de la GS: ST/Q, color y XYZ + fog,
+ * con el "kick" por vertice en la cuarta palabra (32768 = el vertice no cierra triangulo: cara trasera o triangulo que el
+ * recorte reemplazo por otros). pcPs2Prim3DCore es el empaquetador original: calcula el Z de la GS, el XY en 12.4, los
+ * flags de recorte (ADC) y la Z media. Aqui se dibuja exactamente ese resultado: nada se reproyecta ni se reordena.
+ *
+ * Orden de los primitivos con ABE (Ps2AddOT):
+ *   PC_OT_AVERAGE      Z media de los vertices
+ *   PC_OT_FIXED        Z dada por quien llama (Ps2AddPrimPrio)
+ *   PC_OT_PER_TRIANGLE Ps2AddPrim3DExI: un item por triangulo con Z minima/media/maxima segun ViewType
+ *   PC_OT_IMMEDIATE    sin OT: la GS lo dibujaba al momento */
+typedef enum { PC_OT_IMMEDIATE, PC_OT_AVERAGE, PC_OT_FIXED, PC_OT_PER_TRIANGLE } PcOtPolicy;
+
+typedef struct {
+    int floating_color;     /* RGBA en float (0..255) en lugar de enteros */
+    int shadow_mask;        /* contexto 2 (volumen de sombra): sin prueba de alfa ni niebla, siempre inmediato */
+    PcOtPolicy ot;
+    float ot_z;             /* PC_OT_FIXED */
+} PcPrim3D;
+
+#define PC_GIF_PRIM_TME 0x0008000000000000ULL
+#define PC_GIF_PRIM_FGE 0x0010000000000000ULL
+#define PC_GIF_PRIM_ABE 0x0020000000000000ULL
+#define PC_GIF_PRIM_FST 0x0080000000000000ULL
+
+/* Ps2AddOT: con Ps2_ice_flag las texturas de hielo se ordenan con Z >> 12 en lugar de Z >> 4. */
+static int pcOtCoarse(void)
+{
+    unsigned int id;
+    if (Ps2_ice_flag == 0 || Ps2_now_tex == NULL)
+        return 0;
+    id = Ps2_now_tex->globalIndex & 0xFFFFF;
+    return ((id >= 26510) && (id <= 26614)) || (id == 107170);
+}
+
+/* Ensambla los vertices en una lista respetando el kick (ADC) de la GS: el primitivo que cierra un vertice con kick no se
+ * dibuja, pero el vertice sigue contando para los siguientes. Devuelve el numero de vertices de salida. */
+static unsigned int pcAssemblePrepared(const PcNativeVertex* v, const unsigned char* kick, unsigned int count,
+                                       unsigned int topology, PcNativeVertex* out)
+{
+    unsigned int i, n = 0;
+    switch (topology) {
+    case 0: /* puntos */
+        for (i = 0; i < count; i++) if (!kick[i]) out[n++] = v[i];
+        break;
+    case 1: /* lineas */
+        for (i = 1; i < count; i += 2) if (!kick[i]) { out[n++] = v[i - 1]; out[n++] = v[i]; }
+        break;
+    case 2: /* tira de lineas */
+        for (i = 1; i < count; i++) if (!kick[i]) { out[n++] = v[i - 1]; out[n++] = v[i]; }
+        break;
+    case 4: /* tira de triangulos */
+        for (i = 2; i < count; i++) if (!kick[i]) { out[n++] = v[i - 2]; out[n++] = v[i - 1]; out[n++] = v[i]; }
+        break;
+    case 5: /* abanico */
+        for (i = 2; i < count; i++) if (!kick[i]) { out[n++] = v[0]; out[n++] = v[i - 1]; out[n++] = v[i]; }
+        break;
+    default: /* lista de triangulos */
+        for (i = 2; i < count; i += 3) if (!kick[i]) { out[n++] = v[i - 2]; out[n++] = v[i - 1]; out[n++] = v[i]; }
+        break;
+    }
+    return n;
+}
+
+static void pcSubmitPrepared3D(unsigned long prim, const void* data, unsigned int count, const PcPrim3D* mode)
 {
     const float* source = (const float*)data;
+    uint32_t* packed;
     PcNativeVertex* vertices;
+    PcNativeVertex* assembled;
+    unsigned char* kick;
     PcNativeDrawState state;
-    unsigned int i, topology = (unsigned int)((prim >> 47) & 7u);
-    float tex_width = 1.0f, tex_height = 1.0f;
-    int textured = (prim & 0x8000000000000ULL) != 0;
-    int transparent = (prim & 0x20000000000000ULL) != 0;
+    unsigned int i, n, topology = (unsigned int)((prim >> 47) & 7u);
+    float tex_width = 1.0f, tex_height = 1.0f, average_z;
+    int textured = (prim & PC_GIF_PRIM_TME) != 0;
+    int blend = (prim & PC_GIF_PRIM_ABE) != 0;
     unsigned int texture = pcRendererCurrentTexture();
 
     if (source == NULL || count < 1 || count > 16384)
@@ -1684,14 +1747,21 @@ static void pcNativeSubmitPrepared3D(unsigned long prim, const void* data, unsig
     if (textured && texture == 0)
         return;
 
+    packed = (uint32_t*)malloc(((size_t)count * 12u + 4u) * sizeof(*packed));
     vertices = (PcNativeVertex*)malloc((size_t)count * sizeof(*vertices));
-    if (vertices == NULL)
-        return;
+    assembled = (PcNativeVertex*)malloc((size_t)count * 3u * sizeof(*assembled));
+    kick = (unsigned char*)malloc(count);
+    if (packed == NULL || vertices == NULL || assembled == NULL || kick == NULL)
+        goto done;
 
+    pcPs2Prim3DCore(data, packed, count, mode->floating_color);
+    average_z = ((const float*)packed)[(size_t)count * 12u + 3u];
     pcRendererCurrentTextureSize(&tex_width, &tex_height);
+
     for (i = 0; i < count; i++, source += 12) {
+        const uint32_t* d = packed + (size_t)i * 12u;
         float r, g, b, a;
-        if (floating_color) {
+        if (mode->floating_color) {
             r = source[4]; g = source[5]; b = source[6]; a = source[7];
         } else {
             uint32_t rgba[4];
@@ -1702,9 +1772,9 @@ static void pcNativeSubmitPrepared3D(unsigned long prim, const void* data, unsig
             a = (float)(rgba[3] & 0xFFu);
         }
 
-        vertices[i].x = source[8] - 1728.0f;
-        vertices[i].y = source[9] - 1808.0f;
-        vertices[i].z = pcRendererDepthFromReciprocalZ(source[2]);
+        vertices[i].x = (float)(int32_t)d[8] / 16.0f - 1728.0f;
+        vertices[i].y = (float)(int32_t)d[9] / 16.0f - 1808.0f;
+        vertices[i].z = pcRendererDepthFromGsZ((float)(int32_t)d[10] / 16.0f);
         vertices[i].r = fminf(fmaxf(r / 255.0f, 0.0f), 1.0f);
         vertices[i].g = fminf(fmaxf(g / 255.0f, 0.0f), 1.0f);
         vertices[i].b = fminf(fmaxf(b / 255.0f, 0.0f), 1.0f);
@@ -1712,8 +1782,8 @@ static void pcNativeSubmitPrepared3D(unsigned long prim, const void* data, unsig
         vertices[i].u = source[0] * tex_width;   /* ST normalizado -> texels */
         vertices[i].v = source[1] * tex_height;
         vertices[i].q = source[2];
-        vertices[i].fog = floating_color ?
-            fminf(fmaxf(source[11] / 255.0f, 0.0f), 1.0f) : 1.0f;
+        vertices[i].fog = mode->floating_color ? fminf(fmaxf(source[11] / 255.0f, 0.0f), 1.0f) : 1.0f;
+        kick[i] = (d[11] & 0x8000u) != 0;
     }
 
     memset(&state, 0, sizeof(state));
@@ -1722,53 +1792,71 @@ static void pcNativeSubmitPrepared3D(unsigned long prim, const void* data, unsig
     state.texture_height = tex_height;
     pcRendererCurrentTextureCombine(&state.texture_function, &state.texture_alpha);
     state.textured = textured;
-    state.blend = transparent;
+    state.blend = blend;
+    state.immediate = blend && (mode->shadow_mask || mode->ot == PC_OT_IMMEDIATE);
     state.depth_test = 1;
-    state.depth_write = !transparent;
-    state.ot_z_valid = 1;
-    state.ot_z = 65537.0f * ((const float*)data)[(size_t)(count - 1u) * 12u + 2u] + 1.0f;
-    state.alpha_test = 1;
+    state.depth_write = !blend;
+    state.alpha_test = !mode->shadow_mask;   /* TEST_1: ATE=1 GREATER 0; TEST_2 del volumen de sombra: ATE=0 */
     state.alpha_ref = 0.004f;
     state.linear_filter = 1;
     state.screen_space = 1;
-    state.texture_perspective = (prim & 0x80000000000000ULL) == 0;
+    state.fog = !mode->shadow_mask && (prim & PC_GIF_PRIM_FGE) != 0;
+    state.texture_perspective = (prim & PC_GIF_PRIM_FST) == 0;
     state.cull_backfaces = 0;
-
-    switch (topology) {
-    case 0: pcRendererDrawPoints(vertices, (int)count, &state); break;
-    case 1: pcRendererDrawLines(vertices, (int)count, &state); break;
-    case 2: pcRendererDrawLineStrip(vertices, (int)count, &state); break;
-    case 3: pcRendererDrawTriangles(vertices, (int)count, &state); break;
-    case 4: pcRendererDrawTriangleStrip(vertices, (int)count, &state); break;
-    case 5:
-        if (count >= 3) {
-            PcNativeVertex* fan = (PcNativeVertex*)malloc((size_t)(count - 2u) * 3u * sizeof(*fan));
-            if (fan != NULL) {
-                unsigned int t, n = 0;
-                for (t = 1; t + 1 < count; t++) {
-                    fan[n++] = vertices[0]; fan[n++] = vertices[t]; fan[n++] = vertices[t + 1];
-                }
-                pcRendererDrawTriangles(fan, (int)n, &state);
-                free(fan);
-            }
-        }
-        break;
-    default:
-        pcRendererDrawTriangles(vertices, (int)count, &state);
-        break;
+    if (blend && !state.immediate) {
+        state.ot_z_valid = 1;
+        state.ot_z = (mode->ot == PC_OT_FIXED) ? mode->ot_z : average_z;
+        state.ot_coarse = pcOtCoarse();
     }
 
+    if (mode->ot == PC_OT_PER_TRIANGLE && blend && topology == 4 && count > 3 && ViewType < 3 && ((count * 3) - 6) < 167) {
+        /* Ps2AddPrim3DExI: cada triangulo de la tira es un item del OT con su propia Z */
+        for (i = 2; i < count; i++) {
+            const float z0 = (float)(int32_t)(packed[(size_t)(i - 2) * 12u + 10u]) / 16.0f;
+            const float z1 = (float)(int32_t)(packed[(size_t)(i - 1) * 12u + 10u]) / 16.0f;
+            const float z2 = (float)(int32_t)(packed[(size_t)i * 12u + 10u]) / 16.0f;
+            if (kick[i])
+                continue;
+            if (ViewType == 0)
+                state.ot_z = fminf(fminf(z0, z1), z2);
+            else if (ViewType == 1)
+                state.ot_z = 0.33333334f * (z0 + z1 + z2);
+            else
+                state.ot_z = fmaxf(fmaxf(z0, z1), z2);
+            assembled[0] = vertices[i - 2]; assembled[1] = vertices[i - 1]; assembled[2] = vertices[i];
+            pcRendererDrawTriangles(assembled, 3, &state);
+        }
+        goto done;
+    }
+
+    if (topology == 4) {
+        for (i = 2; i < count && !kick[i]; i++) { }
+        if (i == count) {                    /* ningun kick: la tira se dibuja tal cual */
+            pcRendererDrawTriangleStrip(vertices, (int)count, &state);
+            goto done;
+        }
+    }
+
+    n = pcAssemblePrepared(vertices, kick, count, topology, assembled);
+    if (n == 0)
+        goto done;
+    switch (topology) {
+    case 0: pcRendererDrawPoints(assembled, (int)n, &state); break;
+    case 1:
+    case 2: pcRendererDrawLines(assembled, (int)n, &state); break;
+    default: pcRendererDrawTriangles(assembled, (int)n, &state); break;
+    }
+
+done:
+    free(packed);
     free(vertices);
+    free(assembled);
+    free(kick);
 }
 #endif
 
 void Ps2AddPrim3D(unsigned long prim, void* dp, unsigned int num)
 {
-#ifdef TARGET_PC
-    pcNativeSubmitPrepared3D(prim, dp, num, 0);
-    return;
-#endif
-
     unsigned long* p;             
     TIM2_PICTUREHEADER_EX* timp;  
     unsigned int clip_flag;    // needs use   
@@ -1813,6 +1901,14 @@ void Ps2AddPrim3D(unsigned long prim, void* dp, unsigned int num)
             }
         }
     } 
+
+#ifdef TARGET_PC
+    {
+        PcPrim3D mode = { 0, 0, PC_OT_AVERAGE, 0.0f };
+        pcSubmitPrepared3D(prim, dp, num, &mode);
+        return;
+    }
+#endif
 
     p = (unsigned long*)WORKBASE;
     
@@ -1944,11 +2040,6 @@ l_002CBF9C:
 // 100% matching!
 void Ps2AddPrim3DEx(unsigned long prim, void* dp, unsigned int num)
 {
-#ifdef TARGET_PC
-    pcNativeSubmitPrepared3D(prim, dp, num, 1);
-    return;
-#endif
-
     unsigned long* p;             
     TIM2_PICTUREHEADER_EX* timp;  
     unsigned int clip_flag;    // needs use   
@@ -1993,6 +2084,14 @@ void Ps2AddPrim3DEx(unsigned long prim, void* dp, unsigned int num)
             }
         }
     } 
+
+#ifdef TARGET_PC
+    {
+        PcPrim3D mode = { 1, 0, PC_OT_AVERAGE, 0.0f };
+        pcSubmitPrepared3D(prim, dp, num, &mode);
+        return;
+    }
+#endif
 
     p = (unsigned long*)WORKBASE;
     
@@ -2126,11 +2225,6 @@ l_002CC2B0:
 // 100% matching!
 void Ps2AddPrim3DEx1P(unsigned long prim, void* dp, unsigned int num)
 {
-#ifdef TARGET_PC
-    pcNativeSubmitPrepared3D(prim, dp, num, 1);
-    return;
-#endif
-
     unsigned long* p;             
     TIM2_PICTUREHEADER_EX* timp;  
     unsigned int clip_flag;    // needs use   
@@ -2183,6 +2277,14 @@ void Ps2AddPrim3DEx1P(unsigned long prim, void* dp, unsigned int num)
             Ps2_tex_load_tp_cancel = 0;
         }
     } 
+
+#ifdef TARGET_PC
+    {
+        PcPrim3D mode = { 1, 0, (Ps2_albinoid_flag == 0) ? PC_OT_FIXED : PC_OT_IMMEDIATE, Ps2AddPrimPrio };
+        pcSubmitPrepared3D(prim, dp, num, &mode);
+        return;
+    }
+#endif
 
     p = (unsigned long*)WORKBASE;
     
@@ -2316,11 +2418,6 @@ l_002CC600:
 // 100% matching!
 void Ps2AddPrim3DMod(unsigned long prim, void* dp, unsigned int num)
 {
-#ifdef TARGET_PC
-    pcNativeSubmitPrepared3D(prim, dp, num, 1);
-    return;
-#endif
-
     unsigned long* p;             
     unsigned int clip_flag;      
     unsigned int st_clip_flag;    
@@ -2334,6 +2431,14 @@ void Ps2AddPrim3DMod(unsigned long prim, void* dp, unsigned int num)
     zbuff_ab_vec[2] = -Ps2_zbuff_a;
     zbuff_ab_vec[3] = *(float*)&num;  
     
+#ifdef TARGET_PC
+    {
+        PcPrim3D mode = { 1, 1, PC_OT_IMMEDIATE, 0.0f };
+        pcSubmitPrepared3D(prim, dp, num, &mode);
+        return;
+    }
+#endif
+
     p = (unsigned long*)WORKBASE;
     
     D2_SyncTag();
@@ -3675,6 +3780,11 @@ void Ps2ShadowStart()
 {
 	Ps2_current_texbreak = 1;
     
+#ifdef TARGET_PC
+    /* FRAME_2 = mascara de 16 bits (FBP 380) con la Z de la escena (ZBUF_2.ZMSK=1); se limpia a 0 */
+    pcRendererShadowBegin();
+    return;
+#endif
     D2_SyncTag();
     
     ((u_long*)WORKBASE)[0] = DMAend | 0xA;
@@ -3788,6 +3898,13 @@ void Ps2ShadowDraw()
         Ps2_shadow_vec[3] = 0;
     }
     
+#ifdef TARGET_PC
+    /* sprite con la mascara como textura, RGB = fog*3/16, mezcla (Cd - Cs); despues se limpia el rectangulo de la mascara */
+    pcRendererShadowCompose(Ps2_shadow_vec[0] - 1728.0f, Ps2_shadow_vec[1] - 1808.0f,
+                            Ps2_shadow_vec[2] - 1728.0f, Ps2_shadow_vec[3] - 1808.0f,
+                            (int)(((unsigned int)Ps2_shadow_fog * 3) / 16));
+    return;
+#endif
     sceVu0FTOI4Vector(iv4, Ps2_shadow_vec);
     sceVu0FTOI0Vector(iv0, Ps2_shadow_vec);
     
@@ -3867,6 +3984,11 @@ void Ps2ShadowMain0()
 	Ps2_shadow_vec[2] = -65536.0f;
 	Ps2_shadow_vec[3] = -65536.0f;
 
+#ifdef TARGET_PC
+    /* cabecera del paquete: ZBUF_2 (ZMSK=1) y ALPHA_2 = 0x8000000029 -> Cs + Cd (suma las caras del volumen) */
+    pcRendererSetGsAlpha2(0x8000000029ULL);
+    return;
+#endif
 	loadImage((void*)shadow_head);
 }
 
@@ -3875,12 +3997,23 @@ void Ps2ShadowMain1()
 {
 	static const unsigned long shadow_tail[6] = { 0x70000002UL, 0x0UL, 0x1000000000008001UL, 0x0EUL, 0x80000000A1UL, 0x43UL };
 
+#ifdef TARGET_PC
+    /* ALPHA_2 = 0x80000000A1 -> Cd - Cs (resta las caras del otro sentido) */
+    pcRendererSetGsAlpha2(0x80000000A1ULL);
+    return;
+#endif
+
 	loadImage((void*)shadow_tail);
 }
 
 // 100% matching! 
 void Ps2ShadowEnd()
 {
+#ifdef TARGET_PC
+    pcRendererShadowEnd();
+    pcRendererSetGsAlpha2(0ULL);   /* ALPHA_2 = (Cs - Cs) * As + Cs: sin mezcla */
+    return;
+#endif
     D2_SyncTag();
     
     ((u_long*)WORKBASE)[0] = DMAend | 0x5;
@@ -3932,11 +4065,6 @@ void Ps2Vu1ProgSend(unsigned int prog_no)
 // 100% matching!
 void Ps2AddPrim3DExI(unsigned long prim, void* dp, unsigned int num)
 {
-#ifdef TARGET_PC
-    pcNativeSubmitPrepared3D(prim, dp, num, 1);
-    return;
-#endif
-
     unsigned long* p;                
     TIM2_PICTUREHEADER_EX* timp;      
     unsigned int clip_flag;        
@@ -3985,6 +4113,14 @@ void Ps2AddPrim3DExI(unsigned long prim, void* dp, unsigned int num)
             }
         }
     } 
+
+#ifdef TARGET_PC
+    {
+        PcPrim3D mode = { 1, 0, PC_OT_PER_TRIANGLE, 0.0f };
+        pcSubmitPrepared3D(prim, dp, num, &mode);
+        return;
+    }
+#endif
 
     p = (unsigned long*)WORKBASE;
     
