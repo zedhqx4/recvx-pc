@@ -207,7 +207,6 @@ static int trace_set_enabled(int enabled)
 }
 
 static TraceModel* trace_model(void)
-{static TraceModel* trace_model(void)
 {
     return model_depth ? &model_stack[model_depth - 1] : NULL;
 }
