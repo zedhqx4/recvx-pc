@@ -683,7 +683,7 @@ void pcTexTraceGsTextureResolution(const char* resolution,
             (unsigned long long)key1, (unsigned long long)key2,
             (unsigned long long)generation, asset_id, (unsigned long long)asset_hash,
             width, height);
-    if (context != NULL)
+    if (context != NULL) {
         fprintf(trace_file, ",\"source_model_id\":%llu,\"source_chunk\":\"%p\",\"source_chunk_ordinal\":%u,\"source_strip\":%u,\"source_face_first\":%llu,\"source_face_last\":%llu,\"source_material_seq\":%llu",
                 (unsigned long long)context->model_id, context->chunk,
                 context->chunk_ordinal, context->strip_index,
@@ -694,6 +694,7 @@ void pcTexTraceGsTextureResolution(const char* resolution,
                 (unsigned long long)context->queued_primitive_first,
                 (unsigned long long)context->queued_primitive_last,
                 context->queued_primitive_count);
+    }
     trace_end();
 }
 
