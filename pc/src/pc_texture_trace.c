@@ -173,9 +173,15 @@ static int trace_open(void)
     }
     trace_sessions++;
     fprintf(trace_file, "{\"event\":\"trace_start\",\"version\":2,\"session\":%d,"
-                        "\"mode\":\"compact\",\"topology_detail\":%s,\"binary_dumps\":%s}\n",
+                        "\"mode\":\"compact\",\"topology_detail\":%s,\"binary_dumps\":%s,"
+                        "\"stage\":%d,\"room\":%d,\"case\":%d,\"resource_kind\":",
             trace_sessions, trace_topology_enabled() ? "true" : "false",
-            trace_dumps_enabled() ? "true" : "false");
+            trace_dumps_enabled() ? "true" : "false",
+            resource_stage, resource_room, resource_case);
+    trace_json_string(resource_kind[0] ? resource_kind : "UNKNOWN");
+    fputs(",\"resource_name\":", trace_file);
+    trace_json_string(resource_name);
+    fputs("}\n", trace_file);
     fflush(trace_file);
     pcLog("texture trace: capture started; press F5 to stop; output: texture_trace/");
     return 1;
@@ -353,13 +359,10 @@ void pcTexTraceSetResource(const char* kind, const char* name,
 
 void pcTexTraceClearResource(void)
 {
-    resource_kind[0] = 0;
-    resource_name[0] = 0;
+    /* The RDT/block pointers are temporary, but its room identity remains useful
+     * when F5 is pressed after loading has finished. */
     resource_base = NULL;
     resource_data = NULL;
-    resource_stage = resource_room = resource_case = -1;
-    resource_index = 0;
-    resource_offset = -1;
 }
 
 void pcTexTraceTextureBlock(const void* texlist, const void* data, unsigned int texture_offset)
