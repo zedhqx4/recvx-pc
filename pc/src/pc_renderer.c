@@ -978,6 +978,7 @@ unsigned int pcRendererLoadTextureRGBA(const unsigned char* rgba, int width, int
  * En la PS2 el juego copiaba la pantalla (reducida) a otra zona de VRAM (FRAME_2 / FBP 476) y despues la usaba como textura
  * de 256x256. Aqui esa zona es una textura propia con su FBO: capturar = blit con escala desde el FBO de la escena. */
 #define RENDER_TEXTURE_SIZE 256
+static unsigned render_texture_copies, render_texture_binds;
 
 static int ensure_render_texture(void)
 {
@@ -1013,12 +1014,33 @@ void pcRendererCopyScreenToRenderTexture(int sx0, int sy0, int sx1, int sy1, int
     glBindFramebuffer(GL_DRAW_FRAMEBUFFER, render_texture_fbo);
     glBlitFramebuffer((GLint)(sx0 * kx), render_height - (GLint)(sy0 * ky), (GLint)(sx1 * kx), render_height - (GLint)(sy1 * ky),
                       dx0, dy0, dx1, dy1, GL_COLOR_BUFFER_BIT, GL_LINEAR);
+    render_texture_copies++;
+    if (render_texture_copies <= 8 || render_texture_copies % 120 == 0) {
+        /* Diagnostico: contenido de la textura de render tras la copia (la lectura detiene la GPU, por eso se limita). */
+        static unsigned char pixels[RENDER_TEXTURE_SIZE * RENDER_TEXTURE_SIZE * 4];
+        unsigned long long sum[3] = {0, 0, 0};
+        int i, lit = 0;
+        glBindFramebuffer(GL_READ_FRAMEBUFFER, render_texture_fbo);
+        glReadPixels(0, 0, RENDER_TEXTURE_SIZE, RENDER_TEXTURE_SIZE, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
+        for (i = 0; i < RENDER_TEXTURE_SIZE * RENDER_TEXTURE_SIZE; i++) {
+            sum[0] += pixels[i * 4]; sum[1] += pixels[i * 4 + 1]; sum[2] += pixels[i * 4 + 2];
+            if (pixels[i * 4] | pixels[i * 4 + 1] | pixels[i * 4 + 2]) lit++;
+        }
+        pcLog("native renderer: render texture copy #%u src=(%d,%d)-(%d,%d) dst=(%d,%d)-(%d,%d) avg rgb=(%llu,%llu,%llu) non-black=%d%% (binds so far %u)",
+              render_texture_copies, sx0, sy0, sx1, sy1, dx0, dy0, dx1, dy1,
+              sum[0] / (RENDER_TEXTURE_SIZE * RENDER_TEXTURE_SIZE), sum[1] / (RENDER_TEXTURE_SIZE * RENDER_TEXTURE_SIZE),
+              sum[2] / (RENDER_TEXTURE_SIZE * RENDER_TEXTURE_SIZE), lit * 100 / (RENDER_TEXTURE_SIZE * RENDER_TEXTURE_SIZE),
+              render_texture_binds);
+    }
     glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
 }
 
 void pcRendererBindRenderTexture(void)
 {
     if (!ensure_render_texture()) return;
+    render_texture_binds++;
+    if (render_texture_binds <= 8 && render_texture_copies == 0)
+        pcLog("native renderer: render texture bound before any copy (bind #%u): it is still empty", render_texture_binds);
     pcRendererBindTexture(render_texture);
     pcRendererSetTextureCombine(0 /* MODULATE */, 0);   /* rama final de Ps2BindTextureState: TCC=0 */
 }
