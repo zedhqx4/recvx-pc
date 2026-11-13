@@ -504,6 +504,8 @@ int pcNativeTextureLoad(NJS_TEXMEMLIST* addr)
     }
     pcRendererConfigureTexture(texture, linear, wrap_u, wrap_v);
     pcRendererBindTexture(texture);
-    pcRendererSetTextureCombine((int)ph->GsTex0.TFX, (int)ph->GsTex0.TCC);
+    /* TEX0 lo escribe Ps2BindTextureState, no la cabecera TIM2 (su GsTex0.TFX/TCC es basura: se vio TFX=4): siempre MODULATE, y
+     * TCC=1 para las texturas paletizadas / PictFormat 5..8 y TCC=0 para las RGBA32 (el alfa sale solo del vertice). */
+    pcRendererSetTextureCombine(0 /* SCE_GS_MODULATE */, ph->ImageType == TIM2_RGB32 ? 0 : 1);
     return 1;
 }

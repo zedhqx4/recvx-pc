@@ -1020,6 +1020,7 @@ void pcRendererBindRenderTexture(void)
 {
     if (!ensure_render_texture()) return;
     pcRendererBindTexture(render_texture);
+    pcRendererSetTextureCombine(0 /* MODULATE */, 0);   /* rama final de Ps2BindTextureState: TCC=0 */
 }
 
 int pcRendererUpdateTextureRGBA(unsigned int texture, const unsigned char* rgba, int width, int height)
