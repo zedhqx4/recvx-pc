@@ -96,12 +96,20 @@ static size_t addr4(unsigned int bw, unsigned int x, unsigned int y)
     return (size_t)block * 512u + col4[y & 15][x & 31];
 }
 
+/* Detecta cambios de contenido de la imagen/CLUT en cada enlace de textura (el juego reusa los mismos buffers): un FNV byte a byte
+ * costaba ~0.3 ms por MB y con cientos de enlaces por frame llevaba el menu a 2 fps; por palabras de 64 bits es ~8 veces mas rapido. */
 static uint64_t hash_bytes(const unsigned char* p, size_t n)
 {
     uint64_t h = UINT64_C(14695981039346656037);
-    size_t i;
-    for (i = 0; i < n; i++) h = (h ^ p[i]) * UINT64_C(1099511628211);
-    return h;
+    size_t i = 0;
+    for (; i + 8 <= n; i += 8) {
+        uint64_t w;
+        memcpy(&w, p + i, sizeof(w));
+        h = (h ^ w) * UINT64_C(1099511628211);
+        h ^= h >> 29;
+    }
+    for (; i < n; i++) h = (h ^ p[i]) * UINT64_C(1099511628211);
+    return h ^ (uint64_t)n;
 }
 
 /* CLUT residente en la VRAM de la GS (CBP 0x3FF0, 1024 entradas RGBA con alfa 0..0x80). njSetPaletteData la sube desde palbuf; las

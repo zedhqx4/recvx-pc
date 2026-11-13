@@ -1194,6 +1194,17 @@ static void pcPrimLog(const char* what, unsigned long prim, unsigned int num)
 }
 #endif
 
+#ifdef TARGET_PC
+/* Coordenada U o V de una primitiva con PRIM.FST=1 (registro UV de la GS): 14 bits, punto fijo 12.4 -> texels. La palabra llega
+ * como float en el buffer de vertices; se reinterpreta su patron de bits. */
+static float pcFixedUv(float word)
+{
+    unsigned int bits;
+    memcpy(&bits, &word, sizeof(bits));
+    return (float)(bits & 0x3FFFu) / 16.0f;
+}
+#endif
+
 void Ps2AddPrim(unsigned long prim, void* dp, unsigned int num, unsigned int clip_3d_on)
 {
     unsigned long* p;           
@@ -1394,7 +1405,7 @@ void Ps2AddPrim(unsigned long prim, void* dp, unsigned int num, unsigned int cli
             const float* a = (const float*)dp;
             const float* b = a + 12;
             float x0 = a[8], y0 = a[9], x1 = b[8], y1 = b[9];
-            float u0 = a[0], v0 = a[1], u1 = b[0], v1 = b[1];
+            float u0, v0, u1, v1;
             const float* color = b + 4;
             float cf[4];
             float pri_depth = pcRendererDepthFromViewZ(pcPriToViewZ(b[10]));
@@ -1406,7 +1417,13 @@ void Ps2AddPrim(unsigned long prim, void* dp, unsigned int num, unsigned int cli
             memcpy(ci, color, sizeof(ci));
             cf[0] = (float)(ci[0] & 0xFFu); cf[1] = (float)(ci[1] & 0xFFu);
             cf[2] = (float)(ci[2] & 0xFFu); cf[3] = (float)(ci[3] & 0xFFu);
-            u0 *= texture_width; u1 *= texture_width; v0 *= texture_height; v1 *= texture_height;
+            if (use_uv) {
+                /* PRIM.FST=1: palabras 0 y 1 = U,V en punto fijo 12.4 (texels * 16), no ST flotantes */
+                u0 = pcFixedUv(a[0]); v0 = pcFixedUv(a[1]); u1 = pcFixedUv(b[0]); v1 = pcFixedUv(b[1]);
+            } else {
+                u0 = a[0] * texture_width;  v0 = a[1] * texture_height;
+                u1 = b[0] * texture_width;  v1 = b[1] * texture_height;
+            }
             color = cf;
 
             if (wide_2d < 1.0f) {
@@ -1461,8 +1478,13 @@ void Ps2AddPrim(unsigned long prim, void* dp, unsigned int num, unsigned int cli
                 vertices[i].g = fminf(fmaxf((float)(ci[1] & 0xFFu) / 255.0f, 0.0f), 1.0f);
                 vertices[i].b = fminf(fmaxf((float)(ci[2] & 0xFFu) / 255.0f, 0.0f), 1.0f);
                 vertices[i].a = fminf(fmaxf((float)(ci[3] & 0xFFu) / 128.0f, 0.0f), 1.0f);
-                vertices[i].u = source[0] * texture_width;
-                vertices[i].v = source[1] * texture_height;
+                if (use_uv) {
+                    vertices[i].u = pcFixedUv(source[0]);
+                    vertices[i].v = pcFixedUv(source[1]);
+                } else {
+                    vertices[i].u = source[0] * texture_width;
+                    vertices[i].v = source[1] * texture_height;
+                }
                 vertices[i].fog = 1.0f;
                 vertices[i].q = 1.0f;
             }
