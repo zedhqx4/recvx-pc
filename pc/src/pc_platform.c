@@ -15,6 +15,7 @@
 #include "pc_gs.h"
 #include "pc_bindings.h"
 #include "pc_audio.h"
+#include "pc_texture_trace.h"
 
 static unsigned int frames;   /* frames presented */
 static struct { double last, sum, worst, swap, present; int n; } frame_time;
@@ -1068,6 +1069,17 @@ int pcVideoPumpEvents(void)
             int enabled = pcGsToggleUiWireframe();
             title_notice_show(enabled ? "UI WIREFRAME ON (F12)" : "UI WIREFRAME OFF (F12)");
             continue;   /* do not forward the diagnostic hotkey to the game */
+        }
+
+        /* F5 starts/stops texture tracing in the room being investigated.
+         * Intercept it before save_event() so it cannot trigger save-anywhere. */
+        if ((ev.type == SDL_EVENT_KEY_DOWN) && !ev.key.repeat &&
+            (ev.key.scancode == SDL_SCANCODE_F5))
+        {
+            int enabled = pcTexTraceToggle();
+            title_notice_show(enabled > 0 ? "TEXTURE TRACE ON (F5)" :
+                              (enabled == 0 ? "TEXTURE TRACE OFF (F5)" : "TEXTURE TRACE FAILED"));
+            continue;
         }
 
         /* Alt+Enter: fullscreen on/off, like other Windows games */

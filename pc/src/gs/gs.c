@@ -61,6 +61,8 @@ static int out_valid;
 static uint64_t out_trace_primitive_first;
 static uint64_t out_trace_primitive_last;
 static unsigned int out_trace_primitive_count;
+#define GS_TRACE_PRIMITIVE_CAPACITY (1024u * 3u)
+static PcTexTracePrimitive out_trace_primitives[GS_TRACE_PRIMITIVE_CAPACITY];
 
 static void current_state(GsDrawState* st)
 {
@@ -131,6 +133,8 @@ void gsFlushPrims(void)
         out_state.trace_context.queued_primitive_first = out_trace_primitive_first;
         out_state.trace_context.queued_primitive_last = out_trace_primitive_last;
         out_state.trace_context.queued_primitive_count = out_trace_primitive_count;
+        out_state.trace_context.queued_primitives = out_trace_primitives;
+        out_state.trace_context.queued_primitive_detail_count = out_trace_primitive_count;
         gsRendererDraw(&out_state, out_verts, out_count);
     }
 
@@ -163,6 +167,8 @@ static int draw_state_matches(const GsDrawState* a, const GsDrawState* b)
     /* With tracing disabled, use the original full-state comparison unchanged. */
     if (!a->trace_context.tracing_enabled && !b->trace_context.tracing_enabled)
         return memcmp(a, b, sizeof(*a)) == 0;
+    if (a->trace_context.tracing_enabled != b->trace_context.tracing_enabled)
+        return 0; /* F5 creates a clean boundary at start/stop. */
 
     left = *a;
     right = *b;
@@ -216,12 +222,23 @@ static void emit(const GsVertex* v, int n)
 
     if (pcTexTraceEnabled())
     {
-        uint64_t queued_seq = pcTexTraceGsPrimitiveQueued(
-            &st.trace_context, st.tex0, st.texa, st.texclut,
-            st.texture_asset_id, st.texture_asset_content_hash,
-            st.texture_asset_valid, (unsigned int)st.type, st.tme, n);
-        if (queued_seq != 0)
+        uint64_t queued_seq = pcTexTraceGsPrimitiveQueued();
+        if (queued_seq != 0 && out_trace_primitive_count < GS_TRACE_PRIMITIVE_CAPACITY)
         {
+            PcTexTracePrimitive* record = &out_trace_primitives[out_trace_primitive_count];
+            record->sequence = queued_seq;
+            record->model_id = st.trace_context.model_id;
+            record->model = st.trace_context.model;
+            record->chunk = st.trace_context.chunk;
+            record->chunk_ordinal = st.trace_context.chunk_ordinal;
+            record->chunk_type = st.trace_context.chunk_type;
+            record->chunk_bits = st.trace_context.chunk_bits;
+            record->chunk_size = st.trace_context.chunk_size;
+            record->strip_index = st.trace_context.strip_index;
+            record->vertex_count = (unsigned int)n;
+            record->face_first = st.trace_context.face_first;
+            record->face_last = st.trace_context.face_last;
+            record->material_event = st.trace_context.material_event;
             if (out_trace_primitive_first == 0)
                 out_trace_primitive_first = queued_seq;
             out_trace_primitive_last = queued_seq;

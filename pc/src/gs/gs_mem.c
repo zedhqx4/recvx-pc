@@ -548,7 +548,7 @@ void gsMemStartTransfer(const GsRegs* r)
 
         gsFlushLocalToLocal(sbp, sbw, spsm, ssx, ssy, w, h);
 
-        if (pcTexTraceEnabled() && w != 0 && h != 0 &&
+        if (pcTexTraceDumpsEnabled() && w != 0 && h != 0 &&
             (size_t)w <= (size_t)0x04000000 / sizeof(unsigned int) / (size_t)h)
         {
             size_t pixel_count = (size_t)w * (size_t)h;
@@ -573,7 +573,7 @@ void gsMemStartTransfer(const GsRegs* r)
             }
         }
 
-        if (pcTexTraceEnabled() && w != 0 && h != 0 &&
+        if (pcTexTraceDumpsEnabled() && w != 0 && h != 0 &&
             (size_t)w <= (size_t)0x04000000 / sizeof(unsigned int) / (size_t)h)
         {
             size_t pixel_count = (size_t)w * (size_t)h;
