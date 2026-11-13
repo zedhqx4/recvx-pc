@@ -329,8 +329,8 @@ void pcTexTraceSetResource(const char* kind, const char* name,
                            const void* base, const void* data,
                            unsigned int index, int offset)
 {
-    if (!trace_open())
-        return;
+    /* Keep the current room/resource identity even before F5 is pressed. The capture
+     * may be enabled after the room has already loaded. */
     snprintf(resource_kind, sizeof(resource_kind), "%s", kind ? kind : "UNKNOWN");
     snprintf(resource_name, sizeof(resource_name), "%s", name ? name : "");
     resource_stage = stage;
@@ -340,6 +340,8 @@ void pcTexTraceSetResource(const char* kind, const char* name,
     resource_data = data;
     resource_index = index;
     resource_offset = offset;
+    if (!trace_open())
+        return;
     trace_begin("resource_context");
     fprintf(trace_file, ",\"data_offset_from_base\":");
     if (base != NULL && data != NULL)
