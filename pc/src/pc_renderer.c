@@ -98,7 +98,7 @@ static int scissor_enabled;
 static int scissor_rect[4];
 static unsigned long long frame_number;
 
-unsigned long long pcRendererFrameNumber(void) { return frame_number; }
+uint64_t pcRendererFrameNumber(void) { return (uint64_t)frame_number; }
 static void flush_pending_deletes(void);
 static unsigned stat_immediate, stat_queued, stat_vertices, stat_screen_space;
 static int debug_magenta = -1;
