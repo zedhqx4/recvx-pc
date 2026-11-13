@@ -61,8 +61,9 @@ static int out_valid;
 static uint64_t out_trace_primitive_first;
 static uint64_t out_trace_primitive_last;
 static unsigned int out_trace_primitive_count;
-#define GS_TRACE_PRIMITIVE_CAPACITY (1024u * 3u)
-static PcTexTracePrimitive out_trace_primitives[GS_TRACE_PRIMITIVE_CAPACITY];
+#define GS_TRACE_GROUP_CAPACITY (1024u * 3u)
+static PcTexTraceSourceGroup out_trace_groups[GS_TRACE_GROUP_CAPACITY];
+static unsigned int out_trace_group_count;
 
 static void current_state(GsDrawState* st)
 {
@@ -133,8 +134,8 @@ void gsFlushPrims(void)
         out_state.trace_context.queued_primitive_first = out_trace_primitive_first;
         out_state.trace_context.queued_primitive_last = out_trace_primitive_last;
         out_state.trace_context.queued_primitive_count = out_trace_primitive_count;
-        out_state.trace_context.queued_primitives = out_trace_primitives;
-        out_state.trace_context.queued_primitive_detail_count = out_trace_primitive_count;
+        out_state.trace_context.queued_primitives = out_trace_groups;
+        out_state.trace_context.queued_primitive_detail_count = out_trace_group_count;
         gsRendererDraw(&out_state, out_verts, out_count);
     }
 
@@ -143,6 +144,7 @@ void gsFlushPrims(void)
     out_trace_primitive_first = 0;
     out_trace_primitive_last = 0;
     out_trace_primitive_count = 0;
+    out_trace_group_count = 0;
 }
 
 /* Diagnostic switch: default ON, preserving existing rendering. Set ui_uv_inset=0 in
@@ -223,22 +225,48 @@ static void emit(const GsVertex* v, int n)
     if (pcTexTraceEnabled())
     {
         uint64_t queued_seq = pcTexTraceGsPrimitiveQueued();
-        if (queued_seq != 0 && out_trace_primitive_count < GS_TRACE_PRIMITIVE_CAPACITY)
+        if (queued_seq != 0)
         {
-            PcTexTracePrimitive* record = &out_trace_primitives[out_trace_primitive_count];
-            record->sequence = queued_seq;
-            record->model_id = st.trace_context.model_id;
-            record->model = st.trace_context.model;
-            record->chunk = st.trace_context.chunk;
-            record->chunk_ordinal = st.trace_context.chunk_ordinal;
-            record->chunk_type = st.trace_context.chunk_type;
-            record->chunk_bits = st.trace_context.chunk_bits;
-            record->chunk_size = st.trace_context.chunk_size;
-            record->strip_index = st.trace_context.strip_index;
-            record->vertex_count = (unsigned int)n;
-            record->face_first = st.trace_context.face_first;
-            record->face_last = st.trace_context.face_last;
-            record->material_event = st.trace_context.material_event;
+            PcTexTraceSourceGroup* group = NULL;
+            if (out_trace_group_count != 0)
+            {
+                PcTexTraceSourceGroup* last = &out_trace_groups[out_trace_group_count - 1];
+                if (last->model_id == st.trace_context.model_id &&
+                    last->model == st.trace_context.model &&
+                    last->chunk == st.trace_context.chunk &&
+                    last->chunk_ordinal == st.trace_context.chunk_ordinal &&
+                    last->chunk_type == st.trace_context.chunk_type &&
+                    last->chunk_bits == st.trace_context.chunk_bits &&
+                    last->chunk_size == st.trace_context.chunk_size &&
+                    last->strip_index == st.trace_context.strip_index &&
+                    last->face_first == st.trace_context.face_first &&
+                    last->face_last == st.trace_context.face_last &&
+                    last->material_event == st.trace_context.material_event)
+                    group = last;
+            }
+            if (group == NULL && out_trace_group_count < GS_TRACE_GROUP_CAPACITY)
+            {
+                group = &out_trace_groups[out_trace_group_count++];
+                memset(group, 0, sizeof(*group));
+                group->sequence_first = queued_seq;
+                group->model_id = st.trace_context.model_id;
+                group->model = st.trace_context.model;
+                group->chunk = st.trace_context.chunk;
+                group->chunk_ordinal = st.trace_context.chunk_ordinal;
+                group->chunk_type = st.trace_context.chunk_type;
+                group->chunk_bits = st.trace_context.chunk_bits;
+                group->chunk_size = st.trace_context.chunk_size;
+                group->strip_index = st.trace_context.strip_index;
+                group->face_first = st.trace_context.face_first;
+                group->face_last = st.trace_context.face_last;
+                group->material_event = st.trace_context.material_event;
+            }
+            if (group != NULL)
+            {
+                group->sequence_last = queued_seq;
+                group->primitive_count++;
+                group->vertex_count += (unsigned int)n;
+            }
             if (out_trace_primitive_first == 0)
                 out_trace_primitive_first = queued_seq;
             out_trace_primitive_last = queued_seq;

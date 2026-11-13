@@ -3,8 +3,13 @@
 #ifdef TARGET_PC
 #include <stdint.h>
 
-typedef struct PcTexTracePrimitive {
-    uint64_t sequence;
+/* Compact tuple written once per contiguous source-context group:
+ * seq_first,seq_last,model_id,model_ptr,chunk_ptr,chunk_ordinal,chunk_type,
+ * chunk_bits,chunk_size,strip,primitive_count,vertex_count,face_first,
+ * face_last,material_event. */
+typedef struct PcTexTraceSourceGroup {
+    uint64_t sequence_first;
+    uint64_t sequence_last;
     uint64_t model_id;
     const void* model;
     const void* chunk;
@@ -13,11 +18,12 @@ typedef struct PcTexTracePrimitive {
     unsigned int chunk_bits;
     unsigned int chunk_size;
     unsigned int strip_index;
+    unsigned int primitive_count;
     unsigned int vertex_count;
     uint64_t face_first;
     uint64_t face_last;
     uint64_t material_event;
-} PcTexTracePrimitive;
+} PcTexTraceSourceGroup;
 
 typedef struct PcTexTraceDrawContext {
     uint64_t model_id;
@@ -35,7 +41,7 @@ typedef struct PcTexTraceDrawContext {
     uint64_t queued_primitive_last;
     unsigned int queued_primitive_count;
     int tracing_enabled;
-    const PcTexTracePrimitive* queued_primitives;
+    const PcTexTraceSourceGroup* queued_primitives;
     unsigned int queued_primitive_detail_count;
 } PcTexTraceDrawContext;
 

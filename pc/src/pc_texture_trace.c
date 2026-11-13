@@ -172,8 +172,9 @@ static int trace_open(void)
         trace_atexit_registered = 1;
     }
     trace_sessions++;
-    fprintf(trace_file, "{\"event\":\"trace_start\",\"version\":2,\"session\":%d,"
+    fprintf(trace_file, "{\"event\":\"trace_start\",\"version\":3,\"session\":%d,"
                         "\"mode\":\"compact\",\"topology_detail\":%s,\"binary_dumps\":%s,"
+                        "\"source_groups_format\":\"seq_first,seq_last,model_id,model_ptr,chunk_ptr,chunk_ordinal,chunk_type,chunk_bits,chunk_size,strip,primitive_count,vertex_count,face_first,face_last,material_event\","
                         "\"stage\":%d,\"room\":%d,\"case\":%d,\"resource_kind\":",
             trace_sessions, trace_topology_enabled() ? "true" : "false",
             trace_dumps_enabled() ? "true" : "false",
@@ -708,19 +709,21 @@ void pcTexTraceGsDraw(uint64_t tex0, uint64_t texa, uint64_t texclut,
                 context->queued_primitive_count);
         if (context->queued_primitives != NULL && context->queued_primitive_detail_count != 0) {
             unsigned int i;
-            fputs(",\"source_primitives\":[", trace_file);
+            fputs(",\"source_groups\":[", trace_file);
             for (i = 0; i < context->queued_primitive_detail_count; ++i) {
-                const PcTexTracePrimitive* p = &context->queued_primitives[i];
+                const PcTexTraceSourceGroup* g = &context->queued_primitives[i];
                 if (i != 0) fputc(',', trace_file);
                 fprintf(trace_file,
-                        "{\"seq\":%llu,\"model_id\":%llu,\"model\":\"%p\",\"chunk\":\"%p\","
-                        "\"chunk_ordinal\":%u,\"chunk_type\":%u,\"chunk_bits\":%u,\"chunk_size\":%u,"
-                        "\"strip\":%u,\"vertices\":%u,\"face_first\":%llu,\"face_last\":%llu,\"material_seq\":%llu}",
-                        (unsigned long long)p->sequence, (unsigned long long)p->model_id,
-                        p->model, p->chunk, p->chunk_ordinal, p->chunk_type, p->chunk_bits,
-                        p->chunk_size, p->strip_index, p->vertex_count,
-                        (unsigned long long)p->face_first, (unsigned long long)p->face_last,
-                        (unsigned long long)p->material_event);
+                        "[%llu,%llu,%llu,\"%p\",\"%p\",%u,%u,%u,%u,%u,%u,%u,%llu,%llu,%llu]",
+                        (unsigned long long)g->sequence_first,
+                        (unsigned long long)g->sequence_last,
+                        (unsigned long long)g->model_id,
+                        g->model, g->chunk, g->chunk_ordinal, g->chunk_type,
+                        g->chunk_bits, g->chunk_size, g->strip_index,
+                        g->primitive_count, g->vertex_count,
+                        (unsigned long long)g->face_first,
+                        (unsigned long long)g->face_last,
+                        (unsigned long long)g->material_event);
             }
             fputc(']', trace_file);
         }
