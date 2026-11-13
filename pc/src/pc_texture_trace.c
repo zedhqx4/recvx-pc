@@ -242,6 +242,7 @@ void pcTexTraceSnapshotDrawContext(PcTexTraceDrawContext* out)
     memset(out, 0, sizeof(*out));
     if (!trace_open())
         return;
+    out->tracing_enabled = 1;
     m = trace_model();
     if (m == NULL)
         return;

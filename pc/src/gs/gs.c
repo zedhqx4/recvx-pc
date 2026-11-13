@@ -157,9 +157,15 @@ static int pc_ui_uv_inset_enabled(void)
 
 static int draw_state_matches(const GsDrawState* a, const GsDrawState* b)
 {
-    GsDrawState left = *a;
-    GsDrawState right = *b;
+    GsDrawState left;
+    GsDrawState right;
 
+    /* With tracing disabled, use the original full-state comparison unchanged. */
+    if (!a->trace_context.tracing_enabled && !b->trace_context.tracing_enabled)
+        return memcmp(a, b, sizeof(*a)) == 0;
+
+    left = *a;
+    right = *b;
     /* Source provenance is diagnostic metadata, not GS hardware state.
      * Keep the original batching boundaries when model/face context changes. */
     memset(&left.trace_context, 0, sizeof(left.trace_context));

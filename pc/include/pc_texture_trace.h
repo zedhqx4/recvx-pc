@@ -18,6 +18,7 @@ typedef struct PcTexTraceDrawContext {
     uint64_t queued_primitive_first;
     uint64_t queued_primitive_last;
     unsigned int queued_primitive_count;
+    int tracing_enabled;
 } PcTexTraceDrawContext;
 
 int pcTexTraceEnabled(void);
