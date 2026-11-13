@@ -58,6 +58,9 @@ static GsVertex out_verts[1024 * 3];
 static int out_count;
 static GsDrawState out_state;
 static int out_valid;
+static uint64_t out_trace_primitive_first;
+static uint64_t out_trace_primitive_last;
+static unsigned int out_trace_primitive_count;
 
 static void current_state(GsDrawState* st)
 {
@@ -125,11 +128,17 @@ void gsFlushPrims(void)
 {
     if (out_valid && (out_count > 0))
     {
+        out_state.trace_context.queued_primitive_first = out_trace_primitive_first;
+        out_state.trace_context.queued_primitive_last = out_trace_primitive_last;
+        out_state.trace_context.queued_primitive_count = out_trace_primitive_count;
         gsRendererDraw(&out_state, out_verts, out_count);
     }
 
     out_count = 0;
     out_valid = 0;
+    out_trace_primitive_first = 0;
+    out_trace_primitive_last = 0;
+    out_trace_primitive_count = 0;
 }
 
 /* Diagnostic switch: default ON, preserving existing rendering. Set ui_uv_inset=0 in
@@ -144,6 +153,18 @@ static int pc_ui_uv_inset_enabled(void)
     }
 
     return enabled;
+}
+
+static int draw_state_matches(const GsDrawState* a, const GsDrawState* b)
+{
+    GsDrawState left = *a;
+    GsDrawState right = *b;
+
+    /* Source provenance is diagnostic metadata, not GS hardware state.
+     * Keep the original batching boundaries when model/face context changes. */
+    memset(&left.trace_context, 0, sizeof(left.trace_context));
+    memset(&right.trace_context, 0, sizeof(right.trace_context));
+    return memcmp(&left, &right, sizeof(left)) == 0;
 }
 
 static void emit(const GsVertex* v, int n)
@@ -176,7 +197,7 @@ static void emit(const GsVertex* v, int n)
     }
 
     /* sprites, points and lines become separate batches by type */
-    if (out_valid && ((memcmp(&st, &out_state, sizeof(st)) != 0) || (out_count + n > (int)(sizeof(out_verts) / sizeof(out_verts[0])))))
+    if (out_valid && ((!draw_state_matches(&st, &out_state)) || (out_count + n > (int)(sizeof(out_verts) / sizeof(out_verts[0])))))
     {
         gsFlushPrims();
     }
@@ -185,6 +206,21 @@ static void emit(const GsVertex* v, int n)
     {
         out_state = st;
         out_valid = 1;
+    }
+
+    if (pcTexTraceEnabled())
+    {
+        uint64_t queued_seq = pcTexTraceGsPrimitiveQueued(
+            &st.trace_context, st.tex0, st.texa, st.texclut,
+            st.texture_asset_id, st.texture_asset_content_hash,
+            st.texture_asset_valid, (unsigned int)st.type, st.tme, n);
+        if (queued_seq != 0)
+        {
+            if (out_trace_primitive_first == 0)
+                out_trace_primitive_first = queued_seq;
+            out_trace_primitive_last = queued_seq;
+            out_trace_primitive_count++;
+        }
     }
 
     for (i = 0; i < n; i++)

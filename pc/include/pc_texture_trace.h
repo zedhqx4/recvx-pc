@@ -15,6 +15,9 @@ typedef struct PcTexTraceDrawContext {
     uint64_t face_first;
     uint64_t face_last;
     uint64_t material_event;
+    uint64_t queued_primitive_first;
+    uint64_t queued_primitive_last;
+    unsigned int queued_primitive_count;
 } PcTexTraceDrawContext;
 
 int pcTexTraceEnabled(void);
@@ -63,6 +66,11 @@ void pcTexTraceGsTransferData(const char* phase, const void* data, unsigned int 
 void pcTexTraceGsTransferDone(unsigned int bp, unsigned int bw, unsigned int psm,
                               unsigned int x, unsigned int y,
                               unsigned int width, unsigned int height, int changed);
+uint64_t pcTexTraceGsPrimitiveQueued(const PcTexTraceDrawContext* context,
+                                      uint64_t tex0, uint64_t texa, uint64_t texclut,
+                                      unsigned int asset_id, uint64_t asset_hash,
+                                      int asset_valid, unsigned int prim_type,
+                                      int textured, int vertex_count);
 void pcTexTraceGsDraw(uint64_t tex0, uint64_t texa, uint64_t texclut,
                       unsigned int asset_id, uint64_t asset_hash, int asset_valid,
                       unsigned int prim_type, int textured, int vertex_count,

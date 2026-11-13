@@ -319,7 +319,7 @@ void pcTexTraceDumpTim2(const char* role, const void* data, unsigned int size,
     uint64_t hash;
     char path[256];
     FILE* f;
-    if (!trace_open() || data == NULL || size < 128 || size > TRACE_MAX_DUMP_BYTES)
+    if (!trace_open() || data == NULL || size < 144 || size > TRACE_MAX_DUMP_BYTES)
         return;
     {
         const unsigned char* bytes = (const unsigned char*)data;
@@ -600,6 +600,38 @@ void pcTexTraceGsTransferDone(unsigned int bp, unsigned int bw, unsigned int psm
     trace_end();
 }
 
+uint64_t pcTexTraceGsPrimitiveQueued(const PcTexTraceDrawContext* context,
+                                      uint64_t tex0, uint64_t texa, uint64_t texclut,
+                                      unsigned int asset_id, uint64_t asset_hash,
+                                      int asset_valid, unsigned int prim_type,
+                                      int textured, int vertex_count)
+{
+    if (!trace_open())
+        return 0;
+    trace_begin("gs_primitive_queued");
+    fprintf(trace_file, ",\"primitive_type\":%u,\"textured\":%s,\"vertices\":%d,"
+                        "\"TEX0\":\"%016llx\",\"TEXA\":\"%016llx\",\"TEXCLUT\":\"%016llx\","
+                        "\"Gindex_hint\":%u,\"asset_hash\":\"%016llx\",\"asset_valid\":%s",
+            prim_type, textured ? "true" : "false", vertex_count,
+            (unsigned long long)tex0, (unsigned long long)texa, (unsigned long long)texclut,
+            asset_id, (unsigned long long)asset_hash, asset_valid ? "true" : "false");
+    if (context != NULL)
+        fprintf(trace_file, ",\"source_model_id\":%llu,\"source_model\":\"%p\","
+                            "\"source_chunk\":\"%p\",\"source_chunk_ordinal\":%u,"
+                            "\"source_chunk_type\":%u,\"source_chunk_bits\":%u,"
+                            "\"source_chunk_size\":%u,\"source_strip\":%u,"
+                            "\"source_face_first\":%llu,\"source_face_last\":%llu,"
+                            "\"source_material_seq\":%llu",
+                (unsigned long long)context->model_id, context->model, context->chunk,
+                context->chunk_ordinal, context->chunk_type, context->chunk_bits,
+                context->chunk_size, context->strip_index,
+                (unsigned long long)context->face_first,
+                (unsigned long long)context->face_last,
+                (unsigned long long)context->material_event);
+    trace_end();
+    return trace_sequence;
+}
+
 void pcTexTraceGsDraw(uint64_t tex0, uint64_t texa, uint64_t texclut,
                       unsigned int asset_id, uint64_t asset_hash, int asset_valid,
                       unsigned int prim_type, int textured, int vertex_count,
@@ -624,6 +656,10 @@ void pcTexTraceGsDraw(uint64_t tex0, uint64_t texa, uint64_t texclut,
                 (unsigned long long)context->face_first,
                 (unsigned long long)context->face_last,
                 (unsigned long long)context->material_event);
+        fprintf(trace_file, ",\"queued_primitive_first\":%llu,\"queued_primitive_last\":%llu,\"queued_primitive_count\":%u",
+                (unsigned long long)context->queued_primitive_first,
+                (unsigned long long)context->queued_primitive_last,
+                context->queued_primitive_count);
     }
     trace_end();
 }
@@ -654,6 +690,10 @@ void pcTexTraceGsTextureResolution(const char* resolution,
                 (unsigned long long)context->face_first,
                 (unsigned long long)context->face_last,
                 (unsigned long long)context->material_event);
+        fprintf(trace_file, ",\"queued_primitive_first\":%llu,\"queued_primitive_last\":%llu,\"queued_primitive_count\":%u",
+                (unsigned long long)context->queued_primitive_first,
+                (unsigned long long)context->queued_primitive_last,
+                context->queued_primitive_count);
     trace_end();
 }
 
