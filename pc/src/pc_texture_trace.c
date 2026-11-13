@@ -241,10 +241,8 @@ static void trace_begin(const char* event)
 
 static void trace_end(void)
 {
-    if (trace_file != NULL) {
+    if (trace_file != NULL)
         fputs("}\n", trace_file);
-        fflush(trace_file);
-    }
 }
 
 static int trace_dump_seen(const char* role, uint64_t hash, unsigned int size,
@@ -326,8 +324,12 @@ void pcTexTraceSnapshotDrawContext(PcTexTraceDrawContext* out)
 
 void pcTexTraceSetFrame(uint64_t frame)
 {
-    if (trace_open())
+    if (trace_open()) {
         trace_frame = frame;
+        /* Bound crash-loss to about two seconds without flushing every draw/event. */
+        if ((frame % 60u) == 0)
+            fflush(trace_file);
+    }
 }
 
 void pcTexTraceSetResource(const char* kind, const char* name,
