@@ -74,6 +74,7 @@ int pcRendererGetOutputSize(int* width, int* height);
 /* Superficie de render-to-texture (la copia reducida de la pantalla que el juego usa como textura de 256x256). */
 void pcRendererCopyScreenToRenderTexture(int sx0, int sy0, int sx1, int sy1, int dx0, int dy0, int dx1, int dy1);
 void pcRendererBindRenderTexture(void);
+int pcRendererReadScreenRect(int x, int y, int w, int h, unsigned char* rgba);
 /* Shadow volumes (Ps2ShadowStart..End). The GS drew the volume faces into a second 16-bit frame (FRAME_2, FBP 380)
  * that shares the scene Z buffer; here that frame is an offscreen target that shares the scene depth texture.
  *   Begin   : context 2 becomes the draw target and its mask is cleared

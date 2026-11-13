@@ -466,6 +466,7 @@ void pcRendererClear(float r, float g, float b, float a, int clear_depth)
     glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
     glClearColor(r, g, b, a);
     if (clear_depth) {
+        glDepthMask(GL_TRUE);   /* glClear respeta la mascara de escritura de profundidad */
         glClearDepth(1.0);
         mask |= GL_DEPTH_BUFFER_BIT;
     }
@@ -1033,6 +1034,48 @@ void pcRendererCopyScreenToRenderTexture(int sx0, int sy0, int sx1, int sy1, int
               render_texture_binds);
     }
     glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
+}
+
+/* Lee el rectangulo (x,y,w,h) de la pantalla de juego (pixeles de 640x480 de la GS, y hacia abajo) a RGBA8, fila 0 arriba.
+ * Lo que cae fuera de la pantalla queda negro. */
+static unsigned store_texture, store_fbo;
+
+int pcRendererReadScreenRect(int x, int y, int w, int h, unsigned char* rgba)
+{
+    float kx, ky;
+    int vw, vh;
+    if (!ready || rgba == NULL || w <= 0 || h <= 0 || w > 512 || h > 512 || x < 0 || y < 0) return 0;
+    if (!store_texture) {
+        glGenTextures(1, &store_texture);
+        glBindTexture(GL_TEXTURE_2D, store_texture);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, 512, 512, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+        glGenFramebuffers(1, &store_fbo);
+        glBindFramebuffer(GL_FRAMEBUFFER, store_fbo);
+        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, store_texture, 0);
+    }
+    kx = (float)render_width / 640.0f;
+    ky = (float)render_height / 480.0f;
+    vw = (x + w > 640) ? 640 - x : w;
+    vh = (y + h > 480) ? 480 - y : h;
+    glDisable(GL_SCISSOR_TEST);
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, store_fbo);
+    glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+    glClear(GL_COLOR_BUFFER_BIT);
+    if (vw > 0 && vh > 0) {
+        glBindFramebuffer(GL_READ_FRAMEBUFFER, framebuffer);
+        glBlitFramebuffer((GLint)(x * kx), render_height - (GLint)(y * ky), (GLint)((x + vw) * kx), render_height - (GLint)((y + vh) * ky),
+                          0, 0, vw, vh, GL_COLOR_BUFFER_BIT, GL_LINEAR);
+    }
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, store_fbo);
+    glPixelStorei(GL_PACK_ALIGNMENT, 1);
+    {   /* glReadPixels devuelve la fila 0 abajo: la fila 0 de la region (arriba en la pantalla) se copio a la fila 0 del FBO,
+         * que es justo la que sale primero, asi que no hace falta voltear. */
+        glReadPixels(0, 0, w, h, GL_RGBA, GL_UNSIGNED_BYTE, rgba);
+    }
+    glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
+    return 1;
 }
 
 void pcRendererBindRenderTexture(void)

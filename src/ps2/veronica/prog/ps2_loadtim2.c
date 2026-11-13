@@ -217,6 +217,16 @@ void StoreRenderTex(void* tex_adr)
         sceGsExecStoreImage(&gs_simage, p);
     } 
     
+#ifdef TARGET_PC
+    /* La GS limpia aqui el framebuffer (Ps2ScreenClear, sprite RGBA 0): lo que se dibuje despues parte de una pantalla vacia. Ps2ScreenClear
+     * es un no-op en PC (limpiaba trabajo ya dibujado), asi que se limpia el frame explicitamente. */
+    {
+        extern void pcRendererClear(float r, float g, float b, float a, int clear_depth);
+
+        pcRendererClear(0.0f, 0.0f, 0.0f, 0.0f, 1);
+    }
+    return;
+#endif
     Ps2ScreenClear();
 }
 

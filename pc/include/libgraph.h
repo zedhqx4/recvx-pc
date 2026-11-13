@@ -380,6 +380,7 @@ typedef struct {
     sceGsTrxreg trxreg;       u_long64_t trxregaddr;
     sceGsFinish finish;       u_long64_t finishaddr;
     sceGsTrxdir trxdir;       u_long64_t trxdiraddr;
+    short pc_x, pc_y, pc_w, pc_h;   /* PC: rectangulo de pantalla a leer (sceGsSetDefStoreImage) */
 } sceGsStoreImage;
 
 /* ---- libgraph functions (pc/src/pc_libgraph.c) ---- */

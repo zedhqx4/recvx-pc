@@ -66,15 +66,31 @@ int sceGsExecLoadImage(sceGsLoadImage* lp, u_long128* srcaddr)
 void sceGsSetDefStoreImage(sceGsStoreImage* sp, short sbp, short sbw, short spsm,
                            short x, short y, short w, short h)
 {
-    (void)sbp; (void)sbw; (void)spsm; (void)x; (void)y; (void)w; (void)h;
-    if (sp != NULL) memset(sp, 0, sizeof(*sp));
+    (void)sbp; (void)sbw; (void)spsm;
+    if (sp == NULL) return;
+    memset(sp, 0, sizeof(*sp));
+    sp->pc_x = x; sp->pc_y = y; sp->pc_w = w; sp->pc_h = h;
 }
 
-/* CLAUDE-NOTE[N7]: no-op. Es el camino por el que el juego leia el framebuffer a una textura (render texture, espejos,
- * efectos de agua/gas). Sin implementarlo, esas escenas salen vacias. Ver StoreRenderTex() en ps2_loadtim2.c. */
+/* Lectura del framebuffer a memoria (PSMCT32, filas de w pixeles consecutivas). El juego la usa en StoreRenderTex
+ * (njRenderTextureNum/NumG: efectos que re-dibujan la sala como textura, agua, gas): la imagen leida pasa a ser los datos de
+ * la textura RGBA32 de la lista ren_tlist. El alfa se entrega como 0x80 (opaco en la GS). */
 int sceGsExecStoreImage(sceGsStoreImage* sp, u_long128* dstaddr)
 {
-    (void)sp; (void)dstaddr;
+    static unsigned char rgba[512 * 512 * 4];
+    unsigned char* out = (unsigned char*)dstaddr;
+    int i, n;
+
+    if (sp == NULL || dstaddr == NULL || sp->pc_w <= 0 || sp->pc_h <= 0) return 0;
+    pcRendererFlushTransparent();   /* lo diferido (OT) debe estar ya en el framebuffer */
+    if (!pcRendererReadScreenRect(sp->pc_x, sp->pc_y, sp->pc_w, sp->pc_h, rgba)) return 0;
+    n = sp->pc_w * sp->pc_h;
+    for (i = 0; i < n; i++) {
+        out[i * 4]     = rgba[i * 4];
+        out[i * 4 + 1] = rgba[i * 4 + 1];
+        out[i * 4 + 2] = rgba[i * 4 + 2];
+        out[i * 4 + 3] = 0x80;
+    }
     return 0;
 }
 
