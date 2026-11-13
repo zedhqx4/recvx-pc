@@ -61,6 +61,7 @@ void pcRendererDrawLines(const PcNativeVertex* vertices, int count, const PcNati
 void pcRendererDrawLineStrip(const PcNativeVertex* vertices, int count, const PcNativeDrawState* state);
 void pcRendererDrawScreenTriangles(const PcNativeVertex* vertices, int count, const PcNativeDrawState* state);
 void pcRendererFlushTransparent(void);
+void pcRendererFlushTransparentI(void);   /* Ps2DrawOTagI: dos pasadas (alfa >= 128 con Z, despues alfa < 128 sin Z) */
 unsigned int pcRendererLoadTextureRGBA(const unsigned char* rgba, int width, int height, int linear);
 int pcRendererUpdateTextureRGBA(unsigned int texture, const unsigned char* rgba, int width, int height);
 void pcRendererDeleteTexture(unsigned int texture);
@@ -75,6 +76,7 @@ int pcRendererGetOutputSize(int* width, int* height);
 void pcRendererCopyScreenToRenderTexture(int sx0, int sy0, int sx1, int sy1, int dx0, int dy0, int dx1, int dy1);
 void pcRendererBindRenderTexture(void);
 uint64_t pcRendererFrameNumber(void);
+void pcRendererCaptureBurst(int frames);   /* guarda los N frames siguientes como recvx_burst_K.bmp (F8) */
 int pcRendererReadScreenRect(int x, int y, int w, int h, unsigned char* rgba);
 /* Shadow volumes (Ps2ShadowStart..End). The GS drew the volume faces into a second 16-bit frame (FRAME_2, FBP 380)
  * that shares the scene Z buffer; here that frame is an offscreen target that shares the scene depth texture.

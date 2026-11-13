@@ -1071,6 +1071,14 @@ int pcVideoPumpEvents(void)
             continue;
         }
 
+        /* F8: save the next 8 rendered frames as recvx_burst_K.bmp (half size) to catch one-frame artifacts */
+        if ((ev.type == SDL_EVENT_KEY_DOWN) && !ev.key.repeat && (ev.key.scancode == SDL_SCANCODE_F8))
+        {
+            pcRendererCaptureBurst(8);
+            title_notice_show("CAPTURING 8 FRAMES (recvx_burst_*.bmp)");
+            continue;
+        }
+
         /* F12: toggle a wireframe overlay on textured 2D primitives for graphics diagnosis.
          * F12 is not one of the default game bindings (F11 fullscreen, F9 title, F5 save). */
         if ((ev.type == SDL_EVENT_KEY_DOWN) && !ev.key.repeat && (ev.key.scancode == SDL_SCANCODE_F12))

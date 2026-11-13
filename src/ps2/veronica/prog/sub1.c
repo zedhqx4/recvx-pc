@@ -1363,6 +1363,17 @@ void Ps2DrawOTagI()
 {
 	int i;
 	
+#ifdef TARGET_PC
+	{
+		/* El OT no existe en PC: los primitivos con ABE esperan en la cola del renderer. Ps2ZbuffOffI + Ps2ZbuffOff2 los
+		 * recorrian en dos pasadas (fragmentos con alfa >= 128 con Z, despues los de alfa < 128 sin Z). */
+		extern void pcRendererFlushTransparentI(void);
+		pcRendererFlushTransparentI();
+		Ps2_current_texbreak = 1;
+		return;
+	}
+#endif
+
 	Ps2ZbuffOffI();
 
 	for (i = 0; i < 4096; ) 

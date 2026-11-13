@@ -472,15 +472,17 @@ void	njUserClipping(Int mode ,NJS_POINT2 *p)
         return;
     }
     if (mode == 2 && p != NULL) {
-        int x0 = (int)(p[0].x + 0.5f);
-        int y0 = (int)(p[0].y + 0.5f);
-        int x1 = (int)(p[1].x + 0.5f);
-        int y1 = (int)(p[1].y + 0.5f);
-        if (x1 < x0) { int t=x0; x0=x1; x1=t; }
-        if (y1 < y0) { int t=y0; y0=y1; y1=t; }
-        if (x0 < 0) x0=0; if (y0 < 0) y0=0;
-        if (x1 > 640) x1=640; if (y1 > 480) y1=480;
-        pcRendererSetScissor(1, x0, y0, x1-x0, y1-y0);
+        /* El original: SCISSOR(x0 = p0.x*32, x1 = p1.x*32 + 32, y0 = p0.y*32, y1 = p1.y*32 + 32), limites inclusivos en
+         * pixeles. Los llamadores (visor de objetos, sp_evt) pasan las coordenadas divididas entre 32. */
+        int x0 = (int)(p[0].x * 32.0f);
+        int y0 = (int)(p[0].y * 32.0f);
+        int x1 = (int)(p[1].x * 32.0f) + 32;
+        int y1 = (int)(p[1].y * 32.0f) + 32;
+        if (x0 < 0) x0 = 0;
+        if (y0 < 0) y0 = 0;
+        if (x1 > 639) x1 = 639;
+        if (y1 > 479) y1 = 479;
+        pcRendererSetScissor(1, x0, y0, x1 - x0 + 1, y1 - y0 + 1);
         return;
     }
     pcRendererSetScissor(0, 0, 0, 640, 480);

@@ -217,7 +217,9 @@ PRIM (18), RGBAQ (10), UV (8), FRAME_2 (8), ALPHA_2 (3), TRX* (3), ZBUF_1/2 (4),
 | TEX1 (MMAG/MMIN/L/K) + MIPTBP | filtro y mipmaps | Parcial: lineal/nearest, sin mipmaps |
 | CLAMP | repeat/clamp/region-clamp (MINU/MAXU) | Parcial (region clamp no) |
 | FOG/FOGCOL, FGE | niebla por vertice | Parcial (global fog) |
-| SCISSOR | recorte | Implementado (njUserClipping) |
+| SCISSOR | recorte | Implementado (njUserClipping). Las coordenadas llegan /32 (SCISSOR = p*32, x1/y1 = p*32+32, inclusivo): hasta 0.9.105 el PC las usaba como pixeles y recortaba casi todo el visor de objetos |
+| TEST_1 por pasada del OT (Ps2ZbuffOffI / Off2) | Ps2DrawOTagI recorre el OT dos veces: alfa >= 128 con Z, despues alfa < 128 con ZMSK=1 | Hecho (`pcRendererFlushTransparentI`, uniform `uAlphaPass`). `Ps2DrawOTag` (Off) sigue en una pasada sin Z para ABE |
+| Z-buffer PSMZ16 | Z de 16 bits (casi-coplanares dan el mismo Z, gana el ultimo) | Hecho en el fragment shader (`gl_FragDepth` cuantizado a 65535 niveles) |
 | **FRAME_2 + ZBUF_2 (contexto 2)** | **render a buffers fuera de pantalla** (FBP 150, 380, 476) | **Falta por completo** |
 | Ps2ShadowStart/Draw/End/Main0/Main1 | sombras: se dibujan a un buffer 16 bits (FBP 380) y luego se aplican a la escena | **Falta** (sin rama PC): explica la sombra gris del personaje |
 | PS2_Render_Tex_Sub (FRAME_2 476) | copia reducida de la pantalla a 256x256 usada como textura por efectos de pantalla | **Hecho** (`pcRendererCopyScreenToRenderTexture` + enlace en `Ps2TexLoad` con el flag). Pendiente: `sceGsExecStoreImage` (lectura de VRAM) |

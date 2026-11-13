@@ -76,7 +76,7 @@ static GLuint vertex_buffer;
 static GLuint program;
 static GLint u_target, u_projection, u_aspect, u_offset, u_near, u_far;
 static GLint u_textured, u_texture, u_fog_enabled, u_fog_color, u_alpha_test, u_alpha_ref;
-static GLint u_screen_space, u_texture_size, u_texture_function, u_texture_alpha, u_texture_perspective;
+static GLint u_screen_space, u_texture_size, u_texture_function, u_texture_alpha, u_texture_perspective, u_alpha_pass;
 static int output_width = 640;
 static int output_height = 480;
 static int render_width = 640;
@@ -92,6 +92,14 @@ static int ready;
 static GLuint current_texture;
 static int depth_override_test = -1;
 static int depth_override_write = -1;
+
+/* Prueba de alfa por fragmento de la pasada del OT en curso (TEST_1 de Ps2ZbuffOffI / Ps2ZbuffOff2):
+ *   ALPHA_PASS_ALL          sin filtro
+ *   ALPHA_PASS_OPAQUE       ATST=GEQUAL AREF=128 AFAIL=KEEP: solo fragmentos con alfa >= 128 (1.0), escriben Z
+ *   ALPHA_PASS_TRANSLUCENT  ATST=LESS   AREF=128 AFAIL=KEEP: solo fragmentos con alfa <  128, con ZMSK=1 (no escriben Z) */
+enum { ALPHA_PASS_ALL = 0, ALPHA_PASS_OPAQUE = 1, ALPHA_PASS_TRANSLUCENT = 2 };
+static int alpha_pass = ALPHA_PASS_ALL;
+static int ot_writes_depth;   /* durante el vaciado del OT los primitivos con ABE escriben Z (ZMSK=0) si la pasada lo indica */
 static GsBlend gs_blend = { GL_FUNC_ADD, GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, 1.0f };    /* ALPHA_1 */
 static GsBlend gs_blend2 = { GL_FUNC_ADD, GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, 1.0f };   /* ALPHA_2 */
 static int scissor_enabled;
@@ -136,7 +144,7 @@ static const char* fragment_shader =
     "#version 330 core\n"
     "in vec4 vColor; in vec2 vTexCoord; in float vFog; in float vQ;\n"
     "uniform sampler2D uTexture; uniform int uTextured; uniform int uFogEnabled;\n"
-    "uniform vec3 uFogColor; uniform int uAlphaTest; uniform float uAlphaRef; uniform vec2 uTextureSize; uniform int uTextureFunction, uTextureAlpha, uTexturePerspective, uScreenSpace;\n"
+    "uniform vec3 uFogColor; uniform int uAlphaTest; uniform float uAlphaRef; uniform vec2 uTextureSize; uniform int uTextureFunction, uTextureAlpha, uTexturePerspective, uScreenSpace, uAlphaPass;\n"
     "out vec4 oColor;\n"
     "void main(){ vec4 c=vColor; if(uTextured!=0){ vec2 uv=vTexCoord; if(uScreenSpace!=0 && uTexturePerspective!=0)uv/=max(vQ,0.000001); vec4 t=texture(uTexture,uv/uTextureSize);\n"
     "    if(uTextureFunction==0){ c.rgb=t.rgb*c.rgb*1.9921875; if(uTextureAlpha!=0)c.a=t.a*c.a; }\n"
@@ -145,8 +153,14 @@ static const char* fragment_shader =
     "    else if(uTextureFunction==3){ c.rgb=clamp(t.rgb*c.rgb*1.9921875+vec3(c.a*0.5019608),0.0,1.0); if(uTextureAlpha!=0)c.a=t.a; }\n"
     "    else { c=t; } }\n"
     "  if(uAlphaTest!=0 && c.a<uAlphaRef)discard;\n"
+    "  if(uAlphaPass==1 && c.a<0.99609375)discard;\n"   /* alfa entero >= 128 (con medio escalon de margen) */
+    "  if(uAlphaPass==2 && c.a>=0.99609375)discard;\n"
     "  if(uFogEnabled!=0)c.rgb=mix(uFogColor,c.rgb,clamp(vFog,0.0,1.0));\n"
-    "  oColor=c; }\n";
+    "  oColor=c;\n"
+    /* El Z-buffer de la GS es PSMZ16 (ZBUF_1 = PSMCT16S/Z16): el Z interpolado se guarda entero de 16 bits (sz = 0..65535). Dos
+     * superficies casi coplanares dan el MISMO Z y gana la dibujada despues (ZTST=GEQUAL). Con la profundidad de 24 bits de GL
+     * se peleaban (z-fighting); se reproduce la cuantizacion de la GS. */
+    "  gl_FragDepth=1.0-floor((1.0-gl_FragCoord.z)*65535.0+0.5)/65535.0; }\n";
 
 static GLuint compile_shader(GLenum type, const char* source)
 {
@@ -288,6 +302,7 @@ int pcRendererInit(int width, int height)
     u_texture_function = glGetUniformLocation(program, "uTextureFunction");
     u_texture_alpha = glGetUniformLocation(program, "uTextureAlpha");
     u_texture_perspective = glGetUniformLocation(program, "uTexturePerspective");
+    u_alpha_pass = glGetUniformLocation(program, "uAlphaPass");
 
     glGenVertexArrays(1, &vertex_array);
     glBindVertexArray(vertex_array);
@@ -552,7 +567,7 @@ void pcRendererSetGsAlpha2(uint64_t reg) { gs_alpha_decode(reg, &gs_blend2); }
 /* Ultimos valores subidos al programa (ver apply_state). */
 typedef struct {
     float target[2], projection, aspect[2], offset[2], fog_color[3], alpha_ref, texture_size[2];
-    int textured, fog_enabled, alpha_test, screen_space, texture_function, texture_alpha, texture_perspective;
+    int textured, fog_enabled, alpha_test, screen_space, texture_function, texture_alpha, texture_perspective, alpha_pass;
 } UniformCache;
 static UniformCache uniform_cache;
 static int uniform_cache_valid;
@@ -580,7 +595,8 @@ static void apply_state(const PcNativeDrawState* st)
             write = st->depth_write;
             if (!st->screen_space && depth_override_test >= 0) test = depth_override_test;
             if (depth_override_write >= 0) write = depth_override_write;
-            if (st->blend && !st->immediate) write = 0;
+            if (st->blend && !st->immediate && !ot_writes_depth) write = 0;
+            if (alpha_pass == ALPHA_PASS_TRANSLUCENT) write = 0;   /* Ps2ZbuffOff2: ZBUF_1.ZMSK = 1 */
         }
         if (test) glEnable(GL_DEPTH_TEST); else glDisable(GL_DEPTH_TEST);
         glDepthMask(write ? GL_TRUE : GL_FALSE);
@@ -632,6 +648,7 @@ static void apply_state(const PcNativeDrawState* st)
         n.texture_function = st->texture_function;
         n.texture_alpha = st->texture_alpha != 0;
         n.texture_perspective = st->texture_perspective != 0;
+        n.alpha_pass = alpha_pass;
 #define UNIFORM_CHANGED(f) (!uniform_cache_valid || memcmp(&uniform_cache.f, &n.f, sizeof(n.f)) != 0)
         if (UNIFORM_CHANGED(target)) glUniform2f(u_target, n.target[0], n.target[1]);
         if (UNIFORM_CHANGED(projection)) glUniform1f(u_projection, n.projection);
@@ -652,6 +669,7 @@ static void apply_state(const PcNativeDrawState* st)
         if (UNIFORM_CHANGED(texture_function)) glUniform1i(u_texture_function, n.texture_function);
         if (UNIFORM_CHANGED(texture_alpha)) glUniform1i(u_texture_alpha, n.texture_alpha);
         if (UNIFORM_CHANGED(texture_perspective)) glUniform1i(u_texture_perspective, n.texture_perspective);
+        if (UNIFORM_CHANGED(alpha_pass)) glUniform1i(u_alpha_pass, n.alpha_pass);
 #undef UNIFORM_CHANGED
         uniform_cache = n;
         uniform_cache_valid = 1;
@@ -833,28 +851,66 @@ void pcRendererDrawScreenTriangles(const PcNativeVertex* v, int n, const PcNativ
     draw(v, n, &ss, GL_TRIANGLES);
 }
 
-void pcRendererFlushTransparent(void)
+/* Vacia la cola de primitivos con ABE en el orden del OT (bucket de Z de mayor a menor distancia, despues orden de envio).
+ *
+ * una pasada  (Ps2DrawOTag):  Ps2ZbuffOff = TEST_1 con ZTE=1 GEQUAL, escritura de Z enmascarada.
+ * dos pasadas (Ps2DrawOTagI): la GS recorria el OT dos veces, con otro TEST_1 cada vez:
+ *     Ps2ZbuffOffI  ATST=GEQUAL AREF=128 AFAIL=KEEP -> solo fragmentos con alfa >= 128, escriben color y Z
+ *     Ps2ZbuffOff2  ATST=LESS   AREF=128 AFAIL=KEEP, ZMSK=1 -> solo fragmentos con alfa < 128, color sin Z
+ *   Es lo que deja lo translucido (paneles, cristales, bordes de glifos) siempre detras de la geometria opaca del visor de
+ *   objetos y de archivos, sin depender del orden de envio. */
+static int ot_flush_logs;
+
+static void flush_transparent(int two_pass)
 {
-    int i;
+    static const int passes_one[1] = { ALPHA_PASS_ALL };
+    static const int passes_two[2] = { ALPHA_PASS_OPAQUE, ALPHA_PASS_TRANSLUCENT };
+    const int* passes = two_pass ? passes_two : passes_one;
+    const int pass_count = two_pass ? 2 : 1;
+    int i, p;
     int saved_target = active_target;
     if (!ready || transparent_count <= 0) return;
     NativeFrameState live;
     active_target = TARGET_SCREEN;   /* el OT siempre dibuja en la pantalla, nunca en la mascara de sombras */
     capture_frame_state(&live);
     qsort(transparent_queue, (size_t)transparent_count, sizeof(*transparent_queue), compare_transparent);
+
+    if (two_pass && ot_flush_logs < 8) {
+        ot_flush_logs++;
+        pcLog("native OT (two-pass, Ps2DrawOTagI): %d queued draws, frame %llu", transparent_count, frame_number);
+        for (i = 0; i < transparent_count && i < 48; i++) {
+            const NativeQueuedDraw* q = &transparent_queue[i];
+            pcLog("  OT[%d]: bucket=%.0f tex=%u(%gx%g) n=%d textured=%d z0=%.3f rgba=(%.2f,%.2f,%.2f,%.2f) scissor=%d(%d,%d,%d,%d)",
+                  i, q->sort_depth, q->state.texture, q->state.texture_width, q->state.texture_height, q->count, q->state.textured,
+                  q->vertices[0].z, q->vertices[0].r, q->vertices[0].g, q->vertices[0].b, q->vertices[0].a,
+                  q->frame.scissor_enabled, q->frame.scissor_rect[0], q->frame.scissor_rect[1], q->frame.scissor_rect[2], q->frame.scissor_rect[3]);
+        }
+    }
+
+    for (p = 0; p < pass_count; p++) {
+        alpha_pass = passes[p];
+        ot_writes_depth = (alpha_pass == ALPHA_PASS_OPAQUE);
+        for (i = 0; i < transparent_count; i++) {
+            NativeQueuedDraw* item = &transparent_queue[i];
+            restore_frame_state(&item->frame);
+            depth_override_test = 1;   /* ZTE=1 GEQUAL */
+            depth_override_write = ot_writes_depth ? 1 : 0;   /* ZMSK = 0 / 1 */
+            draw_immediate(item->vertices, item->count, &item->state, item->topology);
+        }
+    }
+    alpha_pass = ALPHA_PASS_ALL;
+    ot_writes_depth = 0;
     for (i = 0; i < transparent_count; i++) {
-        NativeQueuedDraw* item = &transparent_queue[i];
-        restore_frame_state(&item->frame);
-        depth_override_test = 1;   /* Ps2DrawOTag original: Ps2ZbuffOff = test de Z activo, escritura enmascarada */
-        depth_override_write = 0;
-        draw_immediate(item->vertices, item->count, &item->state, item->topology);
-        free(item->vertices);
-        item->vertices = NULL;
+        free(transparent_queue[i].vertices);
+        transparent_queue[i].vertices = NULL;
     }
     restore_frame_state(&live);
     transparent_count = 0;
     active_target = saved_target;
 }
+
+void pcRendererFlushTransparent(void) { flush_transparent(0); }
+void pcRendererFlushTransparentI(void) { flush_transparent(1); }
 
 /* ---- Sombras: volumen (prisma) dibujado en la mascara, luego oscurecimiento de la pantalla ---------------------------- */
 
@@ -1186,6 +1242,54 @@ int pcRendererGetOutputSize(int* w, int* h)
 
 /* CLAUDE-NOTE[N1]: el blit de abajo copia el FBO tal cual; no hay ninguna comprobacion (glGetError, glReadPixels) que diga
  * si el FBO tiene contenido. Es el mejor sitio para volcar un pixel/frame cuando se depure la pantalla negra. */
+/* BMP de 24 bits desde filas RGBA de GL (de abajo arriba, como BMP). shrink = 1 (tal cual) o 2 (promedio 2x2). */
+static int write_bmp(const char* name, const unsigned char* px, int width, int height, int shrink)
+{
+    int w = width / shrink, h = height / shrink, x, y;
+    int row_bytes = w * 3, pad = (4 - (row_bytes & 3)) & 3;
+    unsigned int fsize = (unsigned int)(54 + (row_bytes + pad) * h);
+    unsigned char hdr[54], zero[4] = { 0, 0, 0, 0 };
+    FILE* f = fopen(name, "wb");
+    if (!f) return 0;
+    memset(hdr, 0, sizeof(hdr));
+    hdr[0] = 'B'; hdr[1] = 'M';
+    memcpy(hdr + 2, &fsize, 4);
+    hdr[10] = 54; hdr[14] = 40;
+    memcpy(hdr + 18, &w, 4);
+    memcpy(hdr + 22, &h, 4);
+    hdr[26] = 1; hdr[28] = 24;
+    fwrite(hdr, 1, 54, f);
+    for (y = 0; y < h; y++) {
+        for (x = 0; x < w; x++) {
+            unsigned int sum[3] = { 0, 0, 0 };
+            int dx, dy;
+            unsigned char bgr[3];
+            for (dy = 0; dy < shrink; dy++)
+                for (dx = 0; dx < shrink; dx++) {
+                    const unsigned char* q = px + ((size_t)(y * shrink + dy) * (size_t)width + (size_t)(x * shrink + dx)) * 4;
+                    sum[0] += q[0]; sum[1] += q[1]; sum[2] += q[2];
+                }
+            bgr[0] = (unsigned char)(sum[2] / (unsigned)(shrink * shrink));
+            bgr[1] = (unsigned char)(sum[1] / (unsigned)(shrink * shrink));
+            bgr[2] = (unsigned char)(sum[0] / (unsigned)(shrink * shrink));
+            fwrite(bgr, 1, 3, f);
+        }
+        if (pad) fwrite(zero, 1, (size_t)pad, f);
+    }
+    fclose(f);
+    return 1;
+}
+
+/* Captura en rafaga (tecla F8): los N frames consecutivos siguientes se guardan como recvx_burst_K.bmp a media resolucion, para
+ * ver artefactos que duran un solo frame (una captura de pantalla normal no los pilla). */
+static int burst_remaining, burst_index;
+void pcRendererCaptureBurst(int frames)
+{
+    burst_remaining = frames > 0 ? frames : 0;
+    burst_index = 0;
+    pcLog("native renderer: burst capture of %d frames requested", burst_remaining);
+}
+
 /* Diagnostico: cada 240 frames mide el color medio del FBO y guarda los 3 primeros volcados como recvx_frame_N.bmp. */
 static void debug_dump_frame(void)
 {
@@ -1200,13 +1304,25 @@ static void debug_dump_frame(void)
         max_dumps = env ? atoi(env) : 3;
         if (max_dumps < 0) max_dumps = 0;
     }
-    if (frame_number % (getenv("RECVX_FRAME_DUMP") ? 120u : 240u) != (getenv("RECVX_FRAME_DUMP") ? 119u : 239u)) return;
+    if (burst_remaining <= 0 &&
+        frame_number % (getenv("RECVX_FRAME_DUMP") ? 120u : 240u) != (getenv("RECVX_FRAME_DUMP") ? 119u : 239u)) return;
     n = (size_t)render_width * (size_t)render_height;
     px = (unsigned char*)malloc(n * 4);
     if (!px) return;
     glBindFramebuffer(GL_READ_FRAMEBUFFER, framebuffer);
     glPixelStorei(GL_PACK_ALIGNMENT, 1);
     glReadPixels(0, 0, render_width, render_height, GL_RGBA, GL_UNSIGNED_BYTE, px);
+    if (burst_remaining > 0) {
+        char name[64];
+        snprintf(name, sizeof(name), "recvx_burst_%d.bmp", burst_index);
+        if (write_bmp(name, px, render_width, render_height, 2))
+            pcLog("native renderer: burst frame %d (renderer frame %llu, draws=%u, queued=%u) -> %s",
+                  burst_index, (unsigned long long)frame_number, stat_immediate, stat_queued, name);
+        burst_index++;
+        burst_remaining--;
+        free(px);
+        return;
+    }
     for (i = 0; i < n; i++) {
         sum[0] += px[i*4]; sum[1] += px[i*4+1]; sum[2] += px[i*4+2];
         if (px[i*4] | px[i*4+1] | px[i*4+2]) nonblack++;
@@ -1216,34 +1332,8 @@ static void debug_dump_frame(void)
           100.0 * (double)nonblack / (double)n, render_width, render_height);
     if (dumps < max_dumps) {
         char name[64];
-        FILE* f;
-        int row_bytes = render_width * 3, pad = (4 - (row_bytes & 3)) & 3, y;
-        unsigned int fsize = (unsigned int)(54 + (row_bytes + pad) * render_height);
-        unsigned char hdr[54];
-        memset(hdr, 0, sizeof(hdr));
-        hdr[0] = 'B'; hdr[1] = 'M';
-        memcpy(hdr + 2, &fsize, 4);
-        hdr[10] = 54; hdr[14] = 40;
-        memcpy(hdr + 18, &render_width, 4);
-        memcpy(hdr + 22, &render_height, 4);
-        hdr[26] = 1; hdr[28] = 24;
         snprintf(name, sizeof(name), "recvx_frame_%d.bmp", dumps);
-        f = fopen(name, "wb");
-        if (f) {
-            unsigned char zero[4] = {0, 0, 0, 0};
-            fwrite(hdr, 1, 54, f);
-            for (y = 0; y < render_height; y++) {   /* GL rows are bottom-up, like BMP */
-                int x;
-                const unsigned char* row = px + (size_t)y * (size_t)render_width * 4;
-                for (x = 0; x < render_width; x++) {
-                    unsigned char bgr[3] = { row[x*4+2], row[x*4+1], row[x*4] };
-                    fwrite(bgr, 1, 3, f);
-                }
-                if (pad) fwrite(zero, 1, (size_t)pad, f);
-            }
-            fclose(f);
-            pcLog("native frame dump: wrote %s", name);
-        }
+        if (write_bmp(name, px, render_width, render_height, 1)) pcLog("native frame dump: wrote %s", name);
         dumps++;
     }
     free(px);
