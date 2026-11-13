@@ -56,6 +56,32 @@ typedef struct {
     int height;
 } TraceGsDump;
 
+#define TRACE_MAX_LOG_BYTES (128u * 1024u * 1024u)
+#define TRACE_TRANSFER_PHASES 4
+#define TRACE_IMAGE_DUMPS 4096
+#define TRACE_IMAGE_ALIASES 8192
+
+typedef struct {
+    char phase[40];
+    uint64_t bytes;
+    uint64_t chunks;
+    uint64_t hash_state;
+    int hash_valid;
+    unsigned int bp, bw, psm, x, y, width, height;
+    char dump_path[160];
+} TraceTransferPhase;
+
+typedef struct {
+    uint64_t hash;
+    unsigned int width, height;
+    char path[160];
+} TraceImageDump;
+
+typedef struct {
+    uint64_t hash;
+    unsigned int tbp, psm, width, height;
+} TraceImageAlias;
+
 static int trace_state; /* 0=off, 1=on */
 static int trace_sessions;
 static int trace_atexit_registered;
@@ -68,6 +94,13 @@ static uint64_t trace_frame;
 static uint64_t model_sequence;
 static uint64_t face_sequence;
 static uint64_t transfer_sequence;
+static uint64_t trace_session_start;
+static TraceTransferPhase transfer_phases[TRACE_TRANSFER_PHASES];
+static unsigned int transfer_phase_count;
+static TraceImageDump image_dumps[TRACE_IMAGE_DUMPS];
+static unsigned int image_dump_count;
+static TraceImageAlias image_aliases[TRACE_IMAGE_ALIASES];
+static unsigned int image_alias_count;
 static TraceModel model_stack[TRACE_MODEL_STACK];
 static unsigned int model_depth;
 static TraceSourceDump source_dumps[TRACE_SOURCE_DUMPS];
@@ -172,6 +205,7 @@ static int trace_open(void)
         trace_atexit_registered = 1;
     }
     trace_sessions++;
+    transfer_phase_count = 0;
     fprintf(trace_file, "{\"event\":\"trace_start\",\"version\":3,\"session\":%d,"
                         "\"mode\":\"compact\",\"topology_detail\":%s,\"binary_dumps\":%s,"
                         "\"source_groups_format\":\"seq_first,seq_last,model_id,model_ptr,chunk_ptr,chunk_ordinal,chunk_type,chunk_bits,chunk_size,strip,primitive_count,vertex_count,face_first,face_last,material_event\","
@@ -184,6 +218,7 @@ static int trace_open(void)
     trace_json_string(resource_name);
     fputs("}\n", trace_file);
     fflush(trace_file);
+    trace_session_start = (uint64_t)ftell(trace_file);
     pcLog("texture trace: capture started; press F5 to stop; output: texture_trace/");
     return 1;
 }
@@ -327,8 +362,20 @@ void pcTexTraceSetFrame(uint64_t frame)
     if (trace_open()) {
         trace_frame = frame;
         /* Bound crash-loss to about two seconds without flushing every draw/event. */
-        if ((frame % 60u) == 0)
+        if ((frame % 60u) == 0) {
+            long pos;
             fflush(trace_file);
+            pos = ftell(trace_file);
+            if (pos >= 0 && (uint64_t)pos >= trace_session_start + TRACE_MAX_LOG_BYTES) {
+                fprintf(trace_file, "{\"event\":\"trace_limit_reached\",\"limit_bytes\":%u}\n",
+                        (unsigned int)TRACE_MAX_LOG_BYTES);
+                fflush(trace_file);
+                fclose(trace_file);
+                trace_file = NULL;
+                trace_state = 0;
+                pcLog("texture trace stopped at 128 MiB safety limit; press F5 to start another capture");
+            }
+        }
     }
 }
 
@@ -593,11 +640,13 @@ void pcTexTraceGsRegister(unsigned int reg, uint64_t old_value, uint64_t new_val
 {
     if (!trace_open())
         return;
+    if (old_value == new_value)
+        return;
     switch (reg) {
-    case 0x00: case 0x06: case 0x07: case 0x08: case 0x09:
-    case 0x14: case 0x15: case 0x16: case 0x17: case 0x1c:
-    case 0x3b: case 0x3f: case 0x50: case 0x51: case 0x52:
-    case 0x53: case 0x54: case 0x55: case 0x56:
+    /* TEX0/TEX2, palette and transfer registers only. PRIM, CLAMP and TEX1
+     * are represented by the per-draw snapshot and would otherwise flood JSONL. */
+    case 0x06: case 0x07: case 0x16: case 0x17: case 0x1c:
+    case 0x3b: case 0x50: case 0x51: case 0x52: case 0x53:
         break;
     default:
         return;
@@ -624,53 +673,102 @@ void pcTexTraceGsTransferStart(uint64_t bitbltbuf, uint64_t trxpos,
     trace_end();
 }
 
+static TraceTransferPhase* trace_transfer_phase(const char* phase)
+{
+    unsigned int i;
+    const char* name = phase ? phase : "unknown";
+    for (i = 0; i < transfer_phase_count; ++i) {
+        if (strcmp(transfer_phases[i].phase, name) == 0)
+            return &transfer_phases[i];
+    }
+    if (transfer_phase_count >= TRACE_TRANSFER_PHASES)
+        return NULL;
+    {
+        TraceTransferPhase* p = &transfer_phases[transfer_phase_count++];
+        memset(p, 0, sizeof(*p));
+        strncpy(p->phase, name, sizeof(p->phase) - 1);
+        p->hash_state = 1469598103934665603ULL;
+        return p;
+    }
+}
+
+static uint64_t trace_hash_update(uint64_t hash, const void* data, size_t bytes)
+{
+    const unsigned char* p = (const unsigned char*)data;
+    size_t i;
+    for (i = 0; i < bytes; ++i)
+        hash = (hash ^ p[i]) * 1099511628211ULL;
+    return hash;
+}
+
 void pcTexTraceGsTransferData(const char* phase, const void* data, unsigned int bytes,
                               unsigned int bp, unsigned int bw, unsigned int psm,
                               unsigned int x, unsigned int y,
                               unsigned int width, unsigned int height)
 {
-    uint64_t hash;
+    TraceTransferPhase* p;
     if (!trace_open())
         return;
-    hash = (data && bytes) ? trace_hash(data, bytes) : 0;
-    char path[256];
-    FILE* f;
-    uint64_t event_sequence;
-    trace_begin("gs_transfer_data");
-    event_sequence = trace_sequence;
-    fprintf(trace_file, ",\"transfer_id\":%llu,\"phase\":",
-            (unsigned long long)transfer_sequence);
-    trace_json_string(phase ? phase : "unspecified");
-    fprintf(trace_file, ",\"data\":\"%p\",\"bytes\":%u,\"data_hash\":\"%016llx\",\"bp\":%u,\"bw\":%u,\"psm\":%u,\"x\":%u,\"y\":%u,\"width\":%u,\"height\":%u",
-            data, bytes, (unsigned long long)hash, bp, bw, psm, x, y, width, height);
-    if (!trace_dumps_enabled()) {
-        fputs(",\"dump_skipped\":\"set RECVX_TEX_TRACE_DUMPS=1\"", trace_file);
-    } else if (data != NULL && bytes != 0 && bytes <= TRACE_MAX_DUMP_BYTES) {
-        snprintf(path, sizeof(path), "texture_trace/transfer_%06llu_seq%010llu_%016llx.bin",
-                 (unsigned long long)transfer_sequence, (unsigned long long)event_sequence,
-                 (unsigned long long)hash);
-        f = fopen(path, "wb");
+    p = trace_transfer_phase(phase);
+    if (p == NULL)
+        return;
+    p->bytes += bytes;
+    p->chunks++;
+    p->bp = bp; p->bw = bw; p->psm = psm;
+    p->x = x; p->y = y; p->width = width; p->height = height;
+
+    /* Exact hashes and payload files are opt-in; compact mode only counts bytes/chunks. */
+    if (trace_dumps_enabled() && data != NULL && bytes != 0) {
+        FILE* f;
+        char path[160];
+        p->hash_state = trace_hash_update(p->hash_state, data, bytes);
+        p->hash_valid = 1;
+        if (p->dump_path[0] == '\0') {
+            snprintf(p->dump_path, sizeof(p->dump_path),
+                     "texture_trace/transfer_%03d_%06llu_%s.bin",
+                     trace_sessions, (unsigned long long)transfer_sequence, p->phase);
+        }
+        strncpy(path, p->dump_path, sizeof(path) - 1);
+        path[sizeof(path) - 1] = '\0';
+        f = fopen(path, "ab");
         if (f != NULL) {
             fwrite(data, 1, bytes, f);
             fclose(f);
-            fprintf(trace_file, ",\"dump\":");
-            trace_json_string(path);
         }
     }
-    trace_end();
 }
 
 void pcTexTraceGsTransferDone(unsigned int bp, unsigned int bw, unsigned int psm,
                               unsigned int x, unsigned int y,
                               unsigned int width, unsigned int height, int changed)
 {
+    unsigned int i;
     if (!trace_open())
         return;
     trace_begin("gs_transfer_done");
-    fprintf(trace_file, ",\"transfer_id\":%llu,\"bp\":%u,\"bw\":%u,\"psm\":%u,\"x\":%u,\"y\":%u,\"width\":%u,\"height\":%u,\"changed\":%s",
+    fprintf(trace_file, ",\"transfer_id\":%llu,\"bp\":%u,\"bw\":%u,\"psm\":%u,"
+                        "\"x\":%u,\"y\":%u,\"width\":%u,\"height\":%u,\"changed\":%s,\"phases\":[",
             (unsigned long long)transfer_sequence, bp, bw, psm, x, y, width, height,
             changed ? "true" : "false");
+    for (i = 0; i < transfer_phase_count; ++i) {
+        TraceTransferPhase* p = &transfer_phases[i];
+        if (i != 0) fputc(',', trace_file);
+        fputs("{\"phase\":", trace_file); trace_json_string(p->phase);
+        fprintf(trace_file, ",\"bytes\":%llu,\"chunks\":%llu,\"bp\":%u,\"bw\":%u,"
+                            "\"psm\":%u,\"x\":%u,\"y\":%u,\"width\":%u,\"height\":%u",
+                (unsigned long long)p->bytes, (unsigned long long)p->chunks,
+                p->bp, p->bw, p->psm, p->x, p->y, p->width, p->height);
+        if (p->hash_valid)
+            fprintf(trace_file, ",\"data_hash\":\"%016llx\"", (unsigned long long)p->hash_state);
+        if (p->dump_path[0] != '\0') {
+            fputs(",\"dump\":", trace_file); trace_json_string(p->dump_path);
+        }
+        fputc('}', trace_file);
+    }
+    fputs("]", trace_file);
     trace_end();
+    memset(transfer_phases, 0, sizeof(transfer_phases));
+    transfer_phase_count = 0;
 }
 
 uint64_t pcTexTraceGsPrimitiveQueued(void)
@@ -686,7 +784,7 @@ void pcTexTraceGsDraw(uint64_t tex0, uint64_t texa, uint64_t texclut,
                       unsigned int fbp, unsigned int fbw, unsigned int fpsm,
                       const PcTexTraceDrawContext* context)
 {
-    if (!trace_open())
+    if (!trace_open() || !textured)
         return;
     trace_begin("gs_draw");
     fprintf(trace_file, ",\"primitive_type\":%u,\"textured\":%s,\"vertices\":%d,\"TEX0\":\"%016llx\",\"TEXA\":\"%016llx\",\"TEXCLUT\":\"%016llx\",\"TBP0\":%u,\"PSM\":%u,\"CLUT_base\":%u,\"Gindex_hint\":%u,\"asset_hash\":\"%016llx\",\"asset_valid\":%s,\"FBP\":%u,\"FBW\":%u,\"FPSM\":%u",
@@ -790,52 +888,113 @@ static void trace_write_u32(FILE* f, unsigned int value)
     fwrite(b, 1, 4, f);
 }
 
+static const char* trace_image_path(uint64_t hash, unsigned int width, unsigned int height,
+                                    int* is_new)
+{
+    unsigned int i;
+    for (i = 0; i < image_dump_count; ++i) {
+        if (image_dumps[i].hash == hash && image_dumps[i].width == width &&
+            image_dumps[i].height == height) {
+            *is_new = 0;
+            return image_dumps[i].path;
+        }
+    }
+    if (image_dump_count >= TRACE_IMAGE_DUMPS) {
+        *is_new = 0;
+        return NULL;
+    }
+    {
+        TraceImageDump* d = &image_dumps[image_dump_count++];
+        d->hash = hash; d->width = width; d->height = height;
+        snprintf(d->path, sizeof(d->path), "texture_trace/gs_%016llx_%ux%u.bmp",
+                 (unsigned long long)hash, width, height);
+        *is_new = 1;
+        return d->path;
+    }
+}
+
+static int trace_image_alias_seen(uint64_t hash, unsigned int tbp, unsigned int psm,
+                                  unsigned int width, unsigned int height)
+{
+    unsigned int i;
+    for (i = 0; i < image_alias_count; ++i) {
+        TraceImageAlias* a = &image_aliases[i];
+        if (a->hash == hash && a->tbp == tbp && a->psm == psm &&
+            a->width == width && a->height == height)
+            return 1;
+    }
+    if (image_alias_count < TRACE_IMAGE_ALIASES) {
+        TraceImageAlias* a = &image_aliases[image_alias_count++];
+        a->hash = hash; a->tbp = tbp; a->psm = psm;
+        a->width = width; a->height = height;
+    }
+    return 0;
+}
+
 void pcTexTraceGsImage(uint64_t tex0, uint64_t texa, uint64_t texclut,
                        uint64_t generation, uint64_t clut_hash,
                        int width, int height, const unsigned int* rgba)
 {
-    char path[256];
+    const char* path;
     FILE* f;
     unsigned int y, x, row_bytes, pad, file_size;
+    unsigned int tbp = (unsigned int)(tex0 & 0x3FFFu);
+    unsigned int psm = (unsigned int)((tex0 >> 20) & 0x3Fu);
     uint64_t hash;
+    int is_new;
+
     if (!trace_open() || !trace_dumps_enabled() || rgba == NULL || width <= 0 || height <= 0 ||
         width > 1024 || height > 1024)
         return;
+
     hash = trace_hash(rgba, (size_t)width * (size_t)height * 4u);
-    snprintf(path, sizeof(path), "texture_trace/gs_tbp%04x_psm%02x_%016llx.bmp",
-             (unsigned int)(tex0 & 0x3FFFu), (unsigned int)((tex0 >> 20) & 0x3Fu),
-             (unsigned long long)hash);
-    f = fopen(path, "wb");
-    if (f == NULL)
+    path = trace_image_path(hash, (unsigned int)width, (unsigned int)height, &is_new);
+    if (path == NULL)
         return;
-    row_bytes = (unsigned int)width * 3u;
-    pad = (4u - (row_bytes & 3u)) & 3u;
-    file_size = 54u + (row_bytes + pad) * (unsigned int)height;
-    fputc('B', f); fputc('M', f); trace_write_u32(f, file_size); trace_write_u32(f, 0);
-    trace_write_u32(f, 54); trace_write_u32(f, 40);
-    trace_write_u32(f, (unsigned int)width); trace_write_u32(f, (unsigned int)height);
-    trace_write_u16(f, 1); trace_write_u16(f, 24);
-    trace_write_u32(f, 0); trace_write_u32(f, file_size - 54);
-    trace_write_u32(f, 2835); trace_write_u32(f, 2835);
-    trace_write_u32(f, 0); trace_write_u32(f, 0);
-    for (y = (unsigned int)height; y-- > 0;) {
-        unsigned char zero[3] = { 0, 0, 0 };
-        for (x = 0; x < (unsigned int)width; x++) {
-            unsigned int p = rgba[(size_t)y * (size_t)width + x];
-            unsigned char bgr[3];
-            bgr[0] = (unsigned char)(p >> 16);
-            bgr[1] = (unsigned char)(p >> 8);
-            bgr[2] = (unsigned char)p;
-            fwrite(bgr, 1, 3, f);
+
+    if (is_new) {
+        f = fopen(path, "wb");
+        if (f == NULL)
+            return;
+        row_bytes = (unsigned int)width * 3u;
+        pad = (4u - (row_bytes & 3u)) & 3u;
+        file_size = 54u + (row_bytes + pad) * (unsigned int)height;
+        fputc('B', f); fputc('M', f); trace_write_u32(f, file_size); trace_write_u32(f, 0);
+        trace_write_u32(f, 54); trace_write_u32(f, 40);
+        trace_write_u32(f, (unsigned int)width); trace_write_u32(f, (unsigned int)height);
+        trace_write_u16(f, 1); trace_write_u16(f, 24);
+        trace_write_u32(f, 0); trace_write_u32(f, file_size - 54);
+        trace_write_u32(f, 2835); trace_write_u32(f, 2835);
+        trace_write_u32(f, 0); trace_write_u32(f, 0);
+        for (y = (unsigned int)height; y-- > 0;) {
+            unsigned char zero[3] = { 0, 0, 0 };
+            for (x = 0; x < (unsigned int)width; x++) {
+                unsigned int p = rgba[(size_t)y * (size_t)width + x];
+                unsigned char bgr[3];
+                bgr[0] = (unsigned char)(p >> 16);
+                bgr[1] = (unsigned char)(p >> 8);
+                bgr[2] = (unsigned char)p;
+                fwrite(bgr, 1, 3, f);
+            }
+            if (pad) fwrite(zero, 1, pad, f);
         }
-        if (pad) fwrite(zero, 1, pad, f);
+        fclose(f);
     }
-    fclose(f);
+
+    /* A shared image may be referenced from several TBP addresses. Log each unique
+     * address alias once, all pointing at the same BMP. */
+    if (!trace_image_alias_seen(hash, tbp, psm, (unsigned int)width, (unsigned int)height))
+        return;
     trace_begin("gs_texture_dump");
-    fprintf(trace_file, ",\"TEX0\":\"%016llx\",\"TEXA\":\"%016llx\",\"TEXCLUT\":\"%016llx\",\"generation\":\"%016llx\",\"clut_hash\":\"%016llx\",\"width\":%d,\"height\":%d,\"rgba_hash\":\"%016llx\",\"dump\":",
+    fprintf(trace_file, ",\"TEX0\":\"%016llx\",\"TEXA\":\"%016llx\",\"TEXCLUT\":\"%016llx\","
+                        "\"generation\":\"%016llx\",\"clut_hash\":\"%016llx\","
+                        "\"tbp\":%u,\"psm\":%u,\"width\":%d,\"height\":%d,\"rgba_hash\":\"%016llx\",\"duplicate_content\":%s,\"dump\":",
             (unsigned long long)tex0, (unsigned long long)texa,
             (unsigned long long)texclut, (unsigned long long)generation,
-            (unsigned long long)clut_hash, width, height, (unsigned long long)hash);
+            (unsigned long long)clut_hash, tbp, psm, width, height,
+            (unsigned long long)hash, is_new ? "false" : "true");
     trace_json_string(path);
     trace_end();
+}
+
 }

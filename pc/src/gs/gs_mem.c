@@ -953,9 +953,11 @@ void gsMemReadImage(const GsRegs* r, unsigned char* out)
         }
     }
 #ifdef TARGET_PC
-    if ((bits == 32 || bits == 16 || bits == 8) && w != 0 && h != 0)
+    if ((bits == 32 || bits == 16 || bits == 8) && w != 0 && h != 0) {
         pcTexTraceGsTransferData("local_to_host", trace_out,
                                  (unsigned int)(((size_t)w * (size_t)h * (size_t)bits) / 8u),
                                  sbp, sbw, spsm, ssx, ssy, w, h);
+        pcTexTraceGsTransferDone(sbp, sbw, spsm, ssx, ssy, w, h, 0);
+    }
 #endif
 }
