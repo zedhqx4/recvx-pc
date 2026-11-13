@@ -4,6 +4,7 @@
 #include <string.h>
 #include <stdint.h>
 #include <stddef.h>
+#include <time.h>
 #ifdef _WIN32
 #include <direct.h>
 #else
@@ -182,6 +183,34 @@ static void trace_close(void)
     }
 }
 
+static int trace_archive_existing_log(void)
+{
+    FILE* old_file = fopen("texture_trace/events.jsonl", "rb");
+    time_t stamp;
+    unsigned int attempt;
+    char backup[192];
+
+    if (old_file == NULL)
+        return 1;
+    fclose(old_file);
+    stamp = time(NULL);
+    for (attempt = 0; attempt < 100; ++attempt) {
+        FILE* probe;
+        snprintf(backup, sizeof(backup),
+                 "texture_trace/events_previous_%lld_%u.jsonl",
+                 (long long)stamp, attempt);
+        probe = fopen(backup, "rb");
+        if (probe != NULL) {
+            fclose(probe);
+            continue;
+        }
+        if (rename("texture_trace/events.jsonl", backup) == 0)
+            return 1;
+    }
+    pcLog("texture trace: could not archive previous events.jsonl; preserving it and appending");
+    return 0;
+}
+
 static int trace_open(void)
 {
     if (trace_state != 1)
@@ -193,7 +222,12 @@ static int trace_open(void)
 #else
     mkdir("texture_trace", 0777);
 #endif
-    trace_file = fopen("texture_trace/events.jsonl", trace_sessions == 0 ? "wb" : "ab");
+    {
+        const char* mode = "ab";
+        if (trace_sessions == 0 && trace_archive_existing_log())
+            mode = "wb";
+        trace_file = fopen("texture_trace/events.jsonl", mode);
+    }
     if (trace_file == NULL) {
         trace_state = 0;
         pcLog("texture trace: cannot open texture_trace/events.jsonl");
@@ -665,6 +699,8 @@ void pcTexTraceGsTransferStart(uint64_t bitbltbuf, uint64_t trxpos,
         return;
     dir = (unsigned int)(trxdir & 3u);
     transfer_sequence++;
+    memset(transfer_phases, 0, sizeof(transfer_phases));
+    transfer_phase_count = 0;
     trace_begin("gs_transfer_start");
     fprintf(trace_file, ",\"transfer_id\":%llu,\"direction\":%u,\"BITBLTBUF\":\"%016llx\",\"TRXPOS\":\"%016llx\",\"TRXREG\":\"%016llx\",\"TRXDIR\":\"%016llx\"",
             (unsigned long long)transfer_sequence, dir,
