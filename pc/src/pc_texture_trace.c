@@ -40,6 +40,8 @@ typedef struct {
 
 typedef struct {
     uint64_t tex0;
+    uint64_t texa;
+    uint64_t texclut;
     uint64_t generation;
     uint64_t clut_hash;
     int width;
@@ -103,6 +105,15 @@ static void trace_json_string(const char* text)
     fputc('"', trace_file);
 }
 
+static void trace_close(void)
+{
+    if (trace_file != NULL) {
+        fflush(trace_file);
+        fclose(trace_file);
+        trace_file = NULL;
+    }
+}
+
 static int trace_open(void)
 {
     const char* enabled;
@@ -121,6 +132,7 @@ static int trace_open(void)
         return 0;
     }
     trace_state = 1;
+    atexit(trace_close);
     fprintf(trace_file, "{\"event\":\"trace_start\",\"version\":1,\"enabled_by\":\"RECVX_TEX_TRACE=1\"}\n");
     fflush(trace_file);
     pcLog("texture trace: enabled; JSONL and dumps are in texture_trace/");
@@ -185,18 +197,21 @@ static int trace_dump_seen(const char* role, uint64_t hash, unsigned int size,
     return 0;
 }
 
-static int trace_gs_seen(uint64_t tex0, uint64_t generation, uint64_t clut_hash, int width, int height)
+static int trace_gs_seen(uint64_t tex0, uint64_t texa, uint64_t texclut,
+                         uint64_t generation, uint64_t clut_hash, int width, int height)
 {
     unsigned int i;
     for (i = 0; i < gs_dump_count; i++) {
         TraceGsDump* d = &gs_dumps[i];
-        if (d->tex0 == tex0 && d->generation == generation && d->clut_hash == clut_hash &&
+        if (d->tex0 == tex0 && d->texa == texa && d->texclut == texclut &&
+            d->generation == generation && d->clut_hash == clut_hash &&
             d->width == width && d->height == height)
             return 1;
     }
     if (gs_dump_count < TRACE_GS_DUMPS) {
         TraceGsDump* d = &gs_dumps[gs_dump_count++];
-        d->tex0 = tex0; d->generation = generation; d->clut_hash = clut_hash;
+        d->tex0 = tex0; d->texa = texa; d->texclut = texclut;
+        d->generation = generation; d->clut_hash = clut_hash;
         d->width = width; d->height = height;
     }
     return 0;
@@ -448,13 +463,16 @@ void pcTexTraceGsTransferData(const void* data, unsigned int bytes,
     uint64_t hash = (data && bytes) ? trace_hash(data, bytes) : 0;
     char path[256];
     FILE* f;
+    uint64_t event_sequence;
     trace_begin("gs_transfer_data");
+    event_sequence = trace_sequence;
     fprintf(trace_file, ",\"transfer_id\":%llu,\"data\":\"%p\",\"bytes\":%u,\"data_hash\":\"%016llx\",\"bp\":%u,\"bw\":%u,\"psm\":%u,\"x\":%u,\"y\":%u,\"width\":%u,\"height\":%u",
             (unsigned long long)transfer_sequence, data, bytes, (unsigned long long)hash,
             bp, bw, psm, x, y, width, height);
     if (data != NULL && bytes != 0 && bytes <= TRACE_MAX_DUMP_BYTES) {
-        snprintf(path, sizeof(path), "texture_trace/transfer_%06llu_%016llx.bin",
-                 (unsigned long long)transfer_sequence, (unsigned long long)hash);
+        snprintf(path, sizeof(path), "texture_trace/transfer_%06llu_seq%010llu_%016llx.bin",
+                 (unsigned long long)transfer_sequence, (unsigned long long)event_sequence,
+                 (unsigned long long)hash);
         f = fopen(path, "wb");
         if (f != NULL) {
             fwrite(data, 1, bytes, f);
@@ -496,9 +514,17 @@ void pcTexTraceGsDraw(uint64_t tex0, uint64_t texa, uint64_t texclut,
 int pcTexTraceGsDumpNeeded(uint64_t tex0, uint64_t texa, uint64_t texclut,
                            uint64_t generation, uint64_t clut_hash, int width, int height)
 {
-    (void)texa;
-    (void)texclut;
-    return trace_open() && !trace_gs_seen(tex0, generation, clut_hash, width, height);
+    unsigned int i;
+    if (!trace_open())
+        return 0;
+    for (i = 0; i < gs_dump_count; i++) {
+        TraceGsDump* d = &gs_dumps[i];
+        if (d->tex0 == tex0 && d->texa == texa && d->texclut == texclut &&
+            d->generation == generation && d->clut_hash == clut_hash &&
+            d->width == width && d->height == height)
+            return 0;
+    }
+    return 1;
 }
 
 static void trace_write_u16(FILE* f, unsigned int value)
@@ -527,7 +553,7 @@ void pcTexTraceGsImage(uint64_t tex0, uint64_t texa, uint64_t texclut,
     if (!trace_open() || rgba == NULL || width <= 0 || height <= 0 ||
         width > 1024 || height > 1024)
         return;
-    if (trace_gs_seen(tex0, generation, clut_hash, width, height))
+    if (trace_gs_seen(tex0, texa, texclut, generation, clut_hash, width, height))
         return;
     hash = trace_hash(rgba, (size_t)width * (size_t)height * 4u);
     snprintf(path, sizeof(path), "texture_trace/gs_tbp%04x_psm%02x_%016llx.bmp",
