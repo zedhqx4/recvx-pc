@@ -1032,5 +1032,3 @@ void pcTexTraceGsImage(uint64_t tex0, uint64_t texa, uint64_t texclut,
     trace_json_string(path);
     trace_end();
 }
-
-}
