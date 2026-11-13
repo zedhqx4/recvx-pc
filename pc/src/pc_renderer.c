@@ -97,6 +97,8 @@ static GsBlend gs_blend2 = { GL_FUNC_ADD, GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, 
 static int scissor_enabled;
 static int scissor_rect[4];
 static unsigned long long frame_number;
+
+unsigned long long pcRendererFrameNumber(void) { return frame_number; }
 static void flush_pending_deletes(void);
 static unsigned stat_immediate, stat_queued, stat_vertices, stat_screen_space;
 static int debug_magenta = -1;
@@ -360,6 +362,7 @@ void pcRendererBeginFrame(void)
     glDepthFunc(GL_LEQUAL);
     glDepthMask(GL_TRUE);
     glDisable(GL_BLEND);
+    glDisable(GL_SCISSOR_TEST);   /* glClear respeta el scissor: un recorte de un draw anterior dejaria restos del frame previo */
     glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
     if (debug_magenta) glClearColor(1.0f, 0.0f, 1.0f, 1.0f); /* RECVX_CLEAR_DEBUG=1: magenta = blit works, nothing drawn */
     else glClearColor(clear_color[0], clear_color[1], clear_color[2], clear_color[3]);

@@ -83,6 +83,10 @@ int sceGsExecStoreImage(sceGsStoreImage* sp, u_long128* dstaddr)
 
     if (sp == NULL || dstaddr == NULL || sp->pc_w <= 0 || sp->pc_h <= 0) return 0;
     pcRendererFlushTransparent();   /* lo diferido (OT) debe estar ya en el framebuffer */
+    {
+        extern void pcTextureInvalidateSources(void);
+        pcTextureInvalidateSources();   /* la imagen de la textura de destino cambia */
+    }
     if (!pcRendererReadScreenRect(sp->pc_x, sp->pc_y, sp->pc_w, sp->pc_h, rgba)) return 0;
     n = sp->pc_w * sp->pc_h;
     for (i = 0; i < n; i++) {

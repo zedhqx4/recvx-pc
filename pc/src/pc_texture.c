@@ -118,9 +118,30 @@ static uint64_t hash_bytes(const unsigned char* p, size_t n)
 #define VRAM_CLUT_ENTRIES 1024u
 static unsigned char vram_clut[VRAM_CLUT_ENTRIES * 4u];
 
+static unsigned long long vram_clut_generation;
+
 void pcTextureUploadVramClut(const unsigned int* entries)
 {
-    if (entries) memcpy(vram_clut, entries, sizeof(vram_clut));
+    if (entries && memcmp(vram_clut, entries, sizeof(vram_clut)) != 0) {
+        memcpy(vram_clut, entries, sizeof(vram_clut));
+        vram_clut_generation++;
+    }
+}
+
+/* Enlace repetido de la misma textura dentro de un frame (el menu dibuja cientos de quads con una textura de 512x512): la GS no
+ * vuelve a leer nada, solo cambia TEX0; aqui se evita volver a hashear la imagen. Solo se salta la comprobacion si no hubo
+ * recargas de texturas (pcTextureInvalidateSources), subidas de CLUT ni cambio de frame entre medias. */
+static struct {
+    const void* surface;
+    unsigned int bank;
+    unsigned long long frame, clut_generation;
+    unsigned int texture;
+    int valid;
+} bind_memo;
+
+void pcTextureInvalidateSources(void)
+{
+    bind_memo.valid = 0;
 }
 
 static unsigned char clamp_byte(unsigned int x)
@@ -452,6 +473,11 @@ int pcNativeTextureLoad(NJS_TEXMEMLIST* addr)
         clut_size = (size_t)(ph->ImageType == TIM2_IDTEX4 ? 16u : 256u) * 4u;
         clut_in_vram = 1;
     }
+    if (bind_memo.valid && bind_memo.surface == (const void*)ext && bind_memo.bank == bank &&
+        bind_memo.frame == pcRendererFrameNumber() && bind_memo.clut_generation == vram_clut_generation) {
+        texture = bind_memo.texture;
+        goto bind;
+    }
     ih = hash_bytes(image, image_size);
     ch = hash_bytes(clut, clut_size);
 
@@ -505,6 +531,14 @@ int pcNativeTextureLoad(NJS_TEXMEMLIST* addr)
         entry->texture = texture;
     }
 
+    bind_memo.surface = ext;
+    bind_memo.bank = bank;
+    bind_memo.frame = pcRendererFrameNumber();
+    bind_memo.clut_generation = vram_clut_generation;
+    bind_memo.texture = texture;
+    bind_memo.valid = 1;
+
+bind:
     /* ClampFlag carries GS WMS/WMT in its low nibbles. */
     if (ext->ClampFlag != 0) {
         wrap_u = (int)(ext->ClampFlag & 3u);

@@ -212,6 +212,9 @@ Sint32	njLoadTexture(NJS_TEXLIST *texlist)
     unsigned int attr;
     NJS_TEXMEMLIST* addr; 
     
+#ifdef TARGET_PC
+    { extern void pcTextureInvalidateSources(void); pcTextureInvalidateSources(); }   /* memoria de texturas recargada/liberada */
+#endif
     no = Ps2_texcontinue_no;
     
     tex_num = texlist->nbTexture;
@@ -409,6 +412,9 @@ int njSetTextureNumSys(unsigned int n)
 // 100% matching!
 void	njReleaseTextureAll(void)
 {
+#ifdef TARGET_PC
+    { extern void pcTextureInvalidateSources(void); pcTextureInvalidateSources(); }   /* memoria de texturas recargada/liberada */
+#endif
     njInitTexture(Ps2_tex_info, Ps2_texmemlist_num);
 }
 
@@ -420,6 +426,9 @@ Sint32	njReleaseTexture(NJS_TEXLIST *texlist)
     NJS_TEXMEMLIST* p;
 
     Ps2_current_texbreak = 1;
+#ifdef TARGET_PC
+    { extern void pcTextureInvalidateSources(void); pcTextureInvalidateSources(); }   /* memoria de texturas recargada/liberada */
+#endif
     
     tex_num = texlist->nbTexture;
     
@@ -560,6 +569,9 @@ void 	njSetPaletteData(Sint32 offset,Sint32 count,void* data)
 // 100% matching!
 void	njGarbageTexture(NJS_TEXMEMLIST *addr,Uint32 n)
 {
+#ifdef TARGET_PC
+    { extern void pcTextureInvalidateSources(void); pcTextureInvalidateSources(); }   /* memoria de texturas recargada/liberada */
+#endif
     Ps2TextureGarbageCollectionAll();
 }
 
