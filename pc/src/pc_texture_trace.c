@@ -983,7 +983,7 @@ void pcTexTraceGsImage(uint64_t tex0, uint64_t texa, uint64_t texclut,
 
     /* A shared image may be referenced from several TBP addresses. Log each unique
      * address alias once, all pointing at the same BMP. */
-    if (!trace_image_alias_seen(hash, tbp, psm, (unsigned int)width, (unsigned int)height))
+    if (trace_image_alias_seen(hash, tbp, psm, (unsigned int)width, (unsigned int)height))
         return;
     trace_begin("gs_texture_dump");
     fprintf(trace_file, ",\"TEX0\":\"%016llx\",\"TEXA\":\"%016llx\",\"TEXCLUT\":\"%016llx\","
