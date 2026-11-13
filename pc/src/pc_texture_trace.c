@@ -4,12 +4,18 @@
 #include <string.h>
 #include <stdint.h>
 #include <stddef.h>
+#ifdef _WIN32
 #include <direct.h>
+#else
+#include <sys/stat.h>
+#include <sys/types.h>
+#endif
 
 #include "pc_texture_trace.h"
 #include "pc_platform.h"
 
 #define TRACE_MODEL_STACK 16
+#define TRACE_MODEL_STRIPS 16384
 #define TRACE_SOURCE_DUMPS 2048
 #define TRACE_GS_DUMPS 4096
 #define TRACE_MAX_DUMP_BYTES (64u * 1024u * 1024u)
@@ -25,8 +31,10 @@ typedef struct {
     unsigned int chunk_bits;
     unsigned int chunk_size;
     unsigned int strip_index;
-    unsigned int face_first;
-    unsigned int face_last;
+    uint64_t face_first;
+    uint64_t face_last;
+    uint64_t strip_face_first[TRACE_MODEL_STRIPS];
+    uint64_t strip_face_last[TRACE_MODEL_STRIPS];
     uint64_t material_event;
 } TraceModel;
 
@@ -124,7 +132,11 @@ static int trace_open(void)
         trace_state = -1;
         return 0;
     }
+#ifdef _WIN32
     _mkdir("texture_trace");
+#else
+    mkdir("texture_trace", 0777);
+#endif
     trace_file = fopen("texture_trace/events.jsonl", "wb");
     if (trace_file == NULL) {
         trace_state = -1;
@@ -217,6 +229,35 @@ static int trace_gs_seen(uint64_t tex0, uint64_t texa, uint64_t texclut,
     return 0;
 }
 
+int pcTexTraceEnabled(void)
+{
+    return trace_open();
+}
+
+void pcTexTraceSnapshotDrawContext(PcTexTraceDrawContext* out)
+{
+    TraceModel* m;
+    if (out == NULL)
+        return;
+    memset(out, 0, sizeof(*out));
+    if (!trace_open())
+        return;
+    m = trace_model();
+    if (m == NULL)
+        return;
+    out->model_id = m->id;
+    out->model = m->model;
+    out->chunk = m->chunk;
+    out->chunk_ordinal = m->chunk_ordinal;
+    out->chunk_type = m->chunk_type;
+    out->chunk_bits = m->chunk_bits;
+    out->chunk_size = m->chunk_size;
+    out->strip_index = m->strip_index;
+    out->face_first = m->face_first;
+    out->face_last = m->face_last;
+    out->material_event = m->material_event;
+}
+
 void pcTexTraceSetFrame(uint64_t frame)
 {
     if (trace_open())
@@ -242,7 +283,7 @@ void pcTexTraceSetResource(const char* kind, const char* name,
     trace_begin("resource_context");
     fprintf(trace_file, ",\"data_offset_from_base\":");
     if (base != NULL && data != NULL)
-        fprintf(trace_file, "%lld", (long long)((const char*)data - (const char*)base));
+        fprintf(trace_file, "%lld", (long long)((intptr_t)(uintptr_t)data - (intptr_t)(uintptr_t)base));
     else
         fputs("null", trace_file);
     trace_end();
@@ -261,6 +302,8 @@ void pcTexTraceClearResource(void)
 
 void pcTexTraceTextureBlock(const void* texlist, const void* data, unsigned int texture_offset)
 {
+    if (!trace_open())
+        return;
     trace_begin("texture_resource_block");
     fprintf(trace_file, ",\"texlist\":\"%p\",\"data\":\"%p\",\"texture_offset\":%u", texlist, data, texture_offset);
     if (resource_base != NULL && data != NULL)
@@ -278,12 +321,33 @@ void pcTexTraceDumpTim2(const char* role, const void* data, unsigned int size,
     FILE* f;
     if (!trace_open() || data == NULL || size < 128 || size > TRACE_MAX_DUMP_BYTES)
         return;
-    hash = trace_hash(data, size);
-    trace_begin("tim2_dump");
+    {
+        const unsigned char* bytes = (const unsigned char*)data;
+        uint32_t total_size, clut_size, image_size, header_size;
+        uint64_t image_hash = 0, clut_hash = 0;
+        size_t image_offset, clut_offset;
+        memcpy(&total_size, bytes + 128, sizeof(total_size));
+        memcpy(&clut_size, bytes + 132, sizeof(clut_size));
+        memcpy(&image_size, bytes + 136, sizeof(image_size));
+        memcpy(&header_size, bytes + 140, sizeof(header_size));
+        if (total_size > size - 128 || header_size < 0x50 ||
+            header_size > total_size || image_size > total_size - header_size ||
+            clut_size > total_size - header_size - image_size)
+            return;
+        image_offset = 128u + (size_t)header_size;
+        clut_offset = image_offset + (size_t)image_size;
+        if (image_size != 0)
+            image_hash = trace_hash(bytes + image_offset, image_size);
+        if (clut_size != 0)
+            clut_hash = trace_hash(bytes + clut_offset, clut_size);
+        hash = trace_hash(data, size);
+        trace_begin("tim2_dump");
     fprintf(trace_file, ",\"role\":");
     trace_json_string(role ? role : "unknown");
-    fprintf(trace_file, ",\"pointer\":\"%p\",\"bytes\":%u,\"hash\":\"%016llx\",\"gindex\":%u,\"bank\":%u,\"pict_format\":%u,\"image_type\":%u,\"clut_type\":%u,\"width\":%u,\"height\":%u",
-            data, size, (unsigned long long)hash, gindex, bank, pict_format, image_type, clut_type, width, height);
+    fprintf(trace_file, ",\"pointer\":\"%p\",\"bytes\":%u,\"hash\":\"%016llx\",\"image_hash\":\"%016llx\",\"clut_hash\":\"%016llx\",\"gindex\":%u,\"bank\":%u,\"pict_format\":%u,\"image_type\":%u,\"clut_type\":%u,\"width\":%u,\"height\":%u",
+            data, size, (unsigned long long)hash, (unsigned long long)image_hash,
+            (unsigned long long)clut_hash, gindex, bank, pict_format, image_type, clut_type, width, height);
+    }
     if (!trace_dump_seen(role, hash, size, gindex, bank)) {
         snprintf(path, sizeof(path), "texture_trace/%s_g%08x_b%02x_%016llx.bin",
                  (role && strcmp(role, "resident") == 0) ? "resident" : "source",
@@ -310,6 +374,8 @@ void pcTexTraceTextureRegistration(const char* operation, const void* texlist,
                                    unsigned int gindex, unsigned int bank,
                                    unsigned int count, unsigned int tp_flag)
 {
+    if (!trace_open())
+        return;
     trace_begin("texture_registration");
     fputs(",\"operation\":", trace_file); trace_json_string(operation);
     fprintf(trace_file, ",\"texlist\":\"%p\",\"list_index\":%u,\"texname\":\"%p\",\"source_info\":\"%p\",\"source_tim2\":\"%p\",\"entry\":\"%p\",\"resident_tim2\":\"%p\",\"gindex\":%u,\"bank\":%u,\"ref_count\":%u,\"tp_flag\":%u",
@@ -325,6 +391,8 @@ void pcTexTraceTextureUse(const char* operation, unsigned int requested_index,
                           unsigned int ref_count, unsigned int tp_flag)
 {
     TraceModel* m;
+    if (!trace_open())
+        return;
     trace_begin("texture_use");
     fputs(",\"operation\":", trace_file); trace_json_string(operation);
     fprintf(trace_file, ",\"requested_index\":%u,\"texlist\":\"%p\",\"list_count\":%u,\"entry\":\"%p\",\"resident_tim2\":\"%p\",\"gindex\":%u,\"bank\":%u,\"ref_count\":%u,\"tp_flag\":%u",
@@ -379,7 +447,10 @@ void pcTexTraceModelChunk(const char* phase, const void* chunk,
                           unsigned int ordinal, unsigned int type,
                           unsigned int head_bits, unsigned int size)
 {
-    TraceModel* m = trace_model();
+    TraceModel* m;
+    if (!trace_open())
+        return;
+    m = trace_model();
     if (m != NULL) {
         m->chunk = chunk;
         m->chunk_ordinal = ordinal;
@@ -388,6 +459,8 @@ void pcTexTraceModelChunk(const char* phase, const void* chunk,
         m->chunk_size = size;
         m->strip_index = 0;
         m->face_first = m->face_last = 0;
+        memset(m->strip_face_first, 0, sizeof(m->strip_face_first));
+        memset(m->strip_face_last, 0, sizeof(m->strip_face_last));
     }
     trace_begin("model_chunk");
     fputs(",\"phase\":", trace_file); trace_json_string(phase);
@@ -398,9 +471,20 @@ void pcTexTraceModelChunk(const char* phase, const void* chunk,
 
 void pcTexTraceStrip(unsigned int strip_index, unsigned int vertex_count)
 {
-    TraceModel* m = trace_model();
-    if (m != NULL)
+    TraceModel* m;
+    if (!trace_open())
+        return;
+    m = trace_model();
+    if (m != NULL) {
         m->strip_index = strip_index;
+        if (strip_index < TRACE_MODEL_STRIPS) {
+            m->face_first = m->strip_face_first[strip_index];
+            m->face_last = m->strip_face_last[strip_index];
+        } else {
+            m->face_first = 0;
+            m->face_last = 0;
+        }
+    }
     trace_begin("geometry_strip");
     fprintf(trace_file, ",\"strip_index\":%u,\"vertex_count\":%u", strip_index, vertex_count);
     trace_end();
@@ -410,13 +494,22 @@ void pcTexTraceFace(const char* kind, const void* chunk,
                     unsigned int strip_index, unsigned int face_index,
                     unsigned int vertex0, unsigned int vertex1, unsigned int vertex2)
 {
-    TraceModel* m = trace_model();
-    uint64_t id = ++face_sequence;
+    TraceModel* m;
+    uint64_t id;
+    if (!trace_open())
+        return;
+    m = trace_model();
+    id = ++face_sequence;
     if (m != NULL) {
         if (m->face_first == 0)
             m->face_first = id;
         m->face_last = id;
         m->strip_index = strip_index;
+        if (strip_index < TRACE_MODEL_STRIPS) {
+            if (m->strip_face_first[strip_index] == 0)
+                m->strip_face_first[strip_index] = id;
+            m->strip_face_last[strip_index] = id;
+        }
     }
     trace_begin("source_face");
     fputs(",\"kind\":", trace_file); trace_json_string(kind);
@@ -427,6 +520,8 @@ void pcTexTraceFace(const char* kind, const void* chunk,
 
 void pcTexTraceGsRegister(unsigned int reg, uint64_t old_value, uint64_t new_value)
 {
+    if (!trace_open())
+        return;
     switch (reg) {
     case 0x00: case 0x06: case 0x07: case 0x08: case 0x09:
     case 0x14: case 0x15: case 0x16: case 0x17: case 0x1c:
@@ -445,7 +540,10 @@ void pcTexTraceGsRegister(unsigned int reg, uint64_t old_value, uint64_t new_val
 void pcTexTraceGsTransferStart(uint64_t bitbltbuf, uint64_t trxpos,
                                uint64_t trxreg, uint64_t trxdir)
 {
-    unsigned int dir = (unsigned int)(trxdir & 3u);
+    unsigned int dir;
+    if (!trace_open())
+        return;
+    dir = (unsigned int)(trxdir & 3u);
     transfer_sequence++;
     trace_begin("gs_transfer_start");
     fprintf(trace_file, ",\"transfer_id\":%llu,\"direction\":%u,\"BITBLTBUF\":\"%016llx\",\"TRXPOS\":\"%016llx\",\"TRXREG\":\"%016llx\",\"TRXDIR\":\"%016llx\"",
@@ -455,20 +553,25 @@ void pcTexTraceGsTransferStart(uint64_t bitbltbuf, uint64_t trxpos,
     trace_end();
 }
 
-void pcTexTraceGsTransferData(const void* data, unsigned int bytes,
+void pcTexTraceGsTransferData(const char* phase, const void* data, unsigned int bytes,
                               unsigned int bp, unsigned int bw, unsigned int psm,
                               unsigned int x, unsigned int y,
                               unsigned int width, unsigned int height)
 {
-    uint64_t hash = (data && bytes) ? trace_hash(data, bytes) : 0;
+    uint64_t hash;
+    if (!trace_open())
+        return;
+    hash = (data && bytes) ? trace_hash(data, bytes) : 0;
     char path[256];
     FILE* f;
     uint64_t event_sequence;
     trace_begin("gs_transfer_data");
     event_sequence = trace_sequence;
-    fprintf(trace_file, ",\"transfer_id\":%llu,\"data\":\"%p\",\"bytes\":%u,\"data_hash\":\"%016llx\",\"bp\":%u,\"bw\":%u,\"psm\":%u,\"x\":%u,\"y\":%u,\"width\":%u,\"height\":%u",
-            (unsigned long long)transfer_sequence, data, bytes, (unsigned long long)hash,
-            bp, bw, psm, x, y, width, height);
+    fprintf(trace_file, ",\"transfer_id\":%llu,\"phase\":",
+            (unsigned long long)transfer_sequence);
+    trace_json_string(phase ? phase : "unspecified");
+    fprintf(trace_file, ",\"data\":\"%p\",\"bytes\":%u,\"data_hash\":\"%016llx\",\"bp\":%u,\"bw\":%u,\"psm\":%u,\"x\":%u,\"y\":%u,\"width\":%u,\"height\":%u",
+            data, bytes, (unsigned long long)hash, bp, bw, psm, x, y, width, height);
     if (data != NULL && bytes != 0 && bytes <= TRACE_MAX_DUMP_BYTES) {
         snprintf(path, sizeof(path), "texture_trace/transfer_%06llu_seq%010llu_%016llx.bin",
                  (unsigned long long)transfer_sequence, (unsigned long long)event_sequence,
@@ -488,6 +591,8 @@ void pcTexTraceGsTransferDone(unsigned int bp, unsigned int bw, unsigned int psm
                               unsigned int x, unsigned int y,
                               unsigned int width, unsigned int height, int changed)
 {
+    if (!trace_open())
+        return;
     trace_begin("gs_transfer_done");
     fprintf(trace_file, ",\"transfer_id\":%llu,\"bp\":%u,\"bw\":%u,\"psm\":%u,\"x\":%u,\"y\":%u,\"width\":%u,\"height\":%u,\"changed\":%s",
             (unsigned long long)transfer_sequence, bp, bw, psm, x, y, width, height,
@@ -498,8 +603,11 @@ void pcTexTraceGsTransferDone(unsigned int bp, unsigned int bw, unsigned int psm
 void pcTexTraceGsDraw(uint64_t tex0, uint64_t texa, uint64_t texclut,
                       unsigned int asset_id, uint64_t asset_hash, int asset_valid,
                       unsigned int prim_type, int textured, int vertex_count,
-                      unsigned int fbp, unsigned int fbw, unsigned int fpsm)
+                      unsigned int fbp, unsigned int fbw, unsigned int fpsm,
+                      const PcTexTraceDrawContext* context)
 {
+    if (!trace_open())
+        return;
     trace_begin("gs_draw");
     fprintf(trace_file, ",\"primitive_type\":%u,\"textured\":%s,\"vertices\":%d,\"TEX0\":\"%016llx\",\"TEXA\":\"%016llx\",\"TEXCLUT\":\"%016llx\",\"TBP0\":%u,\"PSM\":%u,\"CLUT_base\":%u,\"Gindex_hint\":%u,\"asset_hash\":\"%016llx\",\"asset_valid\":%s,\"FBP\":%u,\"FBW\":%u,\"FPSM\":%u",
             prim_type, textured ? "true" : "false", vertex_count,
@@ -508,6 +616,44 @@ void pcTexTraceGsDraw(uint64_t tex0, uint64_t texa, uint64_t texclut,
             (unsigned int)((tex0 >> 37) & 0x3FFFu), asset_id,
             (unsigned long long)asset_hash, asset_valid ? "true" : "false",
             fbp, fbw, fpsm);
+    if (context != NULL) {
+        fprintf(trace_file, ",\"source_model_id\":%llu,\"source_model\":\"%p\",\"source_chunk\":\"%p\",\"source_chunk_ordinal\":%u,\"source_chunk_type\":%u,\"source_chunk_bits\":%u,\"source_chunk_size\":%u,\"source_strip\":%u,\"source_face_first\":%llu,\"source_face_last\":%llu,\"source_material_seq\":%llu",
+                (unsigned long long)context->model_id, context->model, context->chunk,
+                context->chunk_ordinal, context->chunk_type, context->chunk_bits,
+                context->chunk_size, context->strip_index,
+                (unsigned long long)context->face_first,
+                (unsigned long long)context->face_last,
+                (unsigned long long)context->material_event);
+    }
+    trace_end();
+}
+
+void pcTexTraceGsTextureResolution(const char* resolution,
+                                   unsigned int cache_slot, unsigned int gl_texture,
+                                   unsigned int index_slot, unsigned int palette_texture,
+                                   int hd, int indexed, uint64_t key0, uint64_t key1,
+                                   uint64_t key2, uint64_t generation,
+                                   unsigned int asset_id, uint64_t asset_hash,
+                                   int width, int height,
+                                   const PcTexTraceDrawContext* context)
+{
+    if (!trace_open())
+        return;
+    trace_begin("gs_texture_resolution");
+    fputs(",\"resolution\":", trace_file); trace_json_string(resolution);
+    fprintf(trace_file, ",\"cache_slot\":%u,\"gl_texture\":%u,\"index_slot\":%u,\"palette_texture\":%u,\"hd\":%s,\"indexed\":%s,\"key0\":\"%016llx\",\"key1\":\"%016llx\",\"key2\":\"%016llx\",\"generation\":\"%016llx\",\"asset_id\":%u,\"asset_hash\":\"%016llx\",\"width\":%d,\"height\":%d",
+            cache_slot, gl_texture, index_slot, palette_texture, hd ? "true" : "false",
+            indexed ? "true" : "false", (unsigned long long)key0,
+            (unsigned long long)key1, (unsigned long long)key2,
+            (unsigned long long)generation, asset_id, (unsigned long long)asset_hash,
+            width, height);
+    if (context != NULL)
+        fprintf(trace_file, ",\"source_model_id\":%llu,\"source_chunk\":\"%p\",\"source_chunk_ordinal\":%u,\"source_strip\":%u,\"source_face_first\":%llu,\"source_face_last\":%llu,\"source_material_seq\":%llu",
+                (unsigned long long)context->model_id, context->chunk,
+                context->chunk_ordinal, context->strip_index,
+                (unsigned long long)context->face_first,
+                (unsigned long long)context->face_last,
+                (unsigned long long)context->material_event);
     trace_end();
 }
 
@@ -517,14 +663,7 @@ int pcTexTraceGsDumpNeeded(uint64_t tex0, uint64_t texa, uint64_t texclut,
     unsigned int i;
     if (!trace_open())
         return 0;
-    for (i = 0; i < gs_dump_count; i++) {
-        TraceGsDump* d = &gs_dumps[i];
-        if (d->tex0 == tex0 && d->texa == texa && d->texclut == texclut &&
-            d->generation == generation && d->clut_hash == clut_hash &&
-            d->width == width && d->height == height)
-            return 0;
-    }
-    return 1;
+    return trace_gs_seen(tex0, texa, texclut, generation, clut_hash, width, height) ? 0 : 1;
 }
 
 static void trace_write_u16(FILE* f, unsigned int value)
@@ -552,8 +691,6 @@ void pcTexTraceGsImage(uint64_t tex0, uint64_t texa, uint64_t texclut,
     uint64_t hash;
     if (!trace_open() || rgba == NULL || width <= 0 || height <= 0 ||
         width > 1024 || height > 1024)
-        return;
-    if (trace_gs_seen(tex0, texa, texclut, generation, clut_hash, width, height))
         return;
     hash = trace_hash(rgba, (size_t)width * (size_t)height * 4u);
     snprintf(path, sizeof(path), "texture_trace/gs_tbp%04x_psm%02x_%016llx.bmp",

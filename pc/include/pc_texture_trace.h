@@ -3,6 +3,22 @@
 #ifdef TARGET_PC
 #include <stdint.h>
 
+typedef struct PcTexTraceDrawContext {
+    uint64_t model_id;
+    const void* model;
+    const void* chunk;
+    unsigned int chunk_ordinal;
+    unsigned int chunk_type;
+    unsigned int chunk_bits;
+    unsigned int chunk_size;
+    unsigned int strip_index;
+    uint64_t face_first;
+    uint64_t face_last;
+    uint64_t material_event;
+} PcTexTraceDrawContext;
+
+int pcTexTraceEnabled(void);
+void pcTexTraceSnapshotDrawContext(PcTexTraceDrawContext* out);
 void pcTexTraceSetFrame(uint64_t frame);
 void pcTexTraceSetResource(const char* kind, const char* name,
                            int stage, int room, int room_case,
@@ -40,7 +56,7 @@ void pcTexTraceFace(const char* kind, const void* chunk,
 void pcTexTraceGsRegister(unsigned int reg, uint64_t old_value, uint64_t new_value);
 void pcTexTraceGsTransferStart(uint64_t bitbltbuf, uint64_t trxpos,
                                uint64_t trxreg, uint64_t trxdir);
-void pcTexTraceGsTransferData(const void* data, unsigned int bytes,
+void pcTexTraceGsTransferData(const char* phase, const void* data, unsigned int bytes,
                               unsigned int bp, unsigned int bw, unsigned int psm,
                               unsigned int x, unsigned int y,
                               unsigned int width, unsigned int height);
@@ -50,7 +66,16 @@ void pcTexTraceGsTransferDone(unsigned int bp, unsigned int bw, unsigned int psm
 void pcTexTraceGsDraw(uint64_t tex0, uint64_t texa, uint64_t texclut,
                       unsigned int asset_id, uint64_t asset_hash, int asset_valid,
                       unsigned int prim_type, int textured, int vertex_count,
-                      unsigned int fbp, unsigned int fbw, unsigned int fpsm);
+                      unsigned int fbp, unsigned int fbw, unsigned int fpsm,
+                      const PcTexTraceDrawContext* context);
+void pcTexTraceGsTextureResolution(const char* resolution,
+                                   unsigned int cache_slot, unsigned int gl_texture,
+                                   unsigned int index_slot, unsigned int palette_texture,
+                                   int hd, int indexed, uint64_t key0, uint64_t key1,
+                                   uint64_t key2, uint64_t generation,
+                                   unsigned int asset_id, uint64_t asset_hash,
+                                   int width, int height,
+                                   const PcTexTraceDrawContext* context);
 
 int pcTexTraceGsDumpNeeded(uint64_t tex0, uint64_t texa, uint64_t texclut,
                            uint64_t generation, uint64_t clut_hash, int width, int height);
