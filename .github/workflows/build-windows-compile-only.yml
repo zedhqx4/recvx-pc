@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - OpenGl-3.3
+      - diagnostic/texture-origin-trace
     paths:
       - 'pc/src/**'
       - 'pc/include/**'

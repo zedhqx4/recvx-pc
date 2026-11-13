@@ -11,6 +11,7 @@
 
 #include "gs_internal.h"
 #include "../../include/pc_game_profile.h"
+#include "../../include/pc_texture_trace.h"
 
 /* Set to 0 in the host equivalence test to retain the per-pixel reference path. */
 #ifndef GS_BLOCK_FASTPATH
@@ -512,6 +513,7 @@ void gsMemStartTransfer(const GsRegs* r)
     unsigned int dir = r->trxdir & 3;
 
     xfer.dir = dir;
+    pcTexTraceGsTransferStart(r->bitbltbuf, r->trxpos, r->trxreg, r->trxdir);
 
     if (dir == 0)          /* host -> local */
     {
@@ -803,6 +805,11 @@ void gsMemTransferData(const unsigned char* data, int qwc)
         return;
     }
 
+    if ((xfer.dir == 0) && (bytes > 0))
+        pcTexTraceGsTransferData("host_to_local", data, (unsigned int)bytes,
+                                 xfer.bp, xfer.bw, xfer.psm,
+                                 xfer.x, xfer.y, xfer.w, xfer.h);
+
     /* gsPageGen is a cache invalidation token, not a write count. During one IMAGE
      * packet, bump each affected 8 KB page only once even if thousands of pixels change. */
     currentPageTouchEpoch++;
@@ -884,6 +891,7 @@ void gsMemReadImage(const GsRegs* r, unsigned char* out)
     unsigned int h = (unsigned int)(r->trxreg >> 32) & 0xFFF;
     unsigned int x, y;
     int bits = gsPsmBits(spsm);
+    unsigned char* trace_out = out;
 
     gsFlushLocalToLocal(sbp, sbw, spsm, ssx, ssy, w, h);
 
@@ -909,4 +917,10 @@ void gsMemReadImage(const GsRegs* r, unsigned char* out)
             }
         }
     }
+#ifdef TARGET_PC
+    if ((bits == 32 || bits == 16 || bits == 8) && w != 0 && h != 0)
+        pcTexTraceGsTransferData("local_to_host", trace_out,
+                                 (unsigned int)(((size_t)w * (size_t)h * (size_t)bits) / 8u),
+                                 sbp, sbw, spsm, ssx, ssy, w, h);
+#endif
 }

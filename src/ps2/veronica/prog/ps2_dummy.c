@@ -3,6 +3,7 @@
 #include <string.h>
 #include "../../../../pc/include/pc_game_profile.h"
 #include "../../../../pc/include/pc_texture_cache.h"
+#include "../../../../pc/include/pc_texture_trace.h"
 extern int Send_Tim2_dataExClutOnly(void* tim2_top_adr, unsigned long send_image_adr, unsigned long send_clut_adr);
 #endif
 #include "../../../ps2/veronica/prog/ps2_dummy.h"
@@ -2793,6 +2794,16 @@ int Ps2TexLoad(NJS_TEXMEMLIST* addr)
 
     timp = (TIM2_PICTUREHEADER_EX*)addr->texinfo.texsurface.pSurface;
 
+#ifdef TARGET_PC
+    pcTexTraceTextureUse("Ps2TexLoad_request", Ps2_current_texno,
+                         Ps2_current_texlist,
+                         Ps2_current_texlist ? Ps2_current_texlist->nbTexture : 0,
+                         addr, timp, timp->Gindex, addr->bank, addr->count, timp->TpFlag);
+    pcTexTraceDumpTim2("resident", timp, 128u + timp->TotalSize, timp->Gindex,
+                       addr->bank, timp->PictFormat, timp->ImageType,
+                       timp->ClutType, timp->ImageWidth, timp->ImageHeight);
+#endif
+
     /* Resolve texture layout before deciding whether image data can be reused. */
     tbw = timp->GsTex0.TBW;
     tw = Ps2BitCount(timp->ImageWidth);
@@ -2860,6 +2871,10 @@ int Ps2TexLoad(NJS_TEXMEMLIST* addr)
              */
             Ps2BindTextureState(addr, timp, psm, tbw, tw, th);
             pcGsSetTextureAssetIdentity(timp->Gindex, asset_cache_eligible, image_content_hash);
+            pcTexTraceTextureUse("Ps2TexLoad_bound_cache_hit", Ps2_current_texno,
+                                 Ps2_current_texlist,
+                                 Ps2_current_texlist ? Ps2_current_texlist->nbTexture : 0,
+                                 addr, timp, timp->Gindex, addr->bank, addr->count, timp->TpFlag);
             pc_ps2_texture_bind_cache.state_generation = pcGsGetTextureBindingGeneration();
 
             if (profile_texture)
@@ -2890,6 +2905,10 @@ int Ps2TexLoad(NJS_TEXMEMLIST* addr)
 
 #ifdef TARGET_PC
     pcGsSetTextureAssetIdentity(timp->Gindex, asset_cache_eligible, image_content_hash);
+    pcTexTraceTextureUse("Ps2TexLoad_bound", Ps2_current_texno,
+                         Ps2_current_texlist,
+                         Ps2_current_texlist ? Ps2_current_texlist->nbTexture : 0,
+                         addr, timp, timp->Gindex, addr->bank, addr->count, timp->TpFlag);
     if (asset_cache_eligible)
     {
         pc_ps2_texture_bind_cache.valid = 1;

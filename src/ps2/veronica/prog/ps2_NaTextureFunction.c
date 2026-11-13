@@ -3,6 +3,9 @@
 #include "../../../ps2/veronica/prog/ps2_loadtim2.h"
 #include "../../../ps2/veronica/prog/ps2_texture.h"
 #include "../../../ps2/veronica/prog/main.h"
+#ifdef TARGET_PC
+#include "../../../../pc/include/pc_texture_trace.h"
+#endif
 
 NJS_TEXMEMLIST* Ps2_tex_info __attribute__((aligned(64)));
 unsigned int Ps2_texmemlist_num;
@@ -335,6 +338,43 @@ Sint32	njLoadTexture(NJS_TEXLIST *texlist)
     
     ring_check();
     
+#ifdef TARGET_PC
+    for (j = 0; j < (int)tex_num; j++) {
+        NJS_TEXMEMLIST* trace_entry = (NJS_TEXMEMLIST*)texlist->textures[j].texaddr;
+        unsigned int trace_attr = texlist->textures[j].attr;
+        int trace_has_source_info = ((trace_attr & 0x1000000u) != 0) &&
+                                    ((trace_attr & 0x10000u) == 0) &&
+                                    ((trace_attr & 0x800000u) == 0);
+        NJS_TEXINFO* trace_source_info = trace_has_source_info ?
+            (NJS_TEXINFO*)texlist->textures[j].filename : NULL;
+        TIM2_PICTUREHEADER_EX* trace_source = trace_source_info ?
+            (TIM2_PICTUREHEADER_EX*)trace_source_info->texaddr : NULL;
+        TIM2_PICTUREHEADER_EX* trace_resident = trace_entry ? (TIM2_PICTUREHEADER_EX*)trace_entry->texinfo.texsurface.pSurface : NULL;
+        if (trace_entry != NULL) {
+            pcTexTraceTextureRegistration("njLoadTexture_resolved", texlist, (unsigned int)j,
+                                           &texlist->textures[j], trace_source_info, trace_source,
+                                           trace_entry, trace_resident,
+                                           trace_entry->globalIndex, trace_entry->bank,
+                                           trace_entry->count, trace_resident ? trace_resident->TpFlag : 0);
+            if (trace_source != NULL && trace_source->FileId[0] == 'T' &&
+                trace_source->FileId[1] == 'I' && trace_source->FileId[2] == 'M' &&
+                trace_source->FileId[3] == '2') {
+                unsigned int trace_size = 128u + trace_source->TotalSize;
+                pcTexTraceDumpTim2("source", trace_source, trace_size, trace_entry->globalIndex,
+                                   trace_entry->bank, trace_source->PictFormat, trace_source->ImageType,
+                                   trace_source->ClutType, trace_source->ImageWidth, trace_source->ImageHeight);
+            }
+            if (trace_resident != NULL && trace_resident->FileId[0] == 'T' &&
+                trace_resident->FileId[1] == 'I' && trace_resident->FileId[2] == 'M' &&
+                trace_resident->FileId[3] == '2') {
+                unsigned int trace_size = 128u + trace_resident->TotalSize;
+                pcTexTraceDumpTim2("resident", trace_resident, trace_size, trace_entry->globalIndex,
+                                   trace_entry->bank, trace_resident->PictFormat, trace_resident->ImageType,
+                                   trace_resident->ClutType, trace_resident->ImageWidth, trace_resident->ImageHeight);
+            }
+        }
+    }
+#endif
     return 1;
 }
 
@@ -346,6 +386,10 @@ Sint32	njSetTexture(NJS_TEXLIST *texlist)
         Ps2_current_texlist = texlist;
         
         Ps2_current_texno = 0;
+#ifdef TARGET_PC
+        pcTexTraceTextureUse("njSetTexture_list", 0, texlist, texlist->nbTexture,
+                             NULL, NULL, 0, 0, 0, 0);
+#endif
     }
 #ifdef TARGET_PC /* the PS2 build returned whatever was left in the return register */
     return 0;
@@ -367,6 +411,14 @@ Sint32	njSetTextureNum(Uint32 n)
     Ps2_current_gindex = ((TIM2_PICTUREHEADER_EX*)(Ps2_current_texmemlist->texinfo.texsurface.pSurface))->Gindex; 
     
     Ps2TexLoad(Ps2_current_texmemlist);
+#ifdef TARGET_PC
+    {
+        TIM2_PICTUREHEADER_EX* trace_timp = (TIM2_PICTUREHEADER_EX*)Ps2_current_texmemlist->texinfo.texsurface.pSurface;
+        pcTexTraceTextureUse("njSetTextureNum", n, Ps2_current_texlist, Ps2_current_texlist->nbTexture,
+                             Ps2_current_texmemlist, trace_timp, trace_timp->Gindex,
+                             Ps2_current_texmemlist->bank, Ps2_current_texmemlist->count, trace_timp->TpFlag);
+    }
+#endif
 #ifdef TARGET_PC /* the PS2 build returned whatever was left in the return register */
     return 0;
 #endif
@@ -385,6 +437,14 @@ Sint32	njSetTextureNumG(Uint32 globalIndex)
         Ps2_current_texmemlist = &Ps2_tex_info[no];
         
         Ps2TexLoad(Ps2_current_texmemlist);
+#ifdef TARGET_PC
+        {
+            TIM2_PICTUREHEADER_EX* trace_timp = (TIM2_PICTUREHEADER_EX*)Ps2_current_texmemlist->texinfo.texsurface.pSurface;
+            pcTexTraceTextureUse("njSetTextureNumG", globalIndex, NULL, 0,
+                                 Ps2_current_texmemlist, trace_timp, trace_timp->Gindex,
+                                 Ps2_current_texmemlist->bank, Ps2_current_texmemlist->count, trace_timp->TpFlag);
+        }
+#endif
     }
     else 
     {
@@ -400,7 +460,16 @@ Sint32	njSetTextureNumG(Uint32 globalIndex)
 // 100% matching!
 int njSetTextureNumSys(unsigned int n)
 {
-    Ps2TexLoad((NJS_TEXMEMLIST*)Ps2_current_texlist->textures[n].texaddr);
+    NJS_TEXMEMLIST* selected = (NJS_TEXMEMLIST*)Ps2_current_texlist->textures[n].texaddr;
+    Ps2TexLoad(selected);
+#ifdef TARGET_PC
+    {
+        TIM2_PICTUREHEADER_EX* trace_timp = (TIM2_PICTUREHEADER_EX*)selected->texinfo.texsurface.pSurface;
+        pcTexTraceTextureUse("njSetTextureNumSys", n, Ps2_current_texlist,
+                             Ps2_current_texlist->nbTexture, selected, trace_timp,
+                             trace_timp->Gindex, selected->bank, selected->count, trace_timp->TpFlag);
+    }
+#endif
 #ifdef TARGET_PC /* the PS2 build returned whatever was left in the return register */
     return 0;
 #endif
@@ -429,6 +498,15 @@ Sint32	njReleaseTexture(NJS_TEXLIST *texlist)
         
         if (p->globalIndex != -1)
         {
+#ifdef TARGET_PC
+            {
+                TIM2_PICTUREHEADER_EX* trace_timp = (TIM2_PICTUREHEADER_EX*)p->texinfo.texsurface.pSurface;
+                pcTexTraceTextureRegistration("njReleaseTexture", texlist, (unsigned int)i,
+                                               &texlist->textures[i], NULL, NULL, p,
+                                               trace_timp, p->globalIndex, p->bank, p->count,
+                                               trace_timp ? trace_timp->TpFlag : 0);
+            }
+#endif
             p->count--;
             
             ((TIM2_PICTUREHEADER_EX*)p->texinfo.texsurface.pSurface)->admin.count--;

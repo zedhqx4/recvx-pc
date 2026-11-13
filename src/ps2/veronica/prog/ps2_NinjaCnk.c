@@ -11,6 +11,7 @@
 #include "../../../ps2/veronica/prog/ps2_Vu1Strip.h"
 #ifdef TARGET_PC
 #include "../../../../pc/include/pc_game_profile.h"
+#include "../../../../pc/include/pc_texture_trace.h"
 #include <emmintrin.h>
 #include <stdlib.h>
 void pcVu0CalcPointN(const float* in, void* out, int n);
@@ -32,6 +33,88 @@ unsigned int ulNaCnkFlagModelClip;
 unsigned int ulNaCnkFlagConstAttr;
 unsigned int ulNaCnkFlagConstMaterial;
 int lCnkModClipFace;
+
+#ifdef TARGET_PC
+/* CNK source topology is recorded before clipping/triangulation. The renderer later
+ * selects the range belonging to the active source strip for each GS draw. */
+static void pcTraceCnkPolyFaces(CHUNK_HEAD* chunk)
+{
+    const unsigned short* p;
+    unsigned int words, strip, face;
+    unsigned short header, next, polygons;
+
+    if (!pcTexTraceEnabled() || chunk == NULL || chunk->usSize < 1)
+        return;
+    p = (const unsigned short*)&chunk[1];
+    words = chunk->usSize;
+    header = *p++;
+    words--;
+    next = (header >> 14) & 3;
+    polygons = header & 0x3FFF;
+    for (strip = 0; strip < polygons && words >= (unsigned int)(3 + next); strip++) {
+        unsigned int v0, v1, v2;
+        v0 = *p++; v1 = *p++; v2 = *p++;
+        words -= 3;
+        if (next > words)
+            break;
+        p += next;
+        words -= next;
+        pcTexTraceFace("CoP3", chunk, strip, strip, v0, v1, v2);
+    }
+}
+
+static void pcTraceCnkStripFaces(CHUNK_HEAD* chunk, const char* kind,
+                                 unsigned int record_words, int indexed_next)
+{
+    const unsigned short* p;
+    unsigned int words, strip;
+    unsigned short header, next, strips;
+
+    if (!pcTexTraceEnabled() || chunk == NULL || chunk->usSize < 1 || record_words == 0)
+        return;
+    p = (const unsigned short*)&chunk[1];
+    words = chunk->usSize;
+    header = *p++;
+    words--;
+    next = indexed_next ? ((header >> 14) & 3) : 0;
+    strips = header & 0x3FFF;
+
+    for (strip = 0; strip < strips && words > 0; strip++) {
+        unsigned short raw_count = *p++;
+        unsigned int count = (raw_count & 0x8000) ?
+                             (unsigned short)(~raw_count + 1) : raw_count;
+        unsigned int vertex, previous0 = 0, previous1 = 0;
+
+        words--;
+        if (count > words / record_words)
+            break;
+
+        for (vertex = 0; vertex < count; vertex++) {
+            unsigned int index;
+            if (words < record_words)
+                return;
+            index = p[0];
+            p += record_words;
+            words -= record_words;
+
+            if (vertex >= 2)
+                pcTexTraceFace(kind, chunk, strip, vertex - 2,
+                               previous0, previous1, index);
+            previous0 = previous1;
+            previous1 = index;
+
+            /* CS stores usNext auxiliary words after each vertex from vertex 2 onward. */
+            if (indexed_next && vertex >= 2) {
+                if (next > words)
+                    return;
+                p += next;
+                words -= next;
+            }
+        }
+    }
+}
+#endif
+
 CHUNK_HEAD* (*pCnkFuncTbl[76])(CHUNK_HEAD*) = 
 {
 	njCnkCn,
@@ -689,6 +772,8 @@ int njCnkDrawModelLocal(NJS_CNK_MODEL* pModel)
     unsigned int modelclipflag; 
     float temp, temp2; // not from the debugging symbols
 #ifdef TARGET_PC
+    uint64_t trace_model_id = 0;
+    unsigned int trace_chunk_ordinal = 0;
     int profile_scope = pcGameProfileScope;
     double profile_vlist_ms = 0.0;
     double profile_plist_ms = 0.0;
@@ -768,6 +853,9 @@ int njCnkDrawModelLocal(NJS_CNK_MODEL* pModel)
         }
     }
     
+#ifdef TARGET_PC
+    trace_model_id = pcTexTraceModelBegin(pModel, pModel->vlist, pModel->plist);
+#endif
     njPushMatrixEx();
     
     pCnk = (CHUNK_HEAD*)pModel->vlist;
@@ -785,6 +873,10 @@ int njCnkDrawModelLocal(NJS_CNK_MODEL* pModel)
         {
             modelclipflag = 1;
         }
+#ifdef TARGET_PC
+        pcTexTraceModelChunk("vlist", pCnk, trace_chunk_ordinal++,
+                             pCnk->ucType, pCnk->ucHeadBits, pCnk->usSize);
+#endif
         
         pCnkFuncTbl[pCnk->ucType](pCnk);
 #ifdef TARGET_PC
@@ -803,6 +895,7 @@ int njCnkDrawModelLocal(NJS_CNK_MODEL* pModel)
 #ifdef TARGET_PC
         if (profile_cnk)
             pcGameProfileRecordCnk(profile_scope, profile_vlist_ms, 0.0, 1, 0);
+        pcTexTraceModelEnd(trace_model_id);
 #endif
         return 1;  
     } 
@@ -823,6 +916,8 @@ int njCnkDrawModelLocal(NJS_CNK_MODEL* pModel)
         while (pCnk->ucType != 0xFF) 
         {
 #ifdef TARGET_PC
+            pcTexTraceModelChunk("plist", pCnk, trace_chunk_ordinal++,
+                                 pCnk->ucType, pCnk->ucHeadBits, pCnk->usSize);
             if (profile_cnk)
             {
                 profile_plist_type = pCnk->ucType;
@@ -850,12 +945,19 @@ int njCnkDrawModelLocal(NJS_CNK_MODEL* pModel)
                                1, profile_plist_chunks);
     }
 #endif
+#ifdef TARGET_PC
+    pcTexTraceModelEnd(trace_model_id);
+#endif
     return 1;
 }
 
 // 99.41% matching
 int njCnkDrawModelLocalMod(NJS_CNK_MODEL* pModel)
 {
+#ifdef TARGET_PC
+    uint64_t trace_model_id = 0;
+    unsigned int trace_chunk_ordinal = 0;
+#endif
     NJS_POINT3 Center;      
     float fRW, fRH;              
     float fSX, fSY;              
@@ -933,12 +1035,19 @@ int njCnkDrawModelLocalMod(NJS_CNK_MODEL* pModel)
         }
     }
     
+#ifdef TARGET_PC
+    trace_model_id = pcTexTraceModelBegin(pModel, pModel->vlist, pModel->plist);
+#endif
     njPushMatrixEx();
     
     pCnk = (CHUNK_HEAD*)pModel->vlist;
     
     if (pModel->vlist != NULL)
     {
+#ifdef TARGET_PC
+        pcTexTraceModelChunk("vlist_mod", (CHUNK_HEAD*)pModel->vlist,
+                             trace_chunk_ordinal++, pCnk->ucType, pCnk->ucHeadBits, pCnk->usSize);
+#endif
         njCnkCvVMod((CHUNK_HEAD*)pModel->vlist);
     }
 
@@ -946,9 +1055,17 @@ int njCnkDrawModelLocalMod(NJS_CNK_MODEL* pModel)
     
     if (pModel->plist != NULL) 
     {
+#ifdef TARGET_PC
+        pCnk = (CHUNK_HEAD*)pModel->plist;
+        pcTexTraceModelChunk("plist_mod", pCnk, trace_chunk_ordinal++,
+                             pCnk->ucType, pCnk->ucHeadBits, pCnk->usSize);
+#endif
         njCnkCoP3((CHUNK_HEAD*)pModel->plist);
     }
     
+#ifdef TARGET_PC
+    pcTexTraceModelEnd(trace_model_id);
+#endif
     return 1;
 }
 
@@ -986,12 +1103,37 @@ CHUNK_HEAD* njCnkCbExp(CHUNK_HEAD* pCnk)
 // 100% matching!
 CHUNK_HEAD* njCnkCtTid(CHUNK_HEAD* pCnk) 
 {
+#ifdef TARGET_PC
+    unsigned int trace_index = pCnk->usSize & 0xFFF;
+    pcTexTraceTextureUse("CNK_CTID_request", trace_index,
+                         Ps2_current_texlist,
+                         Ps2_current_texlist ? Ps2_current_texlist->nbTexture : 0,
+                         NULL, NULL, 0, 0, 0, 0);
+#endif
     if (((pCnk->ucHeadBits >> 6) & 0x3)) 
     {
         printf("'Texture Flip' Exist in 'CNK-DATA' !!\n");
     }
 
     njSetTextureNumSys(pCnk->usSize & 0xFFF);
+#ifdef TARGET_PC
+    if (Ps2_current_texlist != NULL && trace_index < Ps2_current_texlist->nbTexture) {
+        NJS_TEXMEMLIST* trace_entry = (NJS_TEXMEMLIST*)Ps2_current_texlist->textures[trace_index].texaddr;
+        TIM2_PICTUREHEADER_EX* trace_timp = trace_entry ?
+            (TIM2_PICTUREHEADER_EX*)trace_entry->texinfo.texsurface.pSurface : NULL;
+        pcTexTraceTextureUse("CNK_CTID_resolved", trace_index, Ps2_current_texlist,
+                             Ps2_current_texlist->nbTexture, trace_entry, trace_timp,
+                             trace_timp ? trace_timp->Gindex : 0,
+                             trace_entry ? trace_entry->bank : 0,
+                             trace_entry ? trace_entry->count : 0,
+                             trace_timp ? trace_timp->TpFlag : 0);
+    } else {
+        pcTexTraceTextureUse("CNK_CTID_out_of_range", trace_index,
+                             Ps2_current_texlist,
+                             Ps2_current_texlist ? Ps2_current_texlist->nbTexture : 0,
+                             NULL, NULL, 0, 0, 0, 0);
+    }
+#endif
 
     if (!(pCnk->usSize & 0x2000)) 
     {
@@ -1926,6 +2068,10 @@ CHUNK_HEAD* njCnkCvVMod(CHUNK_HEAD* pCnk)
 // 100% matching! 
 CHUNK_HEAD* njCnkCoP3(CHUNK_HEAD* pCnk)
 {
+#ifdef TARGET_PC
+    unsigned int trace_poly_index = 0;
+    pcTraceCnkPolyFaces(pCnk);
+#endif
     unsigned short* uspCnk;
     VU1_STRIP_BUF* pV0;    
     VU1_STRIP_BUF* pV1;     
@@ -2081,6 +2227,9 @@ CHUNK_HEAD* njCnkCoP3(CHUNK_HEAD* pCnk)
             }
 
             uspCnk += usNext;
+#ifdef TARGET_PC
+            pcTexTraceStrip(trace_poly_index++, 3);
+#endif
 
             Ps2AddPrim3DMod(SCE_GIF_SET_TAG(0, SCE_GS_FALSE, SCE_GS_FALSE, SCE_GS_SET_PRIM(SCE_GS_PRIM_TRI, 0, 0, 0, 1, 0, 0, 1, 0), SCE_GIF_PACKED, 0), dp = NaCnkStrBufTop, 3);
 
@@ -2096,6 +2245,10 @@ CHUNK_HEAD* njCnkCoP3(CHUNK_HEAD* pCnk)
 // 100% matching! 
 CHUNK_HEAD* njCnkCs(CHUNK_HEAD* pCnk)
 { 
+#ifdef TARGET_PC
+    unsigned int trace_strip_index = 0;
+    pcTraceCnkStripFaces(pCnk, "Cs", 1, 1);
+#endif
     VU1_STRIP_BUF* pS;
     VU1_STRIP_BUF* pV;
     unsigned short usNext;
@@ -2159,6 +2312,9 @@ CHUNK_HEAD* njCnkCs(CHUNK_HEAD* pCnk)
         usCnt = usMax = usClip ? ~*uspCnk + 1 : *uspCnk; 
         
         uspCnk++;
+#ifdef TARGET_PC
+        pcTexTraceStrip(trace_strip_index++, usMax);
+#endif
         
         pV = &pNaCnkVerBufTop[*uspCnk];
 
@@ -2253,6 +2409,10 @@ int _CVV(float* v0)
 // 99.22% matching
 CHUNK_HEAD* njCnkCsUvh(CHUNK_HEAD* pCnk)
 {
+#ifdef TARGET_PC
+    unsigned int trace_strip_index = 0;
+    pcTraceCnkStripFaces(pCnk, "CsUvh", 3, 0);
+#endif
     unsigned char ucFlag;                                                           
     unsigned long ulType, ulType2;                                     
     unsigned short* uspCnk;                                                       
@@ -2401,6 +2561,9 @@ CHUNK_HEAD* njCnkCsUvh(CHUNK_HEAD* pCnk)
             usNum = usMax = (usClip != 0) ? ~*uspCnk + 1 : *uspCnk; 
             
             uspCnk++;
+#ifdef TARGET_PC
+            pcTexTraceStrip(trace_strip_index++, usNum);
+#endif
             
             sExit = 0;
             
@@ -2708,6 +2871,9 @@ CHUNK_HEAD* njCnkCsUvh(CHUNK_HEAD* pCnk)
             usNum = (usClip != 0) ? ~*uspCnk + 1 : *uspCnk; 
             
             uspCnk++;
+#ifdef TARGET_PC
+            pcTexTraceStrip(trace_strip_index++, usNum);
+#endif
             
             sExit = 0;
             
@@ -2767,6 +2933,10 @@ CHUNK_HEAD* njCnkCsUvh(CHUNK_HEAD* pCnk)
 // 99.22% matching
 CHUNK_HEAD* njCnkCsUvn(CHUNK_HEAD* pCnk)
 {
+#ifdef TARGET_PC
+    unsigned int trace_strip_index = 0;
+    pcTraceCnkStripFaces(pCnk, "CsUvn", 3, 0);
+#endif
     unsigned char ucFlag;                                                           
     unsigned long ulType, ulType2;                                     
     unsigned short* uspCnk;                                                       
@@ -2915,6 +3085,9 @@ CHUNK_HEAD* njCnkCsUvn(CHUNK_HEAD* pCnk)
             usNum = usMax = (usClip != 0) ? ~*uspCnk + 1 : *uspCnk; 
             
             uspCnk++;
+#ifdef TARGET_PC
+            pcTexTraceStrip(trace_strip_index++, usNum);
+#endif
             
             sExit = 0;
             

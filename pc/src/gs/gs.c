@@ -10,6 +10,7 @@
 #include "gs_internal.h"
 #include "../../include/pc_platform.h"
 #include "../../include/pc_texture_cache.h"
+#include "../../include/pc_texture_trace.h"
 #include "../pc_os.h"
 
 GsRegs gsRegs;
@@ -93,6 +94,8 @@ static void current_state(GsDrawState* st)
     st->texture_asset_id = gsTextureAssetId[c];
     st->texture_asset_content_hash = gsTextureAssetContentHash[c];
     st->texture_asset_valid = gsTextureAssetValid[c];
+    if (pcTexTraceEnabled())
+        pcTexTraceSnapshotDrawContext(&st->trace_context);
 }
 
 static unsigned int frameClutLoads;
@@ -292,6 +295,28 @@ static void clut_load(u64 tex0);
 
 void gsWriteReg(int reg, u64 value)
 {
+#ifdef TARGET_PC
+    u64 trace_old_value = 0;
+    switch (reg) {
+    case 0x00: trace_old_value = gsRegs.prim; break;
+    case 0x06: trace_old_value = gsRegs.tex0[0]; break;
+    case 0x07: trace_old_value = gsRegs.tex0[1]; break;
+    case 0x08: trace_old_value = gsRegs.clamp[0]; break;
+    case 0x09: trace_old_value = gsRegs.clamp[1]; break;
+    case 0x14: trace_old_value = gsRegs.tex1[0]; break;
+    case 0x15: trace_old_value = gsRegs.tex1[1]; break;
+    case 0x16: trace_old_value = gsRegs.tex2[0]; break;
+    case 0x17: trace_old_value = gsRegs.tex2[1]; break;
+    case 0x1c: trace_old_value = gsRegs.texclut; break;
+    case 0x3b: trace_old_value = gsRegs.texa; break;
+    case 0x50: trace_old_value = gsRegs.bitbltbuf; break;
+    case 0x51: trace_old_value = gsRegs.trxpos; break;
+    case 0x52: trace_old_value = gsRegs.trxreg; break;
+    case 0x53: trace_old_value = gsRegs.trxdir; break;
+    default: break;
+    }
+    pcTexTraceGsRegister((unsigned int)reg, trace_old_value, value);
+#endif
     /* Primitive writes are frequent; invalidate only if their effective GS context changes. */
     if (reg == 0x00)
     {
@@ -940,8 +965,10 @@ void pcGsSetDisplay(unsigned int fbp, unsigned int fbw)
 
 void pcGsPresent(void)
 {
+    static uint64_t trace_frame;
     gsFlushPrims();
     gsRendererPresent(disp_fbp, disp_fbw);
+    pcTexTraceSetFrame(++trace_frame);
 }
 
 void gsMemReadImageRegs(uint64_t bitbltbuf, uint64_t trxpos, uint64_t trxreg, void* out)

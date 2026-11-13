@@ -2,6 +2,9 @@
 #include "../../../ps2/veronica/prog/ps2_NaTextureFunction.h"
 #include "../../../ps2/veronica/prog/ps2_dummy.h"
 #include "../../../ps2/veronica/prog/main.h"
+#ifdef TARGET_PC
+#include "../../../../pc/include/pc_texture_trace.h"
+#endif
 
 static NJS_TEXINFO info;
 PS2_TEX_SAVE Ps2_tex_save[2];
@@ -104,6 +107,9 @@ int bhSetMemPvpTexture(NJS_TEXLIST* tlp, unsigned char* datp, int offset)
     unsigned char* dp;    
     unsigned char* palp;  
 
+#ifdef TARGET_PC
+    pcTexTraceTextureBlock(tlp, datp, (unsigned int)offset);
+#endif
     palnum = 0; 
     
     nbTex = 0; 
@@ -146,6 +152,17 @@ int bhSetMemPvpTexture(NJS_TEXLIST* tlp, unsigned char* datp, int offset)
             
             break; 
         case MAKE_MAGIC('T', 'I', 'M', '2'):
+#ifdef TARGET_PC
+            {
+                TIM2_PICTUREHEADER_EX* trace_ext = (TIM2_PICTUREHEADER_EX*)ap;
+                unsigned int trace_size = 128u + trace_ext->TotalSize;
+                if (trace_size >= 128u && trace_size <= (unsigned int)sz) {
+                    pcTexTraceDumpTim2("source", ap, trace_size, trace_ext->Gindex, 0xFFFFFFFFu,
+                                       trace_ext->PictFormat, trace_ext->ImageType,
+                                       trace_ext->ClutType, trace_ext->ImageWidth, trace_ext->ImageHeight);
+                }
+            }
+#endif
             Ps2CheckTextureAlpha(ap); 
 
             VQflag = isVQ(((TIM2_PICTUREHEADER_EX*)ap)->PictFormat); 

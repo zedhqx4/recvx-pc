@@ -35,6 +35,9 @@
 #include "../../../ps2/veronica/prog/sub1.h"
 #include "../../../ps2/veronica/prog/sync.h"
 #include "../../../ps2/veronica/prog/main.h"
+#ifdef TARGET_PC
+#include "../../../../pc/include/pc_texture_trace.h"
+#endif
 
 //#include <string.h>
 
@@ -1791,7 +1794,16 @@ void bhSysCallMonitor()
             case 3:
                 if (sys->txr_n > sys->txr_ct)
                 {
+#ifdef TARGET_PC
+                    pcTexTraceSetResource("RDT_TEXTURE_BLOCK", sys->mes,
+                                          (int)sys->stg_no, (int)sys->rom_no, (int)sys->rcase,
+                                          sys->memp, sys->txdp[sys->txr_ct],
+                                          (unsigned int)sys->txr_ct, (int)sys->txloff[sys->txr_ct]);
+#endif
                     bhSetMemPvpTexture(sys->txlp[sys->txr_ct], sys->txdp[sys->txr_ct], sys->txloff[sys->txr_ct]);
+#ifdef TARGET_PC
+                    pcTexTraceClearResource();
+#endif
                     
                     sys->txr_ct++;
                 } 

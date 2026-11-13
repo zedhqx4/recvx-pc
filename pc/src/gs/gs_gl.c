@@ -16,6 +16,7 @@
 #include "gl_funcs.h"
 #include "../../include/pc_platform.h"
 #include "../../include/pc_texture_cache.h"
+#include "../../include/pc_texture_trace.h"
 
 /* Defined by gs.c; renderer timing is disabled unless RECVX_GS_TEX_DIAG=1. */
 extern int gsTextureDiagnosticsEnabled(void);
@@ -1387,9 +1388,26 @@ static int get_indexed_atlas_slot(u64 key0, u64 gen, u64 tex0, int w, int h, int
     return slot;
 }
 
+static void trace_texture_resolution(const char* resolution, int slot,
+                                     const CachedTex* cached, GLuint palette_texture,
+                                     int hd, int indexed, u64 key0, u64 key1, u64 key2,
+                                     uint64_t generation, unsigned int asset_id,
+                                     uint64_t asset_hash, int width, int height,
+                                     const PcTexTraceDrawContext* context)
+{
+    pcTexTraceGsTextureResolution(
+        resolution,
+        slot >= 0 ? (unsigned int)slot : 0xFFFFFFFFu,
+        cached != NULL ? cached->tex : 0,
+        (cached != NULL && cached->index_slot >= 0) ? (unsigned int)cached->index_slot : 0xFFFFFFFFu,
+        palette_texture, hd, indexed, key0, key1, key2, generation,
+        asset_id, asset_hash, width, height, context);
+}
+
 static GLuint get_texture(unsigned int asset_id, int asset_id_valid, uint64_t content_hash, u64 tex0, u64 texa, u64 texclut,
                           int w, int h, int rows, int cols,
-                          int* hd, int* indexed, GLuint* palette_texture)
+                          int* hd, int* indexed, GLuint* palette_texture,
+                          const PcTexTraceDrawContext* trace_context)
 {
     unsigned int psm = GSF(tex0, 20, 6);
     unsigned int tbp = GSF(tex0, 0, 14);
@@ -1464,6 +1482,14 @@ static GLuint get_texture(unsigned int asset_id, int asset_id_valid, uint64_t co
     page_hi = page_lo + ((rows + ph - 1) / ph - 1) * stride + (w + pw - 1) / pw;
     clut_page = GSF(tex0, 37, 14) >> 5;
 
+    gen = gen_sum_rect(page_lo, stride, (rows + ph - 1) / ph, (cols + pw - 1) / pw);
+    if (decode_buf != NULL &&
+        pcTexTraceGsDumpNeeded(tex0, texa, texclut, gen, key2, w, h))
+    {
+        gsDecodeTexture(tex0, texa, texclut, w, h, decode_buf);
+        pcTexTraceGsImage(tex0, texa, texclut, gen, key2, w, h, decode_buf);
+    }
+
     cached_slot = (pcGsTextureAssetCacheEnabled() && asset_id_valid) ?
         texture_cache_find_asset(asset_id, content_hash, key0, w, h, rows, cols) : -1;
     if (cached_slot >= 0)
@@ -1476,10 +1502,12 @@ static GLuint get_texture(unsigned int asset_id, int asset_id_valid, uint64_t co
         *palette_texture = get_palette_texture(tex0, texa, indexed_palette_entries(psm), key2, diagnostics);
         if (diagnostics)
             texFrameStats.asset_hits++;
+        trace_texture_resolution("asset_alias_hit", cached_slot, t, *palette_texture,
+                                 *hd, *indexed, key0, key1, key2, gen,
+                                 asset_id, content_hash, w, h, trace_context);
         return t->tex;
     }
 
-    gen = gen_sum_rect(page_lo, stride, (rows + ph - 1) / ph, (cols + pw - 1) / pw);
     cached_slot = texture_cache_find(gen, key0, key1, key2, w, h, rows, cols);
     if (cached_slot >= 0)
     {
@@ -1499,6 +1527,9 @@ static GLuint get_texture(unsigned int asset_id, int asset_id_valid, uint64_t co
         *indexed = t->indexed;
         *palette_texture = t->indexed ?
             get_palette_texture(tex0, texa, indexed_palette_entries(psm), key2, diagnostics) : 0;
+        trace_texture_resolution("page_cache_hit", cached_slot, t, *palette_texture,
+                                 *hd, *indexed, key0, key1, key2, gen,
+                                 asset_id, content_hash, w, h, trace_context);
         return t->tex;
     }
 
@@ -1561,6 +1592,9 @@ static GLuint get_texture(unsigned int asset_id, int asset_id_valid, uint64_t co
             texFrameStats.hits++;
         }
 
+        trace_texture_resolution("coverage_cache_hit", coverage_slot, t, *palette_texture,
+                                 *hd, *indexed, key0, key1, key2, gen,
+                                 asset_id, content_hash, w, h, trace_context);
         return t->tex;
     }
 
@@ -1626,6 +1660,9 @@ static GLuint get_texture(unsigned int asset_id, int asset_id_valid, uint64_t co
             *hd = 1;
             *indexed = 0;
             *palette_texture = 0;
+            trace_texture_resolution("hd_replacement", slot, t, 0, 1, 0,
+                                     key0, key1, key2, gen, asset_id, content_hash,
+                                     w, h, trace_context);
             return r;
         }
     }
@@ -1654,6 +1691,9 @@ static GLuint get_texture(unsigned int asset_id, int asset_id_valid, uint64_t co
                       create_elapsed * 1000.0, decode_elapsed * 1000.0, upload_elapsed * 1000.0);
             }
 
+            trace_texture_resolution("new_indexed_atlas", slot, t, *palette_texture,
+                                     *hd, *indexed, key0, key1, key2, gen,
+                                     asset_id, content_hash, w, h, trace_context);
             return t->tex;
         }
     }
@@ -1708,6 +1748,9 @@ static GLuint get_texture(unsigned int asset_id, int asset_id_valid, uint64_t co
               create_elapsed * 1000.0, decode_elapsed * 1000.0, upload_elapsed * 1000.0);
     }
 
+    trace_texture_resolution("new_decoded_texture", slot, t, *palette_texture,
+                             *hd, *indexed, key0, key1, key2, gen,
+                             asset_id, content_hash, w, h, trace_context);
     return t->tex;
 }
 
@@ -1868,6 +1911,8 @@ static void rt_sync(RenderTarget* rt)
 void gsXferDone(unsigned int bp, unsigned int bw, unsigned int psm, unsigned int x, unsigned int y, unsigned int w, unsigned int h, int changed)
 {
     int i;
+
+    pcTexTraceGsTransferDone(bp, bw, psm, x, y, w, h, changed);
 
     (void)x; (void)w;
 
@@ -2422,6 +2467,10 @@ void gsRendererDraw(const GsDrawState* st, const GsVertex* v, int nverts)
     rt->last_use = frame_counter;
     stats.draws++;
     stats.verts += nverts;
+    pcTexTraceGsDraw(st->tex0, st->texa, st->texclut,
+                     st->texture_asset_id, st->texture_asset_content_hash,
+                     st->texture_asset_valid, (unsigned int)st->type, st->tme,
+                     nverts, fbp, fbw, fpsm, &st->trace_context);
 
     if (dump_frame)
     {
@@ -2671,7 +2720,8 @@ void gsRendererDraw(const GsDrawState* st, const GsVertex* v, int nverts)
             GLuint gt = get_texture(st->texture_asset_id, st->texture_asset_valid, st->texture_asset_content_hash,
                                      st->tex0, st->texa, st->texclut,
                                      tw, th, texture_extent(st, v, nverts, th, 1),
-                                    texture_extent(st, v, nverts, tw, 0), &hd, &indexed_texture, &palette_texture);
+                                    texture_extent(st, v, nverts, tw, 0), &hd, &indexed_texture, &palette_texture,
+                                     &st->trace_context);
 
             pcGsBindTexture(GL_TEXTURE_2D, gt);
             glUniform1i(U.texrt, 0);

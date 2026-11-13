@@ -2,6 +2,7 @@
 #pragma once
 
 #include <stdint.h>
+#include "../../include/pc_texture_trace.h"
 typedef uint64_t u64;
 
 #define GS_VRAM_SIZE (4 * 1024 * 1024)
@@ -54,6 +55,7 @@ typedef struct {
     unsigned int texture_asset_id; /* TIM2 Gindex */
     uint64_t texture_asset_content_hash; /* source index-plane content */
     int texture_asset_valid;
+    PcTexTraceDrawContext trace_context;
 } GsDrawState;
 
 /* gs_mem.c */
