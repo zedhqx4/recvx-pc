@@ -433,13 +433,13 @@ uint64_t pcTexTraceModelBegin(const void* model, const void* vlist, const void* 
 void pcTexTraceModelEnd(uint64_t model_id)
 {
     TraceModel* m;
-    if (!trace_open() || model_depth == 0)
+    if (!trace_open() || model_depth == 0 || model_id == 0)
         return;
     m = &model_stack[model_depth - 1];
     trace_begin("model_end");
     fprintf(trace_file, ",\"model_id_end\":%llu,\"model_ptr\":\"%p\"", (unsigned long long)model_id, m->model);
     trace_end();
-    if (m->id == model_id || model_id == 0)
+    if (m->id == model_id)
         model_depth--;
 }
 

@@ -8,6 +8,7 @@
  * conversion routines (ps2_pxlconv.c).
  */
 #include <string.h>
+#include <stdlib.h>
 
 #include "gs_internal.h"
 #include "../../include/pc_game_profile.h"
@@ -547,11 +548,45 @@ void gsMemStartTransfer(const GsRegs* r)
 
         gsFlushLocalToLocal(sbp, sbw, spsm, ssx, ssy, w, h);
 
+        if (pcTexTraceEnabled() && w != 0 && h != 0 &&
+            (size_t)w <= (size_t)0x04000000 / sizeof(unsigned int) / (size_t)h)
+        {
+            size_t pixel_count = (size_t)w * (size_t)h;
+            unsigned int* trace_pixels = (unsigned int*)malloc(pixel_count * sizeof(unsigned int));
+            if (trace_pixels != NULL) {
+                for (y = 0; y < h; y++)
+                    for (x = 0; x < w; x++)
+                        trace_pixels[(size_t)y * w + x] =
+                            gsMemRead(spsm, sbp, sbw, ssx + x, ssy + y);
+                pcTexTraceGsTransferData("local_to_local_source_pixels", trace_pixels,
+                                         (unsigned int)(pixel_count * sizeof(unsigned int)),
+                                         sbp, sbw, spsm, ssx, ssy, w, h);
+                free(trace_pixels);
+            }
+        }
+
         for (y = 0; y < h; y++)
         {
             for (x = 0; x < w; x++)
             {
                 gsMemWrite(dpsm, dbp, dbw, dsx + x, dsy + y, gsMemRead(spsm, sbp, sbw, ssx + x, ssy + y));
+            }
+        }
+
+        if (pcTexTraceEnabled() && w != 0 && h != 0 &&
+            (size_t)w <= (size_t)0x04000000 / sizeof(unsigned int) / (size_t)h)
+        {
+            size_t pixel_count = (size_t)w * (size_t)h;
+            unsigned int* trace_pixels = (unsigned int*)malloc(pixel_count * sizeof(unsigned int));
+            if (trace_pixels != NULL) {
+                for (y = 0; y < h; y++)
+                    for (x = 0; x < w; x++)
+                        trace_pixels[(size_t)y * w + x] =
+                            gsMemRead(dpsm, dbp, dbw, dsx + x, dsy + y);
+                pcTexTraceGsTransferData("local_to_local_destination_pixels", trace_pixels,
+                                         (unsigned int)(pixel_count * sizeof(unsigned int)),
+                                         dbp, dbw, dpsm, dsx, dsy, w, h);
+                free(trace_pixels);
             }
         }
 
