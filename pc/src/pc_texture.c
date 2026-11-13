@@ -104,6 +104,17 @@ static uint64_t hash_bytes(const unsigned char* p, size_t n)
     return h;
 }
 
+/* CLUT residente en la VRAM de la GS (CBP 0x3FF0, 1024 entradas RGBA con alfa 0..0x80). njSetPaletteData la sube desde palbuf; las
+ * texturas PictFormat 5..8 NO usan el CLUT de su archivo: la GS lo lee de aqui con CBP = 0x3FF0 + (bank & 0x30) / 4 (juego de 256
+ * entradas) y CSA = bank & 0xF (paleta de 16 para 4 bits). El orden de palbuf ya es el que ve la GS (ClutCopy deshace el swizzle). */
+#define VRAM_CLUT_ENTRIES 1024u
+static unsigned char vram_clut[VRAM_CLUT_ENTRIES * 4u];
+
+void pcTextureUploadVramClut(const unsigned int* entries)
+{
+    if (entries) memcpy(vram_clut, entries, sizeof(vram_clut));
+}
+
 static unsigned char clamp_byte(unsigned int x)
 {
     return (unsigned char)(x > 255 ? 255 : x);
@@ -139,22 +150,22 @@ static void color16(unsigned short v, unsigned char org_type, unsigned char* out
     out[3] = (unsigned char)a;
 }
 
-static int build_palette(const TIM2_PICTUREHEADER* ph, const unsigned char* clut,
-                         unsigned int bank, unsigned char org_type, unsigned char* rgba, unsigned int palette_capacity)
+static int build_palette(const TIM2_PICTUREHEADER* ph, const unsigned char* clut, int clut_in_vram,
+                         unsigned char org_type, unsigned char* rgba, unsigned int palette_capacity)
 {
     unsigned int i, n = ph->ClutColors;
-    unsigned int base = ((bank & 0x30u) / 4u) * 16u;
-    unsigned int type = ph->ClutType & 0x7Fu;
-    int csm1 = (ph->ClutType & 0x80u) == 0 && ph->ImageType == TIM2_IDTEX8 && n >= 256;
-    if (ph->ImageType != TIM2_IDTEX4) base = 0;
-    if (n == 0) n = (ph->ImageType == TIM2_IDTEX4) ? 16u : 256u;
+    unsigned int type = clut_in_vram ? (unsigned int)TIM2_RGB32 : (ph->ClutType & 0x7Fu);
+    /* CLUT de archivo en formato GS (CSM1): se permutan los bits 3 y 4 del indice (8 bits: 256 entradas; 4 bits: relleno a 32
+     * palabras, ClutCopy toma 0..7 y 16..23). El CLUT de la VRAM ya esta en orden de indice. */
+    int csm1 = !clut_in_vram && (ph->ClutType & 0x80u) == 0 &&
+               ((ph->ImageType == TIM2_IDTEX8 && n >= 256) || (ph->ImageType == TIM2_IDTEX4 && ph->ClutSize >= 128));
+    if (n == 0 || clut_in_vram) n = (ph->ImageType == TIM2_IDTEX4) ? 16u : 256u;
     if (n > palette_capacity) n = palette_capacity;
     if (type == TIM2_NONE || clut == NULL) return 0;
 
     for (i = 0; i < n; i++) {
         unsigned char* out = rgba + (size_t)i * 4u;
         const unsigned char* src;
-        /* CLUT de 8 bits en formato GS (CSM1): se permutan los bits 3 y 4 del indice */
         unsigned int si = csm1 ? ((i & 0xE7u) | ((i & 8u) << 1) | ((i & 16u) >> 1)) : i;
         if (type == TIM2_RGB32) {
             src = clut + (size_t)si * 4u;
@@ -171,16 +182,11 @@ static int build_palette(const TIM2_PICTUREHEADER* ph, const unsigned char* clut
             return 0;
         }
     }
-    if (base >= n) base = 0;
-    if (base != 0) {
-        for (i = 0; i < n && i + base < n; i++)
-            memcpy(rgba + (size_t)i * 4u, rgba + (size_t)(i + base) * 4u, 4);
-    }
     return (int)n;
 }
 
 static int decode_tim2(const TIM2_PICTUREHEADER_EX* ext, const TIM2_PICTUREHEADER* ph,
-                       const unsigned char* image, const unsigned char* clut, unsigned int bank,
+                       const unsigned char* image, const unsigned char* clut, int clut_in_vram,
                        unsigned char* rgba)
 {
     unsigned int w = ph->ImageWidth, h = ph->ImageHeight, x, y;
@@ -193,7 +199,7 @@ static int decode_tim2(const TIM2_PICTUREHEADER_EX* ext, const TIM2_PICTUREHEADE
     init_tables();
 
     if (ph->ImageType == TIM2_IDTEX4 || ph->ImageType == TIM2_IDTEX8) {
-        palette_count = (unsigned int)build_palette(ph, clut, bank, ext->OrgColorType, palette,
+        palette_count = (unsigned int)build_palette(ph, clut, clut_in_vram, ext->OrgColorType, palette,
                           ph->ImageType == TIM2_IDTEX4 ? 16u : 256u);
         if (palette_count == 0) return 0;
     }
@@ -387,6 +393,7 @@ int pcNativeTextureLoad(NJS_TEXMEMLIST* addr)
     PcNativeTextureEntry* entry;
     unsigned int texture;
     int linear = 1, wrap_u = 1, wrap_v = 1;
+    int clut_in_vram = 0;
 
     if (addr == NULL || addr->texinfo.texsurface.pSurface == NULL) {
         pcRendererBindTexture(0);
@@ -428,10 +435,17 @@ int pcNativeTextureLoad(NJS_TEXMEMLIST* addr)
     clut = image + ph->ImageSize;
     image_size = ph->ImageSize;
     clut_size = ph->ClutSize;
-    ih = hash_bytes(image, image_size);
-    ch = hash_bytes(clut, clut_size);
     gindex = ext->Gindex;
     bank = addr->bank;
+    if (ext->PictFormat >= 5 && ext->PictFormat <= 8 && (ph->ImageType == TIM2_IDTEX4 || ph->ImageType == TIM2_IDTEX8)) {
+        /* Paleta de la VRAM (ver vram_clut): juego de 256 entradas (bank & 0x30) y, con 4 bits, paleta de 16 (bank & 0xF). */
+        unsigned int first = ((bank >> 4) & 3u) * 256u + (ph->ImageType == TIM2_IDTEX4 ? (bank & 0xFu) * 16u : 0u);
+        clut = vram_clut + (size_t)first * 4u;
+        clut_size = (size_t)(ph->ImageType == TIM2_IDTEX4 ? 16u : 256u) * 4u;
+        clut_in_vram = 1;
+    }
+    ih = hash_bytes(image, image_size);
+    ch = hash_bytes(clut, clut_size);
 
     entry = find_entry(gindex, bank);
     if (entry && entry->image_hash == ih && entry->clut_hash == ch &&
@@ -447,7 +461,7 @@ int pcNativeTextureLoad(NJS_TEXMEMLIST* addr)
         }
         rgba = (unsigned char*)malloc(pixels * 4u);
         if (rgba == NULL) return 0;
-        if (!decode_tim2(ext, ph, image, clut, bank, rgba)) {
+        if (!decode_tim2(ext, ph, image, clut, clut_in_vram, rgba)) {
             free(rgba);
             pcRendererBindTexture(0);
             if (log_once(gindex, 4))

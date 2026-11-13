@@ -290,6 +290,15 @@ int Send_1024_Clut_data(void* clt_adr, unsigned long send_clut_adr)
     u_long128* pClut;            
 
     pClut = clt_adr;
+#ifdef TARGET_PC
+    {
+        /* PC: la unica subida de 1024 entradas (njSetPaletteData -> CBP 0x3FF0) alimenta el CLUT residente que leen las texturas
+         * PictFormat 5..8 (pc_texture.c). */
+        extern void pcTextureUploadVramClut(const unsigned int* entries);
+
+        pcTextureUploadVramClut((const unsigned int*)clt_adr);
+    }
+#endif
 
     for (clt_lp = 0; clt_lp < 4; clt_lp++) 
     {
