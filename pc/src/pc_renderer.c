@@ -923,6 +923,13 @@ static void flush_transparent(int two_pass)
                   q->vertices[0].r, q->vertices[0].g, q->vertices[0].b, q->vertices[0].a,
                   (unsigned)q->frame.blend.equation, (unsigned)q->frame.blend.src, (unsigned)q->frame.blend.dst, q->frame.blend.fix,
                   q->state.depth_test, q->state.depth_write);
+            if (q->count <= 8 && i < 60) {
+                int k;
+                for (k = 0; k < q->count; k++)
+                    pcLog("      v%d: xy=(%.1f,%.1f) z=%.4f uv=(%.1f,%.1f) q=%.4f fog=%.2f rgba=(%.2f,%.2f,%.2f,%.2f)", k, q->vertices[k].x, q->vertices[k].y,
+                          q->vertices[k].z, q->vertices[k].u, q->vertices[k].v, q->vertices[k].q, q->vertices[k].fog,
+                          q->vertices[k].r, q->vertices[k].g, q->vertices[k].b, q->vertices[k].a);
+            }
         }
     }
 
