@@ -55,7 +55,8 @@ typedef struct {
     unsigned long long sequence;
 } NativeQueuedDraw;
 
-/* translucent: la textura tiene texels con alfa intermedio (0 < a < 128 en escala GS); los de alfa 0 no alteran el color con ABE. */
+/* translucent: la textura tiene algun texel con alfa < 128 (escala GS), incluido 0: el filtro bilineal mezcla esos texels con los
+ * opacos y da fragmentos de alfa intermedio en los bordes. */
 typedef struct { GLuint id; int width, height; int translucent; } NativeTextureInfo;
 static NativeQueuedDraw* transparent_queue;
 static int transparent_count, transparent_capacity;
@@ -864,7 +865,8 @@ static int ot_flush_logs;
 
 static int texture_is_translucent(GLuint id);
 
-/* Con ABE hay fragmentos con alfa intermedio solo si algun vertice tiene alfa < 1 o la textura tiene texels intermedios. */
+/* Con ABE hay fragmentos con alfa < 1 si algun vertice tiene alfa < 1 o la textura tiene texels con alfa < 1 (los bordes filtrados
+ * de una mascara salen con alfa intermedio aunque los texels sean solo 0 o 255). */
 static int item_may_be_translucent(const NativeQueuedDraw* q)
 {
     int i;
@@ -913,7 +915,7 @@ static void flush_transparent(int two_pass)
     } else {
         /* Ps2DrawOTag (Ps2ZbuffOff: ATST=GEQUAL AREF=128 AFAIL=FB_ONLY): en cada primitivo los fragmentos con alfa >= 128 escriben
          * color y Z, los de alfa < 128 solo color. Son pixeles distintos, asi que el orden entre las dos mitades da igual; la
-         * mitad translucida solo se dibuja si el primitivo puede tener alfa intermedio (alfa 0 no cambia el framebuffer). */
+         * mitad translucida solo se dibuja si el primitivo puede tener alfa < 1. */
         for (i = 0; i < transparent_count; i++) {
             NativeQueuedDraw* item = &transparent_queue[i];
             draw_queued_item(item, ALPHA_PASS_OPAQUE);
@@ -1046,13 +1048,13 @@ static void remember_texture(GLuint id, int width, int height, int translucent)
     native_texture_count++;
 }
 
-/* Alfa de textura en bytes (0x80 de la GS = 255): "intermedio" es cualquier valor entre 1 y 253. */
+/* Alfa de textura en bytes (0x80 de la GS = 255): no opaco es cualquier valor por debajo de 254. */
 static int rgba_has_partial_alpha(const unsigned char* rgba, int width, int height)
 {
     size_t i, n = (size_t)width * (size_t)height;
     for (i = 0; i < n; i++) {
         unsigned char a = rgba[i * 4 + 3];
-        if (a != 0 && a < 254) return 1;
+        if (a < 254) return 1;
     }
     return 0;
 }
