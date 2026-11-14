@@ -218,7 +218,7 @@ PRIM (18), RGBAQ (10), UV (8), FRAME_2 (8), ALPHA_2 (3), TRX* (3), ZBUF_1/2 (4),
 | CLAMP | repeat/clamp/region-clamp (MINU/MAXU) | Parcial (region clamp no) |
 | FOG/FOGCOL, FGE | niebla por vertice | Parcial (global fog) |
 | SCISSOR | recorte | Implementado (njUserClipping). Las coordenadas llegan /32 (SCISSOR = p*32, x1/y1 = p*32+32, inclusivo): hasta 0.9.105 el PC las usaba como pixeles y recortaba casi todo el visor de objetos |
-| TEST_1 por pasada del OT (Ps2ZbuffOffI / Off2) | Ps2DrawOTagI recorre el OT dos veces: alfa >= 128 con Z, despues alfa < 128 con ZMSK=1 | Hecho (`pcRendererFlushTransparentI`, uniform `uAlphaPass`). `Ps2DrawOTag` (Off) sigue en una pasada sin Z para ABE |
+| TEST_1 por pasada del OT (Ps2ZbuffOffI / Off2) | Ps2DrawOTagI recorre el OT dos veces: alfa >= 128 con Z, despues alfa < 128 con ZMSK=1 | Hecho (`pcRendererFlushTransparentI`, uniform `uAlphaPass`). `Ps2DrawOTag` (Off): por primitivo, fragmentos con alfa >= 128 escriben color y Z y los de alfa < 128 solo color (FB_ONLY); la mitad translucida solo se dibuja si el primitivo puede tenerla (alfa de vertice < 1 o textura con texels intermedios). Antes ningun primitivo con ABE escribia Z: lo dibujado despues y mas lejos (fondo del menu) lo tapaba y las caras traseras de los personajes se pintaban encima |
 | Z-buffer PSMZ16 | Z de 16 bits (casi-coplanares dan el mismo Z, gana el ultimo) | Hecho en el fragment shader (`gl_FragDepth` cuantizado a 65535 niveles) |
 | **FRAME_2 + ZBUF_2 (contexto 2)** | **render a buffers fuera de pantalla** (FBP 150, 380, 476) | **Falta por completo** |
 | Ps2ShadowStart/Draw/End/Main0/Main1 | sombras: se dibujan a un buffer 16 bits (FBP 380) y luego se aplican a la escena | **Falta** (sin rama PC): explica la sombra gris del personaje |
