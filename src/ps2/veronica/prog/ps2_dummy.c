@@ -1976,6 +1976,15 @@ static void pcVu1GifPacket(const unsigned int* q, unsigned int max_qwords)
                     }
                 }
             }
+            {
+                static unsigned int packets, drawn;
+                packets++;
+                if (nv == nloop && !((prim & PC_GIF_PRIM_TME) && texture == 0)) drawn++;
+                if (packets <= 12 || packets % 2000 == 0)
+                    pcLog("VU1: paquete #%u (dibujados %u) nloop=%u nreg=%u prim=0x%x tex=%u v0=(%.1f,%.1f,z=%.1f gsz) kick0=%d",
+                          packets, drawn, nloop, nreg, (unsigned)(prim >> 47), texture,
+                          nv ? vertices[0].x : 0.0f, nv ? vertices[0].y : 0.0f, nv ? gs_z[0] : 0.0f, nv ? kick[0] : 0);
+            }
             if (nv == nloop && !((prim & PC_GIF_PRIM_TME) && texture == 0))
                 pcSubmitVertices(prim, vertices, kick, gs_z, nv, &mode, zsum / (float)nv, tex_width, tex_height, texture);
         }
@@ -1995,6 +2004,7 @@ int pcVu1Enabled(void)
     if (enabled < 0) {
         const char* e = getenv("RECVX_VU1");
         enabled = !(e && e[0] == '0');
+        pcLog("VU1: emulacion %s (RECVX_VU1=0 la desactiva)", enabled ? "ACTIVA" : "desactivada");
         pcVu1GifSink = pcVu1GifPacket;
         pcVif1Reset();
     }
