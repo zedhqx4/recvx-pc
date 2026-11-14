@@ -722,10 +722,10 @@ static void draw_immediate(const PcNativeVertex* vertices, int count, const PcNa
               last->x, last->y, vertices[0].u, vertices[0].v, last->u, last->v,
               vertices[0].r, vertices[0].g, vertices[0].b, vertices[0].a,
               (unsigned)gs_blend.equation, (unsigned)gs_blend.src, (unsigned)gs_blend.dst, gs_blend.fix);
-        if (burst_remaining > 0 && !state->textured && count == 15 && burst_index == 0) {   /* diagnostico: tiras sin textura de 5 triangulos */
+        if (burst_remaining > 0 && !state->textured && count == 15 && burst_index < 2) {   /* diagnostico: tiras sin textura de 5 triangulos */
             static int dumped_strips;
             int k;
-            if (dumped_strips < 24) {
+            if (dumped_strips < 30) {
                 dumped_strips++;
                 for (k = 0; k < count; k++)
                     pcLog("      s%d: xy=(%.1f,%.1f) z=%.4f rgba=(%.2f,%.2f,%.2f,%.2f)", k, vertices[k].x, vertices[k].y, vertices[k].z,
