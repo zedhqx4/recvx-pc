@@ -862,6 +862,7 @@ void pcRendererDrawScreenTriangles(const PcNativeVertex* v, int n, const PcNativ
  *   Es lo que deja lo translucido (paneles, cristales, bordes de glifos) siempre detras de la geometria opaca del visor de
  *   objetos y de archivos, sin depender del orden de envio. */
 static int ot_flush_logs;
+static int burst_remaining, burst_index;   /* captura en rafaga (F8), ver pcRendererCaptureBurst */
 
 static int texture_is_translucent(GLuint id);
 
@@ -908,6 +909,20 @@ static void flush_transparent(int two_pass)
                   i, q->sort_depth, q->state.texture, q->state.texture_width, q->state.texture_height, q->count, q->state.textured,
                   q->vertices[0].z, q->vertices[0].r, q->vertices[0].g, q->vertices[0].b, q->vertices[0].a,
                   q->frame.scissor_enabled, q->frame.scissor_rect[0], q->frame.scissor_rect[1], q->frame.scissor_rect[2], q->frame.scissor_rect[3]);
+        }
+    }
+
+    /* Durante una rafaga (F8) se vuelca el OT completo de los 2 primeros frames: sirve para ver que particulas/paneles hay */
+    if (burst_remaining > 0 && burst_index < 2) {
+        pcLog("native OT burst frame %d (%s): %d queued draws", burst_index, two_pass ? "two-pass" : "one-pass", transparent_count);
+        for (i = 0; i < transparent_count && i < 220; i++) {
+            const NativeQueuedDraw* q = &transparent_queue[i];
+            pcLog("  OT[%d]: bucket=%.0f topo=0x%x n=%d tex=%u(%gx%g) tx=%d ta=%d fn=%d xy0=(%.1f,%.1f) z0=%.4f rgba0=(%.2f,%.2f,%.2f,%.2f) eq=0x%x src=0x%x dst=0x%x fix=%.2f dep=%d/%d",
+                  i, q->sort_depth, (unsigned)q->topology, q->count, q->state.texture, q->state.texture_width, q->state.texture_height,
+                  q->state.textured, q->state.texture_alpha, q->state.texture_function, q->vertices[0].x, q->vertices[0].y, q->vertices[0].z,
+                  q->vertices[0].r, q->vertices[0].g, q->vertices[0].b, q->vertices[0].a,
+                  (unsigned)q->frame.blend.equation, (unsigned)q->frame.blend.src, (unsigned)q->frame.blend.dst, q->frame.blend.fix,
+                  q->state.depth_test, q->state.depth_write);
         }
     }
 
@@ -1356,7 +1371,6 @@ static int write_bmp(const char* name, const unsigned char* px, int width, int h
 
 /* Captura en rafaga (tecla F8): los N frames consecutivos siguientes se guardan como recvx_burst_K.bmp a media resolucion, para
  * ver artefactos que duran un solo frame (una captura de pantalla normal no los pilla). */
-static int burst_remaining, burst_index;
 void pcRendererCaptureBurst(int frames)
 {
     burst_remaining = frames > 0 ? frames : 0;
