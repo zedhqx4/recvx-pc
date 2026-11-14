@@ -32,7 +32,8 @@ static PcTim2SourceFingerprint pc_tim2_fingerprints[PC_TIM2_FINGERPRINT_SLOTS];
 typedef struct {
     int valid;
     uint64_t state_generation, image_hash, clut_hash, tex0;
-    unsigned int gindex, tbw, tw, th, psm;
+    const NJS_TEXMEMLIST* source;
+    unsigned int tbw, tw, th, psm;
     unsigned int image_width, image_height, pict_format, image_type, clut_type, clamp_flag, bank, render_sub_flag;
 } PcPs2TextureBindCache;
 static PcPs2TextureBindCache pc_ps2_texture_bind_cache;
@@ -2569,7 +2570,7 @@ void Ps2InitTexCache()
 #ifdef TARGET_PC
     Ps2PcTextureSourceCacheReset();
     pcGsResetTextureAssetCache();
-    pcGsSetTextureAssetIdentity(0, 0, 0);
+    pcGsSetTextureAssetIdentity(NULL, 0, 0);
 #endif
 }
 
@@ -2829,13 +2830,13 @@ int Ps2TexLoad(NJS_TEXMEMLIST* addr)
                                              SCE_GS_MODULATE, 254 * 64,
                                              SCE_GS_PSMCT32, 0, 0, 2);
         asset_cache_hit = pcGsTextureAssetCacheContains(
-            timp->Gindex, image_content_hash, asset_cache_tex0,
+            addr, image_content_hash, asset_cache_tex0,
             (int)(1U << tw), (int)(1U << th));
 
         if (asset_cache_hit && !Ps2_current_texbreak &&
             pc_ps2_texture_bind_cache.valid &&
             pc_ps2_texture_bind_cache.state_generation == pcGsGetTextureBindingGeneration() &&
-            pc_ps2_texture_bind_cache.gindex == timp->Gindex &&
+            pc_ps2_texture_bind_cache.source == addr &&
             pc_ps2_texture_bind_cache.image_hash == image_content_hash &&
             pc_ps2_texture_bind_cache.clut_hash == clut_content_hash &&
             pc_ps2_texture_bind_cache.tex0 == asset_cache_tex0 &&
@@ -2859,7 +2860,7 @@ int Ps2TexLoad(NJS_TEXMEMLIST* addr)
              * advance the binding generation, so restore both after the bind packet.
              */
             Ps2BindTextureState(addr, timp, psm, tbw, tw, th);
-            pcGsSetTextureAssetIdentity(timp->Gindex, asset_cache_eligible, image_content_hash);
+            pcGsSetTextureAssetIdentity(addr, asset_cache_eligible, image_content_hash);
             pc_ps2_texture_bind_cache.state_generation = pcGsGetTextureBindingGeneration();
 
             if (profile_texture)
@@ -2889,7 +2890,7 @@ int Ps2TexLoad(NJS_TEXMEMLIST* addr)
 
 
 #ifdef TARGET_PC
-    pcGsSetTextureAssetIdentity(timp->Gindex, asset_cache_eligible, image_content_hash);
+    pcGsSetTextureAssetIdentity(addr, asset_cache_eligible, image_content_hash);
     if (asset_cache_eligible)
     {
         pc_ps2_texture_bind_cache.valid = 1;
@@ -2897,7 +2898,7 @@ int Ps2TexLoad(NJS_TEXMEMLIST* addr)
         pc_ps2_texture_bind_cache.image_hash = image_content_hash;
         pc_ps2_texture_bind_cache.clut_hash = clut_content_hash;
         pc_ps2_texture_bind_cache.tex0 = asset_cache_tex0;
-        pc_ps2_texture_bind_cache.gindex = timp->Gindex;
+        pc_ps2_texture_bind_cache.source = addr;
         pc_ps2_texture_bind_cache.tbw = tbw;
         pc_ps2_texture_bind_cache.tw = tw;
         pc_ps2_texture_bind_cache.th = th;
