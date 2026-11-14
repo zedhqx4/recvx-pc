@@ -234,3 +234,12 @@ Conclusion: ya no quedan "parches de color"; lo que falta son **tres subsistemas
 3. Sombras sobre esa base.
 4. Render-to-texture / post-proceso.
 5. Texto dinamico (TRX* de subida).
+
+## VU1 emulada (0.9.120)
+
+- `vsm/ps2_vu1.vsm` -> `pc/src/vu/vu1_micro.c` (generado por `pc/tools/vu_micro2c.py`, igual que la VU0). `pcVu1Micro(addr)`: 0 = DoubleMain, 700 = SingleMain.
+- `pc/src/vu/pc_vif1.c`: VIF1 (cadena DMA cnt/end, BASE/OFFSET con TOPS, UNPACK V4-32, MSCAL) y `XGKICK` -> `pcVu1GifSink`.
+- `ps2_dummy.c::pcVu1GifPacket`: decodifica el paquete GIF PACKED (ST/RGBAQ/XYZF2) y lo manda por `pcSubmitVertices`, **inmediato** (sin OT): como el original, solo `TransDouble` pasaba por el EE + OT.
+- `njCnkCsUvh` (ps2_NinjaCnk.c) usa la VU1 salvo `TransDouble[I]`. `RECVX_VU1=0` vuelve a la ruta del EE.
+- `njCnkCs` (tiras sin textura) NO usa la VU1: son funciones C del EE (`vu1DrawTriangleStrip*`).
+- Punto de retorno si algo se rompe: rama `pre-vu1-backup` (cf41cec, 0.9.116).

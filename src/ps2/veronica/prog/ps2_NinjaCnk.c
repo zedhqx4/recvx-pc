@@ -2097,6 +2097,8 @@ CHUNK_HEAD* njCnkCoP3(CHUNK_HEAD* pCnk)
 #ifdef TARGET_PC
 extern void pcLog(const char* fmt, ...);
 extern int pcRendererBurstDiag(void);
+extern int pcVu1Enabled(void);
+extern void pcVif1Dma(const void* tag);
 #endif
 
 CHUNK_HEAD* njCnkCs(CHUNK_HEAD* pCnk)
@@ -2357,7 +2359,8 @@ CHUNK_HEAD* njCnkCsUvh(CHUNK_HEAD* pCnk)
     usStrip = *uspCnk++ & 0x3FFF;
     
 #ifdef TARGET_PC
-    if (0) /* PC: always the EE strip path below, no VU1 */
+    /* PC: VU1 emulada (microcodigo generado de vsm/ps2_vu1.vsm); RECVX_VU1=0 usa la ruta del EE de abajo */
+    if (pcVu1Enabled() && ((ulDrawGeneralPurposeWater != 0) || ((pVu1Func != vu1DrawTriangleStripTransDouble) && (pVu1Func != vu1DrawTriangleStripTransDoubleI))))
 #else
     if ((ulDrawGeneralPurposeWater != 0) || ((pVu1Func != vu1DrawTriangleStripTransDouble) && (pVu1Func != vu1DrawTriangleStripTransDoubleI))) 
 #endif
@@ -2429,8 +2432,12 @@ CHUNK_HEAD* njCnkCsUvh(CHUNK_HEAD* pCnk)
         ulpP[32] = SCE_GIF_SET_TAG(0, 1, SCE_GIF_REGLIST, NULL, 0, 3) | ulType2;
         ulpP[33] = GIF_REGLIST(SCE_GS_ST, SCE_GS_RGBAQ, SCE_GS_XYZF2);
         
+#ifdef TARGET_PC
+        pcVif1Dma((void*)0x70003E80);   /* constantes: BASE/OFFSET + UNPACK a la memoria de la VU1 */
+#else
         sceDmaSend((sceDmaChan*)D1_CHCR, (void*)0xF0003E80);
         sceDmaSync((sceDmaChan*)D1_CHCR, 0, 0);
+#endif
         
         for (; usStrip; usStrip--)  
         {
@@ -2714,7 +2721,11 @@ CHUNK_HEAD* njCnkCsUvh(CHUNK_HEAD* pCnk)
                     p[0] = 0;
                     p[1] = vu1func_tag;
                     
+#ifdef TARGET_PC
+                    pcVif1Dma((void*)ulpP);   /* tira: UNPACK + MSCAL; el XGKICK de la VU1 dibuja */
+#else
                     sceDmaSend((sceDmaChan*)D1_CHCR, (void*)((unsigned int)ulpP | 0x80000000));
+#endif
                     
                     Ps2_chunk_buff_flip ^= 1;
                 }
@@ -2871,7 +2882,8 @@ CHUNK_HEAD* njCnkCsUvn(CHUNK_HEAD* pCnk)
     usStrip = *uspCnk++ & 0x3FFF;
     
 #ifdef TARGET_PC
-    if (0) /* PC: always the EE strip path below, no VU1 */
+    /* PC: VU1 emulada (microcodigo generado de vsm/ps2_vu1.vsm); RECVX_VU1=0 usa la ruta del EE de abajo */
+    if (pcVu1Enabled() && ((ulDrawGeneralPurposeWater != 0) || ((pVu1Func != vu1DrawTriangleStripTransDouble) && (pVu1Func != vu1DrawTriangleStripTransDoubleI))))
 #else
     if ((ulDrawGeneralPurposeWater != 0) || ((pVu1Func != vu1DrawTriangleStripTransDouble) && (pVu1Func != vu1DrawTriangleStripTransDoubleI))) 
 #endif
@@ -2943,8 +2955,12 @@ CHUNK_HEAD* njCnkCsUvn(CHUNK_HEAD* pCnk)
         ulpP[32] = SCE_GIF_SET_TAG(0, 1, SCE_GIF_REGLIST, NULL, 0, 3) | ulType2;
         ulpP[33] = GIF_REGLIST(SCE_GS_ST, SCE_GS_RGBAQ, SCE_GS_XYZF2);
         
+#ifdef TARGET_PC
+        pcVif1Dma((void*)0x70003E80);   /* constantes: BASE/OFFSET + UNPACK a la memoria de la VU1 */
+#else
         sceDmaSend((sceDmaChan*)D1_CHCR, (void*)0xF0003E80);
         sceDmaSync((sceDmaChan*)D1_CHCR, 0, 0);
+#endif
         
         for (; usStrip; usStrip--)  
         {
@@ -3228,7 +3244,11 @@ CHUNK_HEAD* njCnkCsUvn(CHUNK_HEAD* pCnk)
                     p[0] = 0;
                     p[1] = vu1func_tag;
                     
+#ifdef TARGET_PC
+                    pcVif1Dma((void*)ulpP);   /* tira: UNPACK + MSCAL; el XGKICK de la VU1 dibuja */
+#else
                     sceDmaSend((sceDmaChan*)D1_CHCR, (void*)((unsigned int)ulpP | 0x80000000));
+#endif
                     
                     Ps2_chunk_buff_flip ^= 1;
                 }

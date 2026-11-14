@@ -1,6 +1,9 @@
 #ifdef TARGET_PC
 #include <stdio.h>
 #include <string.h>
+#include <stdlib.h>
+#include <stdint.h>
+#include "../../../../pc/include/pc_vu.h"
 #include "../../../../pc/include/pc_game_profile.h"
 extern int Send_Tim2_dataExClutOnly(void* tim2_top_adr, unsigned long send_image_adr, unsigned long send_clut_adr);
 #endif
@@ -1752,63 +1755,21 @@ static unsigned int pcAssemblePrepared(const PcNativeVertex* v, const unsigned c
     return n;
 }
 
-static void pcSubmitPrepared3D(unsigned long prim, const void* data, unsigned int count, const PcPrim3D* mode)
+/* Cola final: vertices ya en pantalla (+ kick y Z de la GS por vertice) -> renderer nativo.
+ * La comparten el empaquetador del EE (pcSubmitPrepared3D) y la salida de la VU1 (pcVu1GifPacket). */
+static void pcSubmitVertices(unsigned long prim, const PcNativeVertex* vertices, const unsigned char* kick, const float* gs_z,
+                             unsigned int count, const PcPrim3D* mode, float average_z, float tex_width, float tex_height,
+                             unsigned int texture)
 {
-    const float* source = (const float*)data;
-    uint32_t* packed;
-    PcNativeVertex* vertices;
     PcNativeVertex* assembled;
-    unsigned char* kick;
     PcNativeDrawState state;
     unsigned int i, n, topology = (unsigned int)((prim >> 47) & 7u);
-    float tex_width = 1.0f, tex_height = 1.0f, average_z;
     int textured = (prim & PC_GIF_PRIM_TME) != 0;
     int blend = (prim & PC_GIF_PRIM_ABE) != 0;
-    unsigned int texture = pcRendererCurrentTexture();
 
-    if (source == NULL || count < 1 || count > 16384)
-        return;
-    if (textured && texture == 0)
-        return;
-
-    packed = (uint32_t*)malloc(((size_t)count * 12u + 4u) * sizeof(*packed));
-    vertices = (PcNativeVertex*)malloc((size_t)count * sizeof(*vertices));
     assembled = (PcNativeVertex*)malloc((size_t)count * 3u * sizeof(*assembled));
-    kick = (unsigned char*)malloc(count);
-    if (packed == NULL || vertices == NULL || assembled == NULL || kick == NULL)
-        goto done;
-
-    pcPs2Prim3DCore(data, packed, count, mode->floating_color);
-    average_z = ((const float*)packed)[(size_t)count * 12u + 3u];
-    pcRendererCurrentTextureSize(&tex_width, &tex_height);
-
-    for (i = 0; i < count; i++, source += 12) {
-        const uint32_t* d = packed + (size_t)i * 12u;
-        float r, g, b, a;
-        if (mode->floating_color) {
-            r = source[4]; g = source[5]; b = source[6]; a = source[7];
-        } else {
-            uint32_t rgba[4];
-            memcpy(rgba, source + 4, sizeof(rgba));
-            r = (float)(rgba[0] & 0xFFu);
-            g = (float)(rgba[1] & 0xFFu);
-            b = (float)(rgba[2] & 0xFFu);
-            a = (float)(rgba[3] & 0xFFu);
-        }
-
-        vertices[i].x = (float)(int32_t)d[8] / 16.0f - 1728.0f;
-        vertices[i].y = (float)(int32_t)d[9] / 16.0f - 1808.0f;
-        vertices[i].z = pcRendererDepthFromGsZ((float)(int32_t)d[10] / 16.0f);
-        vertices[i].r = fminf(fmaxf(r / 255.0f, 0.0f), 1.0f);
-        vertices[i].g = fminf(fmaxf(g / 255.0f, 0.0f), 1.0f);
-        vertices[i].b = fminf(fmaxf(b / 255.0f, 0.0f), 1.0f);
-        vertices[i].a = fminf(fmaxf(a / 128.0f, 0.0f), 1.0f);
-        vertices[i].u = source[0] * tex_width;   /* ST normalizado -> texels */
-        vertices[i].v = source[1] * tex_height;
-        vertices[i].q = source[2];
-        vertices[i].fog = mode->floating_color ? fminf(fmaxf(source[11] / 255.0f, 0.0f), 1.0f) : 1.0f;
-        kick[i] = (d[11] & 0x8000u) != 0;
-    }
+    if (assembled == NULL)
+        return;
 
     memset(&state, 0, sizeof(state));
     state.texture = texture;
@@ -1836,9 +1797,7 @@ static void pcSubmitPrepared3D(unsigned long prim, const void* data, unsigned in
     if (mode->ot == PC_OT_PER_TRIANGLE && blend && topology == 4 && count > 3 && ViewType < 3 && ((count * 3) - 6) < 167) {
         /* Ps2AddPrim3DExI: cada triangulo de la tira es un item del OT con su propia Z */
         for (i = 2; i < count; i++) {
-            const float z0 = (float)(int32_t)(packed[(size_t)(i - 2) * 12u + 10u]) / 16.0f;
-            const float z1 = (float)(int32_t)(packed[(size_t)(i - 1) * 12u + 10u]) / 16.0f;
-            const float z2 = (float)(int32_t)(packed[(size_t)i * 12u + 10u]) / 16.0f;
+            const float z0 = gs_z[i - 2], z1 = gs_z[i - 1], z2 = gs_z[i];
             if (kick[i])
                 continue;
             if (ViewType == 0)
@@ -1872,10 +1831,174 @@ static void pcSubmitPrepared3D(unsigned long prim, const void* data, unsigned in
     }
 
 done:
+    free(assembled);
+}
+
+static void pcSubmitPrepared3D(unsigned long prim, const void* data, unsigned int count, const PcPrim3D* mode)
+{
+    const float* source = (const float*)data;
+    uint32_t* packed;
+    PcNativeVertex* vertices;
+    unsigned char* kick;
+    float* gs_z;
+    unsigned int i;
+    float tex_width = 1.0f, tex_height = 1.0f, average_z;
+    int textured = (prim & PC_GIF_PRIM_TME) != 0;
+    unsigned int texture = pcRendererCurrentTexture();
+
+    if (source == NULL || count < 1 || count > 16384)
+        return;
+    if (textured && texture == 0)
+        return;
+
+    packed = (uint32_t*)malloc(((size_t)count * 12u + 4u) * sizeof(*packed));
+    vertices = (PcNativeVertex*)malloc((size_t)count * sizeof(*vertices));
+    kick = (unsigned char*)malloc(count);
+    gs_z = (float*)malloc((size_t)count * sizeof(*gs_z));
+    if (packed == NULL || vertices == NULL || kick == NULL || gs_z == NULL)
+        goto done;
+
+    pcPs2Prim3DCore(data, packed, count, mode->floating_color);
+    average_z = ((const float*)packed)[(size_t)count * 12u + 3u];
+    pcRendererCurrentTextureSize(&tex_width, &tex_height);
+
+    for (i = 0; i < count; i++, source += 12) {
+        const uint32_t* d = packed + (size_t)i * 12u;
+        float r, g, b, a;
+        if (mode->floating_color) {
+            r = source[4]; g = source[5]; b = source[6]; a = source[7];
+        } else {
+            uint32_t rgba[4];
+            memcpy(rgba, source + 4, sizeof(rgba));
+            r = (float)(rgba[0] & 0xFFu);
+            g = (float)(rgba[1] & 0xFFu);
+            b = (float)(rgba[2] & 0xFFu);
+            a = (float)(rgba[3] & 0xFFu);
+        }
+
+        gs_z[i] = (float)(int32_t)d[10] / 16.0f;
+        vertices[i].x = (float)(int32_t)d[8] / 16.0f - 1728.0f;
+        vertices[i].y = (float)(int32_t)d[9] / 16.0f - 1808.0f;
+        vertices[i].z = pcRendererDepthFromGsZ(gs_z[i]);
+        vertices[i].r = fminf(fmaxf(r / 255.0f, 0.0f), 1.0f);
+        vertices[i].g = fminf(fmaxf(g / 255.0f, 0.0f), 1.0f);
+        vertices[i].b = fminf(fmaxf(b / 255.0f, 0.0f), 1.0f);
+        vertices[i].a = fminf(fmaxf(a / 128.0f, 0.0f), 1.0f);
+        vertices[i].u = source[0] * tex_width;   /* ST normalizado -> texels */
+        vertices[i].v = source[1] * tex_height;
+        vertices[i].q = source[2];
+        vertices[i].fog = mode->floating_color ? fminf(fmaxf(source[11] / 255.0f, 0.0f), 1.0f) : 1.0f;
+        kick[i] = (d[11] & 0x8000u) != 0;
+    }
+
+    pcSubmitVertices(prim, vertices, kick, gs_z, count, mode, average_z, tex_width, tex_height, texture);
+
+done:
     free(packed);
     free(vertices);
-    free(assembled);
     free(kick);
+    free(gs_z);
+}
+
+/* ---- Salida de la VU1 (XGKICK): paquetes GIF PACKED con ST / RGBAQ / XYZF2 por vertice ----
+ * Es lo que la GS recibia directamente: el microcodigo ya hizo proyeccion, recorte, color e iluminacion. En el original esos
+ * primitivos (tiras Opaque/TransSingle de njCnkCsUvh) iban sin pasar por el OT: la GS los dibujaba en el momento. */
+static void pcVu1GifPacket(const unsigned int* q, unsigned int max_qwords)
+{
+    unsigned int pos = 0, guard = 0;
+
+    while (pos < max_qwords && guard++ < 16) {
+        const unsigned int nloop = q[pos * 4] & 0x7FFFu, eop = (q[pos * 4] >> 15) & 1u;
+        const unsigned int hi = q[pos * 4 + 1];
+        const unsigned int flg = (hi >> 26) & 3u;
+        unsigned int nreg = (hi >> 28) & 0xFu;
+        const uint64_t prim = ((uint64_t)((hi >> 15) & 0x7FFu)) << 47;
+        const int pre = (hi >> 14) & 1;
+        unsigned int regs[16], r, i;
+        PcNativeVertex* vertices;
+        unsigned char* kick;
+        float* gs_z;
+        float tex_width = 1.0f, tex_height = 1.0f, zsum = 0.0f;
+        unsigned int texture = pcRendererCurrentTexture();
+        PcPrim3D mode = { 0, 0, PC_OT_IMMEDIATE, 0.0f };
+        const unsigned int* d;
+        PcNativeVertex cur;
+        unsigned int nv = 0;
+        float sq = 1.0f, ss = 0.0f, st = 0.0f;
+
+        if (nreg == 0) nreg = 16;
+        for (r = 0; r < nreg; r++)
+            regs[r] = ((q[pos * 4 + 2 + (r >> 3)]) >> ((r & 7) * 4)) & 0xFu;
+        pos++;
+
+        if (flg != 0 || !pre || nloop == 0 || nloop > 16384 || pos + (size_t)nloop * nreg > max_qwords)
+            return;   /* el microcodigo del juego solo manda PACKED con PRIM */
+
+        vertices = (PcNativeVertex*)malloc((size_t)nloop * sizeof(*vertices));
+        kick = (unsigned char*)malloc(nloop);
+        gs_z = (float*)malloc((size_t)nloop * sizeof(*gs_z));
+        if (vertices && kick && gs_z) {
+            memset(&cur, 0, sizeof(cur));
+            pcRendererCurrentTextureSize(&tex_width, &tex_height);
+            d = q + pos * 4;
+            for (i = 0; i < nloop; i++, d += nreg * 4) {
+                for (r = 0; r < nreg; r++) {
+                    const unsigned int* w = d + r * 4;
+                    float fl[3];
+                    switch (regs[r]) {
+                    case 2:   /* ST: S, T y Q (palabra 2) */
+                        memcpy(fl, w, sizeof(fl));
+                        ss = fl[0]; st = fl[1]; sq = fl[2];
+                        break;
+                    case 1:   /* RGBAQ: un byte por palabra, A en 0..128 */
+                        cur.r = fminf((float)(w[0] & 0xFFu) / 255.0f, 1.0f);
+                        cur.g = fminf((float)(w[1] & 0xFFu) / 255.0f, 1.0f);
+                        cur.b = fminf((float)(w[2] & 0xFFu) / 255.0f, 1.0f);
+                        cur.a = fminf((float)(w[3] & 0xFFu) / 128.0f, 1.0f);
+                        break;
+                    case 4:   /* XYZF2: X, Y en 12.4, Z, F (bits 4..11) y ADC (bit 15) */
+                    case 5:   /* XYZ2 */
+                        cur.x = (float)(int32_t)w[0] / 16.0f - 1728.0f;
+                        cur.y = (float)(int32_t)w[1] / 16.0f - 1808.0f;
+                        gs_z[nv] = (float)(int32_t)w[2] / 16.0f;
+                        cur.z = pcRendererDepthFromGsZ(gs_z[nv]);
+                        cur.fog = regs[r] == 4 ? fminf((float)((w[3] >> 4) & 0xFFu) / 255.0f, 1.0f) : 1.0f;
+                        cur.u = ss * tex_width;
+                        cur.v = st * tex_height;
+                        cur.q = sq;
+                        vertices[nv] = cur;
+                        kick[nv] = (w[3] & 0x8000u) != 0;
+                        zsum += gs_z[nv];
+                        nv++;
+                        break;
+                    default:
+                        break;
+                    }
+                }
+            }
+            if (nv == nloop && !((prim & PC_GIF_PRIM_TME) && texture == 0))
+                pcSubmitVertices(prim, vertices, kick, gs_z, nv, &mode, zsum / (float)nv, tex_width, tex_height, texture);
+        }
+        free(vertices);
+        free(kick);
+        free(gs_z);
+        pos += nloop * nreg;
+        if (eop)
+            break;
+    }
+}
+
+/* Interruptor: 1 = tiras de njCnkCsUvh por el microcodigo de la VU1 (RECVX_VU1=0 las deja por la ruta del EE) */
+int pcVu1Enabled(void)
+{
+    static int enabled = -1;
+    if (enabled < 0) {
+        const char* e = getenv("RECVX_VU1");
+        enabled = !(e && e[0] == '0');
+        pcVu1GifSink = pcVu1GifPacket;
+        pcVif1Reset();
+    }
+    return enabled;
 }
 #endif
 
