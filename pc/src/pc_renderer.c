@@ -96,6 +96,9 @@ static int depth_override_test = -1;
 static int depth_override_write = -1;
 static int burst_remaining, burst_index;   /* captura en rafaga (F8), ver pcRendererCaptureBurst */
 
+/* diagnostico para codigo del juego: hay una rafaga F8 en sus dos primeros frames */
+int pcRendererBurstDiag(void) { return burst_remaining > 0 && burst_index < 2; }
+
 /* Prueba de alfa por fragmento de la pasada del OT en curso (TEST_1 de Ps2ZbuffOffI / Ps2ZbuffOff2):
  *   ALPHA_PASS_ALL          sin filtro
  *   ALPHA_PASS_OPAQUE       ATST=GEQUAL AREF=128 AFAIL=KEEP: solo fragmentos con alfa >= 128 (1.0), escriben Z

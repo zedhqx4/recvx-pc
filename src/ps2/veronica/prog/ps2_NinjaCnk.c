@@ -2094,6 +2094,11 @@ CHUNK_HEAD* njCnkCoP3(CHUNK_HEAD* pCnk)
 }
 
 // 100% matching! 
+#ifdef TARGET_PC
+extern void pcLog(const char* fmt, ...);
+extern int pcRendererBurstDiag(void);
+#endif
+
 CHUNK_HEAD* njCnkCs(CHUNK_HEAD* pCnk)
 { 
     VU1_STRIP_BUF* pS;
@@ -2107,6 +2112,9 @@ CHUNK_HEAD* njCnkCs(CHUNK_HEAD* pCnk)
     unsigned short usCnt;
     unsigned short* uspCnk;                                                        
     unsigned short usStrip;                                                      
+#ifdef TARGET_PC
+    unsigned short pcIdx[64]; int pcN;
+#endif
     unsigned short usColorCalc2; // not from the debugging symbols
     void (*pVu1Func)(unsigned long, VU1_STRIP_BUF*, unsigned short, unsigned short); 
 
@@ -2160,6 +2168,9 @@ CHUNK_HEAD* njCnkCs(CHUNK_HEAD* pCnk)
         
         uspCnk++;
         
+#ifdef TARGET_PC
+        pcN = 0; pcIdx[pcN++] = *uspCnk;
+#endif
         pV = &pNaCnkVerBufTop[*uspCnk];
 
         uspCnk++;
@@ -2170,6 +2181,9 @@ CHUNK_HEAD* njCnkCs(CHUNK_HEAD* pCnk)
         
         pS++;
         
+#ifdef TARGET_PC
+        pcIdx[pcN++] = *uspCnk;
+#endif
         pV = &pNaCnkVerBufTop[*uspCnk];
 
         uspCnk++;
@@ -2182,6 +2196,9 @@ CHUNK_HEAD* njCnkCs(CHUNK_HEAD* pCnk)
         
         for (usCnt = usMax - 2; usCnt; usCnt--) 
         {
+#ifdef TARGET_PC
+            if (pcN < 64) pcIdx[pcN++] = *uspCnk;
+#endif
             pV = &pNaCnkVerBufTop[*uspCnk];
 
             uspCnk++;
@@ -2195,6 +2212,27 @@ CHUNK_HEAD* njCnkCs(CHUNK_HEAD* pCnk)
             uspCnk += usNext;
         }
         
+#ifdef TARGET_PC
+        if (pcRendererBurstDiag() && usMax == 15)
+        {
+            /* diagnostico (F8): lo que recibe la funcion de tira; fNz decide el kick de caras traseras */
+            static int pcCsLogged;
+            if (pcCsLogged < 10)
+            {
+                int k;
+                pcCsLogged++;
+                pcLog("njCnkCs: modo=%d usNext=%d usClip=0x%x colorcalc=%d ulType=0x%x%08x single_op=%d single_tr=%d",
+                      (int)((ulMode & 0x18) | ulCnkCurrentDrawMode), (int)usNext, (unsigned)usClip, (int)usColorCalc2,
+                      (unsigned)(ulType >> 32), (unsigned)ulType,
+                      pVu1Func == vu1DrawTriangleStripOpaqueSingle, pVu1Func == vu1DrawTriangleStripTransSingle);
+                for (k = 0; k < 15; k++)
+                    pcLog("      c%d: idx=%u v=(%.2f,%.2f,%.2f) s=(%.1f,%.1f) iz=%.5f nz=%.4f uv=(%.2f,%.2f) rgb=(%.2f,%.2f,%.2f)",
+                          k, (unsigned)pcIdx[k], NaCnkStrBufTop[k].fVx, NaCnkStrBufTop[k].fVy, NaCnkStrBufTop[k].fVz,
+                          NaCnkStrBufTop[k].fSx, NaCnkStrBufTop[k].fSy, NaCnkStrBufTop[k].fIz, NaCnkStrBufTop[k].fNz,
+                          NaCnkStrBufTop[k].fU, NaCnkStrBufTop[k].fV, NaCnkStrBufTop[k].fIr, NaCnkStrBufTop[k].fIg, NaCnkStrBufTop[k].fIb);
+            }
+        }
+#endif
         pVu1Func(ulType, NaCnkStrBufTop, usMax, usClip | usColorCalc2);
     }
     
