@@ -1395,22 +1395,24 @@ void pcRendererCaptureBurst(int frames)
     pcLog("native renderer: burst capture of %d frames requested", burst_remaining);
 }
 
-/* Diagnostico: cada 240 frames mide el color medio del FBO y guarda los 3 primeros volcados como recvx_frame_N.bmp. */
+/* Diagnostico (desactivado por defecto): RECVX_FRAME_DUMP=N mide el color medio del FBO cada 120 frames y guarda hasta N
+ * volcados como recvx_frame_N.bmp. La rafaga F8 va siempre aparte. */
 static void debug_dump_frame(void)
 {
     static int dumps;
     static int max_dumps = -1;
+    static int frame_dump_enabled;
     unsigned char* px;
     size_t n, i;
     double sum[3] = {0, 0, 0};
     unsigned nonblack = 0;
-    if (max_dumps < 0) {   /* RECVX_FRAME_DUMP=N: guarda hasta N capturas (una cada 120 frames); por defecto 3 cada 240 */
+    if (max_dumps < 0) {
         const char* env = getenv("RECVX_FRAME_DUMP");
-        max_dumps = env ? atoi(env) : 3;
+        max_dumps = env ? atoi(env) : 0;
         if (max_dumps < 0) max_dumps = 0;
+        frame_dump_enabled = env != NULL;
     }
-    if (burst_remaining <= 0 &&
-        frame_number % (getenv("RECVX_FRAME_DUMP") ? 120u : 240u) != (getenv("RECVX_FRAME_DUMP") ? 119u : 239u)) return;
+    if (burst_remaining <= 0 && (!frame_dump_enabled || frame_number % 120u != 119u)) return;
     n = (size_t)render_width * (size_t)render_height;
     px = (unsigned char*)malloc(n * 4);
     if (!px) return;
