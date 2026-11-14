@@ -94,6 +94,7 @@ static int ready;
 static GLuint current_texture;
 static int depth_override_test = -1;
 static int depth_override_write = -1;
+static int burst_remaining, burst_index;   /* captura en rafaga (F8), ver pcRendererCaptureBurst */
 
 /* Prueba de alfa por fragmento de la pasada del OT en curso (TEST_1 de Ps2ZbuffOffI / Ps2ZbuffOff2):
  *   ALPHA_PASS_ALL          sin filtro
@@ -712,7 +713,7 @@ static void draw_immediate(const PcNativeVertex* vertices, int count, const PcNa
         upload[i].fog = vertices[i].fog;
     }
     stat_immediate++; stat_vertices += (unsigned)count; if (state && state->screen_space) stat_screen_space++;
-    if (frame_number % 120 == 119 && stat_immediate <= 150 && state) {
+    if (((frame_number % 120 == 119 && stat_immediate <= 150) || (burst_remaining > 0 && burst_index < 2 && stat_immediate <= 2500)) && state) {
         const PcNativeVertex* last = &vertices[count - 1];
         pcLog("native draw #%u: topo=0x%x n=%d tex=%u(%gx%g) fn=%d ta=%d textured=%d blend=%d screen=%d depth=%d/%d scissor=%d v0=(%.1f,%.1f,%.3f) vN=(%.1f,%.1f) uv0=(%.1f,%.1f) uvN=(%.1f,%.1f) rgba=(%.2f,%.2f,%.2f,%.2f) eq=0x%x src=0x%x dst=0x%x fix=%.2f",
               stat_immediate, (unsigned)topology, count, state->texture, state->texture_width, state->texture_height,
@@ -862,7 +863,6 @@ void pcRendererDrawScreenTriangles(const PcNativeVertex* v, int n, const PcNativ
  *   Es lo que deja lo translucido (paneles, cristales, bordes de glifos) siempre detras de la geometria opaca del visor de
  *   objetos y de archivos, sin depender del orden de envio. */
 static int ot_flush_logs;
-static int burst_remaining, burst_index;   /* captura en rafaga (F8), ver pcRendererCaptureBurst */
 
 static int texture_is_translucent(GLuint id);
 
