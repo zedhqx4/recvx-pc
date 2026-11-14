@@ -1997,14 +1997,16 @@ static void pcVu1GifPacket(const unsigned int* q, unsigned int max_qwords)
     }
 }
 
-/* Interruptor: 1 = tiras de njCnkCsUvh por el microcodigo de la VU1 (RECVX_VU1=0 las deja por la ruta del EE) */
+/* Interruptor: RECVX_VU1=1 = tiras de njCnkCsUvh por el microcodigo de la VU1; por defecto, la ruta del EE */
 int pcVu1Enabled(void)
 {
     static int enabled = -1;
     if (enabled < 0) {
         const char* e = getenv("RECVX_VU1");
-        enabled = !(e && e[0] == '0');
-        pcLog("VU1: emulacion %s (RECVX_VU1=0 la desactiva)", enabled ? "ACTIVA" : "desactivada");
+        /* La VU1 emulada da el mismo resultado que la ruta del EE (verificado con F8 en 0.9.120/121) pero cuesta CPU:
+         * queda como herramienta de verificacion, RECVX_VU1=1 la activa. */
+        enabled = (e && e[0] == '1');
+        pcLog("VU1: emulacion %s (RECVX_VU1=1 la activa)", enabled ? "ACTIVA" : "desactivada");
         pcVu1GifSink = pcVu1GifPacket;
         pcVif1Reset();
     }
