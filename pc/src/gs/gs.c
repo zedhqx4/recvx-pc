@@ -13,7 +13,7 @@
 #include "../pc_os.h"
 
 GsRegs gsRegs;
-static unsigned int gsTextureAssetId[2];
+static const void* gsTextureAssetSource[2];
 static uint64_t gsTextureAssetContentHash[2];
 static int gsTextureAssetValid[2];
 static uint64_t gsTextureBindingGeneration;
@@ -34,9 +34,9 @@ int gsTextureDiagnosticsEnabled(void)
     return enabled;
 }
 
-void pcGsSetTextureAssetIdentity(unsigned int asset_id, int valid, uint64_t content_hash)
+void pcGsSetTextureAssetIdentity(const void* source, int valid, uint64_t content_hash)
 {
-    gsTextureAssetId[0] = asset_id;
+    gsTextureAssetSource[0] = valid ? source : NULL;
     gsTextureAssetContentHash[0] = valid ? content_hash : 0;
     gsTextureAssetValid[0] = valid != 0;
 }
@@ -90,7 +90,7 @@ static void current_state(GsDrawState* st)
     st->dthe = gsRegs.dthe;
     st->colclamp = gsRegs.colclamp;
     st->texclut = gsRegs.texclut;
-    st->texture_asset_id = gsTextureAssetId[c];
+    st->texture_asset_source = gsTextureAssetSource[c];
     st->texture_asset_content_hash = gsTextureAssetContentHash[c];
     st->texture_asset_valid = gsTextureAssetValid[c];
 }
@@ -324,8 +324,8 @@ void gsWriteReg(int reg, u64 value)
     case 0x03: gsRegs.uv = value; break;
     case 0x04: latch_vertex(value, 1, 1); break;
     case 0x05: latch_vertex(value, 0, 1); break;
-    case 0x06: gsRegs.tex0[0] = value; gsTextureAssetId[0] = 0; gsTextureAssetContentHash[0] = 0; gsTextureAssetValid[0] = 0; clut_load(value); break;
-    case 0x07: gsRegs.tex0[1] = value; gsTextureAssetId[1] = 0; gsTextureAssetContentHash[1] = 0; gsTextureAssetValid[1] = 0; clut_load(value); break;
+    case 0x06: gsRegs.tex0[0] = value; gsTextureAssetSource[0] = NULL; gsTextureAssetContentHash[0] = 0; gsTextureAssetValid[0] = 0; clut_load(value); break;
+    case 0x07: gsRegs.tex0[1] = value; gsTextureAssetSource[1] = NULL; gsTextureAssetContentHash[1] = 0; gsTextureAssetValid[1] = 0; clut_load(value); break;
     case 0x08: gsRegs.clamp[0] = value; break;
     case 0x09: gsRegs.clamp[1] = value; break;
     case 0x0a: gsRegs.fog = value; break;
@@ -340,7 +340,7 @@ void gsWriteReg(int reg, u64 value)
         u64 mask = (0x3FULL << 20) | (0xFFFFFFFULL << 37);
 
         /* TEX2 changes the active texture interpretation: don't carry an older TIM2 source hint. */
-        gsTextureAssetId[c] = 0;
+        gsTextureAssetSource[c] = NULL;
         gsTextureAssetContentHash[c] = 0;
         gsTextureAssetValid[c] = 0;
         gsRegs.tex2[c] = value;
