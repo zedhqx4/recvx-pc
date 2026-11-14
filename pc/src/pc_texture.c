@@ -504,6 +504,17 @@ int pcNativeTextureLoad(NJS_TEXMEMLIST* addr)
             return 0;
         }
         debug_dump_texture(ext, ph, image, clut, rgba, bank);
+        if (clut_in_vram) {
+            /* Diagnostico: paleta (RGBA crudos de la VRAM, alfa 0..0x80) con la que se decodifico cada textura paletizada */
+            static int logged_clut;
+            if (logged_clut < 400) {
+                char hex[16 * 9 + 1];
+                unsigned int k;
+                for (k = 0; k < 16u; k++) snprintf(hex + k * 9, 10, "%02x%02x%02x%02x ", clut[k * 4], clut[k * 4 + 1], clut[k * 4 + 2], clut[k * 4 + 3]);
+                logged_clut++;
+                pcLog("vram clut: Gindex=%u bank=%u type=%u first 16 entries (rgba raw): %s", gindex, bank, (unsigned)ph->ImageType, hex);
+            }
+        }
         texture = pcRendererLoadTextureRGBA(rgba, ph->ImageWidth, ph->ImageHeight, linear);
         free(rgba);
         if (texture == 0) {
