@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - OpenGl-3.3
+      - experiment/gindex-cache-refresh
     paths:
       - 'pc/src/**'
       - 'pc/include/**'
