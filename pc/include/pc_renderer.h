@@ -31,6 +31,7 @@ typedef struct {
     float ot_z;
     int ot_coarse;             /* 1: OT bucket = Z >> 12 instead of Z >> 4 (Ps2AddOT with Ps2_ice_flag) */
     int fog;                   /* PRIM.FGE: apply the global fog color using the per-vertex fog factor */
+    int ot_queue;              /* 1: goes through the OT even without ABE (2D: the GS ordered it by Z bucket, then by submission) */
     int immediate;             /* blended primitive that the game draws at once instead of through the OT */
 } PcNativeDrawState;
 

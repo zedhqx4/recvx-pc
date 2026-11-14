@@ -816,7 +816,7 @@ static int compare_transparent(const void* a, const void* b)
 
 static void draw(const PcNativeVertex* v, int n, const PcNativeDrawState* state, GLenum topology)
 {
-    if (state && state->blend && !state->immediate && active_target == TARGET_SCREEN) queue_transparent(v, n, state, topology);
+    if (state && ((state->blend && !state->immediate) || state->ot_queue) && active_target == TARGET_SCREEN) queue_transparent(v, n, state, topology);
     else draw_immediate(v, n, state, topology);
 }
 
@@ -878,8 +878,10 @@ static int item_may_be_translucent(const NativeQueuedDraw* q)
 /* Dibuja un item de la cola con una prueba de alfa de la GS: ALPHA_PASS_OPAQUE (alfa >= 128, escribe Z) o ALPHA_PASS_TRANSLUCENT. */
 static void draw_queued_item(NativeQueuedDraw* item, int pass)
 {
+    /* Sin ABE no hay prueba de alfa partida en dos mitades: se dibuja entero, con escritura de Z (ZMSK=0) */
+    if (!item->state.blend) pass = ALPHA_PASS_ALL;
     alpha_pass = pass;
-    ot_writes_depth = (pass == ALPHA_PASS_OPAQUE);
+    ot_writes_depth = (pass != ALPHA_PASS_TRANSLUCENT);
     restore_frame_state(&item->frame);
     depth_override_test = 1;   /* ZTE=1 GEQUAL */
     depth_override_write = ot_writes_depth ? 1 : 0;   /* ZMSK = 0 / 1 */
@@ -911,7 +913,8 @@ static void flush_transparent(int two_pass)
     if (two_pass) {
         /* Ps2DrawOTagI: el OT entero con alfa >= 128 (escribe Z) y despues el OT entero con alfa < 128 (sin Z) */
         for (i = 0; i < transparent_count; i++) draw_queued_item(&transparent_queue[i], ALPHA_PASS_OPAQUE);
-        for (i = 0; i < transparent_count; i++) draw_queued_item(&transparent_queue[i], ALPHA_PASS_TRANSLUCENT);
+        for (i = 0; i < transparent_count; i++)
+            if (transparent_queue[i].state.blend) draw_queued_item(&transparent_queue[i], ALPHA_PASS_TRANSLUCENT);
     } else {
         /* Ps2DrawOTag (Ps2ZbuffOff: ATST=GEQUAL AREF=128 AFAIL=FB_ONLY): en cada primitivo los fragmentos con alfa >= 128 escriben
          * color y Z, los de alfa < 128 solo color. Son pixeles distintos, asi que el orden entre las dos mitades da igual; la
@@ -919,7 +922,7 @@ static void flush_transparent(int two_pass)
         for (i = 0; i < transparent_count; i++) {
             NativeQueuedDraw* item = &transparent_queue[i];
             draw_queued_item(item, ALPHA_PASS_OPAQUE);
-            if (item_may_be_translucent(item)) draw_queued_item(item, ALPHA_PASS_TRANSLUCENT);
+            if (item->state.blend && item_may_be_translucent(item)) draw_queued_item(item, ALPHA_PASS_TRANSLUCENT);
         }
     }
     alpha_pass = ALPHA_PASS_ALL;
@@ -1059,6 +1062,20 @@ static int rgba_has_partial_alpha(const unsigned char* rgba, int width, int heig
     return 0;
 }
 
+/* Diagnostico: histograma del alfa de las primeras texturas subidas (para ver con que alfa llegan las mascaras de texto) */
+static void log_texture_alpha(const char* what, GLuint id, const unsigned char* rgba, int width, int height)
+{
+    static int logged;
+    size_t i, n = (size_t)width * (size_t)height, zero = 0, partial = 0;
+    if (logged >= 160) return;
+    logged++;
+    for (i = 0; i < n; i++) {
+        unsigned char a = rgba[i * 4 + 3];
+        if (a == 0) zero++; else if (a < 254) partial++;
+    }
+    pcLog("texture alpha (%s): id=%u %dx%d zero=%zu partial=%zu opaque=%zu", what, (unsigned)id, width, height, zero, partial, n - zero - partial);
+}
+
 static int texture_is_translucent(GLuint id)
 {
     int i;
@@ -1080,6 +1097,7 @@ unsigned int pcRendererLoadTextureRGBA(const unsigned char* rgba, int width, int
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
     remember_texture(texture, width, height, rgba_has_partial_alpha(rgba, width, height));
+    log_texture_alpha("load", texture, rgba, width, height);
     return texture;
 }
 
@@ -1214,6 +1232,7 @@ int pcRendererUpdateTextureRGBA(unsigned int texture, const unsigned char* rgba,
                 glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, rgba);
             }
             native_textures[i].translucent = rgba_has_partial_alpha(rgba, width, height);
+            log_texture_alpha("update", (GLuint)texture, rgba, width, height);
             if (current_texture == (GLuint)texture) {
                 current_texture_width = (float)width;
                 current_texture_height = (float)height;

@@ -1511,6 +1511,8 @@ void Ps2AddPrim(unsigned long prim, void* dp, unsigned int num, unsigned int cli
             float zv = pcPriToViewZ(use_last_pri);
             state.ot_z_valid = 1;
             state.ot_z = 65537.0f / zv + 1.0f;
+            /* el 2D opaco tambien pasaba por el OT: fondo y rejilla del mapa comparten Z16 y solo los separa el orden */
+            state.ot_queue = 1;
         }
 
         switch (topology) {
