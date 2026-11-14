@@ -891,6 +891,7 @@ static void draw_queued_item(NativeQueuedDraw* item, int pass)
 static void flush_transparent(int two_pass)
 {
     int i;
+    static int skipped_logs;
     int saved_target = active_target;
     if (!ready || transparent_count <= 0) return;
     NativeFrameState live;
@@ -923,6 +924,10 @@ static void flush_transparent(int two_pass)
             NativeQueuedDraw* item = &transparent_queue[i];
             draw_queued_item(item, ALPHA_PASS_OPAQUE);
             if (item->state.blend && item_may_be_translucent(item)) draw_queued_item(item, ALPHA_PASS_TRANSLUCENT);
+            else if (item->state.blend && item->state.textured && skipped_logs < 24) {
+                skipped_logs++;
+                pcLog("OT: mitad translucida OMITIDA tex=%u(%gx%g) ta=%d", item->state.texture, item->state.texture_width, item->state.texture_height, item->state.texture_alpha);
+            }
         }
     }
     alpha_pass = ALPHA_PASS_ALL;
@@ -1067,7 +1072,7 @@ static void log_texture_alpha(const char* what, GLuint id, const unsigned char* 
 {
     static int logged;
     size_t i, n = (size_t)width * (size_t)height, zero = 0, partial = 0;
-    if (logged >= 160) return;
+    if (logged >= 900) return;
     logged++;
     for (i = 0; i < n; i++) {
         unsigned char a = rgba[i * 4 + 3];

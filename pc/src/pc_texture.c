@@ -338,8 +338,8 @@ static int log_once(unsigned int gindex, unsigned int reason)
     return 1;
 }
 
-/* Diagnostico: vuelca (por defecto) las primeras 16 texturas decodificadas como BMP y registra datos de cabecera/paleta.
- * RECVX_TEXDUMP=0 lo desactiva. */
+/* Diagnostico (desactivado por defecto): RECVX_TEXDUMP=1 vuelca las primeras 16 texturas decodificadas como BMP y registra
+ * cabecera/paleta; RECVX_TEXDUMP=all hasta 400; RECVX_TEXDUMP_GINDEX=n las primeras 8 versiones de esa Gindex. */
 static void debug_dump_texture(const TIM2_PICTUREHEADER_EX* ext, const TIM2_PICTUREHEADER* ph,
                                const unsigned char* image, const unsigned char* clut,
                                const unsigned char* rgba, unsigned int bank)
@@ -358,7 +358,7 @@ static void debug_dump_texture(const TIM2_PICTUREHEADER_EX* ext, const TIM2_PICT
     int idx;
     int is_want = want && (unsigned int)strtoul(want, NULL, 10) == ext->Gindex && dumped_want < 8;
     if (is_want) { dumped_want++; }
-    else if (dumped >= ((env && strcmp(env, "all") == 0) ? 400 : 16) || (env && env[0] == '0')) return;   /* RECVX_TEXDUMP=all: hasta 400 */
+    else if (dumped >= ((env && strcmp(env, "all") == 0) ? 400 : 16) || !env || env[0] == '0' || env[0] == 0) return;   /* RECVX_TEXDUMP=all: hasta 400 */
     if (!is_want) dumped++;
     idx = is_want ? 100 + dumped_want : dumped;
     for (k = 0; k < 32; k++) {
