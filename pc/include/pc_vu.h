@@ -36,13 +36,29 @@ typedef struct {
     unsigned int cycle;
     struct { unsigned int cycle, mac, clip, status; } hist[VU_FLAG_HIST];
     unsigned int hist_pos;
-    VuVec mem[256];             /* VU0 data memory, 4 KB */
+    int top, itop;              /* VU1: registros TOP/ITOP que fija el VIF1 (XTOP/XITOP los leen) */
+    VuVec mem[1024];            /* memoria de datos: VU0 usa 256 qw (4 KB), VU1 los 1024 qw (16 KB) */
 } PcVu0;
 
+/* La VU1 comparte registros, flags y helpers con la VU0: mismo estado, otra memoria (mascara 1023) */
+typedef PcVu0 PcVu1;
+
 extern PcVu0 pcVu0;
+extern PcVu1 pcVu1;
 
 /* run a VU0 microprogram starting at instruction index addr (vcallms addr * 8) */
 void pcVu0Micro(int addr);
+
+/* idem VU1 (vsm/ps2_vu1.vsm): MSCAL addr */
+void pcVu1Micro(int addr);
+
+/* XGKICK: la VU1 manda al GIF el paquete que empieza en el quadword addr de su memoria de datos */
+void pcVu1XgKick(PcVu1* v, int addr);
+
+/* VIF1 (pc/src/vu/pc_vif1.c): recorre una cadena DMA del host; XGKICK entrega el paquete GIF a pcVu1GifSink */
+void pcVif1Reset(void);
+void pcVif1Dma(const void* tag);
+extern void (*pcVu1GifSink)(const unsigned int* qwords, unsigned int max_qwords);
 
 /* ---- float helpers ---- */
 
