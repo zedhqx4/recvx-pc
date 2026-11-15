@@ -269,3 +269,8 @@ Objetivo: quitar capas de compatibilidad PS2 (GS/VU1/VU0/EE/GIF) donde no aporta
 
 - **0.9.127**: niebla en `pcSubmitPrepared3D` para todas las rutas (antes fog=1.0 salvo color flotante: Ps2AddPrim3D -> particulas njPtcl*,
   NaDraw, NaGraphics3D no recibian niebla aunque PRIM.FGE estuviera activo). Es lo que se ve como motas blancas brillantes en niebla.
+
+- **0.9.128**: SPRITE (tipo 6, 2 vertices) en las rutas 3D preparadas. `pcAssemblePrepared` no tenia caso 6 y los sprites caian en 'lista de
+  triangulos': vertices de particulas distintas se mezclaban (los 'palitos' de la tierra, la sangre al recibir dano). Ahora cada par es un
+  rectangulo alineado (2 triangulos) con color/Z/niebla del 2o vertice y UV de esquina a esquina, como la GS. Origen: njPtclDrawPolygon/Sprite
+  (prim 0x13/0x33/0x1B/0x3B -> tipo 6) via Ps2AddPrim3D.

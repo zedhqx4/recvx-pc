@@ -1748,6 +1748,22 @@ static unsigned int pcAssemblePrepared(const PcNativeVertex* v, const unsigned c
     case 5: /* abanico */
         for (i = 2; i < count; i++) if (!kick[i]) { out[n++] = v[0]; out[n++] = v[i - 1]; out[n++] = v[i]; }
         break;
+    case 6: /* sprite: 2 vertices = esquina y esquina opuesta; rectangulo alineado a los ejes (2 triangulos) */
+        for (i = 1; i < count; i += 2) {
+            PcNativeVertex c0, c1, c2, c3;
+            if (kick[i])
+                continue;
+            /* La GS pinta el sprite con el color, la Z y la niebla del SEGUNDO vertice (sin gradiente); las coordenadas de
+             * textura van de la primera esquina a la opuesta. */
+            c0 = v[i]; c1 = v[i]; c2 = v[i]; c3 = v[i];
+            c0.x = v[i - 1].x; c0.y = v[i - 1].y; c0.u = v[i - 1].u; c0.v = v[i - 1].v; c0.q = v[i - 1].q;
+            c1.x = v[i].x;     c1.y = v[i - 1].y; c1.u = v[i].u;     c1.v = v[i - 1].v;
+            c2.x = v[i].x;     c2.y = v[i].y;     c2.u = v[i].u;     c2.v = v[i].v;
+            c3.x = v[i - 1].x; c3.y = v[i].y;     c3.u = v[i - 1].u; c3.v = v[i].v;     c3.q = v[i - 1].q;
+            out[n++] = c0; out[n++] = c1; out[n++] = c2;
+            out[n++] = c0; out[n++] = c2; out[n++] = c3;
+        }
+        break;
     default: /* lista de triangulos */
         for (i = 2; i < count; i += 3) if (!kick[i]) { out[n++] = v[i - 2]; out[n++] = v[i - 1]; out[n++] = v[i]; }
         break;
