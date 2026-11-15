@@ -132,9 +132,15 @@ static const char* vertex_shader =
     "layout(location=4) in float aQ;\n"
     "uniform vec2 uTarget; uniform float uProjection; uniform vec2 uAspect; uniform vec2 uOffset;\n"
     "uniform float uNear; uniform float uFar; uniform int uScreenSpace;\n"
-    "out vec4 vColor; out vec2 vTexCoord; out float vFog; out float vQ;\n"
+    /* La GS interpola color y niebla linealmente en pantalla (sin correccion de perspectiva); solo ST lleva Q */
+    "noperspective out vec4 vColor; out vec2 vTexCoord; noperspective out float vFog; out float vQ;\n"
     "void main(){\n"
     "  vColor=aColor; vTexCoord=aTexCoord; vFog=aFog; vQ=aQ;\n"
+    /* uScreenSpace==2 (modelos 3D): x,y en pixeles, z = profundidad GS sin recortar, q = 1/w. Coordenadas homogeneas
+     * (x*w, y*w, z*w, w): la GPU recorta contra cercano/lejano y los lados sin generar poligonos de scissor, y UV, Z y
+     * color salen como los de la GS. w>0 al frente (q>0), un vertice con q<=0 queda detras de la camara. */
+    "  if(uScreenSpace==2){ float w=1.0/aQ; vec2 n=vec2(aViewPosition.x/uTarget.x*2.0-1.0, 1.0-aViewPosition.y/uTarget.y*2.0);\n"
+    "    gl_Position=vec4(n*w,(aViewPosition.z*2.0-1.0)*w,w); return; }\n"
     "  if(uScreenSpace!=0){ vec2 n=vec2(aViewPosition.x/uTarget.x*2.0-1.0, 1.0-aViewPosition.y/uTarget.y*2.0);\n"
     "    gl_Position=vec4(n,aViewPosition.z*2.0-1.0,1.0); return; }\n"
     "  float z=aViewPosition.z;\n"
@@ -148,7 +154,7 @@ static const char* vertex_shader =
 
 static const char* fragment_shader =
     "#version 330 core\n"
-    "in vec4 vColor; in vec2 vTexCoord; in float vFog; in float vQ;\n"
+    "noperspective in vec4 vColor; in vec2 vTexCoord; noperspective in float vFog; in float vQ;\n"
     "uniform sampler2D uTexture; uniform int uTextured; uniform int uFogEnabled;\n"
     "uniform vec3 uFogColor; uniform int uAlphaTest; uniform float uAlphaRef; uniform vec2 uTextureSize; uniform int uTextureFunction, uTextureAlpha, uTexturePerspective, uScreenSpace, uAlphaPass;\n"
     "out vec4 oColor;\n"
@@ -648,7 +654,7 @@ static void apply_state(const PcNativeDrawState* st)
         memcpy(n.fog_color, global_fog_color, sizeof(n.fog_color));
         n.alpha_test = st->alpha_test != 0;
         n.alpha_ref = st->alpha_ref;
-        n.screen_space = st->screen_space != 0;
+        n.screen_space = st->screen_space;   /* 0 espacio de vista, 1 pantalla, 2 pantalla homogenea (w = 1/q) */
         n.texture_size[0] = st->texture_width > 0.0f ? st->texture_width : 1.0f;
         n.texture_size[1] = st->texture_height > 0.0f ? st->texture_height : 1.0f;
         n.texture_function = st->texture_function;

@@ -25,7 +25,7 @@ typedef struct {
     int alpha_test;
     float alpha_ref;
     int linear_filter;
-    int screen_space;
+    int screen_space;          /* 0: espacio de vista; 1: pixeles (z = profundidad); 2: pixeles homogeneos, w = 1/q (recorte en GPU) */
     int cull_backfaces;
     int ot_z_valid;            /* 1: ot_z holds the GS Z (0..65534, bigger = nearer) used to order the OT */
     float ot_z;

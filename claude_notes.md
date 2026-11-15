@@ -243,3 +243,16 @@ Conclusion: ya no quedan "parches de color"; lo que falta son **tres subsistemas
 - `njCnkCsUvh` (ps2_NinjaCnk.c) usa la VU1 salvo `TransDouble[I]`. `RECVX_VU1=1` activa la VU1 (por defecto OFF desde 0.9.122: mismo resultado visual que el EE, mas lenta).
 - `njCnkCs` (tiras sin textura) NO usa la VU1: son funciones C del EE (`vu1DrawTriangleStrip*`).
 - Punto de retorno si algo se rompe: rama `pre-vu1-backup` (cf41cec, 0.9.116).
+
+## Nativizacion de las tiras 3D (0.9.123)
+
+Objetivo: quitar capas de compatibilidad PS2 (GS/VU1/VU0/EE/GIF) donde no aportan comportamiento.
+- **Hecho**: las tiras de los modelos (`vu1DrawTriangleStrip*` -> `Ps2AddPrim3DEx/1P/I`) ya NO pasan por `pcPs2Prim3DCore` (empaquetado GIF,
+  punto fijo 12.4, ADC por recorte), ni por polígonos de scissor, ni por `_Clip_ViewVolume2` (VU0). `pcSubmitStrip3D` (ps2_dummy.c) manda
+  floats al renderer en pantalla homogenea (`screen_space = 2`, w = 1/Q): la GPU recorta cercano/lejano/lados; Z = Z16 de la GS (afin en Q);
+  color y niebla `noperspective` (la GS los interpola lineal en pantalla), UV con perspectiva de la GPU.
+- Se conserva (comportamiento del juego): kick por cara trasera (`ulKick`, Single), politicas de OT (promedio / por triangulo / fija).
+- `_Check_DisplayAreaPoint` devuelve 0 y `_Clip_ViewVolume2` no hace nada en PC: el recorte ya no genera kicks ni scissors.
+- **Pendiente**: color (VU0_CALC_COLOR / pColorCalcFuncTbl: ojo, las 11 funciones EE y los programas VU0 difieren en modos 5, 7, 8 y 10),
+  CALCPOINT (transformacion de vertices en VU0), el resto de Ps2AddPrim* (2D, NaGraphics3D) y retirar la VU1 emulada (vu1_micro.c, pc_vif1.c)
+  cuando se verifique la ruta nativa.

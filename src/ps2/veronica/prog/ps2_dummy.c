@@ -1759,7 +1759,7 @@ static unsigned int pcAssemblePrepared(const PcNativeVertex* v, const unsigned c
  * La comparten el empaquetador del EE (pcSubmitPrepared3D) y la salida de la VU1 (pcVu1GifPacket). */
 static void pcSubmitVertices(unsigned long prim, const PcNativeVertex* vertices, const unsigned char* kick, const float* gs_z,
                              unsigned int count, const PcPrim3D* mode, float average_z, float tex_width, float tex_height,
-                             unsigned int texture)
+                             unsigned int texture, int screen_space)
 {
     PcNativeVertex* assembled;
     PcNativeDrawState state;
@@ -1784,9 +1784,10 @@ static void pcSubmitVertices(unsigned long prim, const PcNativeVertex* vertices,
     state.alpha_test = !mode->shadow_mask;   /* TEST_1: ATE=1 GREATER 0; TEST_2 del volumen de sombra: ATE=0 */
     state.alpha_ref = 0.004f;
     state.linear_filter = 1;
-    state.screen_space = 1;
+    state.screen_space = screen_space;
     state.fog = !mode->shadow_mask && (prim & PC_GIF_PRIM_FGE) != 0;
-    state.texture_perspective = (prim & PC_GIF_PRIM_FST) == 0;
+    /* espacio 1: el fragmento divide S/Q a mano; espacio 2 (homogeneo): la GPU ya interpola UV con correccion de perspectiva */
+    state.texture_perspective = screen_space == 1 && (prim & PC_GIF_PRIM_FST) == 0;
     state.cull_backfaces = 0;
     if (blend && !state.immediate) {
         state.ot_z_valid = 1;
@@ -1891,10 +1892,78 @@ static void pcSubmitPrepared3D(unsigned long prim, const void* data, unsigned in
         kick[i] = (d[11] & 0x8000u) != 0;
     }
 
-    pcSubmitVertices(prim, vertices, kick, gs_z, count, mode, average_z, tex_width, tex_height, texture);
+    pcSubmitVertices(prim, vertices, kick, gs_z, count, mode, average_z, tex_width, tex_height, texture, 1);
 
 done:
     free(packed);
+    free(vertices);
+    free(kick);
+    free(gs_z);
+}
+
+/* Tiras 3D de los modelos (vu1DrawTriangleStrip*): registros VU1_PRIM_BUF de 12 floats que el juego ya dejo proyectados
+ * (S,T,Q, kick, RGBA, X,Y,Z, F). Esta ruta NO empaqueta GIF ni usa punto fijo 12.4 ni flags ADC de recorte ni poligonos de
+ * scissor: los vertices pasan como floats en pantalla homogenea (x*w, y*w, z*w, w con w = 1/Q) y la GPU recorta contra los
+ * planos cercano/lejano y los lados. Lo que el juego decide se conserva: el kick por cara trasera (ulKick, tiras Single), las
+ * politicas de OT y la profundidad de la GS (afin en Q, cuantizada a 16 bits en el fragmento). */
+static void pcSubmitStrip3D(unsigned long prim, const void* data, unsigned int count, const PcPrim3D* mode)
+{
+    const float* rec = (const float*)data;
+    PcNativeVertex* vertices;
+    unsigned char* kick;
+    float* gs_z;
+    unsigned int i, texture = pcRendererCurrentTexture();
+    float tex_width = 1.0f, tex_height = 1.0f, zsum = 0.0f;
+
+    if (rec == NULL || count < 3 || count > 16384)
+        return;
+    if ((prim & PC_GIF_PRIM_TME) && texture == 0)
+        return;
+
+    vertices = (PcNativeVertex*)malloc((size_t)count * sizeof(*vertices));
+    kick = (unsigned char*)malloc(count);
+    gs_z = (float*)malloc((size_t)count * sizeof(*gs_z));
+    if (vertices == NULL || kick == NULL || gs_z == NULL)
+        goto done;
+
+    pcRendererCurrentTextureSize(&tex_width, &tex_height);
+    {
+        static unsigned int strips;
+        if (strips++ < 3 || strips % 20000 == 0)
+            pcLog("tiras 3D nativas (homogeneas): #%u n=%u prim=0x%x q0=%.5f xy0=(%.1f,%.1f)", strips, count,
+                  (unsigned)(prim >> 47), rec[2], rec[8], rec[9]);
+    }
+
+    for (i = 0; i < count; i++, rec += 12) {
+        uint32_t flags;
+        float q = rec[2], sz, zc;
+
+        memcpy(&flags, &rec[3], sizeof(flags));
+        if (q > -1e-9f && q < 1e-9f)
+            q = 1e-9f;                                  /* w = 1/q finita */
+
+        sz = -Ps2_zbuff_a + q * -Ps2_zbuff_b;           /* Z de la GS: afin en Q, por eso el recorte homogeneo es exacto */
+        zc = sz < 0.0f ? 0.0f : sz > 65534.0f ? 65534.0f : sz;
+        gs_z[i] = zc;
+        zsum += zc;
+
+        vertices[i].x = rec[8] - 1728.0f;
+        vertices[i].y = rec[9] - 1808.0f;
+        vertices[i].z = 1.0f - sz / 65535.0f;           /* sin recortar: la GPU lo recorta */
+        vertices[i].q = q;
+        vertices[i].u = rec[0] / q * tex_width;         /* S = U*Q: con la interpolacion de la GPU ya no se divide por Q */
+        vertices[i].v = rec[1] / q * tex_height;
+        vertices[i].r = fminf(fmaxf(rec[4] / 255.0f, 0.0f), 1.0f);
+        vertices[i].g = fminf(fmaxf(rec[5] / 255.0f, 0.0f), 1.0f);
+        vertices[i].b = fminf(fmaxf(rec[6] / 255.0f, 0.0f), 1.0f);
+        vertices[i].a = fminf(fmaxf(rec[7] / 128.0f, 0.0f), 1.0f);
+        vertices[i].fog = fminf(fmaxf(rec[11] / 255.0f, 0.0f), 1.0f);
+        kick[i] = (flags & 0x8000u) != 0;
+    }
+
+    pcSubmitVertices(prim, vertices, kick, gs_z, count, mode, zsum / (float)count, tex_width, tex_height, texture, 2);
+
+done:
     free(vertices);
     free(kick);
     free(gs_z);
@@ -1986,7 +2055,7 @@ static void pcVu1GifPacket(const unsigned int* q, unsigned int max_qwords)
                           nv ? vertices[0].x : 0.0f, nv ? vertices[0].y : 0.0f, nv ? gs_z[0] : 0.0f, nv ? kick[0] : 0);
             }
             if (nv == nloop && !((prim & PC_GIF_PRIM_TME) && texture == 0))
-                pcSubmitVertices(prim, vertices, kick, gs_z, nv, &mode, zsum / (float)nv, tex_width, tex_height, texture);
+                pcSubmitVertices(prim, vertices, kick, gs_z, nv, &mode, zsum / (float)nv, tex_width, tex_height, texture, 1);
         }
         free(vertices);
         free(kick);
@@ -2247,7 +2316,7 @@ void Ps2AddPrim3DEx(unsigned long prim, void* dp, unsigned int num)
 #ifdef TARGET_PC
     {
         PcPrim3D mode = { 1, 0, PC_OT_AVERAGE, 0.0f };
-        pcSubmitPrepared3D(prim, dp, num, &mode);
+        pcSubmitStrip3D(prim, dp, num, &mode);
         return;
     }
 #endif
@@ -2440,7 +2509,7 @@ void Ps2AddPrim3DEx1P(unsigned long prim, void* dp, unsigned int num)
 #ifdef TARGET_PC
     {
         PcPrim3D mode = { 1, 0, (Ps2_albinoid_flag == 0) ? PC_OT_FIXED : PC_OT_IMMEDIATE, Ps2AddPrimPrio };
-        pcSubmitPrepared3D(prim, dp, num, &mode);
+        pcSubmitStrip3D(prim, dp, num, &mode);
         return;
     }
 #endif
@@ -4276,7 +4345,7 @@ void Ps2AddPrim3DExI(unsigned long prim, void* dp, unsigned int num)
 #ifdef TARGET_PC
     {
         PcPrim3D mode = { 1, 0, PC_OT_PER_TRIANGLE, 0.0f };
-        pcSubmitPrepared3D(prim, dp, num, &mode);
+        pcSubmitStrip3D(prim, dp, num, &mode);
         return;
     }
 #endif

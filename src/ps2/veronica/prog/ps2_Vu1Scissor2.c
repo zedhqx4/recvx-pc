@@ -123,6 +123,11 @@ unsigned int _Clip_ViewVolume2(NJS_POINT4* vec)
     ret = 0;
     
 #ifdef TARGET_PC
+    /* PC: sin recorte por VU0 (lo hace la GPU); ahorra una llamada al microcodigo por vertice */
+    (void)vec;
+    return ret;
+#endif
+#ifdef TARGET_PC
     {
         PcGpr g_op0 = { 0 };
         PcGpr g_zero = { 0 };
