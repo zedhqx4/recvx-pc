@@ -296,3 +296,9 @@ Objetivo: quitar capas de compatibilidad PS2 (GS/VU1/VU0/EE/GIF) donde no aporta
   correcta, FGE/global bien), plano lejano (toda la escena tiene profundidad GL 0.93..0.992, nada se satura). PENDIENTE: la mezcla alfa de la GS
   (`(A-B)*C>>7 + D`, floor) sigue siendo mezcla fija en flotante de GL (redondeo al mas cercano): candidato a las barras de cinematicas que no son
   100 % negras; falta un F8 de una cinematica con barras para ver su alfa/ecuacion.
+
+- **0.9.132**: `RECVX_GS_INT=0` desactiva la aritmetica entera de la GS (0.9.131) para comparar A/B contra la GS sin recompilar (log: 'aritmetica entera de la GS').
+  Barras de cinematicas (log ff7ba64a): 4 draws negros, SRC_ALPHA/ONE_MINUS_SRC_ALPHA, Cs=0, alfa 0.95 (frame 1378) -> 0.99 (frame 1420): hacen fade-in,
+  no estan fijas en 1.0. Con As=127/128 la GS da `Cd + ((0-Cd)*127 >> 7)` = floor(Cd/128) (0 para Cd<128) y GL redondea Cd*(1/128) al mas cercano
+  (hasta 2 de 255): fuga <=1-2 LSB por el truncado de la mezcla alfa, que GL no puede hacer en funcion fija. Opciones: mezcla en shader leyendo el destino
+  (copia del framebuffer, costosa) o dejarlo.
