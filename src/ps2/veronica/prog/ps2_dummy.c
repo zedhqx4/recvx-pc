@@ -1914,6 +1914,7 @@ static void pcSubmitStrip3D(unsigned long prim, const void* data, unsigned int c
     float* gs_z;
     unsigned int i, texture = pcRendererCurrentTexture();
     float tex_width = 1.0f, tex_height = 1.0f, zsum = 0.0f;
+    unsigned int clip_hist = 0;
 
     if (rec == NULL || count < 3 || count > 16384)
         return;
@@ -1939,6 +1940,23 @@ static void pcSubmitStrip3D(unsigned long prim, const void* data, unsigned int c
         float q = rec[2], sz, zc;
 
         memcpy(&flags, &rec[3], sizeof(flags));
+        /* Filtro de recorte del VU0 original (pcPs2Prim3DCore): un vertice fuera de la ventana de 4096 (+-2047 alrededor de
+         * 2048) o del rango Z marca ADC (no dispara triangulo) y el juego dibuja en su lugar los poligonos de scissor. El
+         * historial de 6 bits por vertice abarca los 3 ultimos: cualquier vertice fuera descarta el triangulo entero. Sin
+         * esto el triangulo original se dibuja ademas del recortado (0.9.123: escaleras de la pantalla de carga rotas). */
+        {
+            const float cx = rec[8] - 2048.0f, cy = rec[9] - 2048.0f, cz = (rec[10] + -2048.0625f) + rec[10] * 0.062501907f;
+            unsigned int f = 0;
+            if (cx > 2047.0f) f |= 0x01;
+            if (cx < -2047.0f) f |= 0x02;
+            if (cy > 2047.0f) f |= 0x04;
+            if (cy < -2047.0f) f |= 0x08;
+            if (cz > 2047.0f) f |= 0x10;
+            if (cz < -2047.0f) f |= 0x20;
+            clip_hist = ((clip_hist << 6) | f) & 0xFFFFFFu;
+            if (clip_hist & 0x3FFFFu)
+                flags |= 0x8000u;
+        }
         if (q > -1e-9f && q < 1e-9f)
             q = 1e-9f;                                  /* w = 1/q finita */
 

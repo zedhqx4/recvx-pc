@@ -258,3 +258,7 @@ Objetivo: quitar capas de compatibilidad PS2 (GS/VU1/VU0/EE/GIF) donde no aporta
 - **Pendiente**: color (VU0_CALC_COLOR / pColorCalcFuncTbl: ojo, las 11 funciones EE y los programas VU0 difieren en modos 5, 7, 8 y 10),
   CALCPOINT (transformacion de vertices en VU0), el resto de Ps2AddPrim* (2D, NaGraphics3D) y retirar la VU1 emulada (vu1_micro.c, pc_vif1.c)
   cuando se verifique la ruta nativa.
+
+- **0.9.125**: causa real de las escaleras de la carga: `pcSubmitStrip3D` omitio el filtro ADC del empaquetador original (`pcPs2Prim3DCore`:
+  vertice fuera de ventana 4096 / rango Z => triangulo descartado, el juego dibuja los poligonos de scissor). Reproducido exacto en la ruta nativa.
+  La 0.9.121 funcionaba porque tenia la VU1 por defecto; la ruta EE/OT (TransDouble) siempre uso este filtro.
