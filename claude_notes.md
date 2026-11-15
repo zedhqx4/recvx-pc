@@ -278,3 +278,7 @@ Objetivo: quitar capas de compatibilidad PS2 (GS/VU1/VU0/EE/GIF) donde no aporta
 - **0.9.129**: diagnostico `pcPrimDiag` (ps2_dummy.c): en los 2 primeros frames de la rafaga F8 (pcRendererBurstDiag) loguea cada llamada de
   Ps2AddPrim3D / Ps2AddPrim3DMod / Ps2AddPrim(2D) con PRIM decodificado (tipo, TME, ABE, FGE, FST) y los 4 primeros vertices crudos
   (stq, color, xyz, F). Sirve para identificar quien emite las particulas (palitos, sangre, llamas) y que niebla llega.
+
+- **PENDIENTE (niebla, distinto de las particulas)**: en GL la niebla deja ver geometria lejana que en la GS queda tapada ("le falta thickness").
+  No es brillo ni opacidad de efectos. Revisado: njCalcFogPower/Ex, copia de fFog a las tiras (rec[11]) y la mezcla del shader coinciden con la
+  GS; falta comparar valores de F por vertice y FOGCOL con los de la GS (el diagnostico 0.9.129 imprime F). Dejado para despues.
