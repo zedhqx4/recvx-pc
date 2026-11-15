@@ -98,6 +98,8 @@ typedef ptrdiff_t GLintptr;
     X(void, glGetProgramiv, (GLuint p, GLenum n, GLint* v)) \
     X(void, glGetProgramInfoLog, (GLuint p, GLsizei max, GLsizei* len, GLchar* log)) \
     X(void, glUseProgram, (GLuint p)) \
+    X(void, glDeleteProgram, (GLuint p)) \
+    X(void, glDeleteShader, (GLuint s)) \
     X(GLint, glGetUniformLocation, (GLuint p, const GLchar* name)) \
     X(void, glUniform1i, (GLint l, GLint v)) \
     X(void, glUniform1f, (GLint l, GLfloat v)) \
@@ -163,6 +165,8 @@ PC_GL_FUNCS(PC_GL_DECLARE)
 #define glGetProgramiv pc_glGetProgramiv
 #define glGetProgramInfoLog pc_glGetProgramInfoLog
 #define glUseProgram pc_glUseProgram
+#define glDeleteProgram pc_glDeleteProgram
+#define glDeleteShader pc_glDeleteShader
 #define glGetUniformLocation pc_glGetUniformLocation
 #define glUniform1i pc_glUniform1i
 #define glUniform1f pc_glUniform1f
