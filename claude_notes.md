@@ -252,7 +252,9 @@ Objetivo: quitar capas de compatibilidad PS2 (GS/VU1/VU0/EE/GIF) donde no aporta
   floats al renderer en pantalla homogenea (`screen_space = 2`, w = 1/Q): la GPU recorta cercano/lejano/lados; Z = Z16 de la GS (afin en Q);
   color y niebla `noperspective` (la GS los interpola lineal en pantalla), UV con perspectiva de la GPU.
 - Se conserva (comportamiento del juego): kick por cara trasera (`ulKick`, Single), politicas de OT (promedio / por triangulo / fija).
-- `_Check_DisplayAreaPoint` devuelve 0 y `_Clip_ViewVolume2` no hace nada en PC: el recorte ya no genera kicks ni scissors.
+- **REVERTIDO en 0.9.124**: `_Check_DisplayAreaPoint` y `_Clip_ViewVolume2` vuelven al original (iguales a 0.9.116). Desactivarlos rompio las
+  escaleras de la pantalla de carga (mitad inferior cortada, tambien con RECVX_VU1=1): los poligonos que cruzan borde/plano cercano se
+  descartaban en vez de recortarse. Hasta entender por que el recorte homogeneo no los cubre, el scissor del juego sigue activo.
 - **Pendiente**: color (VU0_CALC_COLOR / pColorCalcFuncTbl: ojo, las 11 funciones EE y los programas VU0 difieren en modos 5, 7, 8 y 10),
   CALCPOINT (transformacion de vertices en VU0), el resto de Ps2AddPrim* (2D, NaGraphics3D) y retirar la VU1 emulada (vu1_micro.c, pc_vif1.c)
   cuando se verifique la ruta nativa.

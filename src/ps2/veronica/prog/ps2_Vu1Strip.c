@@ -1390,12 +1390,6 @@ void ScissorTriangle(SCISSOR* scissor, SCISSOR_PLANE* plane_set)
 // 100% matching!
 int _Check_DisplayAreaPoint(NJS_VECTOR* vec)
 {
-#ifdef TARGET_PC
-    /* PC: el recorte contra la ventana de 4096 y el plano cercano/lejano lo hace la GPU (pcSubmitStrip3D, coordenadas
-     * homogeneas): nunca hace falta el scissor por poligonos de la VU1. */
-    (void)vec;
-    return 0;
-#endif
     if (((vec->x >= 1.0f) && (vec->x < 4095.0f)) && ((vec->y >= 1.0f) && (vec->y < 4095.0f)) && ((vec->z >= 1.0f) && (vec->z < 65535.0f))) 
     {
         return 0;
