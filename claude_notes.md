@@ -274,3 +274,7 @@ Objetivo: quitar capas de compatibilidad PS2 (GS/VU1/VU0/EE/GIF) donde no aporta
   triangulos': vertices de particulas distintas se mezclaban (los 'palitos' de la tierra, la sangre al recibir dano). Ahora cada par es un
   rectangulo alineado (2 triangulos) con color/Z/niebla del 2o vertice y UV de esquina a esquina, como la GS. Origen: njPtclDrawPolygon/Sprite
   (prim 0x13/0x33/0x1B/0x3B -> tipo 6) via Ps2AddPrim3D.
+
+- **0.9.129**: diagnostico `pcPrimDiag` (ps2_dummy.c): en los 2 primeros frames de la rafaga F8 (pcRendererBurstDiag) loguea cada llamada de
+  Ps2AddPrim3D / Ps2AddPrim3DMod / Ps2AddPrim(2D) con PRIM decodificado (tipo, TME, ABE, FGE, FST) y los 4 primeros vertices crudos
+  (stq, color, xyz, F). Sirve para identificar quien emite las particulas (palitos, sangre, llamas) y que niebla llega.

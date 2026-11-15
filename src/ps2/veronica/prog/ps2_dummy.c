@@ -1195,6 +1195,32 @@ static void pcPrimLog(const char* what, unsigned long prim, unsigned int num)
     if (what == NULL) { if ((calls++ % 300) < 6) pcLog("Ps2AddPrim: prim=%08x%08x num=%u tex=%s", hi, lo, num, Ps2_now_tex ? "set" : "NULL"); }
     else if (drops++ < 40) pcLog("Ps2AddPrim DROP (%s): prim=%08x%08x num=%u", what, hi, lo, num);
 }
+
+/* Diagnostico (solo en los 2 primeros frames de la rafaga F8): cada llamada de dibujo 3D/2D con su PRIM decodificado y los
+ * primeros vertices CRUDOS tal como los dejo el juego (3 qwords por vertice: S,T,Q,flags / RGBA / X,Y,Z,F). Sirve para
+ * saber QUIEN emite una primitiva (los vertices y la PRIM delatan al llamador) y comprobar el tipo (6 = sprite: 2 vertices por
+ * rectangulo), el numero de vertices, la textura y la niebla (F, ultima palabra) que llega al renderer. */
+static void pcPrimDiag(const char* who, unsigned long prim, const void* dp, unsigned int num)
+{
+    extern int pcRendererBurstDiag(void);
+    static unsigned int lines;
+    const float* v = (const float*)dp;
+    unsigned int i, n = num < 4 ? num : 4;
+
+    if (!pcRendererBurstDiag()) { lines = 0; return; }
+    if (lines++ >= 220 || dp == NULL)
+        return;
+    pcLog("P3D %s: prim=%08x%08x type=%u TME=%u ABE=%u FGE=%u FST=%u IIP=%u num=%u tex=%s", who,
+          (unsigned int)(prim >> 32), (unsigned int)prim, (unsigned int)((prim >> 47) & 7u), (unsigned int)((prim >> 51) & 1u),
+          (unsigned int)((prim >> 53) & 1u), (unsigned int)((prim >> 52) & 1u), (unsigned int)((prim >> 55) & 1u),
+          (unsigned int)((prim >> 50) & 1u), num, Ps2_now_tex ? "set" : "NULL");
+    for (i = 0; i < n; i++, v += 12) {
+        unsigned int c[4];
+        memcpy(c, v + 4, sizeof(c));
+        pcLog("    v%u: stq=(%.4f %.4f %.4f) col=%08x %08x %08x %08x  xyz=(%.1f %.1f %.1f) F=%.1f", i, v[0], v[1], v[2],
+              c[0], c[1], c[2], c[3], v[8], v[9], v[10], v[11]);
+    }
+}
 #endif
 
 #ifdef TARGET_PC
@@ -1398,6 +1424,7 @@ void Ps2AddPrim(unsigned long prim, void* dp, unsigned int num, unsigned int cli
         float texture_width = 1.0f, texture_height = 1.0f;
         float use_last_pri = ((const float*)dp)[(size_t)(count > 0 ? count - 1 : 0) * 12u + 10u];
 
+        pcPrimDiag("Ps2AddPrim(2D)", prim, dp, num);
         if (count < 1 || count > 16384)
             { pcPrimLog("bad count", prim, num); return; }
         if (textured && (Ps2_now_tex == NULL))
@@ -2173,6 +2200,7 @@ void Ps2AddPrim3D(unsigned long prim, void* dp, unsigned int num)
 #ifdef TARGET_PC
     {
         PcPrim3D mode = { 0, 0, PC_OT_AVERAGE, 0.0f };
+        pcPrimDiag("Ps2AddPrim3D", prim, dp, num);
         pcSubmitPrepared3D(prim, dp, num, &mode);
         return;
     }
@@ -2702,6 +2730,7 @@ void Ps2AddPrim3DMod(unsigned long prim, void* dp, unsigned int num)
 #ifdef TARGET_PC
     {
         PcPrim3D mode = { 1, 1, PC_OT_IMMEDIATE, 0.0f };
+        pcPrimDiag("Ps2AddPrim3DMod", prim, dp, num);
         pcSubmitPrepared3D(prim, dp, num, &mode);
         return;
     }
