@@ -1475,6 +1475,107 @@ static void debug_dump_frame(void)
     free(px);
 }
 
+/* Motion blur (recvx.ini: motion_blur=1, motion_blur_strength=0..90, por defecto 50): mezcla cada imagen con la anterior YA mezclada
+ * (acumulacion temporal, estela exponencial) en la etapa de presentado, despues de la escena y los overlays. No toca el Z, la niebla ni
+ * la aritmetica de la GS: solo lo que se ve en la ventana (las capturas F8 salen sin desenfoque). Para que los cortes de camara no
+ * dejen fantasma, el peso de la imagen anterior cae a 0 donde la diferencia con la actual es enorme (> ~0.5-0.9). */
+extern int pcIniGetInt(const char* key, int def);
+static GLuint blur_program, blur_vao, blur_tex[2], blur_fbo[2];
+static int blur_w, blur_h, blur_history, blur_valid, blur_enabled = -1, blur_strength = 50;
+
+static int blur_prepare(void)
+{
+    static const char* vs_src =
+        "#version 330 core\nout vec2 vUv;\n"
+        "void main(){ vec2 p=vec2(float((gl_VertexID<<1)&2),float(gl_VertexID&2)); vUv=p; gl_Position=vec4(p*2.0-1.0,0.0,1.0); }\n";
+    static const char* fs_src =
+        "#version 330 core\nin vec2 vUv; uniform sampler2D uCur; uniform sampler2D uHist; uniform float uK; out vec4 o;\n"
+        "void main(){ vec3 c=texture(uCur,vUv).rgb; vec3 h=texture(uHist,vUv).rgb; vec3 d=abs(c-h);\n"
+        "  float k=uK*(1.0-smoothstep(0.5,0.9,max(d.r,max(d.g,d.b)))); o=vec4(mix(c,h,k),1.0); }\n";
+    int i;
+    if (!blur_program) {
+        GLuint vs = compile_shader(GL_VERTEX_SHADER, vs_src), fs = compile_shader(GL_FRAGMENT_SHADER, fs_src);
+        GLint ok = 0;
+        if (!vs || !fs) return 0;
+        blur_program = glCreateProgram();
+        glAttachShader(blur_program, vs);
+        glAttachShader(blur_program, fs);
+        glLinkProgram(blur_program);
+        glGetProgramiv(blur_program, GL_LINK_STATUS, &ok);
+        glDeleteShader(vs);
+        glDeleteShader(fs);
+        if (!ok) { glDeleteProgram(blur_program); blur_program = 0; pcLog("native renderer: motion blur: link failed"); return 0; }
+        glUseProgram(blur_program);
+        glUniform1i(glGetUniformLocation(blur_program, "uCur"), 0);
+        glUniform1i(glGetUniformLocation(blur_program, "uHist"), 1);
+        glGenVertexArrays(1, &blur_vao);
+    }
+    if (blur_w != render_width || blur_h != render_height) {
+        if (blur_fbo[0]) glDeleteFramebuffers(2, blur_fbo);
+        if (blur_tex[0]) glDeleteTextures(2, blur_tex);
+        glGenTextures(2, blur_tex);
+        glGenFramebuffers(2, blur_fbo);
+        for (i = 0; i < 2; i++) {
+            glBindTexture(GL_TEXTURE_2D, blur_tex[i]);
+            glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, render_width, render_height, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+            glBindFramebuffer(GL_FRAMEBUFFER, blur_fbo[i]);
+            glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, blur_tex[i], 0);
+            if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
+                glBindFramebuffer(GL_FRAMEBUFFER, 0);
+                pcLog("native renderer: motion blur: framebuffer incomplete");
+                return 0;
+            }
+        }
+        blur_w = render_width;
+        blur_h = render_height;
+        blur_valid = 0;
+        blur_history = 0;
+    }
+    return 1;
+}
+
+/* Devuelve el framebuffer a leer en el presentado: el mezclado (y deja la mezcla como historia) o el de la escena. */
+static GLuint blur_apply(void)
+{
+    int out;
+    if (blur_enabled < 0) {
+        blur_enabled = pcIniGetInt("motion_blur", 0) != 0;
+        blur_strength = pcIniGetInt("motion_blur_strength", 50);
+        if (blur_strength < 0) blur_strength = 0;
+        if (blur_strength > 90) blur_strength = 90;
+        pcLog("native renderer: motion blur %s (intensidad %d%%)", blur_enabled ? "activo" : "desactivado", blur_strength);
+    }
+    if (!blur_enabled || !blur_prepare()) return framebuffer;
+
+    out = 1 - blur_history;
+    glBindFramebuffer(GL_FRAMEBUFFER, blur_fbo[out]);
+    glViewport(0, 0, render_width, render_height);
+    glDisable(GL_SCISSOR_TEST);
+    glDisable(GL_DEPTH_TEST);
+    glDisable(GL_BLEND);
+    glDisable(GL_CULL_FACE);
+    glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+    glUseProgram(blur_program);
+    glUniform1f(glGetUniformLocation(blur_program, "uK"), blur_valid ? (float)blur_strength / 100.0f : 0.0f);
+    glActiveTexture(GL_TEXTURE1);
+    glBindTexture(GL_TEXTURE_2D, blur_tex[blur_history]);
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, color_target);
+    glBindVertexArray(blur_vao);
+    glDrawArrays(GL_TRIANGLES, 0, 3);
+    glBindVertexArray(0);
+    glActiveTexture(GL_TEXTURE1);
+    glBindTexture(GL_TEXTURE_2D, 0);
+    glActiveTexture(GL_TEXTURE0);
+    blur_history = out;
+    blur_valid = 1;
+    return blur_fbo[out];
+}
+
 void pcRendererPresent(void)
 {
     /* Native GDI overlays are composed into the same framebuffer before the final blit. */
@@ -1563,13 +1664,15 @@ void pcRendererPresent(void)
     float aspect;
     if (ready) debug_dump_frame();
     int vw, vh, x, y;
+    GLuint present_source;
     if (!ready) return;
 
     window = SDL_GL_GetCurrentWindow();
     if (window) SDL_GetWindowSizeInPixels(window, &ww, &wh);
     if (ww <= 0 || wh <= 0) return;
 
-    glBindFramebuffer(GL_READ_FRAMEBUFFER, framebuffer);
+    present_source = blur_apply();
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, present_source);
     glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
     glDisable(GL_SCISSOR_TEST);
     glDisable(GL_DEPTH_TEST);

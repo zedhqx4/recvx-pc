@@ -302,3 +302,9 @@ Objetivo: quitar capas de compatibilidad PS2 (GS/VU1/VU0/EE/GIF) donde no aporta
   no estan fijas en 1.0. Con As=127/128 la GS da `Cd + ((0-Cd)*127 >> 7)` = floor(Cd/128) (0 para Cd<128) y GL redondea Cd*(1/128) al mas cercano
   (hasta 2 de 255): fuga <=1-2 LSB por el truncado de la mezcla alfa, que GL no puede hacer en funcion fija. Opciones: mezcla en shader leyendo el destino
   (copia del framebuffer, costosa) o dejarlo.
+
+- **0.9.133 (motion blur opcional)**: `motion_blur=1` en recvx.ini (casilla en recvx-config.exe) y `motion_blur_strength=0..90` (defecto 50). Acumulacion temporal en
+  `pcRendererPresent` (pc_renderer.c: blur_prepare/blur_apply): dos texturas RGBA8 ping-pong, salida = mix(actual, historia, k) con k=intensidad, y k cae a 0 donde
+  la diferencia con la historia es enorme (cortes de camara sin fantasma). Solo afecta lo que se ve en la ventana: el Z, la niebla, la aritmetica de la GS y las
+  capturas F8 quedan intactos. Limites conocidos: mezcla tambien la UI/menus (estela en texto que se mueve); como todo desenfoque por mezcla de frames, se nota
+  mas cuanto mayor sea la tasa de presentado respecto a la del juego. Un desenfoque real por velocidad (solo 3D) exigiria vectores de movimiento por vertice.
