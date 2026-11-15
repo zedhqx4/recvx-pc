@@ -266,3 +266,6 @@ Objetivo: quitar capas de compatibilidad PS2 (GS/VU1/VU0/EE/GIF) donde no aporta
 - **0.9.126**: la causa de las escaleras (confirmada en el log del usuario: draws con z=-0.27 que no aparecian): `pcSubmitStrip3D` usaba el Z sin
   fijar, asi que la GPU recortaba lo cercano al plano cercano. El original fija sz a 0..65534 por vertice (aplasta, no recorta). Ahora
   usa `pcRendererDepthFromGsZ(zc)`, igual que `pcSubmitPrepared3D`. Nota: la premisa 'recorte homogeneo de Z exacto' era falsa por ese fijado.
+
+- **0.9.127**: niebla en `pcSubmitPrepared3D` para todas las rutas (antes fog=1.0 salvo color flotante: Ps2AddPrim3D -> particulas njPtcl*,
+  NaDraw, NaGraphics3D no recibian niebla aunque PRIM.FGE estuviera activo). Es lo que se ve como motas blancas brillantes en niebla.

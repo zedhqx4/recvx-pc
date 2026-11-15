@@ -1888,7 +1888,10 @@ static void pcSubmitPrepared3D(unsigned long prim, const void* data, unsigned in
         vertices[i].u = source[0] * tex_width;   /* ST normalizado -> texels */
         vertices[i].v = source[1] * tex_height;
         vertices[i].q = source[2];
-        vertices[i].fog = mode->floating_color ? fminf(fmaxf(source[11] / 255.0f, 0.0f), 1.0f) : 1.0f;
+        /* F de la GS: todos los llamadores (particulas njPtcl*, NaDraw, NaGraphics3D...) dejan scr.fog (0..255) en el .w del
+         * 3er qword y el empaquetador original lo mete en XYZF2.F (bits 4..11). Antes solo se leia con color flotante y el
+         * resto quedaba en 1.0 (sin niebla): las particulas con PRIM.FGE no se perdian en la niebla. */
+        vertices[i].fog = fminf(fmaxf(source[11] / 255.0f, 0.0f), 1.0f);
         kick[i] = (d[11] & 0x8000u) != 0;
     }
 
