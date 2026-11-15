@@ -167,7 +167,7 @@ static const char* fragment_shader =
     "  if(uAlphaTest!=0 && c.a<uAlphaRef)discard;\n"
     "  if(uAlphaPass==1 && c.a<0.99609375)discard;\n"   /* alfa entero >= 128 (con medio escalon de margen) */
     "  if(uAlphaPass==2 && c.a>=0.99609375)discard;\n"
-    "  if(uFogEnabled!=0)c.rgb=mix(uFogColor,c.rgb,clamp(vFog,0.0,1.0));\n"
+    "  if(uFogEnabled!=0)c.rgb=mix(uFogColor,clamp(c.rgb,0.0,1.0),clamp(vFog,0.0,1.0));\n"   /* la GS satura Cs antes de la niebla */
     "  oColor=c;\n"
     /* El Z-buffer de la GS es PSMZ16 (ZBUF_1 = PSMCT16S/Z16): el Z interpolado se guarda entero de 16 bits (sz = 0..65535). Dos
      * superficies casi coplanares dan el MISMO Z y gana la dibujada despues (ZTST=GEQUAL). Con la profundidad de 24 bits de GL
@@ -731,6 +731,13 @@ static void draw_immediate(const PcNativeVertex* vertices, int count, const PcNa
               last->x, last->y, vertices[0].u, vertices[0].v, last->u, last->v,
               vertices[0].r, vertices[0].g, vertices[0].b, vertices[0].a,
               (unsigned)gs_blend.equation, (unsigned)gs_blend.src, (unsigned)gs_blend.dst, gs_blend.fix);
+        {   /* diagnostico de niebla: FGE del draw, niebla global y rango de F de sus vertices (255 = sin niebla, 0 = FOGCOL) */
+            float fmin = 1.0f, fmax = 0.0f;
+            int k;
+            for (k = 0; k < count; k++) { if (vertices[k].fog < fmin) fmin = vertices[k].fog; if (vertices[k].fog > fmax) fmax = vertices[k].fog; }
+            pcLog("      fog: fge=%d global=%d color=(%.2f,%.2f,%.2f) F=[%.0f..%.0f]", state->fog, global_fog_enabled, global_fog_color[0],
+                  global_fog_color[1], global_fog_color[2], fmin * 255.0f, fmax * 255.0f);
+        }
         if (burst_remaining > 0 && !state->textured && count == 15 && burst_index < 2) {   /* diagnostico: tiras sin textura de 5 triangulos */
             static int dumped_strips;
             int k;

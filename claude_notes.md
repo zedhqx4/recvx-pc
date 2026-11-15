@@ -282,3 +282,9 @@ Objetivo: quitar capas de compatibilidad PS2 (GS/VU1/VU0/EE/GIF) donde no aporta
 - **PENDIENTE (niebla, distinto de las particulas)**: en GL la niebla deja ver geometria lejana que en la GS queda tapada ("le falta thickness").
   No es brillo ni opacidad de efectos. Revisado: njCalcFogPower/Ex, copia de fFog a las tiras (rec[11]) y la mezcla del shader coinciden con la
   GS; falta comparar valores de F por vertice y FOGCOL con los de la GS (el diagnostico 0.9.129 imprime F). Dejado para despues.
+
+- **0.9.130 (niebla)**: verificado en x86 que njGenerateFogTable3 + njCalcFogPower dan niebla lineal entre near y far (F=255 a near, 0 a far; difiere
+  <1 de la formula lineal): la matematica del juego NO es la causa. Shader: la GS satura Cs (0..255) tras la funcion de textura y ANTES de la niebla;
+  ahora tambien (antes Cs hasta 2.0 con vertice sobreexpuesto entraba sin saturar). Diagnosticos en la rafaga F8: `FOGDIAG` (estado, color, near/far,
+  densidad y F a 12 distancias), linea `fog:` por draw (FGE, niebla global, color, rango de F de sus vertices) y `tiras ADC` (vertices fuera por
+  z lejano / z cercano / xy). Hipotesis abierta: la GS no dibuja lo que pasa del plano lejano (ADC por z) y GL lo dibuja con FOGCOL.

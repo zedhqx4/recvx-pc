@@ -283,3 +283,20 @@ float njCalcFogPower(float fVSZ)
     
     return ret;
 }
+
+#ifdef TARGET_PC
+/* Diagnostico de niebla (rafaga F8, ver pcPrimDiag): estado del juego y la tabla muestreada. F = 255 sin niebla, 0 = todo FOGCOL.
+ * La tabla se indexa por vista-z (njCalcFogPower): se imprime F a varias distancias para compararlo con la GS. */
+extern void pcLog(const char* fmt, ...);
+void pcFogDiag(void)
+{
+    static const float zs[] = { 50.0f, 100.0f, 200.0f, 400.0f, 800.0f, 1200.0f, 1600.0f, 2400.0f, 3200.0f, 4800.0f, 6400.0f, 12800.0f };
+    unsigned int i;
+
+    pcLog("FOGDIAG estado=%u color=(%u,%u,%u) near=%.1f far=%.1f densidad=%.2f tabla[0]=%.2f tabla[64]=%.2f tabla[127]=%.2f",
+          ulNaFogState, ulNaFogR, ulNaFogG, ulNaFogB, fNaFogNear, fNaFogFar, fNaFogDensity, fNaFogTbl[0], fNaFogTbl[64], fNaFogTbl[127]);
+    for (i = 0; i < sizeof(zs) / sizeof(zs[0]); i++)
+        pcLog("FOGDIAG   z=%.0f -> F(njCalcFogPower)=%.2f  F(njCalcFogPowerEx 1/z)=%.2f", zs[i], njCalcFogPower(zs[i]),
+              njCalcFogPowerEx(1.0f / zs[i]));
+}
+#endif

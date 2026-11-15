@@ -1208,6 +1208,10 @@ static void pcPrimDiag(const char* who, unsigned long prim, const void* dp, unsi
     unsigned int i, n = num < 4 ? num : 4;
 
     if (!pcRendererBurstDiag()) { lines = 0; return; }
+    if (lines == 0) {
+        extern void pcFogDiag(void);
+        pcFogDiag();
+    }
     if (lines++ >= 220 || dp == NULL)
         return;
     pcLog("P3D %s: prim=%08x%08x type=%u TME=%u ABE=%u FGE=%u FST=%u IIP=%u num=%u tex=%s", who,
@@ -2002,6 +2006,17 @@ static void pcSubmitStrip3D(unsigned long prim, const void* data, unsigned int c
             clip_hist = ((clip_hist << 6) | f) & 0xFFFFFFu;
             if (clip_hist & 0x3FFFFu)
                 flags |= 0x8000u;
+            if (f) {   /* diagnostico: por que lados se sale el vertice (ver "tiras ADC" en la rafaga) */
+                static unsigned int n_out, n_far, n_near, n_xy, n_total;
+                extern int pcRendererBurstDiag(void);
+                n_out++;
+                if (f & 0x10) n_far++;
+                if (f & 0x20) n_near++;
+                if (f & 0x0F) n_xy++;
+                if (pcRendererBurstDiag() && (n_out % 64) == 1)
+                    pcLog("tiras ADC: fuera=%u (z lejano=%u z cercano=%u xy=%u) ultimo cz=%.1f z=%.1f", n_out, n_far, n_near, n_xy, cz, rec[10]);
+                (void)n_total;
+            }
         }
         if (q > -1e-9f && q < 1e-9f)
             q = 1e-9f;                                  /* w = 1/q finita */
