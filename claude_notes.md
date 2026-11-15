@@ -288,3 +288,11 @@ Objetivo: quitar capas de compatibilidad PS2 (GS/VU1/VU0/EE/GIF) donde no aporta
   ahora tambien (antes Cs hasta 2.0 con vertice sobreexpuesto entraba sin saturar). Diagnosticos en la rafaga F8: `FOGDIAG` (estado, color, near/far,
   densidad y F a 12 distancias), linea `fog:` por draw (FGE, niebla global, color, rango de F de sus vertices) y `tiras ADC` (vertices fuera por
   z lejano / z cercano / xy). Hipotesis abierta: la GS no dibuja lo que pasa del plano lejano (ADC por z) y GL lo dibuja con FOGCOL.
+
+- **0.9.131 (aritmetica entera de la GS en el shader)**: medido en las capturas de la escena de los barriles: la region totalmente nublada es (17,17,27)
+  en el 100 % de los pixeles de la GS y (17,17,27)/(18,18,28) 58/41 % en GL; FOGCOL=(18,18,28) -> la GS hace `(F*Cs + (255-F)*FOGCOL) >> 8` con enteros
+  (F=0 -> floor(255*18/256)=17; con F=255 resta 1). Ahora el shader reproduce en enteros de 8 bits: MODULATE `min((Ct*Cv)>>7, 255)` y la niebla
+  `(F*Cs+(255-F)*FOGCOL)>>8`. Descartado con el log 0.9.130: densidad/estado de niebla (FOGDIAG coincide con la tabla del juego, F por vertice
+  correcta, FGE/global bien), plano lejano (toda la escena tiene profundidad GL 0.93..0.992, nada se satura). PENDIENTE: la mezcla alfa de la GS
+  (`(A-B)*C>>7 + D`, floor) sigue siendo mezcla fija en flotante de GL (redondeo al mas cercano): candidato a las barras de cinematicas que no son
+  100 % negras; falta un F8 de una cinematica con barras para ver su alfa/ecuacion.
