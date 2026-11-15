@@ -1967,7 +1967,10 @@ static void pcSubmitStrip3D(unsigned long prim, const void* data, unsigned int c
 
         vertices[i].x = rec[8] - 1728.0f;
         vertices[i].y = rec[9] - 1808.0f;
-        vertices[i].z = 1.0f - sz / 65535.0f;           /* sin recortar: la GPU lo recorta */
+        /* Z de la GS con el MISMO fijado por vertice que el empaquetador original (0..65534): lo que quedaba mas cerca que el
+         * plano cercano se dibujaba aplastado contra el, no recortado. Con el Z sin fijar (0.9.123-125) la GPU recortaba la
+         * geometria cercana: escaleras de la pantalla de carga (z = -0.27) desaparecian. */
+        vertices[i].z = pcRendererDepthFromGsZ(zc);
         vertices[i].q = q;
         vertices[i].u = rec[0] / q * tex_width;         /* S = U*Q: con la interpolacion de la GPU ya no se divide por Q */
         vertices[i].v = rec[1] / q * tex_height;

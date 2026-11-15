@@ -262,3 +262,7 @@ Objetivo: quitar capas de compatibilidad PS2 (GS/VU1/VU0/EE/GIF) donde no aporta
 - **0.9.125**: causa real de las escaleras de la carga: `pcSubmitStrip3D` omitio el filtro ADC del empaquetador original (`pcPs2Prim3DCore`:
   vertice fuera de ventana 4096 / rango Z => triangulo descartado, el juego dibuja los poligonos de scissor). Reproducido exacto en la ruta nativa.
   La 0.9.121 funcionaba porque tenia la VU1 por defecto; la ruta EE/OT (TransDouble) siempre uso este filtro.
+
+- **0.9.126**: la causa de las escaleras (confirmada en el log del usuario: draws con z=-0.27 que no aparecian): `pcSubmitStrip3D` usaba el Z sin
+  fijar, asi que la GPU recortaba lo cercano al plano cercano. El original fija sz a 0..65534 por vertice (aplasta, no recorta). Ahora
+  usa `pcRendererDepthFromGsZ(zc)`, igual que `pcSubmitPrepared3D`. Nota: la premisa 'recorte homogeneo de Z exacto' era falsa por ese fijado.
