@@ -150,6 +150,8 @@ def import_record(record):
     obj["recvx_sprite"] = bool(sprite)
     obj["recvx_original_uv"] = json.dumps(source_original_uv)
     obj["recvx_original_vertex_count"] = source_count
+    obj["recvx_original_positions"] = json.dumps([list(v.co) for v in mesh.vertices])
+    obj["recvx_original_faces"] = json.dumps([list(poly.vertices) for poly in mesh.polygons])
     obj["recvx_texture_path"] = image_path or ""
     group_name = GROUP_PREFIX + "G%d_F%d" % (record["gindex"], record["pict_format"])
     group = bpy.data.groups.get(group_name)
@@ -189,10 +191,33 @@ def export_patch():
         if not mesh.uv_layers.active:
             print("RECVX: skip %s: no active UV layer" % obj.name)
             continue
+        sprite = bool(obj.get("recvx_sprite", False))
+        expected_positions = json.loads(obj["recvx_original_positions"])
+        expected_faces = json.loads(obj["recvx_original_faces"])
+        expected_mesh_vertices = 4 if sprite else int(obj["recvx_original_vertex_count"])
+        if len(mesh.vertices) != expected_mesh_vertices:
+            print("RECVX: skip %s: mesh vertex count changed" % obj.name)
+            continue
+        if [list(poly.vertices) for poly in mesh.polygons] != expected_faces:
+            print("RECVX: skip %s: mesh topology changed" % obj.name)
+            continue
+        geometry_changed = False
+        for index, vertex in enumerate(mesh.vertices):
+            original_position = expected_positions[index]
+            if any(abs(vertex.co[axis] - original_position[axis]) > 1.0e-5 for axis in range(3)):
+                geometry_changed = True
+                break
+        if geometry_changed:
+            print("RECVX: skip %s: vertex positions changed; only UV edits are allowed" % obj.name)
+            continue
+        if (any(abs(v) > 1.0e-6 for v in obj.location) or
+            any(abs(v) > 1.0e-6 for v in obj.rotation_euler) or
+            any(abs(obj.scale[i] - 1.0) > 1.0e-6 for i in range(3))):
+            print("RECVX: skip %s: object transform changed; only UV edits are allowed" % obj.name)
+            continue
         width = float(obj["recvx_texture_width"])
         height = float(obj["recvx_texture_height"])
         original = json.loads(obj["recvx_original_uv"])
-        sprite = bool(obj.get("recvx_sprite", False))
         by_source = {}
         conflict = False
 
