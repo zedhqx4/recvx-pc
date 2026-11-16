@@ -890,6 +890,66 @@ static int pause_until_active(void)
 static Uint64 last_mouse_move;
 
 /* RGB range debug controls are intentionally independent of the broader debug= option. */
+/* Independent from debug= and RGBRangedebug. Settings are written to recvx.ini on every change. */
+static int pc_image_adjustment_debug_enabled(void)
+{
+    static int enabled = -1;
+
+    if (enabled < 0) {
+        enabled = pcIniGetInt("image_adjustment_debug", 0) != 0;
+        pcLog("video: image adjustment hotkeys %s (image_adjustment_debug=%d; numpad 2/3 brightness, 5/6 contrast, 8/9 gamma)",
+              enabled ? "enabled" : "disabled", enabled);
+    }
+
+    return enabled;
+}
+
+/* True means the key event was consumed and must not reach the game. */
+static int pc_image_adjustment_debug_handle_event(const SDL_Event* ev)
+{
+    SDL_Scancode key;
+    int control = -1;
+    float delta = 0.0f;
+    float brightness, contrast, gamma;
+    char notice[160];
+
+    if (!pc_image_adjustment_debug_enabled())
+        return 0;
+
+    if (ev->type != SDL_EVENT_KEY_DOWN && ev->type != SDL_EVENT_KEY_UP)
+        return 0;
+
+    key = ev->key.scancode;
+    switch (key) {
+    case SDL_SCANCODE_KP_2: control = 0; delta = -0.02f; break;
+    case SDL_SCANCODE_KP_3: control = 0; delta =  0.02f; break;
+    case SDL_SCANCODE_KP_5: control = 1; delta = -0.05f; break;
+    case SDL_SCANCODE_KP_6: control = 1; delta =  0.05f; break;
+    case SDL_SCANCODE_KP_8: control = 2; delta = -0.05f; break;
+    case SDL_SCANCODE_KP_9: control = 2; delta =  0.05f; break;
+    default: return 0;
+    }
+
+    /* Consume both edges; one adjustment per press, never leak numpad input into the game. */
+    if (ev->type == SDL_EVENT_KEY_UP || ev->key.repeat)
+        return 1;
+
+    pcRendererGetImageAdjustments(&brightness, &contrast, &gamma);
+    if (control == 0) brightness += delta;
+    else if (control == 1) contrast += delta;
+    else gamma += delta;
+
+    if (pcRendererSetImageAdjustments(brightness, contrast, gamma)) {
+        snprintf(notice, sizeof(notice), "IMAGE BRI %+.2f  CON %.2f  GAM %.2f",
+                 brightness, contrast, gamma);
+        title_notice_show(notice);
+    } else {
+        title_notice_show("IMAGE ADJUSTMENT FAILED (see recvx.log)");
+    }
+
+    return 1;
+}
+
 static int pc_rgb_range_debug_enabled(void)
 {
     static int enabled = -1;
@@ -1120,6 +1180,13 @@ int pcVideoPumpEvents(void)
         {
             last_mouse_move = SDL_GetTicks();
             SDL_ShowCursor(SDL_ENABLE);
+        }
+
+        /* Image adjustment gets first refusal: numpad 2 is brightness when both debug modes are enabled.
+         * RGBRange mode 2 remains available through the main-row 2 key in that case. */
+        if (pc_image_adjustment_debug_handle_event(&ev))
+        {
+            continue;
         }
 
         /* RGB output range diagnostic: 0/1/2 select the presentation conversion while RGBRangedebug=1. */
