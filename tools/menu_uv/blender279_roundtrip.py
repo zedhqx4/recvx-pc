@@ -119,7 +119,8 @@ def import_record(record):
     obj = bpy.data.objects.new("UI_G%d_F%d_%s" % (record["gindex"], record["pict_format"], record["id"]), mesh)
     bpy.context.scene.objects.link(obj)
 
-    uv_layer = mesh.uv_layers.new("UVMap")
+    uv_layer = mesh.uv_layers.new()
+    uv_layer.name = "UVMap"
     for poly in mesh.polygons:
         for loop_index in poly.loop_indices:
             vertex_index = mesh.loops[loop_index].vertex_index
@@ -195,7 +196,7 @@ def export_patch():
             print("RECVX: skip %s: UV encoding changed since import" % obj.name)
             continue
         mesh = obj.data
-        if not mesh.uv_layers.active:
+        if mesh.uv_layers.active is None:
             print("RECVX: skip %s: no active UV layer" % obj.name)
             continue
         sprite = bool(obj.get("recvx_sprite", False))
@@ -317,9 +318,39 @@ def export_patch():
             stream.write(json.dumps(item, separators=(",", ":"), sort_keys=True) + "\n")
     print("RECVX: wrote %d UV-only records to %s" % (len(patch_records), PATCH_JSONL))
 
-if MODE == "IMPORT":
-    import_all()
-elif MODE == "EXPORT":
-    export_patch()
-else:
-    raise RuntimeError("MODE must be IMPORT or EXPORT")
+# ------------------------------------------------------------
+# MAIN WITH FILE-BASED DIAGNOSTICS (works without system console)
+# ------------------------------------------------------------
+import traceback
+
+ERROR_LOG = os.path.join(os.path.dirname(INPUT_JSONL), "menu_uv_blender_error.txt")
+
+def write_log(message):
+    try:
+        with open(ERROR_LOG, "a") as log_file:
+            log_file.write(str(message) + "\n")
+    except:
+        pass
+
+try:
+    with open(ERROR_LOG, "w") as log_file:
+        log_file.write("RECVX Blender roundtrip started\n")
+        log_file.write("Blender version: %s\n" % bpy.app.version_string)
+        log_file.write("Mode: %s\n" % MODE)
+        log_file.write("Input: %s\n" % INPUT_JSONL)
+
+    if MODE == "IMPORT":
+        write_log("Starting IMPORT")
+        import_all()
+    elif MODE == "EXPORT":
+        write_log("Starting EXPORT")
+        export_patch()
+    else:
+        raise RuntimeError("MODE must be IMPORT or EXPORT")
+
+    write_log("FINISHED OK")
+
+except:
+    write_log("FAILED:")
+    write_log(traceback.format_exc())
+    raise
