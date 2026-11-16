@@ -39,6 +39,9 @@ int pcRendererInit(int width, int height);
 void pcRendererShutdown(void);
 void pcRendererBeginFrame(void);
 void pcRendererPresent(void);
+/* Runtime presentation mode: 0 = limited passthrough, 1 = limited-to-full, 2 = full-to-limited. */
+int pcRendererGetRgbRange(void);
+int pcRendererSetRgbRange(int mode);
 float pcRendererDepthFromViewZ(float view_z);
 float pcRendererDepthFromReciprocalZ(float reciprocal_z);
 /* GS Z (0..65534, bigger = nearer, as written by the VU0 packer) -> GL depth (0 = nearest). */
