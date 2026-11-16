@@ -1615,45 +1615,64 @@ void pcUiUvCaptureToggle(void)
     pcLog("UI UV capture started: %s (F9 to stop)", path);
 }
 
-static void pc_ui_uv_capture_geometry(uint64_t key, const unsigned int* words,
+static void pc_ui_uv_capture_geometry(const unsigned int* words,
                                       unsigned int count, unsigned long prim)
 {
-    PcUiUvDraw* draw = NULL;
     unsigned int i, j, gindex, bank, pict_format, width, height;
+    uint64_t signature = UINT64_C(14695981039346656037), key;
     uint64_t raw_prim = (uint64_t)prim;
-    if (!pc_ui_uv_capture_file || !key || !words || !count || count > 64) return;
+    int fst = (raw_prim & UINT64_C(0x80000000000000)) != 0;
+    if (!pc_ui_uv_capture_file || !words || !count || count > 16384) return;
+    if (!pc_ui_uv_texture_identity(&gindex, &bank, &pict_format, &width, &height)) return;
+
+    /* Include every packed source word: this distinguishes same-atlas elements by
+     * geometry, UVs, color and priority, not by draw order or the selector's 64-vertex limit. */
+    signature = pc_ui_uv_hash_add(signature, gindex);
+    signature = pc_ui_uv_hash_add(signature, bank);
+    signature = pc_ui_uv_hash_add(signature, pict_format);
+    signature = pc_ui_uv_hash_add(signature, width);
+    signature = pc_ui_uv_hash_add(signature, height);
+    signature = pc_ui_uv_hash_add(signature, count);
+    signature = pc_ui_uv_hash_add(signature, raw_prim);
+    for (i = 0; i < count * 12u; i++)
+        signature = pc_ui_uv_hash_add(signature, words[i]);
+    key = signature ? signature : 1;
     for (i = 0; i < pc_ui_uv_capture_seen_count; i++)
         if (pc_ui_uv_capture_seen[i] == key) return;
     if (pc_ui_uv_capture_seen_count >= PC_UI_UV_CAPTURE_SEEN_MAX) return;
-    for (i = 0; i < pc_ui_uv_draw_count; i++)
-        if (pc_ui_uv_draws[i].key == key) { draw = &pc_ui_uv_draws[i]; break; }
-    if (!draw || !pc_ui_uv_texture_identity(&gindex, &bank, &pict_format, &width, &height)) return;
 
     fprintf(pc_ui_uv_capture_file,
             "{\"schema\":1,\"frame\":%" PRIu64 ",\"id\":\"%016" PRIx64
-            "\",\"signature\":\"%016" PRIx64 "\",\"occurrence\":%u,"
+            "\",\"signature\":\"%016" PRIx64 "\",\"occurrence\":0,"
             "\"gindex\":%u,\"bank\":%u,\"pict_format\":%u,\"texture_width\":%u,"
             "\"texture_height\":%u,\"prim\":\"%016" PRIx64 "\",\"topology\":%u,"
-            "\"textured\":1,\"use_uv\":1,\"vertex_count\":%u,\"vertices\":[",
-            pcRendererFrameNumber(), key, draw->signature, draw->occurrence,
-            gindex, bank, pict_format, width, height, raw_prim,
-            (unsigned int)((raw_prim >> 47) & 7u), count);
+            "\"textured\":1,\"use_uv\":%d,\"uv_mode\":\"%s\",\"vertex_count\":%u,\"vertices\":[",
+            pcRendererFrameNumber(), key, signature, gindex, bank, pict_format, width, height,
+            raw_prim, (unsigned int)((raw_prim >> 47) & 7u), fst, fst ? "FST_12_4" : "ST_FLOAT", count);
     for (j = 0; j < count; j++) {
         uint32_t u_bits, v_bits, color[4];
-        float x, y, z;
+        float x, y, z, u, v;
         memcpy(&u_bits, &words[j * 12u], sizeof(u_bits));
         memcpy(&v_bits, &words[j * 12u + 1u], sizeof(v_bits));
         memcpy(&color[0], &words[j * 12u + 4u], sizeof(color));
         x = ((const float*)words)[j * 12u + 8u];
         y = ((const float*)words)[j * 12u + 9u];
         z = ((const float*)words)[j * 12u + 10u];
+        if (fst) {
+            u = (float)(u_bits & 0x3FFFu) / 16.0f;
+            v = (float)(v_bits & 0x3FFFu) / 16.0f;
+        } else {
+            float su, sv;
+            memcpy(&su, &words[j * 12u], sizeof(su));
+            memcpy(&sv, &words[j * 12u + 1u], sizeof(sv));
+            u = su * (float)width;
+            v = sv * (float)height;
+        }
         fprintf(pc_ui_uv_capture_file,
                 "%s{\"x\":%.9g,\"y\":%.9g,\"z\":%.9g,"
-                "\"u_raw\":%u,\"v_raw\":%u,\"u\":%.6f,\"v\":%.6f,"
+                "\"u_raw\":%u,\"v_raw\":%u,\"u\":%.9g,\"v\":%.9g,"
                 "\"color\":[%u,%u,%u,%u]}",
-                j ? "," : "", x, y, z, u_bits & 0x3FFFu, v_bits & 0x3FFFu,
-                (float)(u_bits & 0x3FFFu) / 16.0f,
-                (float)(v_bits & 0x3FFFu) / 16.0f,
+                j ? "," : "", x, y, z, u_bits, v_bits, u, v,
                 color[0], color[1], color[2], color[3]);
     }
     fputs("]}\n", pc_ui_uv_capture_file);
@@ -1835,6 +1854,11 @@ void Ps2AddPrim(unsigned long prim, void* dp, unsigned int num, unsigned int cli
     } 
     
 #ifdef TARGET_PC
+    /* Capture all textured 2D source streams, including ST (non-FST) and >64 vertices.
+     * The interactive selector remains narrower; export must not inherit that UI limitation. */
+    if ((clip_3d_on == 0) && (prim & 0x8000000000000ULL) && Ps2_now_tex != NULL)
+        pc_ui_uv_capture_geometry((const unsigned int*)dp, num, prim);
+
     if ((clip_3d_on == 0) && (prim & 0x8000000000000) && (prim & 0x80000000000000) && (num <= 64))
     {
         memcpy(wide_buf, dp, num * 48);
