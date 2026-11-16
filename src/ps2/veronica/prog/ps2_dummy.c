@@ -2148,7 +2148,7 @@ void Ps2AddPrim(unsigned long prim, void* dp, unsigned int num, unsigned int cli
     if ((clip_3d_on == 0) && (prim & 0x8000000000000ULL) && Ps2_now_tex != NULL)
         pc_ui_uv_capture_geometry(ui_uv_source_words, num, prim);
 
-    if (clip_3d_on == 0)
+    if ((clip_3d_on == 0) && (prim & 0x8000000000000ULL) && Ps2_now_tex != NULL)
         ui_uv_patch_entry = pc_ui_uv_patch_find(ui_uv_source_words, num, prim);
 
     if ((clip_3d_on == 0) && (prim & 0x8000000000000) && (prim & 0x80000000000000) && (num <= 64))
