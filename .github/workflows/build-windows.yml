@@ -126,7 +126,18 @@ jobs:
           if (-not (Select-String -Path $trace -Pattern 'pcVideoInit: OpenGL context created' -Quiet)) {
             throw 'recvx did not reach a working SDL window and OpenGL context; see the startup trace above.'
           }
-          Write-Host 'Startup smoke test passed: main, SDL initialization, window, OpenGL context, and AA shaders.'
+          if (Test-Path $log) {
+            if (Select-String -Path $log -Pattern 'FATAL: The graphics driver does not expose the OpenGL 3.3 functions required by the native renderer' -Quiet) {
+              Write-Host 'Native renderer smoke test skipped: this runner does not expose the OpenGL 3.3 entry points required by recvx.'
+            } elseif (Select-String -Path $log -Pattern 'native renderer: OpenGL 3.3 initialized' -Quiet) {
+              Write-Host 'Native renderer smoke test passed: OpenGL 3.3 initialized.'
+            } else {
+              throw 'The native renderer neither initialized nor reported the known headless-runner OpenGL limitation; see recvx.log.'
+            }
+          } else {
+            throw 'recvx.log was not created; cannot verify native renderer initialization.'
+          }
+          Write-Host 'Startup trace passed: main, SDL initialization, window creation, and OpenGL context creation.'
 
       - name: Verify executables
         shell: pwsh
