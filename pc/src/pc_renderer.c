@@ -83,9 +83,15 @@ static int output_width = 640;
 static int output_height = 480;
 /* Output conversion mode: 0 = leave limited 16..235 unchanged; 1 = expand to full; 2 = compress full to limited. */
 static int RGBRange = 0;
-static GLuint rgb_range_program;
-static GLint rgb_range_source = -1;
-static GLint rgb_range_mode = -1;
+static GLuint output_adjustment_program;
+static GLint output_adjustment_source = -1;
+static GLint output_adjustment_range_mode = -1;
+static GLint output_adjustment_brightness = -1;
+static GLint output_adjustment_contrast = -1;
+static GLint output_adjustment_gamma = -1;
+static float image_brightness = 0.0f;
+static float image_contrast = 1.0f;
+static float image_gamma = 1.0f;
 static int render_width = 640;
 static int render_height = 480;
 static float projection_value = 1.0f;
@@ -232,18 +238,20 @@ static GLuint create_program(void)
     return p;
 }
 
-static GLuint create_rgb_range_program(void)
+static GLuint create_output_adjustment_program(void)
 {
     static const char* vs_src =
         "#version 330 core\nout vec2 vUv;\n"
         "void main(){ vec2 p=vec2(float((gl_VertexID<<1)&2),float(gl_VertexID&2)); "
         "vUv=p; gl_Position=vec4(p*2.0-1.0,0.0,1.0); }\n";
     static const char* fs_src =
-        "#version 330 core\nin vec2 vUv; uniform sampler2D uSource; uniform int uMode; out vec4 oColor;\n"
+        "#version 330 core\nin vec2 vUv; uniform sampler2D uSource; uniform int uMode; "
+        "uniform float uBrightness, uContrast, uGamma; out vec4 oColor;\n"
         "void main(){ vec4 c=texture(uSource,vUv); "
         "if(uMode==1) c.rgb=clamp((c.rgb*255.0-16.0)/219.0,0.0,1.0); "
         "else if(uMode==2) c.rgb=c.rgb*(219.0/255.0)+(16.0/255.0); "
-        "oColor=c; }\n";
+        "c.rgb=clamp((c.rgb-vec3(0.5))*uContrast+vec3(0.5+uBrightness),0.0,1.0); "
+        "c.rgb=pow(c.rgb,vec3(1.0/max(uGamma,0.01))); oColor=c; }\n";
     GLuint vs = compile_shader(GL_VERTEX_SHADER, vs_src);
     GLuint fs = compile_shader(GL_FRAGMENT_SHADER, fs_src);
     GLuint p = 0;
@@ -278,18 +286,59 @@ static GLuint create_rgb_range_program(void)
         return 0;
     }
 
-    rgb_range_source = glGetUniformLocation(p, "uSource");
-    rgb_range_mode = glGetUniformLocation(p, "uMode");
-    if (rgb_range_source < 0 || rgb_range_mode < 0) {
-        pcLog("native renderer: RGB range shader is missing a required uniform");
+    output_adjustment_source = glGetUniformLocation(p, "uSource");
+    output_adjustment_range_mode = glGetUniformLocation(p, "uMode");
+    output_adjustment_brightness = glGetUniformLocation(p, "uBrightness");
+    output_adjustment_contrast = glGetUniformLocation(p, "uContrast");
+    output_adjustment_gamma = glGetUniformLocation(p, "uGamma");
+    if (output_adjustment_source < 0 || output_adjustment_range_mode < 0 ||
+        output_adjustment_brightness < 0 || output_adjustment_contrast < 0 ||
+        output_adjustment_gamma < 0) {
+        pcLog("native renderer: output adjustment shader is missing a required uniform");
         glDeleteProgram(p);
         return 0;
     }
 
     glUseProgram(p);
-    glUniform1i(rgb_range_source, 0);
+    glUniform1i(output_adjustment_source, 0);
     glUseProgram(0);
     return p;
+}
+
+static float read_ini_float(const char* key, float fallback)
+{
+    char text[64], *end;
+    double value;
+
+    if (!pcIniGet(key, text, sizeof(text)))
+        return fallback;
+
+    value = strtod(text, &end);
+    if (end == text || !isfinite(value))
+        return fallback;
+
+    return (float)value;
+}
+
+static float clamp_adjustment(float value, float minimum, float maximum)
+{
+    return value < minimum ? minimum : value > maximum ? maximum : value;
+}
+
+static int image_adjustments_active(void)
+{
+    return fabsf(image_brightness) > 0.0001f ||
+           fabsf(image_contrast - 1.0f) > 0.0001f ||
+           fabsf(image_gamma - 1.0f) > 0.0001f;
+}
+
+static int ensure_output_adjustment_program(void)
+{
+    if (output_adjustment_program)
+        return 1;
+
+    output_adjustment_program = create_output_adjustment_program();
+    return output_adjustment_program != 0;
 }
 
 static int create_targets(int width, int height)
@@ -373,17 +422,22 @@ int pcRendererInit(int width, int height)
         pcLog("native renderer: invalid RGBRange=%d; using 0 (limited passthrough)", RGBRange);
         RGBRange = 0;
     }
-    if (RGBRange != 0) {
-        rgb_range_program = create_rgb_range_program();
-        if (!rgb_range_program) {
-            pcLog("native renderer: RGBRange=%d requested, but output conversion could not be initialized; using 0 (limited passthrough)", RGBRange);
-            RGBRange = 0;
-        }
-    }
+    image_brightness = clamp_adjustment(read_ini_float("image_brightness", 0.0f), -0.5f, 0.5f);
+    image_contrast = clamp_adjustment(read_ini_float("image_contrast", 1.0f), 0.0f, 2.0f);
+    image_gamma = clamp_adjustment(read_ini_float("image_gamma", 1.0f), 0.5f, 2.0f);
     pcLog("native renderer: output RGB range mode: %d (%s)", RGBRange,
           RGBRange == 0 ? "limited passthrough" :
           RGBRange == 1 ? "limited 16-235 -> full 0-255" :
                           "full 0-255 -> limited 16-235");
+    pcLog("native renderer: image adjustment brightness=%.3f contrast=%.3f gamma=%.3f",
+          image_brightness, image_contrast, image_gamma);
+    if ((RGBRange != 0 || image_adjustments_active()) && !ensure_output_adjustment_program()) {
+        pcLog("native renderer: output adjustment shader unavailable; using original limited output and neutral image adjustment");
+        RGBRange = 0;
+        image_brightness = 0.0f;
+        image_contrast = 1.0f;
+        image_gamma = 1.0f;
+    }
 
     u_target = glGetUniformLocation(program, "uTarget");
     u_projection = glGetUniformLocation(program, "uProjection");
@@ -440,9 +494,9 @@ void pcRendererShutdown(void)
     if (!ready) return;
     glDeleteBuffers(1, &vertex_buffer);
     glDeleteVertexArrays(1, &vertex_array);
-    if (rgb_range_program) glDeleteProgram(rgb_range_program);
-    rgb_range_program = 0;
-    rgb_range_source = -1;
+    if (output_adjustment_program) glDeleteProgram(output_adjustment_program);
+    output_adjustment_program = 0;
+    output_adjustment_source = -1;
     if (render_texture_fbo) glDeleteFramebuffers(1, &render_texture_fbo);
     if (render_texture) glDeleteTextures(1, &render_texture);
     render_texture = render_texture_fbo = 0;
@@ -1775,18 +1829,21 @@ void pcRendererPresent(void)
     }
     x = (ww - vw) / 2;
     y = (wh - vh) / 2;
-    if (RGBRange == 0) {
-        /* Preserve the game's existing limited-range output byte-for-byte. */
+    if (RGBRange == 0 && !image_adjustments_active()) {
+        /* No output transforms: preserve the original limited-range blit exactly. */
         glBlitFramebuffer(0, 0, render_width, render_height,
                           x, y, x + vw, y + vh, GL_COLOR_BUFFER_BIT, GL_LINEAR);
     } else {
-        /* Convert only the final window output; the game framebuffer and captures remain unchanged. */
+        /* RGB range and image adjustments affect only the final window output, never the game framebuffer/captures. */
         GLuint source_texture = (present_source == framebuffer) ? color_target : blur_tex[blur_history];
         glBindFramebuffer(GL_FRAMEBUFFER, 0);
         glViewport(x, y, vw, vh);
         glDisable(GL_CULL_FACE);
-        glUseProgram(rgb_range_program);
-        glUniform1i(rgb_range_mode, RGBRange);
+        glUseProgram(output_adjustment_program);
+        glUniform1i(output_adjustment_range_mode, RGBRange);
+        glUniform1f(output_adjustment_brightness, image_brightness);
+        glUniform1f(output_adjustment_contrast, image_contrast);
+        glUniform1f(output_adjustment_gamma, image_gamma);
         glActiveTexture(GL_TEXTURE0);
         glBindTexture(GL_TEXTURE_2D, source_texture);
         glBindVertexArray(vertex_array);
@@ -1808,13 +1865,9 @@ int pcRendererSetRgbRange(int mode)
         return 0;
     }
 
-    /* Lazy creation lets the mode be changed at runtime even when startup used passthrough mode 0. */
-    if (mode != 0 && !rgb_range_program) {
-        rgb_range_program = create_rgb_range_program();
-        if (!rgb_range_program) {
-            pcLog("native renderer: cannot activate RGBRange=%d; keeping mode %d", mode, RGBRange);
-            return 0;
-        }
+    if (mode != 0 && !ensure_output_adjustment_program()) {
+        pcLog("native renderer: cannot activate RGBRange=%d; keeping mode %d", mode, RGBRange);
+        return 0;
     }
 
     if (RGBRange != mode) {
@@ -1823,8 +1876,55 @@ int pcRendererSetRgbRange(int mode)
               RGBRange == 0 ? "limited passthrough" :
               RGBRange == 1 ? "limited 16-235 -> full 0-255" :
                               "full 0-255 -> limited 16-235");
+        { char value[16]; snprintf(value, sizeof(value), "%d", RGBRange); pcIniSet("RGBRange", value); }
     }
 
+    return 1;
+}
+
+void pcRendererGetImageAdjustments(float* brightness, float* contrast, float* gamma)
+{
+    if (brightness) *brightness = image_brightness;
+    if (contrast) *contrast = image_contrast;
+    if (gamma) *gamma = image_gamma;
+}
+
+int pcRendererSetImageAdjustments(float brightness, float contrast, float gamma)
+{
+    char value[32];
+
+    if (!isfinite(brightness) || !isfinite(contrast) || !isfinite(gamma))
+        return 0;
+
+    brightness = clamp_adjustment(brightness, -0.5f, 0.5f);
+    contrast = clamp_adjustment(contrast, 0.0f, 2.0f);
+    gamma = clamp_adjustment(gamma, 0.5f, 2.0f);
+
+    if ((fabsf(brightness - image_brightness) < 0.0001f) &&
+        (fabsf(contrast - image_contrast) < 0.0001f) &&
+        (fabsf(gamma - image_gamma) < 0.0001f))
+        return 1;
+
+    if ((RGBRange != 0 || fabsf(brightness) > 0.0001f ||
+         fabsf(contrast - 1.0f) > 0.0001f || fabsf(gamma - 1.0f) > 0.0001f) &&
+        !ensure_output_adjustment_program()) {
+        pcLog("native renderer: cannot activate image adjustments; values unchanged");
+        return 0;
+    }
+
+    image_brightness = brightness;
+    image_contrast = contrast;
+    image_gamma = gamma;
+
+    snprintf(value, sizeof(value), "%.3f", image_brightness);
+    pcIniSet("image_brightness", value);
+    snprintf(value, sizeof(value), "%.3f", image_contrast);
+    pcIniSet("image_contrast", value);
+    snprintf(value, sizeof(value), "%.3f", image_gamma);
+    pcIniSet("image_gamma", value);
+
+    pcLog("native renderer: image adjustment changed brightness=%.3f contrast=%.3f gamma=%.3f",
+          image_brightness, image_contrast, image_gamma);
     return 1;
 }
 
