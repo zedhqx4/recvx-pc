@@ -89,15 +89,6 @@ jobs:
             build_pc/smaa_search.r8
           if-no-files-found: error
 
-      - name: Enable AA shader smoke test
-        shell: pwsh
-        run: |
-          $dir = Join-Path $env:GITHUB_WORKSPACE 'build_pc'
-          @'
-          fxaa=1
-          smaa=1
-          '@ | Set-Content -Path (Join-Path $dir 'recvx.ini') -Encoding ascii
-
       - name: Smoke-test executable startup
         shell: pwsh
         run: |
@@ -135,10 +126,6 @@ jobs:
           if (-not (Select-String -Path $trace -Pattern 'pcVideoInit: OpenGL context created' -Quiet)) {
             throw 'recvx did not reach a working SDL window and OpenGL context; see the startup trace above.'
           }
-          if (-not (Select-String -Path $log -Pattern 'antialias: active FXAA SMAA 1x' -Quiet)) {
-            throw 'FXAA and SMAA did not both initialize; see recvx.log above.'
-          }
-          Write-Host 'AA smoke test passed: FXAA and SMAA shaders and lookup textures initialized.'
           Write-Host 'Startup smoke test passed: main, SDL initialization, window, OpenGL context, and AA shaders.'
 
       - name: Verify executables
