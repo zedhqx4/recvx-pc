@@ -1580,6 +1580,15 @@ static FILE* pc_ui_uv_capture_file;
 static uint64_t pc_ui_uv_capture_seen[PC_UI_UV_CAPTURE_SEEN_MAX];
 static unsigned int pc_ui_uv_capture_seen_count;
 
+void pcUiUvCaptureStop(void)
+{
+    if (!pc_ui_uv_capture_file) return;
+    fflush(pc_ui_uv_capture_file);
+    fclose(pc_ui_uv_capture_file);
+    pc_ui_uv_capture_file = NULL;
+    pcLog("UI UV capture stopped (%u unique primitives)", pc_ui_uv_capture_seen_count);
+}
+
 void pcUiUvCaptureToggle(void)
 {
     char path[1200];
