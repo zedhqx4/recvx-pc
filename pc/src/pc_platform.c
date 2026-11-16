@@ -889,7 +889,6 @@ static int pause_until_active(void)
 
 static Uint64 last_mouse_move;
 
-/* Diagnostic hotkeys are inert in normal builds; enable them with debug=1 in recvx.ini. */
 /* RGB range debug controls are intentionally independent of the broader debug= option. */
 static int pc_rgb_range_debug_enabled(void)
 {
@@ -947,6 +946,7 @@ static int pc_rgb_range_debug_handle_event(const SDL_Event* ev)
     return 1;
 }
 
+/* Other diagnostic hotkeys are inert in normal builds; enable them with debug=1 in recvx.ini. */
 static int pc_debug_mode_enabled(void)
 {
     static int enabled = -1;
