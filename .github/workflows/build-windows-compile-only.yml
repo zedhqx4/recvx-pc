@@ -6,6 +6,7 @@ on:
     branches:
       - OpenGl-3.3
       - render-nativo
+      - experimental/RGB_Range
     paths:
       - 'pc/src/**'
       - 'pc/include/**'
