@@ -323,3 +323,45 @@ void pcVu0CalcPointN(const float* in, void* output, int n)
         pcVu0CalcPointOne(in, out);
     }
 }
+
+/* Empaquetado nativo de una tira CNK (sustituye al bucle del EE que pasaba por pcVu0.vf).
+ * Por vertice i, con (idx,U,V) = idx[3i..3i+2] y el vertice de 64 bytes en vbuf[idx]:
+ *   out0 = (U*k, V*k, v.z0, 0)        k = zb[1]  (UV 12.4 -> float)
+ *   out1 = v.q1 con w = v.q3.w
+ *   out2 = v.q2
+ *   out3 = (v.q3.x, v.q3.y, clamp(v.q3.z * zb[0] + zb[2], 0, zb[3]), v.q2.w)
+ * Es la misma secuencia vitof0/vmuly/vmulax/vmaddw/vmax/vminiw/vmove que el microcodigo original. */
+void pcVu0StripPack(void* dst, const unsigned short* idx, int n, const void* vbuf, const float zb[4])
+{
+    uint8_t* out = (uint8_t*)dst;
+    const uint8_t* const vb = (const uint8_t*)vbuf;
+    int i;
+
+    for (i = 0; i < n; i++, idx += 3, out += 64)
+    {
+        const float* v = (const float*)(vb + ((uint32_t)idx[0] << 6));
+        float o[16];
+        float z;
+
+        o[0] = vu_f((float)idx[1] * zb[1]);
+        o[1] = vu_f((float)idx[2] * zb[1]);
+        o[3] = 0.0f;
+        o[4] = v[4]; o[5] = v[5]; o[6] = v[6];
+        o[7] = v[15];                     /* vf5.w = vf7.w */
+        o[8] = v[8]; o[9] = v[9]; o[10] = v[10]; o[11] = v[11];
+
+        /* vf7 = cuarto quad del vertice (v[12..15]) */
+        o[2] = v[14];                     /* vf4.z = vf7.z original */
+        z = vu_f(vu_f(v[14] * zb[0]) + zb[2]);
+        if (z < 0.0f) z = 0.0f;
+        if (z > zb[3]) z = zb[3];
+        o[12] = v[12]; o[13] = v[13]; o[14] = z; o[15] = v[11];
+
+        memcpy(out, o, 64);
+    }
+
+    if (n > 0)
+    {
+        memcpy(&pcVu0.vf[4], out - 64, 64);   /* deja vf4..vf7 como los dejaba el bucle original */
+    }
+}

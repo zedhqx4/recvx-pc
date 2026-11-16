@@ -316,3 +316,11 @@ Objetivo: quitar capas de compatibilidad PS2 (GS/VU1/VU0/EE/GIF) donde no aporta
 - Motion blur: ya es `motion_blur=0` por defecto (pc_renderer.c, recvx_config.c quita la clave al desmarcar). El log 492e3171 dice "motion blur desactivado".
 - Log 492e3171 (blur apagado): todos los tramos a 33.4 ms (tope de 30 fps), GPU esperando 0.1 ms. El coste esta en CPU: `draw-model` hasta 23/35 ms de media/max en la sala con agua (room geometry 10.3 ms, water 6.2 ms, CNK plist 9.8 ms con 113 chunks/frame). Los 24 fps del blur son esos ~41 ms: CPU ya al limite + pasada extra de pantalla completa.
 - Objetivos de optimizacion: (1) CNK plist/room geometry, (2) agua, (3) blur a media resolucion y sin copias extra.
+
+### 0.9.135 (rama `optimizacion`): primeros pasos hacia quitar VU0
+- Hallazgo: la ruta por defecto de njCnkCsUvh/Uvn (RECVX_VU1=0) es la del EE: copia por vertice + `_CVV` (recorte) + `pVu1Func` (vu1Draw*, ~3500 lineas de asm2c sobre `pcVu0.vf`). El bucle traducido de la ruta VU1 solo corre con RECVX_VU1=1.
+- `_CVV` nativo: x*M0+y*M1, +z*M2, +M3 con `vu_f` y los 6 bits de recorte, sin `vu_clip`/historial de banderas (solo se leen los 6 bits bajos). Mismo resultado.
+- `pcVu0StripPack` (vu0_calcpoint.c): empaquetado nativo de tiras (UV 12.4->float, Z de la GS fijado a 0..65534) que sustituye al bucle traducido en las dos rutas VU1.
+- No verificado en ejecucion (solo revision de codigo; sin compilar con MSVC). Si algo cambia visualmente, volver a `milestone/0.9.131` o revertir este commit.
+- Siguiente: nativizar `vu1Draw*`/`pColorCalcFuncTbl` (vf24-27 como struct C estatica en vez de `pcVu0.vf`), luego retirar VU1 emulada.
+- Sobre el EE: no hay que "nativizarlo" aparte; el juego ya corre como C en x86. Lo que sobra son las capas (`PcGpr`, `A2C_*`, `a2c_ldl/ldr`) de las zonas traducidas de asm; se eliminan al nativizar cada funcion.

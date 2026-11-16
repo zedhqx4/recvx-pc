@@ -16,6 +16,7 @@
 void pcVu0CalcPointN(const float* in, void* out, int n);
 int pcVu0CalcPointBatchEnabled(void);
 unsigned int pcVu0StripClip(const unsigned short* idx, int n, const void* vbuf);
+void pcVu0StripPack(void* dst, const unsigned short* idx, int n, const void* vbuf, const float zb[4]);
 #endif
 
 static VU1_STRIP_BUF* pNaCnkVerBufTop;
@@ -2248,18 +2249,30 @@ int _CVV(float* v0)
     
 #ifdef TARGET_PC
     {
-        VuVec r_;
+        /* Nativo: mismo calculo (x*M0 + y*M1) + z*M2 + M3 con el redondeo de la VU y los 6 bits de recorte de
+         * la GS, sin el historial de banderas de la VU0 (aqui solo se leen los 6 bits bajos). */
+        const VuVec* const m = &pcVu0.vf[24];
+        const float x = v0[0], y = v0[1], z = v0[2];
+        float r[4];
+        float aw;
+        unsigned int f = 0;
         int k_;
 
         for (k_ = 0; k_ < 4; k_++)
         {
-            r_.f[k_] = vu_f(vu_f(vu_f(pcVu0.vf[24].f[k_] * v0[0] + pcVu0.vf[25].f[k_] * v0[1]) + pcVu0.vf[26].f[k_] * v0[2]) + pcVu0.vf[27].f[k_]);
+            r[k_] = vu_f(vu_f(vu_f(m[0].f[k_] * x + m[1].f[k_] * y) + m[2].f[k_] * z) + m[3].f[k_]);
         }
 
-        vu_clip(&pcVu0, &r_, r_.f[3]);
-        ret = (int)pcVu0.clip;
+        aw = fabsf(r[3]);
+        if (r[0] > aw)  f |= 0x01;
+        if (r[0] < -aw) f |= 0x02;
+        if (r[1] > aw)  f |= 0x04;
+        if (r[1] < -aw) f |= 0x08;
+        if (r[2] > aw)  f |= 0x10;
+        if (r[2] < -aw) f |= 0x20;
 
-        return ret;
+        pcVu0.clip = ((pcVu0.clip << 6) | f) & 0xFFFFFF;
+        return (int)pcVu0.clip;
     }
 #else
     asm volatile 
@@ -2576,66 +2589,10 @@ CHUNK_HEAD* njCnkCsUvh(CHUNK_HEAD* pCnk)
 #endif
    
 #ifdef TARGET_PC
-                    {
-                        PcGpr g_op0 = { 0 };
-                        PcGpr g_op1 = { 0 };
-                        PcGpr g_op2 = { 0 };
-                        PcGpr g_op3 = { 0 };
-                        PcGpr g_op4 = { 0 };
-                        PcGpr g_t0 = { 0 };
-                        PcGpr g_t1 = { 0 };
-                        PcGpr g_t2 = { 0 };
-                        PcGpr g_t3 = { 0 };
-                        PcGpr g_t4 = { 0 };
-                        PcGpr g_zero = { 0 };
-                        uint64_t lo_ = 0; int fcc_ = 0;
-                        g_op0.d[0] = A2C_SX32((uint32_t)(uintptr_t)(pS));
-                        g_op1.d[0] = A2C_SX32((uint32_t)(uintptr_t)(uspCnk));
-                        g_op2.d[0] = A2C_SX32((uint32_t)(uintptr_t)(pNaCnkVerBufTop));
-                        g_op3.d[0] = A2C_SX32((uint32_t)(uintptr_t)(usMax));
-                        g_op4.d[0] = A2C_SX32((uint32_t)(uintptr_t)(usColorCalc));
-                        g_op3.d[0] = (g_op3.d[0] & (uint64_t)(uint16_t)(0xFFFF));
-                        g_t3.d[0] = g_op0.d[0];
-                        g_t4.d[0] = g_op1.d[0];
-                        g_t0.d[0] = a2c_ldl(g_t0.d[0], ((uint32_t)(g_t4.w[0] + (0x7))));
-                        g_t0.d[0] = a2c_ldr(g_t0.d[0], ((uint32_t)(g_t4.w[0] + (0))));
-                        g_t4.d[0] = A2C_SX32(g_t4.w[0] + (uint32_t)((int32_t)(6)));
-                        g_t1.d[0] = (g_t0.d[0] & (uint64_t)(uint16_t)(0xFFFF));
-                        g_t0.d[0] = (g_t0.d[0] >> 16);
-                        g_t1.d[0] = A2C_SX32(g_t1.w[0] << (6));
-                        g_t2.d[0] = A2C_SX32(g_op2.w[0] + (uint32_t)(g_t1.w[0]));
-                        NinjaCnk_a7_l_002D2B38:;
-                        memcpy(&pcVu0.vf[4], A2C_PTR(((uint32_t)(g_t2.w[0] + (0)))), 16);
-                        memcpy(&pcVu0.vf[5], A2C_PTR(((uint32_t)(g_t2.w[0] + (0x10)))), 16);
-                        memcpy(&pcVu0.vf[6], A2C_PTR(((uint32_t)(g_t2.w[0] + (0x20)))), 16);
-                        memcpy(&pcVu0.vf[7], A2C_PTR(((uint32_t)(g_t2.w[0] + (0x30)))), 16);
-                        { PcGpr r_; int k_; for (k_ = 0; k_ < 4; k_++) { r_.h[k_ * 2] = g_t0.h[k_]; r_.h[k_ * 2 + 1] = g_zero.h[k_]; } g_t0 = r_; }
-                        memcpy(&pcVu0.vf[4], &g_t0, 16);
-                        { VuVec r_ = pcVu0.vf[0]; r_.f[0] = (float)pcVu0.vf[4].i[0] / 1.0f; r_.f[1] = (float)pcVu0.vf[4].i[1] / 1.0f; pcVu0.vf[4].f[0] = r_.f[0]; pcVu0.vf[4].f[1] = r_.f[1]; }
-                        { VuVec r_ = pcVu0.vf[0]; r_.u[2] = pcVu0.vf[7].u[2]; pcVu0.vf[4].f[2] = r_.f[2]; }
-                        { VuVec r_ = pcVu0.vf[0]; r_.f[0] = vu_f(pcVu0.vf[4].f[0] * pcVu0.vf[8].f[1]); r_.f[1] = vu_f(pcVu0.vf[4].f[1] * pcVu0.vf[8].f[1]); pcVu0.vf[4].f[0] = r_.f[0]; pcVu0.vf[4].f[1] = r_.f[1]; vu_set_mac(&pcVu0, &r_, 12); }
-                        { VuVec r_ = pcVu0.vf[0]; r_.u[3] = pcVu0.vf[7].u[3]; pcVu0.vf[5].f[3] = r_.f[3]; }
-                        { VuVec r_ = pcVu0.vf[0]; r_.f[2] = vu_f(pcVu0.vf[7].f[2] * pcVu0.vf[8].f[0]); pcVu0.acc.f[2] = r_.f[2]; vu_set_mac(&pcVu0, &r_, 2); }
-                        { VuVec r_ = pcVu0.vf[0]; r_.f[2] = vu_f(pcVu0.acc.f[2] + pcVu0.vf[8].f[2] * pcVu0.vf[0].f[3]); pcVu0.vf[7].f[2] = r_.f[2]; vu_set_mac(&pcVu0, &r_, 2); }
-                        g_t0.d[0] = a2c_ldl(g_t0.d[0], ((uint32_t)(g_t4.w[0] + (0x7))));
-                        g_t0.d[0] = a2c_ldr(g_t0.d[0], ((uint32_t)(g_t4.w[0] + (0))));
-                        g_t4.d[0] = A2C_SX32(g_t4.w[0] + (uint32_t)((int32_t)(6)));
-                        { VuVec r_ = pcVu0.vf[0]; r_.f[2] = vu_f(fmaxf(pcVu0.vf[7].f[2], pcVu0.vf[0].f[2])); pcVu0.vf[7].f[2] = r_.f[2]; }
-                        g_t1.d[0] = (g_t0.d[0] & (uint64_t)(uint16_t)(0xFFFF));
-                        g_t0.d[0] = (g_t0.d[0] >> 16);
-                        g_t1.d[0] = A2C_SX32(g_t1.w[0] << (6));
-                        g_t2.d[0] = A2C_SX32(g_op2.w[0] + (uint32_t)(g_t1.w[0]));
-                        { VuVec r_ = pcVu0.vf[0]; r_.f[2] = vu_f(fminf(pcVu0.vf[7].f[2], pcVu0.vf[8].f[3])); pcVu0.vf[7].f[2] = r_.f[2]; }
-                        { VuVec r_ = pcVu0.vf[0]; r_.u[3] = pcVu0.vf[6].u[3]; pcVu0.vf[7].f[3] = r_.f[3]; }
-                        g_op3.d[0] = A2C_SX32(g_op3.w[0] + (uint32_t)((int32_t)(-1)));
-                        memcpy(A2C_PTR(((uint32_t)(g_t3.w[0] + (0)))), &pcVu0.vf[4], 16);
-                        memcpy(A2C_PTR(((uint32_t)(g_t3.w[0] + (0x10)))), &pcVu0.vf[5], 16);
-                        memcpy(A2C_PTR(((uint32_t)(g_t3.w[0] + (0x20)))), &pcVu0.vf[6], 16);
-                        memcpy(A2C_PTR(((uint32_t)(g_t3.w[0] + (0x30)))), &pcVu0.vf[7], 16);
-                        *(uint32_t*)A2C_PTR(((uint32_t)(g_op0.w[0] + (offsetof(VU1_STRIP_BUF, fPad1))))) = (uint32_t)g_op4.d[0];
-                        { int c_ = (g_op3.d[0] != 0); g_t3.d[0] = A2C_SX32(g_t3.w[0] + (uint32_t)((int32_t)(64))); if (c_) goto NinjaCnk_a7_l_002D2B38; }
-                        (void)g_zero; (void)lo_; (void)fcc_;
-                    }
+                    /* Nativo: lo que hacia el bucle del EE/VU0 (UV 12.4 -> float, Z de la GS fijado a 0..65534)
+                     * sin pasar por el archivo de registros de la VU0. */
+                    pcVu0StripPack(pS, uspCnk, (int)usMax, pNaCnkVerBufTop, zbuff);
+                    *(uint32_t*)((char*)pS + offsetof(VU1_STRIP_BUF, fPad1)) = (uint32_t)usColorCalc;
 #else
                     asm volatile
                     ("
@@ -3099,66 +3056,10 @@ CHUNK_HEAD* njCnkCsUvn(CHUNK_HEAD* pCnk)
 #endif
    
 #ifdef TARGET_PC
-                    {
-                        PcGpr g_op0 = { 0 };
-                        PcGpr g_op1 = { 0 };
-                        PcGpr g_op2 = { 0 };
-                        PcGpr g_op3 = { 0 };
-                        PcGpr g_op4 = { 0 };
-                        PcGpr g_t0 = { 0 };
-                        PcGpr g_t1 = { 0 };
-                        PcGpr g_t2 = { 0 };
-                        PcGpr g_t3 = { 0 };
-                        PcGpr g_t4 = { 0 };
-                        PcGpr g_zero = { 0 };
-                        uint64_t lo_ = 0; int fcc_ = 0;
-                        g_op0.d[0] = A2C_SX32((uint32_t)(uintptr_t)(pS));
-                        g_op1.d[0] = A2C_SX32((uint32_t)(uintptr_t)(uspCnk));
-                        g_op2.d[0] = A2C_SX32((uint32_t)(uintptr_t)(pNaCnkVerBufTop));
-                        g_op3.d[0] = A2C_SX32((uint32_t)(uintptr_t)(usMax));
-                        g_op4.d[0] = A2C_SX32((uint32_t)(uintptr_t)(usColorCalc));
-                        g_op3.d[0] = (g_op3.d[0] & (uint64_t)(uint16_t)(0xFFFF));
-                        g_t3.d[0] = g_op0.d[0];
-                        g_t4.d[0] = g_op1.d[0];
-                        g_t0.d[0] = a2c_ldl(g_t0.d[0], ((uint32_t)(g_t4.w[0] + (0x7))));
-                        g_t0.d[0] = a2c_ldr(g_t0.d[0], ((uint32_t)(g_t4.w[0] + (0))));
-                        g_t4.d[0] = A2C_SX32(g_t4.w[0] + (uint32_t)((int32_t)(6)));
-                        g_t1.d[0] = (g_t0.d[0] & (uint64_t)(uint16_t)(0xFFFF));
-                        g_t0.d[0] = (g_t0.d[0] >> 16);
-                        g_t1.d[0] = A2C_SX32(g_t1.w[0] << (6));
-                        g_t2.d[0] = A2C_SX32(g_op2.w[0] + (uint32_t)(g_t1.w[0]));
-                        NinjaCnk_a10_l_002D2B38:;
-                        memcpy(&pcVu0.vf[4], A2C_PTR(((uint32_t)(g_t2.w[0] + (0)))), 16);
-                        memcpy(&pcVu0.vf[5], A2C_PTR(((uint32_t)(g_t2.w[0] + (0x10)))), 16);
-                        memcpy(&pcVu0.vf[6], A2C_PTR(((uint32_t)(g_t2.w[0] + (0x20)))), 16);
-                        memcpy(&pcVu0.vf[7], A2C_PTR(((uint32_t)(g_t2.w[0] + (0x30)))), 16);
-                        { PcGpr r_; int k_; for (k_ = 0; k_ < 4; k_++) { r_.h[k_ * 2] = g_t0.h[k_]; r_.h[k_ * 2 + 1] = g_zero.h[k_]; } g_t0 = r_; }
-                        memcpy(&pcVu0.vf[4], &g_t0, 16);
-                        { VuVec r_ = pcVu0.vf[0]; r_.f[0] = (float)pcVu0.vf[4].i[0] / 1.0f; r_.f[1] = (float)pcVu0.vf[4].i[1] / 1.0f; pcVu0.vf[4].f[0] = r_.f[0]; pcVu0.vf[4].f[1] = r_.f[1]; }
-                        { VuVec r_ = pcVu0.vf[0]; r_.u[2] = pcVu0.vf[7].u[2]; pcVu0.vf[4].f[2] = r_.f[2]; }
-                        { VuVec r_ = pcVu0.vf[0]; r_.f[0] = vu_f(pcVu0.vf[4].f[0] * pcVu0.vf[8].f[1]); r_.f[1] = vu_f(pcVu0.vf[4].f[1] * pcVu0.vf[8].f[1]); pcVu0.vf[4].f[0] = r_.f[0]; pcVu0.vf[4].f[1] = r_.f[1]; vu_set_mac(&pcVu0, &r_, 12); }
-                        { VuVec r_ = pcVu0.vf[0]; r_.u[3] = pcVu0.vf[7].u[3]; pcVu0.vf[5].f[3] = r_.f[3]; }
-                        { VuVec r_ = pcVu0.vf[0]; r_.f[2] = vu_f(pcVu0.vf[7].f[2] * pcVu0.vf[8].f[0]); pcVu0.acc.f[2] = r_.f[2]; vu_set_mac(&pcVu0, &r_, 2); }
-                        { VuVec r_ = pcVu0.vf[0]; r_.f[2] = vu_f(pcVu0.acc.f[2] + pcVu0.vf[8].f[2] * pcVu0.vf[0].f[3]); pcVu0.vf[7].f[2] = r_.f[2]; vu_set_mac(&pcVu0, &r_, 2); }
-                        g_t0.d[0] = a2c_ldl(g_t0.d[0], ((uint32_t)(g_t4.w[0] + (0x7))));
-                        g_t0.d[0] = a2c_ldr(g_t0.d[0], ((uint32_t)(g_t4.w[0] + (0))));
-                        g_t4.d[0] = A2C_SX32(g_t4.w[0] + (uint32_t)((int32_t)(6)));
-                        { VuVec r_ = pcVu0.vf[0]; r_.f[2] = vu_f(fmaxf(pcVu0.vf[7].f[2], pcVu0.vf[0].f[2])); pcVu0.vf[7].f[2] = r_.f[2]; }
-                        g_t1.d[0] = (g_t0.d[0] & (uint64_t)(uint16_t)(0xFFFF));
-                        g_t0.d[0] = (g_t0.d[0] >> 16);
-                        g_t1.d[0] = A2C_SX32(g_t1.w[0] << (6));
-                        g_t2.d[0] = A2C_SX32(g_op2.w[0] + (uint32_t)(g_t1.w[0]));
-                        { VuVec r_ = pcVu0.vf[0]; r_.f[2] = vu_f(fminf(pcVu0.vf[7].f[2], pcVu0.vf[8].f[3])); pcVu0.vf[7].f[2] = r_.f[2]; }
-                        { VuVec r_ = pcVu0.vf[0]; r_.u[3] = pcVu0.vf[6].u[3]; pcVu0.vf[7].f[3] = r_.f[3]; }
-                        g_op3.d[0] = A2C_SX32(g_op3.w[0] + (uint32_t)((int32_t)(-1)));
-                        memcpy(A2C_PTR(((uint32_t)(g_t3.w[0] + (0)))), &pcVu0.vf[4], 16);
-                        memcpy(A2C_PTR(((uint32_t)(g_t3.w[0] + (0x10)))), &pcVu0.vf[5], 16);
-                        memcpy(A2C_PTR(((uint32_t)(g_t3.w[0] + (0x20)))), &pcVu0.vf[6], 16);
-                        memcpy(A2C_PTR(((uint32_t)(g_t3.w[0] + (0x30)))), &pcVu0.vf[7], 16);
-                        *(uint32_t*)A2C_PTR(((uint32_t)(g_op0.w[0] + (offsetof(VU1_STRIP_BUF, fPad1))))) = (uint32_t)g_op4.d[0];
-                        { int c_ = (g_op3.d[0] != 0); g_t3.d[0] = A2C_SX32(g_t3.w[0] + (uint32_t)((int32_t)(64))); if (c_) goto NinjaCnk_a10_l_002D2B38; }
-                        (void)g_zero; (void)lo_; (void)fcc_;
-                    }
+                    /* Nativo: lo que hacia el bucle del EE/VU0 (UV 12.4 -> float, Z de la GS fijado a 0..65534)
+                     * sin pasar por el archivo de registros de la VU0. */
+                    pcVu0StripPack(pS, uspCnk, (int)usMax, pNaCnkVerBufTop, zbuff);
+                    *(uint32_t*)((char*)pS + offsetof(VU1_STRIP_BUF, fPad1)) = (uint32_t)usColorCalc;
 #else
                     asm volatile
                     ("
