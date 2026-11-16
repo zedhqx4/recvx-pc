@@ -1157,7 +1157,7 @@ static void pc_wide_clip(unsigned int* v, unsigned int num, int uv)
         /* sprites are flat shaded from their last vertex; the first one's color is unset */
         for (k = 4; (num > 2) && (k < 8); k++)
         {
-            a[k] = (unsigned int)((int)a[k] + (int)(t * ((int)b[k] - (int)a[k])));   /* truncar, como la GS */
+            a[k] = (unsigned int)((int)a[k] + (int)(t * ((int)b[k] - (int)a[k]) + 0.5f));   /* vertice sintetico del recorte propio: no existe en la GS, se aproxima el valor exacto (natural) */
         }
 
         ((float*)a)[8] = e;
