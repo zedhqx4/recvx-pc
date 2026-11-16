@@ -1,6 +1,6 @@
 # Blender 2.79 script: import recvx menu_uv_capture.jsonl and export UV-only patches.
 # Edit INPUT_JSONL / TEXTURE_DIR / MODE below, then Run Script (Alt-P).
-# MODE="IMPORT" builds editable objects; MODE="EXPORT" writes menu_uv_patch.json.
+# MODE="IMPORT" builds editable objects; MODE="EXPORT" writes menu_uv_patch.jsonl.
 import bpy
 import json
 import os
@@ -10,7 +10,7 @@ import math
 MODE = "IMPORT"
 INPUT_JSONL = os.path.join(os.path.dirname(bpy.data.filepath) or os.getcwd(), "menu_uv_capture.jsonl")
 TEXTURE_DIR = os.path.dirname(INPUT_JSONL)
-PATCH_JSON = os.path.join(os.path.dirname(INPUT_JSONL), "menu_uv_patch.json")
+PATCH_JSONL = os.path.join(os.path.dirname(INPUT_JSONL), "menu_uv_patch.jsonl")
 GROUP_PREFIX = "RECVX_UI_"
 
 def read_records(path):
@@ -177,7 +177,7 @@ def import_all():
     print("RECVX: texture images are matched by *g<Gindex>*f<format>* in %s" % TEXTURE_DIR)
 
 def export_patch():
-    patch = {"schema": 1, "coordinate_space": "per_record_source_uv", "records": []}
+    patch_records = []
     source_records = dict((record["id"], record) for record in read_records(INPUT_JSONL))
     for obj in bpy.context.scene.objects:
         if obj.type != "MESH" or int(obj.get("recvx_schema", 0)) != 1:
@@ -265,10 +265,31 @@ def export_patch():
             continue
         uv_mode = obj.get("recvx_uv_mode", "FST_12_4")
         if uv_mode == "FST_12_4":
-            uv_payload = {"uv_raw": [[int(round(u * 16.0)), int(round(v * 16.0))] for u, v in values]}
+            raw_values = []
+            invalid_uv = False
+            for u, v in values:
+                ru = int(round(u * 16.0))
+                rv = int(round(v * 16.0))
+                if ru < 0 or ru > 0x3FFF or rv < 0 or rv > 0x3FFF:
+                    invalid_uv = True
+                    break
+                raw_values.append([ru, rv])
+            if invalid_uv:
+                print("RECVX: skip %s: FST UV is outside the GS 14-bit range (0..16383 / 16 texels)" % obj.name)
+                continue
+            uv_payload = {"uv_raw": raw_values}
+        elif uv_mode == "ST_FLOAT":
+            st_values = [[u / width, v / height] for u, v in values]
+            if any(not math.isfinite(component) for pair in st_values for component in pair):
+                print("RECVX: skip %s: ST UV contains a non-finite value" % obj.name)
+                continue
+            uv_payload = {"uv_st": st_values}
         else:
-            uv_payload = {"uv_st": [[u / width, v / height] for u, v in values]}
+            print("RECVX: skip %s: unsupported UV encoding %s" % (obj.name, uv_mode))
+            continue
+
         item = {
+            "schema": 1,
             "id": obj["recvx_id"],
             "signature": obj["recvx_signature"],
             "gindex": int(obj["recvx_gindex"]),
@@ -282,10 +303,17 @@ def export_patch():
             "vertex_count": len(values)
         }
         item.update(uv_payload)
-        patch["records"].append(item)
-    with open(PATCH_JSON, "w") as stream:
-        json.dump(patch, stream, indent=2, sort_keys=True)
-    print("RECVX: wrote %d UV-only records to %s" % (len(patch["records"]), PATCH_JSON))
+        patch_records.append(item)
+
+    with open(PATCH_JSONL, "w") as stream:
+        stream.write(json.dumps({
+            "schema": 1,
+            "type": "recvx_menu_uv_patch",
+            "coordinate_space": "per_record_source_uv"
+        }, separators=(",", ":"), sort_keys=True) + "\n")
+        for item in patch_records:
+            stream.write(json.dumps(item, separators=(",", ":"), sort_keys=True) + "\n")
+    print("RECVX: wrote %d UV-only records to %s" % (len(patch_records), PATCH_JSONL))
 
 if MODE == "IMPORT":
     import_all()
