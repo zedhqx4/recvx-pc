@@ -17,6 +17,25 @@ void pcVu0CalcPointN(const float* in, void* out, int n);
 int pcVu0CalcPointBatchEnabled(void);
 unsigned int pcVu0StripClip(const unsigned short* idx, int n, const void* vbuf);
 void pcVu0StripPack(void* dst, const unsigned short* idx, int n, const void* vbuf, const float zb[4]);
+#include "../../../../pc/include/pc_vu.h"
+#include "../../../../pc/include/pc_platform.h"
+
+/* Perfil opt-in (debug=1, profile_game=1): cuantas tiras de la ruta del EE llegan a vu1Draw* y cuantas se descartan por
+ * recorte de frustum tras pasar todos sus vertices por _CVV. Una linea "PROFILE cnk strips" cada 20000 tiras. */
+static unsigned int pcck_strips, pcck_culled, pcck_verts;
+static void pcCnkCount(unsigned int verts, int culled)
+{
+    pcck_strips++;
+    pcck_verts += verts;
+    if (culled) pcck_culled++;
+    if (pcck_strips >= 20000)
+    {
+        pcLog("PROFILE cnk strips: %u tiras, %u descartadas por frustum (%.0f%%), %u vertices por _CVV (%.1f por tira)",
+              pcck_strips, pcck_culled, 100.0 * pcck_culled / pcck_strips, pcck_verts, (double)pcck_verts / pcck_strips);
+        pcck_strips = pcck_culled = pcck_verts = 0;
+    }
+}
+#define PC_CNK_COUNT(verts, culled) do { if (pcGameProfileEnabled()) pcCnkCount((verts), (culled)); } while (0)
 #endif
 
 static VU1_STRIP_BUF* pNaCnkVerBufTop;
@@ -2751,6 +2770,7 @@ CHUNK_HEAD* njCnkCsUvh(CHUNK_HEAD* pCnk)
                     cflag &= _CVV(&pV->fVx);
                 }
              
+                PC_CNK_COUNT(usMax, cflag != 0);
                 if (cflag == 0) 
                 {
                     pVu1Func(ulType, (VU1_STRIP_BUF*)ulpP, usMax, usClip | usColorCalc);
@@ -3220,6 +3240,7 @@ CHUNK_HEAD* njCnkCsUvn(CHUNK_HEAD* pCnk)
                     cflag &= _CVV(&pV->fVx);
                 }
              
+                PC_CNK_COUNT(usMax, cflag != 0);
                 if (cflag == 0) 
                 {
                     pVu1Func(ulType, (VU1_STRIP_BUF*)ulpP, usMax, usClip | usColorCalc);
