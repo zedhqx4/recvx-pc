@@ -324,3 +324,9 @@ Objetivo: quitar capas de compatibilidad PS2 (GS/VU1/VU0/EE/GIF) donde no aporta
 - No verificado en ejecucion (solo revision de codigo; sin compilar con MSVC). Si algo cambia visualmente, volver a `milestone/0.9.131` o revertir este commit.
 - Siguiente: nativizar `vu1Draw*`/`pColorCalcFuncTbl` (vf24-27 como struct C estatica en vez de `pcVu0.vf`), luego retirar VU1 emulada.
 - Sobre el EE: no hay que "nativizarlo" aparte; el juego ya corre como C en x86. Lo que sobra son las capas (`PcGpr`, `A2C_*`, `a2c_ldl/ldr`) de las zonas traducidas de asm; se eliminan al nativizar cada funcion.
+
+### Medicion 0.9.135 (log 26fbbd70, perfil activo con debug=1 + profile_game=1)
+- plist por chunk CNK: 31-93 us (antes de 0.9.135: 28-95 us). `_CVV` nativo no cambia nada medible: NO era el cuello.
+- Cuello real (por lectura de codigo): por cada vertice de tira, `vu1DrawTriangleStrip*` llama a `pFunc` (vu1GetVertexColor*), `_Clip_ViewVolume2` (pcVu0Micro 269, 2 vertices) / `_Check_ClipViewAll` (pcVu0Micro 237, el resto) y `_Get_ClipViewVolume2`; ~1 us/vertice con ~60 vertices por chunk.
+- OJO al nativizar 237: `VU0_CLIP_VIEW_VOLUME_ALL` hace `ILW vi01,187(vi00); JALR vi15,vi01`, es decir salta a la rutina de color VU0 elegida en tiempo de ejecucion (`vu0GetVertexColor*`, escrita en mem[187] por la rutina de init de 0x0C48-0C58 con la tabla en mem[176+modo]) y vuelve por `JR vi15` a 0x07D0. Es recorte + iluminacion en una sola llamada. Hay que nativizar la familia vu0GetVertexColor* a la vez (pendiente "colour calc VU0_CALC_COLOR"), y verificar vi02 (plano) con los FCOR: constantes 0xDF7DF, 0xEFBEF, 0x7DF7, 0xBEFB, 0xDF7D, 0xEFBE sobre el clip visto (|imm)&0xFFFFFF==0xFFFFFF.
+- 269 (VU0_CLIP_VIEW_VOLUME) es sencillo (vf19<-vf18<-vf15; vf15 = M*vf14; 3 CLIPw) pero solo afecta a 2 vertices por tira: ganancia pequena.
