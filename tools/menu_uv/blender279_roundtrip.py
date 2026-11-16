@@ -8,7 +8,9 @@ import glob
 import math
 
 MODE = "IMPORT"
-INPUT_JSONL = os.path.join(os.path.dirname(bpy.data.filepath) or os.getcwd(), "menu_uv_capture.jsonl")
+# Capture supplied for this project. Keep this as a raw string so Windows
+# backslashes and spaces are interpreted literally by Python.
+INPUT_JSONL = r"E:\Games\Resident Evil Code Veronica X\menu_uv_capture.jsonl"
 TEXTURE_DIR = os.path.dirname(INPUT_JSONL)
 PATCH_JSONL = os.path.join(os.path.dirname(INPUT_JSONL), "menu_uv_patch.jsonl")
 GROUP_PREFIX = "RECVX_UI_"
