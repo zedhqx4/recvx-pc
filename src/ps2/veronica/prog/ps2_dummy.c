@@ -1864,7 +1864,6 @@ void Ps2AddPrim(unsigned long prim, void* dp, unsigned int num, unsigned int cli
         memcpy(wide_buf, dp, num * 48);
         dp = wide_buf;
         ui_uv_element_key = pc_ui_uv_register_geometry(wide_buf, num, prim, &ui_uv_selected_draw);
-        pc_ui_uv_capture_geometry(ui_uv_element_key, wide_buf, num, prim);
         if (pc_ui_snap_uv_enabled())
         {
             pc_snap_uv((unsigned int*)wide_buf, num);
