@@ -64,7 +64,7 @@ extern void (*pcVu1GifSink)(const unsigned int* qwords, unsigned int max_qwords)
  * La FPU del EE y las FMAC de las VU truncan hacia cero (no hay redondeo al mas cercano) y vacian los
  * denormales. En x86 eso es MXCSR con RC=11, FTZ y DAZ. pcVuRoundEnter/Leave lo activan solo mientras corre
  * matematica de VU (las funciones vu1Draw*), de modo que el driver de GL, SDL y el resto del proceso siguen con
- * el redondeo normal. Opt-in: vu_trunc=1 en recvx.ini (o RECVX_VU_TRUNC=1); por defecto apagado. */
+ * el redondeo normal. Activo por defecto; vu_trunc=0 en recvx.ini (o RECVX_VU_TRUNC=0) vuelve al redondeo del host para comparar. */
 #if defined(_M_IX86) || defined(_M_X64) || defined(__SSE__)
 #include <xmmintrin.h>
 int pcVuTruncEnabled(void);

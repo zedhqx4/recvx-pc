@@ -240,7 +240,7 @@ static void pcVu0StripClipTransform(const uint8_t* position)
     vu_set_mac(&pcVu0, &r_, 15);
 }
 
-uint32_t pcVu0StripClip(const unsigned short* idx, int n, const void* vbuf)
+static uint32_t pcVu0StripClipImpl(const unsigned short* idx, int n, const void* vbuf)
 {
     const uint8_t* const vb = (const uint8_t*)vbuf;
     uint32_t coflag = 0x3F;
@@ -284,7 +284,7 @@ int pcVu0CalcPointBatchEnabled(void)
     return enabled;
 }
 
-void pcVu0CalcPointN(const float* in, void* output, int n)
+static void pcVu0CalcPointNImpl(const float* in, void* output, int n)
 {
     PcVu0* const s = &pcVu0;
     uint8_t* out = (uint8_t*)output;
@@ -331,7 +331,7 @@ void pcVu0CalcPointN(const float* in, void* output, int n)
  *   out2 = v.q2
  *   out3 = (v.q3.x, v.q3.y, clamp(v.q3.z * zb[0] + zb[2], 0, zb[3]), v.q2.w)
  * Es la misma secuencia vitof0/vmuly/vmulax/vmaddw/vmax/vminiw/vmove que el microcodigo original. */
-void pcVu0StripPack(void* dst, const unsigned short* idx, int n, const void* vbuf, const float zb[4])
+static void pcVu0StripPackImpl(void* dst, const unsigned short* idx, int n, const void* vbuf, const float zb[4])
 {
     uint8_t* out = (uint8_t*)dst;
     const uint8_t* const vb = (const uint8_t*)vbuf;
@@ -364,4 +364,27 @@ void pcVu0StripPack(void* dst, const unsigned short* idx, int n, const void* vbu
     {
         memcpy(&pcVu0.vf[4], out - 64, 64);   /* deja vf4..vf7 como los dejaba el bucle original */
     }
+}
+
+/* Entradas publicas: matematica de VU0 con el redondeo del hardware (truncar hacia cero, sin denormales). */
+uint32_t pcVu0StripClip(const unsigned short* idx, int n, const void* vbuf)
+{
+    const unsigned int csr = pcVuRoundEnter();
+    const uint32_t r = pcVu0StripClipImpl(idx, n, vbuf);
+    pcVuRoundLeave(csr);
+    return r;
+}
+
+void pcVu0CalcPointN(const float* in, void* output, int n)
+{
+    const unsigned int csr = pcVuRoundEnter();
+    pcVu0CalcPointNImpl(in, output, n);
+    pcVuRoundLeave(csr);
+}
+
+void pcVu0StripPack(void* dst, const unsigned short* idx, int n, const void* vbuf, const float zb[4])
+{
+    const unsigned int csr = pcVuRoundEnter();
+    pcVu0StripPackImpl(dst, idx, n, vbuf, zb);
+    pcVuRoundLeave(csr);
 }

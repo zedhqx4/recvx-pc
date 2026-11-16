@@ -298,8 +298,9 @@ def generate(vsm, dst_rel, state, func, mask, extra_decl=""):
         out.append("int pcVu0NativeMicro(int addr);")
         out.append("void pcVu0MicroInterp(int addr);\n")
         out.append("void %s(int addr)\n{" % func)
-        out.append("    if (pcVu0NativeMicro(addr)) return;")
-        out.append("    pcVu0MicroInterp(addr);")
+        out.append("    const unsigned int csr = pcVuRoundEnter();   /* truncar hacia cero como la VU */")
+        out.append("    if (!pcVu0NativeMicro(addr)) pcVu0MicroInterp(addr);")
+        out.append("    pcVuRoundLeave(csr);")
         out.append("}\n")
         func = "pcVu0MicroInterp"
     out.append("void %s(int addr)\n{" % func)

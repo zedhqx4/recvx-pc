@@ -8,8 +8,9 @@ void pcVu0MicroInterp(int addr);
 
 void pcVu0Micro(int addr)
 {
-    if (pcVu0NativeMicro(addr)) return;
-    pcVu0MicroInterp(addr);
+    const unsigned int csr = pcVuRoundEnter();   /* truncar hacia cero como la VU */
+    if (!pcVu0NativeMicro(addr)) pcVu0MicroInterp(addr);
+    pcVuRoundLeave(csr);
 }
 
 void pcVu0MicroInterp(int addr)

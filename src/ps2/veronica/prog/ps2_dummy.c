@@ -1157,7 +1157,7 @@ static void pc_wide_clip(unsigned int* v, unsigned int num, int uv)
         /* sprites are flat shaded from their last vertex; the first one's color is unset */
         for (k = 4; (num > 2) && (k < 8); k++)
         {
-            a[k] = (unsigned int)((int)a[k] + (int)(t * ((int)b[k] - (int)a[k]) + 0.5f));
+            a[k] = (unsigned int)((int)a[k] + (int)(t * ((int)b[k] - (int)a[k])));   /* truncar, como la GS */
         }
 
         ((float*)a)[8] = e;
@@ -1802,6 +1802,13 @@ static unsigned int pcAssemblePrepared(const PcNativeVertex* v, const unsigned c
     return n;
 }
 
+/* FTOI0 de la VU1 (truncar hacia cero) tras fijar al rango del campo de 8 bits: asi llegan a la GS el color RGBA y la F de
+ * la niebla. El float de la VU se queda en el entero de abajo; no se redondea al mas cercano. */
+static float pcFtoi0Sat(float x)
+{
+    return floorf(fminf(fmaxf(x, 0.0f), 255.0f));
+}
+
 /* Cola final: vertices ya en pantalla (+ kick y Z de la GS por vertice) -> renderer nativo.
  * La comparten el empaquetador del EE (pcSubmitPrepared3D) y la salida de la VU1 (pcVu1GifPacket). */
 static void pcSubmitVertices(unsigned long prim, const PcNativeVertex* vertices, const unsigned char* kick, const float* gs_z,
@@ -1914,7 +1921,7 @@ static void pcSubmitPrepared3D(unsigned long prim, const void* data, unsigned in
         const uint32_t* d = packed + (size_t)i * 12u;
         float r, g, b, a;
         if (mode->floating_color) {
-            r = source[4]; g = source[5]; b = source[6]; a = source[7];
+            r = pcFtoi0Sat(source[4]); g = pcFtoi0Sat(source[5]); b = pcFtoi0Sat(source[6]); a = pcFtoi0Sat(source[7]);
         } else {
             uint32_t rgba[4];
             memcpy(rgba, source + 4, sizeof(rgba));
@@ -1938,7 +1945,7 @@ static void pcSubmitPrepared3D(unsigned long prim, const void* data, unsigned in
         /* F de la GS: todos los llamadores (particulas njPtcl*, NaDraw, NaGraphics3D...) dejan scr.fog (0..255) en el .w del
          * 3er qword y el empaquetador original lo mete en XYZF2.F (bits 4..11). Antes solo se leia con color flotante y el
          * resto quedaba en 1.0 (sin niebla): las particulas con PRIM.FGE no se perdian en la niebla. */
-        vertices[i].fog = fminf(fmaxf(source[11] / 255.0f, 0.0f), 1.0f);
+        vertices[i].fog = pcFtoi0Sat(source[11]) / 255.0f;
         kick[i] = (d[11] & 0x8000u) != 0;
     }
 
@@ -2023,11 +2030,13 @@ static void pcSubmitStrip3D(unsigned long prim, const void* data, unsigned int c
 
         sz = -Ps2_zbuff_a + q * -Ps2_zbuff_b;           /* Z de la GS: afin en Q, por eso el recorte homogeneo es exacto */
         zc = sz < 0.0f ? 0.0f : sz > 65534.0f ? 65534.0f : sz;
+        zc = floorf(zc);                                /* Z de 32 bits entero (FTOI0): se trunca, no se redondea */
         gs_z[i] = zc;
         zsum += zc;
 
-        vertices[i].x = rec[8] - 1728.0f;
-        vertices[i].y = rec[9] - 1808.0f;
+        /* XYZ2 de la GS es punto fijo 12.4: FTOI4 trunca a 1/16 de pixel */
+        vertices[i].x = floorf(rec[8] * 16.0f) / 16.0f - 1728.0f;
+        vertices[i].y = floorf(rec[9] * 16.0f) / 16.0f - 1808.0f;
         /* Z de la GS con el MISMO fijado por vertice que el empaquetador original (0..65534): lo que quedaba mas cerca que el
          * plano cercano se dibujaba aplastado contra el, no recortado. Con el Z sin fijar (0.9.123-125) la GPU recortaba la
          * geometria cercana: escaleras de la pantalla de carga (z = -0.27) desaparecian. */
@@ -2035,11 +2044,11 @@ static void pcSubmitStrip3D(unsigned long prim, const void* data, unsigned int c
         vertices[i].q = q;
         vertices[i].u = rec[0] / q * tex_width;         /* S = U*Q: con la interpolacion de la GPU ya no se divide por Q */
         vertices[i].v = rec[1] / q * tex_height;
-        vertices[i].r = fminf(fmaxf(rec[4] / 255.0f, 0.0f), 1.0f);
-        vertices[i].g = fminf(fmaxf(rec[5] / 255.0f, 0.0f), 1.0f);
-        vertices[i].b = fminf(fmaxf(rec[6] / 255.0f, 0.0f), 1.0f);
-        vertices[i].a = fminf(fmaxf(rec[7] / 128.0f, 0.0f), 1.0f);
-        vertices[i].fog = fminf(fmaxf(rec[11] / 255.0f, 0.0f), 1.0f);
+        vertices[i].r = pcFtoi0Sat(rec[4]) / 255.0f;
+        vertices[i].g = pcFtoi0Sat(rec[5]) / 255.0f;
+        vertices[i].b = pcFtoi0Sat(rec[6]) / 255.0f;
+        vertices[i].a = fminf(pcFtoi0Sat(rec[7]) / 128.0f, 1.0f);
+        vertices[i].fog = pcFtoi0Sat(rec[11]) / 255.0f;
         kick[i] = (flags & 0x8000u) != 0;
     }
 

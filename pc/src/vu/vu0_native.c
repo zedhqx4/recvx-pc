@@ -321,7 +321,7 @@ int pcVuTruncEnabled(void)
     if (on < 0)
     {
         const char* e = getenv("RECVX_VU_TRUNC");
-        on = (e != NULL) ? (atoi(e) != 0) : (pcIniGetInt("vu_trunc", 0) != 0);
+        on = (e != NULL) ? (atoi(e) != 0) : (pcIniGetInt("vu_trunc", 1) != 0);
         pcLog("VU rounding: %s", on ? "truncate toward zero + flush denormals (EE/VU)" : "round to nearest (host default)");
     }
     return on;
