@@ -259,7 +259,7 @@ static int native_mode(void)
     if (mode < 0)
     {
         const char* e = getenv("RECVX_VU0_NATIVE");
-        mode = (e == NULL) ? 1 : atoi(e);
+        mode = (e != NULL) ? atoi(e) : pcIniGetInt("vu0_native", 1);   /* entorno RECVX_VU0_NATIVE o vu0_native= en recvx.ini */
     }
     return mode;
 }

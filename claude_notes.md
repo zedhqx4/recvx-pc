@@ -349,3 +349,6 @@ Principio: EE/VU/GS truncan hacia cero y nunca redondean al mas cercano; el port
 
 ### 0.9.138: criterio por operacion (no "truncar todo")
 Regla: cada paso hace lo que hace el hardware. Truncar: FMAC de VU/FPU del EE (chop), FTOI0/FTOI4, MODULATE `>>7`, niebla `>>8`, mezcla `>>7`, Z entero, interpolacion de color/F/Z en la GS. Redondear: solo donde el original redondea (hay que comprobarlo en el codigo del juego, p. ej. sumas de 0.5 antes de FTOI). Natural (float sin tocar): ST/Q, calculos propios del port que no existen en la GS (vertices sinteticos del recorte propio, escalado de ventana, viewport). Revertido: el `+0.5` en la interpolacion de color del recorte propio de sprites (no es hardware). Por verificar contra el codigo/hardware antes de darlo por bueno: truncado del resultado del filtro bilineal, y cuantizacion de F interpolado.
+
+### 0.9.139: opciones tambien en recvx.ini
+Las opciones de depuracion solo existian como variable de entorno (`getenv`), incomodas en Windows. Ahora el entorno manda y, si no existe, se lee `recvx.ini`: `vu1=1` (RECVX_VU1), `vu0_native=0|1|2` (RECVX_VU0_NATIVE), `gs_int=0|1` (RECVX_GS_INT), `vu_trunc=0|1` (ya leia el ini). Siguen solo por entorno: RECVX_VU0_BATCH, RECVX_CV_VN_BATCH, RECVX_FRAME_DUMP y las de volcado/diagnostico.

@@ -86,6 +86,7 @@ static int render_height = 480;
 static float projection_value = 1.0f;
 static float aspect_w = 1.0f, aspect_h = 1.0f;
 static float offset_x, offset_y;
+extern int pcIniGetInt(const char* key, int def);
 static float near_clip = 1.0f, far_clip = 65535.0f;
 static float clear_color[4] = { 0, 0, 0, 1 };
 static int global_fog_enabled;
@@ -323,10 +324,10 @@ int pcRendererInit(int width, int height)
     u_alpha_pass = glGetUniformLocation(program, "uAlphaPass");
     {   /* RECVX_GS_INT=0 vuelve a la mezcla en coma flotante (comparar A/B con la aritmetica entera de la GS, por defecto activa) */
         const char* e = getenv("RECVX_GS_INT");
-        int gs_int = !(e && *e == '0');
+        int gs_int = e ? (*e != '0') : (pcIniGetInt("gs_int", 1) != 0);   /* entorno RECVX_GS_INT o gs_int= en recvx.ini */
         glUseProgram(program);
         glUniform1i(glGetUniformLocation(program, "uGsInt"), gs_int);
-        pcLog("native renderer: aritmetica entera de la GS (MODULATE >>7, niebla >>8): %s", gs_int ? "activa" : "desactivada (RECVX_GS_INT=0)");
+        pcLog("native renderer: aritmetica entera de la GS (MODULATE >>7, niebla >>8): %s", gs_int ? "activa" : "desactivada (gs_int=0 / RECVX_GS_INT=0)");
     }
 
     glGenVertexArrays(1, &vertex_array);

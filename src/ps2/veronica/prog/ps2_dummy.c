@@ -2165,8 +2165,9 @@ int pcVu1Enabled(void)
         const char* e = getenv("RECVX_VU1");
         /* La VU1 emulada da el mismo resultado que la ruta del EE (verificado con F8 en 0.9.120/121) pero cuesta CPU:
          * queda como herramienta de verificacion, RECVX_VU1=1 la activa. */
-        enabled = (e && e[0] == '1');
-        pcLog("VU1: emulacion %s (RECVX_VU1=1 la activa)", enabled ? "ACTIVA" : "desactivada");
+        /* variable de entorno RECVX_VU1 o, si no existe, vu1=1 en recvx.ini */
+        enabled = e ? (e[0] == '1') : (pcIniGetInt("vu1", 0) != 0);
+        pcLog("VU1: emulacion %s (vu1=1 en recvx.ini o RECVX_VU1=1 la activa)", enabled ? "ACTIVA" : "desactivada");
         pcVu1GifSink = pcVu1GifPacket;
         pcVif1Reset();
     }
