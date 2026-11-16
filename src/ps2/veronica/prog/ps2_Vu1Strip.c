@@ -9,6 +9,45 @@
 #include <string.h>
 #endif
 
+
+#ifdef TARGET_PC
+/* Perfil opt-in (debug=1, profile_game=1): reparto del tiempo de cada tira entre color/recorte por vertice y el envio
+ * (Ps2AddPrim3DEx). Cada 4000 tiras escribe una linea "PROFILE vu1Draw" en recvx.log. */
+#include "pc_game_profile.h"
+#include "pc_platform.h"
+#include "pc_vu.h"
+static struct { double total, submit; unsigned int strips, verts; } pcsp_acc[4];
+static unsigned int pcsp_count;
+static void pcStripProfRecord(int kind, double t0, double t1, double t2, unsigned int verts)
+{
+    static const char* const names[4] = { "OpaqueSingle", "OpaqueDouble", "TransSingle", "TransDouble" };
+    pcsp_acc[kind].total += t2 - t0;
+    pcsp_acc[kind].submit += t2 - t1;
+    pcsp_acc[kind].strips++;
+    pcsp_acc[kind].verts += verts;
+    if (++pcsp_count >= 4000)
+    {
+        int i;
+        for (i = 0; i < 4; i++)
+        {
+            if (pcsp_acc[i].strips == 0) continue;
+            pcLog("PROFILE vu1Draw %s: %u strips %u verts | %.3f us/vertex total, %.3f us/vertex submit (Ps2AddPrim3DEx), %.3f us/vertex color+clip+rest",
+                  names[i], pcsp_acc[i].strips, pcsp_acc[i].verts,
+                  pcsp_acc[i].total * 1000.0 / pcsp_acc[i].verts, pcsp_acc[i].submit * 1000.0 / pcsp_acc[i].verts,
+                  (pcsp_acc[i].total - pcsp_acc[i].submit) * 1000.0 / pcsp_acc[i].verts);
+            memset(&pcsp_acc[i], 0, sizeof(pcsp_acc[i]));
+        }
+        pcsp_count = 0;
+    }
+}
+#define PCSP_BEGIN unsigned int pcsp_csr = pcVuRoundEnter(); double pcsp_t0 = pcGameProfileEnabled() ? pcGameProfileNowMs() : 0.0, pcsp_t1 = 0.0;
+#define PCSP_SUBMIT(kind, call) do { pcVuRoundLeave(pcsp_csr); if (pcsp_t0 != 0.0) pcsp_t1 = pcGameProfileNowMs(); call; \
+    if (pcsp_t0 != 0.0) pcStripProfRecord(kind, pcsp_t0, pcsp_t1, pcGameProfileNowMs(), usStripMax); } while (0)
+#else
+#define PCSP_BEGIN
+#define PCSP_SUBMIT(kind, call) call
+#endif
+
 static SCISSOR_PLANE planeset;
 static SCISSOR scissorflip;
 static NODE node;
@@ -1510,6 +1549,7 @@ void DrawScissorPolygonOpaque(SCISSOR* scissor, unsigned long ulType)
 // 100% matching! 
 void vu1DrawTriangleStripOpaqueSingle(unsigned long ulType, VU1_STRIP_BUF* pStripTop, unsigned short usStripMax, unsigned short usMode)
 {
+    PCSP_BEGIN
     VU1_PRIM_BUF* pP;                            
     VU1_STRIP_BUF* pS0, *pS1, *pS2;                         
     float fIz;                                   
@@ -1625,12 +1665,13 @@ void vu1DrawTriangleStripOpaqueSingle(unsigned long ulType, VU1_STRIP_BUF* pStri
         flg <<= 1;
     }
     
-    Ps2AddPrim3DEx(ulType, Ps2_DRAW_TMP, usStripMax);
+    PCSP_SUBMIT(0, Ps2AddPrim3DEx(ulType, Ps2_DRAW_TMP, usStripMax));
 }
 
 // 100% matching! 
 void vu1DrawTriangleStripOpaqueDouble(unsigned long ulType, VU1_STRIP_BUF* pS, unsigned short usStripMax, unsigned short usMode)
 {
+    PCSP_BEGIN
     VU1_PRIM_BUF* pP;                            
     float fIz;                                   
     unsigned short usStripCnt;                  
@@ -1739,12 +1780,13 @@ void vu1DrawTriangleStripOpaqueDouble(unsigned long ulType, VU1_STRIP_BUF* pS, u
         flg <<= 1;
     }
     
-    Ps2AddPrim3DEx(ulType, Ps2_DRAW_TMP, usStripMax);
+    PCSP_SUBMIT(1, Ps2AddPrim3DEx(ulType, Ps2_DRAW_TMP, usStripMax));
 }
 
 // 100% matching! 
 void vu1DrawTriangleStripTransSingle(unsigned long ulType, VU1_STRIP_BUF* pStripTop, unsigned short usStripMax, unsigned short usMode)
 {
+    PCSP_BEGIN
     VU1_PRIM_BUF* pP;                            
     VU1_STRIP_BUF* pS0, *pS1, *pS2;                         
     float fIz;                                   
@@ -1860,7 +1902,7 @@ void vu1DrawTriangleStripTransSingle(unsigned long ulType, VU1_STRIP_BUF* pStrip
         flg <<= 1;
     }
     
-    Ps2AddPrim3DEx(ulType, Ps2_DRAW_TMP, usStripMax);
+    PCSP_SUBMIT(2, Ps2AddPrim3DEx(ulType, Ps2_DRAW_TMP, usStripMax));
 }
 
 // 99.38% matching
@@ -1920,6 +1962,7 @@ int _Clip_Screen(float* clip)
 // 97.44% matching
 void vu1DrawTriangleStripTransDouble(unsigned long ulType, VU1_STRIP_BUF* pS, unsigned short usStripMax, unsigned short usMode)
 {
+    PCSP_BEGIN
     VU1_PRIM_BUF* pP;                            
     float fIz;                                   
     unsigned short usStripCnt;                  
@@ -2501,7 +2544,7 @@ void vu1DrawTriangleStripTransDouble(unsigned long ulType, VU1_STRIP_BUF* pS, un
         } 
     } 
     
-    Ps2AddPrim3DEx(ulType, Ps2_DRAW_TMP, usStripMax); 
+    PCSP_SUBMIT(3, Ps2AddPrim3DEx(ulType, Ps2_DRAW_TMP, usStripMax)); 
 } 
 
 // 100% matching!

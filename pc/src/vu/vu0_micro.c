@@ -3,7 +3,16 @@
 
 PcVu0 pcVu0 = { { { { 0, 0, 0, 1 } } } };
 
+int pcVu0NativeMicro(int addr);
+void pcVu0MicroInterp(int addr);
+
 void pcVu0Micro(int addr)
+{
+    if (pcVu0NativeMicro(addr)) return;
+    pcVu0MicroInterp(addr);
+}
+
+void pcVu0MicroInterp(int addr)
 {
     PcVu0* v = &pcVu0;
     VuVec ut, lt;
