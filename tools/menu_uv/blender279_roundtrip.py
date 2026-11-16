@@ -88,6 +88,7 @@ def import_record(record):
     topology = int(record["topology"])
     raw_vertices = record["vertices"]
     source_count = len(raw_vertices)
+    source_original_uv = [[v["u"], v["v"]] for v in raw_vertices]
     sprite = topology == 6 and source_count >= 2
 
     if sprite:
@@ -146,7 +147,7 @@ def import_record(record):
     obj["recvx_texture_height"] = int(record["texture_height"])
     obj["recvx_topology"] = topology
     obj["recvx_sprite"] = bool(sprite)
-    obj["recvx_original_uv"] = json.dumps([[v["u"], v["v"]] for v in raw_vertices])
+    obj["recvx_original_uv"] = json.dumps(source_original_uv)
     obj["recvx_original_vertex_count"] = source_count
     obj["recvx_texture_path"] = image_path or ""
     group_name = GROUP_PREFIX + "G%d_F%d" % (record["gindex"], record["pict_format"])
