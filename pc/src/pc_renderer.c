@@ -81,10 +81,11 @@ static GLint u_textured, u_texture, u_fog_enabled, u_fog_color, u_alpha_test, u_
 static GLint u_screen_space, u_texture_size, u_texture_function, u_texture_alpha, u_texture_perspective, u_alpha_pass;
 static int output_width = 640;
 static int output_height = 480;
-/* Target output range only: 1 = expand the game's limited RGB (16..235) to full (0..255); 0 = leave it limited. */
-static int RGBRangeFull = 1;
+/* Output conversion mode: 0 = leave limited 16..235 unchanged; 1 = expand to full; 2 = compress full to limited. */
+static int RGBRange = 0;
 static GLuint rgb_range_program;
 static GLint rgb_range_source = -1;
+static GLint rgb_range_mode = -1;
 static int render_width = 640;
 static int render_height = 480;
 static float projection_value = 1.0f;
@@ -238,9 +239,11 @@ static GLuint create_rgb_range_program(void)
         "void main(){ vec2 p=vec2(float((gl_VertexID<<1)&2),float(gl_VertexID&2)); "
         "vUv=p; gl_Position=vec4(p*2.0-1.0,0.0,1.0); }\n";
     static const char* fs_src =
-        "#version 330 core\nin vec2 vUv; uniform sampler2D uSource; out vec4 oColor;\n"
+        "#version 330 core\nin vec2 vUv; uniform sampler2D uSource; uniform int uMode; out vec4 oColor;\n"
         "void main(){ vec4 c=texture(uSource,vUv); "
-        "c.rgb=clamp((c.rgb*255.0-16.0)/219.0,0.0,1.0); oColor=c; }\n";
+        "if(uMode==1) c.rgb=clamp((c.rgb*255.0-16.0)/219.0,0.0,1.0); "
+        "else if(uMode==2) c.rgb=c.rgb*(219.0/255.0)+(16.0/255.0); "
+        "oColor=c; }\n";
     GLuint vs = compile_shader(GL_VERTEX_SHADER, vs_src);
     GLuint fs = compile_shader(GL_FRAGMENT_SHADER, fs_src);
     GLuint p = 0;
@@ -276,8 +279,9 @@ static GLuint create_rgb_range_program(void)
     }
 
     rgb_range_source = glGetUniformLocation(p, "uSource");
-    if (rgb_range_source < 0) {
-        pcLog("native renderer: RGB range shader is missing uSource");
+    rgb_range_mode = glGetUniformLocation(p, "uMode");
+    if (rgb_range_source < 0 || rgb_range_mode < 0) {
+        pcLog("native renderer: RGB range shader is missing a required uniform");
         glDeleteProgram(p);
         return 0;
     }
@@ -364,16 +368,22 @@ int pcRendererInit(int width, int height)
     program = create_program();
     if (!program) return 0;
 
-    RGBRangeFull = pcIniGetInt("RGBRangeFull", 1) != 0;
-    if (RGBRangeFull) {
+    RGBRange = pcIniGetInt("RGBRange", 0);
+    if (RGBRange < 0 || RGBRange > 2) {
+        pcLog("native renderer: invalid RGBRange=%d; using 0 (limited passthrough)", RGBRange);
+        RGBRange = 0;
+    }
+    if (RGBRange != 0) {
         rgb_range_program = create_rgb_range_program();
         if (!rgb_range_program) {
-            pcLog("native renderer: RGBRangeFull=1 requested, but limited-to-full expansion could not be initialized; keeping limited output");
-            RGBRangeFull = 0;
+            pcLog("native renderer: RGBRange=%d requested, but output conversion could not be initialized; using 0 (limited passthrough)", RGBRange);
+            RGBRange = 0;
         }
     }
-    pcLog("native renderer: output RGB range: %s (RGBRangeFull=%d)",
-          RGBRangeFull ? "full / expand limited 16-235 to 0-255" : "limited / passthrough", RGBRangeFull);
+    pcLog("native renderer: output RGB range mode: %d (%s)", RGBRange,
+          RGBRange == 0 ? "limited passthrough" :
+          RGBRange == 1 ? "limited 16-235 -> full 0-255" :
+                          "full 0-255 -> limited 16-235");
 
     u_target = glGetUniformLocation(program, "uTarget");
     u_projection = glGetUniformLocation(program, "uProjection");
@@ -1753,7 +1763,7 @@ void pcRendererPresent(void)
     glDisable(GL_DEPTH_TEST);
     glDisable(GL_BLEND);
     glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
-    { float black = RGBRangeFull ? 0.0f : (16.0f / 255.0f); glClearColor(black, black, black, 1.0f); }
+    { float black = (RGBRange == 1) ? 0.0f : (16.0f / 255.0f); glClearColor(black, black, black, 1.0f); }
     glClear(GL_COLOR_BUFFER_BIT);
 
     aspect = pcVideoAspect();
@@ -1765,17 +1775,18 @@ void pcRendererPresent(void)
     }
     x = (ww - vw) / 2;
     y = (wh - vh) / 2;
-    if (!RGBRangeFull) {
-        /* Preserve the existing limited-range path byte-for-byte. */
+    if (RGBRange == 0) {
+        /* Preserve the game's existing limited-range output byte-for-byte. */
         glBlitFramebuffer(0, 0, render_width, render_height,
                           x, y, x + vw, y + vh, GL_COLOR_BUFFER_BIT, GL_LINEAR);
     } else {
-        /* Expand only the final window output; the game framebuffer and captures stay limited-range. */
+        /* Convert only the final window output; the game framebuffer and captures remain unchanged. */
         GLuint source_texture = (present_source == framebuffer) ? color_target : blur_tex[blur_history];
         glBindFramebuffer(GL_FRAMEBUFFER, 0);
         glViewport(x, y, vw, vh);
         glDisable(GL_CULL_FACE);
         glUseProgram(rgb_range_program);
+        glUniform1i(rgb_range_mode, RGBRange);
         glActiveTexture(GL_TEXTURE0);
         glBindTexture(GL_TEXTURE_2D, source_texture);
         glBindVertexArray(vertex_array);
