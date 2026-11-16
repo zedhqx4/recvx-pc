@@ -890,6 +890,63 @@ static int pause_until_active(void)
 static Uint64 last_mouse_move;
 
 /* Diagnostic hotkeys are inert in normal builds; enable them with debug=1 in recvx.ini. */
+/* RGB range debug controls are intentionally independent of the broader debug= option. */
+static int pc_rgb_range_debug_enabled(void)
+{
+    static int enabled = -1;
+
+    if (enabled < 0) {
+        enabled = pcIniGetInt("RGBRangedebug", 0) != 0;
+        pcLog("video: RGB range hotkeys %s (RGBRangedebug=%d; keys 0/1/2)",
+              enabled ? "enabled" : "disabled", enabled);
+    }
+
+    return enabled;
+}
+
+/* True means the key event was consumed and must not reach the game. */
+static int pc_rgb_range_debug_handle_event(const SDL_Event* ev)
+{
+    SDL_Scancode key;
+    int mode = -1;
+    char notice[128];
+
+    if (!pc_rgb_range_debug_enabled())
+        return 0;
+
+    if (ev->type != SDL_EVENT_KEY_DOWN && ev->type != SDL_EVENT_KEY_UP)
+        return 0;
+
+    key = ev->key.scancode;
+    switch (key) {
+    case SDL_SCANCODE_0:
+    case SDL_SCANCODE_KP_0: mode = 0; break;
+    case SDL_SCANCODE_1:
+    case SDL_SCANCODE_KP_1: mode = 1; break;
+    case SDL_SCANCODE_2:
+    case SDL_SCANCODE_KP_2: mode = 2; break;
+    default: return 0;
+    }
+
+    /* Consume both edges while enabled; avoid leaking a mode-selection press into game controls. */
+    if (ev->type == SDL_EVENT_KEY_UP || ev->key.repeat)
+        return 1;
+
+    if (pcRendererSetRgbRange(mode)) {
+        const char* description =
+            (mode == 0) ? "LIMITED passthrough" :
+            (mode == 1) ? "FULL (expand 16-235 to 0-255)" :
+                          "LIMITED (compress 0-255 to 16-235)";
+        snprintf(notice, sizeof(notice), "RGB RANGE %d: %s", mode, description);
+        title_notice_show(notice);
+    } else {
+        snprintf(notice, sizeof(notice), "RGB RANGE %d: unavailable (see recvx.log)", mode);
+        title_notice_show(notice);
+    }
+
+    return 1;
+}
+
 static int pc_debug_mode_enabled(void)
 {
     static int enabled = -1;
@@ -1063,6 +1120,12 @@ int pcVideoPumpEvents(void)
         {
             last_mouse_move = SDL_GetTicks();
             SDL_ShowCursor(SDL_ENABLE);
+        }
+
+        /* RGB output range diagnostic: 0/1/2 select the presentation conversion while RGBRangedebug=1. */
+        if (pc_rgb_range_debug_handle_event(&ev))
+        {
+            continue;
         }
 
         /* Live UV crop tuner; changes take effect on the next UI draw and are saved to recvx.ini. */
