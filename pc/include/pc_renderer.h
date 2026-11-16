@@ -38,6 +38,8 @@ typedef struct {
 int pcRendererInit(int width, int height);
 void pcRendererShutdown(void);
 void pcRendererBeginFrame(void);
+/* Debug-only outline for a selected 2D UI primitive, in the game's 640x480 pixel space. */
+void pcRendererSetUiUvDebugRect(float x0, float y0, float x1, float y1);
 void pcRendererPresent(void);
 float pcRendererDepthFromViewZ(float view_z);
 float pcRendererDepthFromReciprocalZ(float reciprocal_z);

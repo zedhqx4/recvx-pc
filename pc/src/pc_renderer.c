@@ -95,6 +95,8 @@ static GLuint current_texture;
 static int depth_override_test = -1;
 static int depth_override_write = -1;
 static int burst_remaining, burst_index;   /* captura en rafaga (F8), ver pcRendererCaptureBurst */
+static int ui_uv_debug_rect_valid;
+static float ui_uv_debug_rect[4];
 
 /* diagnostico para codigo del juego: hay una rafaga F8 en sus dos primeros frames */
 int pcRendererBurstDiag(void) { return burst_remaining > 0 && burst_index < 2; }
@@ -113,6 +115,17 @@ static int scissor_rect[4];
 static unsigned long long frame_number;
 
 uint64_t pcRendererFrameNumber(void) { return (uint64_t)frame_number; }
+
+void pcRendererSetUiUvDebugRect(float x0, float y0, float x1, float y1)
+{
+    if (!(x1 > x0) || !(y1 > y0)) return;
+    ui_uv_debug_rect[0] = x0;
+    ui_uv_debug_rect[1] = y0;
+    ui_uv_debug_rect[2] = x1;
+    ui_uv_debug_rect[3] = y1;
+    ui_uv_debug_rect_valid = 1;
+}
+
 static void flush_pending_deletes(void);
 static unsigned stat_immediate, stat_queued, stat_vertices, stat_screen_space;
 static int debug_magenta = -1;
@@ -368,6 +381,7 @@ void pcRendererShutdown(void)
 void pcRendererBeginFrame(void)
 {
     stream_cursor = 0;
+    ui_uv_debug_rect_valid = 0;
     if (!ready) return;
     frame_number++;
     if (debug_magenta < 0) { const char* e = getenv("RECVX_CLEAR_DEBUG"); debug_magenta = (e && *e && *e != '0'); }
@@ -1467,6 +1481,74 @@ static void debug_dump_frame(void)
     free(px);
 }
 
+static void ui_uv_debug_add_quad(PcNativeVertex* vertices, int* count,
+                                  float x0, float y0, float x1, float y1,
+                                  float r, float g, float b)
+{
+    static const unsigned char corner[6] = { 0, 1, 2, 0, 2, 3 };
+    int i;
+    for (i = 0; i < 6; i++) {
+        unsigned int c = corner[i];
+        PcNativeVertex* p = &vertices[(*count)++];
+        p->x = (c == 0 || c == 3) ? x0 : x1;
+        p->y = (c < 2) ? y0 : y1;
+        p->z = 0.0f;
+        p->r = r; p->g = g; p->b = b; p->a = 1.0f;
+        p->u = p->v = 0.0f;
+        p->q = 1.0f;
+        p->fog = 1.0f;
+    }
+}
+
+/* Draw after the game's OT flush so the selected UI element remains visible above the menu. */
+static void draw_ui_uv_debug_rect(void)
+{
+    PcNativeVertex vertices[48];
+    PcNativeDrawState state;
+    float x0, y0, x1, y1;
+    float inner;
+    const float outer = 3.0f;
+    int count = 0;
+    int saved_scissor, saved_rect[4], saved_depth_test, saved_depth_write;
+
+    if (!ready || !ui_uv_debug_rect_valid) return;
+    ui_uv_debug_rect_valid = 0;
+    x0 = ui_uv_debug_rect[0]; y0 = ui_uv_debug_rect[1];
+    x1 = ui_uv_debug_rect[2]; y1 = ui_uv_debug_rect[3];
+    if (x1 - x0 < 1.0f || y1 - y0 < 1.0f) return;
+    inner = fminf(1.25f, fminf(x1 - x0, y1 - y0) * 0.4f);
+
+    saved_scissor = scissor_enabled;
+    memcpy(saved_rect, scissor_rect, sizeof(saved_rect));
+    saved_depth_test = depth_override_test;
+    saved_depth_write = depth_override_write;
+    scissor_enabled = 0;
+    depth_override_test = -1;
+    depth_override_write = -1;
+
+    /* Dark outline plus yellow inner stroke: visible over both bright and dark UI artwork. */
+    ui_uv_debug_add_quad(vertices, &count, x0 - outer, y0 - outer, x1 + outer, y0, 0.02f, 0.02f, 0.02f);
+    ui_uv_debug_add_quad(vertices, &count, x0 - outer, y1, x1 + outer, y1 + outer, 0.02f, 0.02f, 0.02f);
+    ui_uv_debug_add_quad(vertices, &count, x0 - outer, y0, x0, y1, 0.02f, 0.02f, 0.02f);
+    ui_uv_debug_add_quad(vertices, &count, x1, y0, x1 + outer, y1, 0.02f, 0.02f, 0.02f);
+    ui_uv_debug_add_quad(vertices, &count, x0, y0, x1, y0 + inner, 1.0f, 0.88f, 0.05f);
+    ui_uv_debug_add_quad(vertices, &count, x0, y1 - inner, x1, y1, 1.0f, 0.88f, 0.05f);
+    ui_uv_debug_add_quad(vertices, &count, x0, y0 + inner, x0 + inner, y1 - inner, 1.0f, 0.88f, 0.05f);
+    ui_uv_debug_add_quad(vertices, &count, x1 - inner, y0 + inner, x1, y1 - inner, 1.0f, 0.88f, 0.05f);
+
+    memset(&state, 0, sizeof(state));
+    state.screen_space = 1;
+    state.depth_test = 0;
+    state.depth_write = 0;
+    state.immediate = 1;
+    draw_immediate(vertices, count, &state, GL_TRIANGLES);
+
+    scissor_enabled = saved_scissor;
+    memcpy(scissor_rect, saved_rect, sizeof(saved_rect));
+    depth_override_test = saved_depth_test;
+    depth_override_write = saved_depth_write;
+}
+
 void pcRendererPresent(void)
 {
     /* Native GDI overlays are composed into the same framebuffer before the final blit. */
@@ -1549,6 +1631,8 @@ void pcRendererPresent(void)
         depth_override_test = saved_depth_test;
         depth_override_write = saved_depth_write;
     }
+
+    draw_ui_uv_debug_rect();
 
     SDL_Window* window;
     int ww = 0, wh = 0;

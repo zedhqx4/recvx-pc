@@ -22,7 +22,15 @@ int pcIniFileGetInt(const char* ini, const char* key, int def);
 /* Set (or with value NULL remove) "key=value" in recvx.ini, keeping every other line. */
 void pcIniSet(const char* key, const char* value);
 
-/* Live UI UV crop tuner. Edge order: left=0, right=1, top=2, bottom=3; reset edge -1 clears all. */
+/* Live UI UV tuner. Per-element values are stored separately in menu_uv_adjustments.ini.
+ * profile: 0=standard, 1=clockwise-90; edge: left=0, right=1, top=2, bottom=3. */
+int pcUiUvTuningActive(void);
+int pcUiUvElementSelectNext(void);
+int pcUiUvElementGetStatus(int profile, char* out, int out_size);
+void pcUiUvElementAdjust(int profile, int edge, int delta);
+void pcUiUvElementReset(int profile, int edge);
+
+/* Existing global UI UV crop controls remain available as the baseline. */
 void pcUiUvCropGet(int* left, int* right, int* top, int* bottom);
 void pcUiUvCropAdjust(int edge, int delta);
 void pcUiUvCropReset(int edge);

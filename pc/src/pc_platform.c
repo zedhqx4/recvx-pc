@@ -903,6 +903,7 @@ static int pc_debug_mode_enabled(void)
 }
 
 static int ui_uv_tuning;
+int pcUiUvTuningActive(void) { return ui_uv_tuning != 0; }
 static int ui_uv_crop_selected_edge;
 static int ui_uv_crop_rot90_cw;
 static int ui_uv_consume_escape_up;
@@ -919,11 +920,21 @@ static void ui_uv_crop_show_status(const char* state)
     else
         pcUiUvCropGet(&left, &right, &top, &bottom);
 
-    snprintf(notice, sizeof(notice), "UV %s %s | %s | L:%d R:%d T:%d B:%d",
-             profile, state, ui_uv_crop_edge_names[ui_uv_crop_selected_edge],
-             left, right, top, bottom);
-    pcLog("UI UV crop profile=%s %s: left=%d right=%d top=%d bottom=%d; selected=%s (1/16 texel units)",
-          profile, state, left, right, top, bottom, ui_uv_crop_edge_names[ui_uv_crop_selected_edge]);
+    {
+        char element[112];
+        if (ui_uv_tuning && pcUiUvElementGetStatus(ui_uv_crop_rot90_cw, element, (int)sizeof(element))) {
+            snprintf(notice, sizeof(notice), "UV %s | %s | EDGE:%s",
+                     state, element, ui_uv_crop_edge_names[ui_uv_crop_selected_edge]);
+            pcLog("UI UV element %s; %s; edge=%s; values use the existing 1/16-texel representation",
+                  element, state, ui_uv_crop_edge_names[ui_uv_crop_selected_edge]);
+        } else {
+            snprintf(notice, sizeof(notice), "UV %s %s | %s | L:%d R:%d T:%d B:%d",
+                     profile, state, ui_uv_crop_edge_names[ui_uv_crop_selected_edge],
+                     left, right, top, bottom);
+            pcLog("UI UV crop profile=%s %s: left=%d right=%d top=%d bottom=%d; selected=%s (1/16 texel units)",
+                  profile, state, left, right, top, bottom, ui_uv_crop_edge_names[ui_uv_crop_selected_edge]);
+        }
+    }
     title_notice_show(notice);
 }
 
@@ -951,7 +962,13 @@ static int ui_uv_crop_handle_event(const SDL_Event* ev)
         if (down && !ev->key.repeat)
         {
             ui_uv_tuning = !ui_uv_tuning;
-            ui_uv_crop_show_status(ui_uv_tuning ? "ON (TAB edge, R profile, UP/DOWN adjust, BS reset, F10 done)" : "OFF");
+            if (ui_uv_tuning) {
+                if (!pcUiUvElementGetStatus(ui_uv_crop_rot90_cw, NULL, 0))
+                    pcUiUvElementSelectNext();
+                ui_uv_crop_show_status("ON (PAGEUP next element, TAB edge, UP/DOWN adjust, BS reset)");
+            } else {
+                ui_uv_crop_show_status("OFF");
+            }
         }
         return 1;
     }
@@ -993,9 +1010,16 @@ static int ui_uv_crop_handle_event(const SDL_Event* ev)
         ui_uv_crop_show_status("EDGE SELECTED");
         break;
 
+    case SDL_SCANCODE_PAGEUP:
+        if (pcUiUvElementSelectNext())
+            ui_uv_crop_show_status("ELEMENT SELECTED");
+        else
+            ui_uv_crop_show_status("NO VISIBLE 2D UV ELEMENT");
+        break;
+
     case SDL_SCANCODE_R:
         ui_uv_crop_rot90_cw = !ui_uv_crop_rot90_cw;
-        ui_uv_crop_show_status("PROFILE SELECTED");
+        ui_uv_crop_show_status("ELEMENT PROFILE SELECTED");
         break;
 
     case SDL_SCANCODE_UP:
@@ -1003,20 +1027,23 @@ static int ui_uv_crop_handle_event(const SDL_Event* ev)
     {
         int step = (ev->key.mod & SDL_KMOD_SHIFT) ? 4 : 1;
         int delta = (key == SDL_SCANCODE_UP) ? step : -step;
-        if (ui_uv_crop_rot90_cw)
-            pcUiUvCropRot90CWAdjust(ui_uv_crop_selected_edge, delta);
-        else
-            pcUiUvCropAdjust(ui_uv_crop_selected_edge, delta);
-        ui_uv_crop_show_status("VALUE CHANGED");
+        if (pcUiUvElementGetStatus(ui_uv_crop_rot90_cw, NULL, 0)) {
+            pcUiUvElementAdjust(ui_uv_crop_rot90_cw, ui_uv_crop_selected_edge, delta);
+            ui_uv_crop_show_status("ELEMENT VALUE CHANGED");
+        } else {
+            ui_uv_crop_show_status("NO ELEMENT; PRESS PAGEUP");
+        }
         break;
     }
 
     case SDL_SCANCODE_BACKSPACE:
-        if (ui_uv_crop_rot90_cw)
-            pcUiUvCropRot90CWReset((ev->key.mod & SDL_KMOD_SHIFT) ? -1 : ui_uv_crop_selected_edge);
-        else
-            pcUiUvCropReset((ev->key.mod & SDL_KMOD_SHIFT) ? -1 : ui_uv_crop_selected_edge);
-        ui_uv_crop_show_status((ev->key.mod & SDL_KMOD_SHIFT) ? "ALL EDGES RESET" : "EDGE RESET");
+        if (pcUiUvElementGetStatus(ui_uv_crop_rot90_cw, NULL, 0)) {
+            pcUiUvElementReset(ui_uv_crop_rot90_cw,
+                               (ev->key.mod & SDL_KMOD_SHIFT) ? -1 : ui_uv_crop_selected_edge);
+            ui_uv_crop_show_status((ev->key.mod & SDL_KMOD_SHIFT) ? "ELEMENT PROFILE RESET" : "ELEMENT EDGE RESET");
+        } else {
+            ui_uv_crop_show_status("NO ELEMENT; PRESS PAGEUP");
+        }
         break;
 
     case SDL_SCANCODE_F12:
@@ -1065,7 +1092,7 @@ int pcVideoPumpEvents(void)
             SDL_ShowCursor(SDL_ENABLE);
         }
 
-        /* Live UV crop tuner; changes take effect on the next UI draw and are saved to recvx.ini. */
+        /* Live per-element UV tuner; adjustments are appended to menu_uv_adjustments.ini. */
         if (ui_uv_crop_handle_event(&ev))
         {
             continue;

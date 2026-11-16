@@ -19,6 +19,7 @@ extern int Send_Tim2_dataExClutOnly(void* tim2_top_adr, unsigned long send_image
 #include "../../../ps2/veronica/prog/main.h"
 #ifdef TARGET_PC
 #include "pc_renderer.h"
+#include "pc_platform.h"
 #endif
 
 #ifdef TARGET_PC
@@ -1228,6 +1229,336 @@ static void pcPrimDiag(const char* who, unsigned long prim, const void* dp, unsi
 #endif
 
 #ifdef TARGET_PC
+/*
+ * Per-primitive UI UV tuner.
+ * Identity = TIM2 asset + bank + primitive flags/layout + original UV stream + same-signature draw occurrence.
+ * The occurrence distinguishes separate UI instances that reuse the same atlas region in one frame.
+ * Values reuse the existing 1/16-texel offsets and pc_crop_uv_edges() implementation.
+ */
+#define PC_UI_UV_DRAW_MAX 1024
+#define PC_UI_UV_SEEN_MAX 1024
+#define PC_UI_UV_ADJUSTMENT_MAX 512
+
+typedef struct {
+    uint64_t key, signature;
+    unsigned int gindex, bank, pict_format, width, height, occurrence;
+} PcUiUvDraw;
+
+typedef struct {
+    uint64_t key, signature;
+    unsigned int gindex, bank, pict_format, width, height, occurrence;
+    int offsets[2][4];
+    int used;
+} PcUiUvAdjustment;
+
+typedef struct {
+    uint64_t signature;
+    unsigned int next_occurrence;
+    int used;
+} PcUiUvSeen;
+
+static PcUiUvDraw pc_ui_uv_draws[PC_UI_UV_DRAW_MAX];
+static unsigned int pc_ui_uv_draw_count;
+static PcUiUvSeen pc_ui_uv_seen[PC_UI_UV_SEEN_MAX];
+static PcUiUvAdjustment pc_ui_uv_adjustments[PC_UI_UV_ADJUSTMENT_MAX];
+static uint64_t pc_ui_uv_registry_frame = UINT64_MAX;
+static uint64_t pc_ui_uv_selected_key;
+static int pc_ui_uv_adjustments_loaded;
+static int pc_ui_uv_adjustments_warned_full;
+
+static uint64_t pc_ui_uv_hash_add(uint64_t hash, uint64_t value)
+{
+    return (hash ^ value) * UINT64_C(1099511628211);
+}
+
+static void pc_ui_uv_adjustment_path(char* out, int out_size)
+{
+    char dir[1024];
+    pcPlatformExeDir(dir, (int)sizeof(dir));
+#ifdef _WIN32
+    snprintf(out, (size_t)out_size, "%s\\menu_uv_adjustments.ini", dir);
+#else
+    snprintf(out, (size_t)out_size, "%s/menu_uv_adjustments.ini", dir);
+#endif
+}
+
+static PcUiUvAdjustment* pc_ui_uv_find_adjustment(uint64_t key)
+{
+    unsigned int i;
+    for (i = 0; i < PC_UI_UV_ADJUSTMENT_MAX; i++)
+        if (pc_ui_uv_adjustments[i].used && pc_ui_uv_adjustments[i].key == key)
+            return &pc_ui_uv_adjustments[i];
+    return NULL;
+}
+
+static PcUiUvAdjustment* pc_ui_uv_allocate_adjustment(const PcUiUvDraw* draw)
+{
+    unsigned int i;
+    PcUiUvAdjustment* entry = pc_ui_uv_find_adjustment(draw->key);
+    if (entry) return entry;
+    for (i = 0; i < PC_UI_UV_ADJUSTMENT_MAX; i++) {
+        if (!pc_ui_uv_adjustments[i].used) {
+            entry = &pc_ui_uv_adjustments[i];
+            memset(entry, 0, sizeof(*entry));
+            entry->used = 1;
+            entry->key = draw->key;
+            entry->signature = draw->signature;
+            entry->gindex = draw->gindex;
+            entry->bank = draw->bank;
+            entry->pict_format = draw->pict_format;
+            entry->width = draw->width;
+            entry->height = draw->height;
+            entry->occurrence = draw->occurrence;
+            return entry;
+        }
+    }
+    if (!pc_ui_uv_adjustments_warned_full) {
+        pcLog("UI UV tuner: adjustment table full (%u entries)", PC_UI_UV_ADJUSTMENT_MAX);
+        pc_ui_uv_adjustments_warned_full = 1;
+    }
+    return NULL;
+}
+
+static void pc_ui_uv_adjustments_load(void)
+{
+    char path[1200], line[512];
+    FILE* file;
+    if (pc_ui_uv_adjustments_loaded) return;
+    pc_ui_uv_adjustments_loaded = 1;
+    pc_ui_uv_adjustment_path(path, (int)sizeof(path));
+    file = fopen(path, "rb");
+    if (!file) return;
+    while (fgets(line, (int)sizeof(line), file)) {
+        unsigned long long key, signature;
+        unsigned int gindex, bank, pict_format, width, height, occurrence;
+        int sl, sr, st, sb, rl, rr, rt, rb;
+        if (line[0] == '#' || line[0] == '\n' || line[0] == '\r') continue;
+        if (sscanf(line, "%llx %u %u %u %u %u %llx %u %d %d %d %d %d %d %d %d",
+                   &key, &gindex, &bank, &pict_format, &width, &height, &signature, &occurrence,
+                   &sl, &sr, &st, &sb, &rl, &rr, &rt, &rb) != 16)
+            continue;
+        {
+            PcUiUvDraw draw;
+            PcUiUvAdjustment* entry;
+            memset(&draw, 0, sizeof(draw));
+            draw.key = (uint64_t)key;
+            draw.signature = (uint64_t)signature;
+            draw.gindex = gindex;
+            draw.bank = bank;
+            draw.pict_format = pict_format;
+            draw.width = width;
+            draw.height = height;
+            draw.occurrence = occurrence;
+            entry = pc_ui_uv_allocate_adjustment(&draw);
+            if (entry) {
+                entry->offsets[0][0] = sl; entry->offsets[0][1] = sr;
+                entry->offsets[0][2] = st; entry->offsets[0][3] = sb;
+                entry->offsets[1][0] = rl; entry->offsets[1][1] = rr;
+                entry->offsets[1][2] = rt; entry->offsets[1][3] = rb;
+            }
+        }
+    }
+    fclose(file);
+}
+
+static void pc_ui_uv_adjustment_save(const PcUiUvAdjustment* entry)
+{
+    char path[1200];
+    FILE* file;
+    if (!entry || !entry->used) return;
+    pc_ui_uv_adjustment_path(path, (int)sizeof(path));
+    file = fopen(path, "ab");
+    if (!file) {
+        pcLog("UI UV tuner: cannot append %s", path);
+        return;
+    }
+    if (ftell(file) == 0)
+        fputs("# recvx per-primitive menu UV adjustments v1; values are 1/16 texel units\n", file);
+    fprintf(file, "%016llx %u %u %u %u %u %016llx %u %d %d %d %d %d %d %d %d\n",
+            (unsigned long long)entry->key, entry->gindex, entry->bank, entry->pict_format,
+            entry->width, entry->height, (unsigned long long)entry->signature, entry->occurrence,
+            entry->offsets[0][0], entry->offsets[0][1], entry->offsets[0][2], entry->offsets[0][3],
+            entry->offsets[1][0], entry->offsets[1][1], entry->offsets[1][2], entry->offsets[1][3]);
+    fclose(file);
+}
+
+static int pc_ui_uv_texture_identity(unsigned int* gindex, unsigned int* bank,
+                                     unsigned int* pict_format, unsigned int* width, unsigned int* height)
+{
+    TIM2_PICTUREHEADER_EX* ext;
+    TIM2_PICTUREHEADER* ph;
+    if (!Ps2_now_tex || !Ps2_now_tex->texinfo.texsurface.pSurface) return 0;
+    ext = (TIM2_PICTUREHEADER_EX*)Ps2_now_tex->texinfo.texsurface.pSurface;
+    if (memcmp(ext->FileId, "TIM2", 4) != 0 || ext->FormatId > 1) return 0;
+    ph = (TIM2_PICTUREHEADER*)((unsigned char*)ext + (ext->FormatId ? 128 : 16));
+    if (ph->HeaderSize < sizeof(TIM2_PICTUREHEADER) || !ph->ImageWidth || !ph->ImageHeight ||
+        ph->ImageWidth > 2048 || ph->ImageHeight > 2048) return 0;
+    *gindex = ext->Gindex;
+    *bank = Ps2_now_bank;
+    *pict_format = ext->PictFormat;
+    *width = ph->ImageWidth;
+    *height = ph->ImageHeight;
+    return 1;
+}
+
+static void pc_ui_uv_registry_begin_frame(void)
+{
+    uint64_t frame = pcRendererFrameNumber();
+    if (frame != pc_ui_uv_registry_frame) {
+        memset(pc_ui_uv_seen, 0, sizeof(pc_ui_uv_seen));
+        pc_ui_uv_draw_count = 0;
+        pc_ui_uv_registry_frame = frame;
+    }
+}
+
+static uint64_t pc_ui_uv_register_geometry(const unsigned int* vertices, unsigned int count,
+                                           unsigned long prim, int* selected)
+{
+    uint64_t signature = UINT64_C(14695981039346656037), key;
+    unsigned int gindex, bank, pict_format, width, height, i, occurrence = 0;
+    unsigned int slot, probe;
+    if (selected) *selected = 0;
+    if (!vertices || !count || count > 64 ||
+        !pc_ui_uv_texture_identity(&gindex, &bank, &pict_format, &width, &height))
+        return 0;
+
+    pc_ui_uv_adjustments_load();
+    pc_ui_uv_registry_begin_frame();
+    signature = pc_ui_uv_hash_add(signature, gindex);
+    signature = pc_ui_uv_hash_add(signature, bank);
+    signature = pc_ui_uv_hash_add(signature, pict_format);
+    signature = pc_ui_uv_hash_add(signature, width);
+    signature = pc_ui_uv_hash_add(signature, height);
+    signature = pc_ui_uv_hash_add(signature, count);
+    signature = pc_ui_uv_hash_add(signature, (uint64_t)prim & UINT64_C(0x00FFFFFFFFFFFFFF));
+    for (i = 0; i < count; i++) {
+        signature = pc_ui_uv_hash_add(signature, vertices[i * 12u] & 0x3FFFu);
+        signature = pc_ui_uv_hash_add(signature, vertices[i * 12u + 1u] & 0x3FFFu);
+    }
+    if (!signature) signature = 1;
+
+    slot = (unsigned int)((signature ^ (signature >> 32)) & (PC_UI_UV_SEEN_MAX - 1u));
+    for (probe = 0; probe < PC_UI_UV_SEEN_MAX; probe++) {
+        PcUiUvSeen* seen = &pc_ui_uv_seen[(slot + probe) & (PC_UI_UV_SEEN_MAX - 1u)];
+        if (!seen->used) {
+            seen->used = 1;
+            seen->signature = signature;
+            seen->next_occurrence = 1;
+            occurrence = 0;
+            break;
+        }
+        if (seen->signature == signature) {
+            occurrence = seen->next_occurrence++;
+            break;
+        }
+    }
+    if (probe == PC_UI_UV_SEEN_MAX) return 0;
+
+    key = pc_ui_uv_hash_add(signature, occurrence + 1u);
+    if (!key) key = 1;
+    if (pc_ui_uv_draw_count < PC_UI_UV_DRAW_MAX) {
+        PcUiUvDraw* draw = &pc_ui_uv_draws[pc_ui_uv_draw_count++];
+        draw->key = key;
+        draw->signature = signature;
+        draw->gindex = gindex;
+        draw->bank = bank;
+        draw->pict_format = pict_format;
+        draw->width = width;
+        draw->height = height;
+        draw->occurrence = occurrence;
+    }
+    if (selected && key == pc_ui_uv_selected_key) *selected = 1;
+    return key;
+}
+
+static void pc_ui_uv_apply_geometry(uint64_t key, unsigned int* vertices, unsigned int count)
+{
+    PcUiUvAdjustment* entry;
+    int* inset;
+    if (!key || !vertices) return;
+    entry = pc_ui_uv_find_adjustment(key);
+    if (!entry) return;
+    inset = entry->offsets[pc_ui_uv_mapping_is_rot90_cw(vertices, count) ? 1 : 0];
+    if (inset[0] || inset[1] || inset[2] || inset[3])
+        pc_crop_uv_edges(vertices, count, inset);
+}
+
+static PcUiUvDraw* pc_ui_uv_selected_draw(void)
+{
+    unsigned int i;
+    if (!pc_ui_uv_selected_key) return NULL;
+    for (i = 0; i < pc_ui_uv_draw_count; i++)
+        if (pc_ui_uv_draws[i].key == pc_ui_uv_selected_key)
+            return &pc_ui_uv_draws[i];
+    return NULL;
+}
+
+int pcUiUvElementSelectNext(void)
+{
+    unsigned int i;
+    if (pc_ui_uv_draw_count == 0) return 0;
+    for (i = 0; i < pc_ui_uv_draw_count; i++) {
+        if (pc_ui_uv_draws[i].key == pc_ui_uv_selected_key) {
+            pc_ui_uv_selected_key = pc_ui_uv_draws[(i + 1u) % pc_ui_uv_draw_count].key;
+            return 1;
+        }
+    }
+    pc_ui_uv_selected_key = pc_ui_uv_draws[0].key;
+    return 1;
+}
+
+int pcUiUvElementGetStatus(int profile, char* out, int out_size)
+{
+    PcUiUvDraw* draw = pc_ui_uv_selected_draw();
+    PcUiUvAdjustment* entry;
+    int* v;
+    if (!draw) return 0;
+    entry = pc_ui_uv_find_adjustment(draw->key);
+    v = entry ? entry->offsets[profile ? 1 : 0] : NULL;
+    if (out && out_size > 0) {
+        snprintf(out, (size_t)out_size, "#%u/%u G%u/F%u %ux%u d[%d,%d,%d,%d]",
+                 (unsigned int)(draw - pc_ui_uv_draws) + 1u, pc_ui_uv_draw_count,
+                 draw->gindex, draw->pict_format, draw->width, draw->height,
+                 v ? v[0] : 0, v ? v[1] : 0, v ? v[2] : 0, v ? v[3] : 0);
+    }
+    return 1;
+}
+
+void pcUiUvElementAdjust(int profile, int edge, int delta)
+{
+    PcUiUvDraw* draw = pc_ui_uv_selected_draw();
+    PcUiUvAdjustment* entry;
+    int* value;
+    if (!draw || edge < 0 || edge >= 4 || !delta) return;
+    entry = pc_ui_uv_allocate_adjustment(draw);
+    if (!entry) return;
+    value = &entry->offsets[profile ? 1 : 0][edge];
+    *value += delta;
+    if (*value < -64) *value = -64;
+    if (*value > 64) *value = 64;
+    pc_ui_uv_adjustment_save(entry);
+    pcLog("UI UV element id=%016llx gindex=%u format=%u profile=%s edge=%d value=%d (1/16 texel units)",
+          (unsigned long long)entry->key, entry->gindex, entry->pict_format,
+          profile ? "rot90_cw" : "standard", edge, *value);
+}
+
+void pcUiUvElementReset(int profile, int edge)
+{
+    PcUiUvDraw* draw = pc_ui_uv_selected_draw();
+    PcUiUvAdjustment* entry;
+    int first = edge < 0 ? 0 : edge;
+    int last = edge < 0 ? 3 : edge;
+    int i;
+    if (!draw || first < 0 || last >= 4) return;
+    entry = pc_ui_uv_allocate_adjustment(draw);
+    if (!entry) return;
+    for (i = first; i <= last; i++) entry->offsets[profile ? 1 : 0][i] = 0;
+    pc_ui_uv_adjustment_save(entry);
+}
+
+#endif
+
+#ifdef TARGET_PC
 /* Coordenada U o V de una primitiva con PRIM.FST=1 (registro UV de la GS): 14 bits, punto fijo 12.4 -> texels. La palabra llega
  * como float en el buffer de vertices; se reinterpreta su patron de bits. */
 static float pcFixedUv(float word)
@@ -1255,6 +1586,8 @@ void Ps2AddPrim(unsigned long prim, void* dp, unsigned int num, unsigned int cli
 #ifdef TARGET_PC
     float wide_2d = 1.0f;
     static unsigned int wide_buf[64 * 12];
+    uint64_t ui_uv_element_key = 0;
+    int ui_uv_selected_draw = 0;
 #endif
 
 #ifdef TARGET_PC
@@ -1293,6 +1626,7 @@ void Ps2AddPrim(unsigned long prim, void* dp, unsigned int num, unsigned int cli
     {
         memcpy(wide_buf, dp, num * 48);
         dp = wide_buf;
+        ui_uv_element_key = pc_ui_uv_register_geometry(wide_buf, num, prim, &ui_uv_selected_draw);
         if (pc_ui_snap_uv_enabled())
         {
             pc_snap_uv((unsigned int*)wide_buf, num);
@@ -1336,6 +1670,8 @@ void Ps2AddPrim(unsigned long prim, void* dp, unsigned int num, unsigned int cli
                 if ((wide_buf[i2 * 12] & 0x3FFF) == umax) wide_buf[i2 * 12] -= 16;
             }
         }
+
+        pc_ui_uv_apply_geometry(ui_uv_element_key, wide_buf, num);
     }
 
     /* widescreen: 2D keeps its 4:3 layout in the middle of the stretched frame. Primitives
@@ -1547,6 +1883,18 @@ void Ps2AddPrim(unsigned long prim, void* dp, unsigned int num, unsigned int cli
             state.ot_z = 65537.0f / zv + 1.0f;
             /* el 2D opaco tambien pasaba por el OT: fondo y rejilla del mapa comparten Z16 y solo los separa el orden */
             state.ot_queue = 1;
+        }
+
+        if (ui_uv_selected_draw && pcUiUvTuningActive()) {
+            float x0 = 1.0e9f, y0 = 1.0e9f, x1 = -1.0e9f, y1 = -1.0e9f;
+            unsigned int k;
+            for (k = 0; k < (unsigned int)count; k++) {
+                if (vertices[k].x < x0) x0 = vertices[k].x;
+                if (vertices[k].x > x1) x1 = vertices[k].x;
+                if (vertices[k].y < y0) y0 = vertices[k].y;
+                if (vertices[k].y > y1) y1 = vertices[k].y;
+            }
+            pcRendererSetUiUvDebugRect(x0, y0, x1, y1);
         }
 
         switch (topology) {
