@@ -3,6 +3,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <stdint.h>
+#include <inttypes.h>
 #include "../../../../pc/include/pc_vu.h"
 #include "../../../../pc/include/pc_game_profile.h"
 extern int Send_Tim2_dataExClutOnly(void* tim2_top_adr, unsigned long send_image_adr, unsigned long send_clut_adr);
@@ -1329,11 +1330,11 @@ static void pc_ui_uv_adjustments_load(void)
     file = fopen(path, "rb");
     if (!file) return;
     while (fgets(line, (int)sizeof(line), file)) {
-        unsigned long long key, signature;
+        uint64_t key, signature;
         unsigned int gindex, bank, pict_format, width, height, occurrence;
         int sl, sr, st, sb, rl, rr, rt, rb;
         if (line[0] == '#' || line[0] == '\n' || line[0] == '\r') continue;
-        if (sscanf(line, "%llx %u %u %u %u %u %llx %u %d %d %d %d %d %d %d %d",
+        if (sscanf(line, "%" SCNx64 " %u %u %u %u %u %" SCNx64 " %u %d %d %d %d %d %d %d %d",
                    &key, &gindex, &bank, &pict_format, &width, &height, &signature, &occurrence,
                    &sl, &sr, &st, &sb, &rl, &rr, &rt, &rb) != 16)
             continue;
@@ -1374,9 +1375,9 @@ static void pc_ui_uv_adjustment_save(const PcUiUvAdjustment* entry)
     }
     if (ftell(file) == 0)
         fputs("# recvx per-primitive menu UV adjustments v1; values are 1/16 texel units\n", file);
-    fprintf(file, "%016llx %u %u %u %u %u %016llx %u %d %d %d %d %d %d %d %d\n",
-            (unsigned long long)entry->key, entry->gindex, entry->bank, entry->pict_format,
-            entry->width, entry->height, (unsigned long long)entry->signature, entry->occurrence,
+    fprintf(file, "%016" PRIx64 " %u %u %u %u %u %016" PRIx64 " %u %d %d %d %d %d %d %d %d\n",
+            entry->key, entry->gindex, entry->bank, entry->pict_format,
+            entry->width, entry->height, entry->signature, entry->occurrence,
             entry->offsets[0][0], entry->offsets[0][1], entry->offsets[0][2], entry->offsets[0][3],
             entry->offsets[1][0], entry->offsets[1][1], entry->offsets[1][2], entry->offsets[1][3]);
     fclose(file);
@@ -1537,8 +1538,8 @@ void pcUiUvElementAdjust(int profile, int edge, int delta)
     if (*value < -64) *value = -64;
     if (*value > 64) *value = 64;
     pc_ui_uv_adjustment_save(entry);
-    pcLog("UI UV element id=%016llx gindex=%u format=%u profile=%s edge=%d value=%d (1/16 texel units)",
-          (unsigned long long)entry->key, entry->gindex, entry->pict_format,
+    pcLog("UI UV element id=%016" PRIx64 " gindex=%u format=%u profile=%s edge=%d value=%d (1/16 texel units)",
+          entry->key, entry->gindex, entry->pict_format,
           profile ? "rot90_cw" : "standard", edge, *value);
 }
 
