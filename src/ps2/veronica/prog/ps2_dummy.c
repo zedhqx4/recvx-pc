@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <stdint.h>
 #include <inttypes.h>
+#include <float.h>
 #include "../../../../pc/include/pc_vu.h"
 #include "../../../../pc/include/pc_game_profile.h"
 extern int Send_Tim2_dataExClutOnly(void* tim2_top_adr, unsigned long send_image_adr, unsigned long send_clut_adr);
@@ -1615,28 +1616,40 @@ void pcUiUvCaptureToggle(void)
     pcLog("UI UV capture started: %s (F9 to stop)", path);
 }
 
-static void pc_ui_uv_capture_geometry(const unsigned int* words,
-                                      unsigned int count, unsigned long prim)
+static uint64_t pc_ui_uv_source_signature(const unsigned int* words, unsigned int count,
+                                             unsigned long prim, unsigned int gindex,
+                                             unsigned int bank, unsigned int pict_format,
+                                             unsigned int width, unsigned int height)
 {
-    unsigned int i, j, gindex, bank, pict_format, width, height;
-    uint64_t signature = UINT64_C(14695981039346656037), key;
-    uint64_t raw_prim = (uint64_t)prim;
-    int fst = (raw_prim & UINT64_C(0x80000000000000)) != 0;
-    if (!pc_ui_uv_capture_file || !words || !count || count > 16384) return;
-    if (!pc_ui_uv_texture_identity(&gindex, &bank, &pict_format, &width, &height)) return;
-
-    /* Include every packed source word: this distinguishes same-atlas elements by
-     * geometry, UVs, color and priority, not by draw order or the selector's 64-vertex limit. */
+    unsigned int i;
+    uint64_t signature = UINT64_C(14695981039346656037);
     signature = pc_ui_uv_hash_add(signature, gindex);
     signature = pc_ui_uv_hash_add(signature, bank);
     signature = pc_ui_uv_hash_add(signature, pict_format);
     signature = pc_ui_uv_hash_add(signature, width);
     signature = pc_ui_uv_hash_add(signature, height);
     signature = pc_ui_uv_hash_add(signature, count);
-    signature = pc_ui_uv_hash_add(signature, raw_prim);
+    signature = pc_ui_uv_hash_add(signature, (uint64_t)prim);
     for (i = 0; i < count * 12u; i++)
         signature = pc_ui_uv_hash_add(signature, words[i]);
-    key = signature ? signature : 1;
+    return signature ? signature : 1;
+}
+
+static void pc_ui_uv_capture_geometry(const unsigned int* words,
+                                      unsigned int count, unsigned long prim)
+{
+    unsigned int i, j, gindex, bank, pict_format, width, height;
+    uint64_t signature, key;
+    uint64_t raw_prim = (uint64_t)prim;
+    int fst = (raw_prim & UINT64_C(0x80000000000000)) != 0;
+    if (!pc_ui_uv_capture_file || !words || !count || count > 16384) return;
+    if (!pc_ui_uv_texture_identity(&gindex, &bank, &pict_format, &width, &height)) return;
+
+    /* Keep one exact source fingerprint for the roundtrip. This is computed before
+     * any tuner, crop, widescreen or imported-patch edits touch the vertex stream. */
+    signature = pc_ui_uv_source_signature(words, count, prim, gindex, bank,
+                                          pict_format, width, height);
+    key = signature;
     for (i = 0; i < pc_ui_uv_capture_seen_count; i++)
         if (pc_ui_uv_capture_seen[i] == key) return;
     if (pc_ui_uv_capture_seen_count >= PC_UI_UV_CAPTURE_SEEN_MAX) return;
@@ -1678,6 +1691,281 @@ static void pc_ui_uv_capture_geometry(const unsigned int* words,
     fputs("]}\n", pc_ui_uv_capture_file);
     fflush(pc_ui_uv_capture_file);
     pc_ui_uv_capture_seen[pc_ui_uv_capture_seen_count++] = key;
+}
+
+/* Runtime loader for the JSON Lines patch emitted by blender279_roundtrip.py.
+ * The file contains one source primitive per line. A patch is accepted only when
+ * its complete original source fingerprint and TIM2 identity still match. */
+#define PC_UI_UV_PATCH_MAX 2048
+#define PC_UI_UV_PATCH_LINE_MAX (2u * 1024u * 1024u)
+typedef struct {
+    uint64_t id, signature;
+    unsigned int gindex, bank, pict_format, width, height, topology, vertex_count;
+    int fst;
+    void* values;                 /* uint32_t pairs for FST; float pairs for ST */
+    int applied_logged;
+} PcUiUvPatchEntry;
+
+static PcUiUvPatchEntry pc_ui_uv_patches[PC_UI_UV_PATCH_MAX];
+static unsigned int pc_ui_uv_patch_count;
+static int pc_ui_uv_patch_loaded;
+static unsigned int* pc_ui_uv_patch_buffer;
+static size_t pc_ui_uv_patch_buffer_words;
+
+static char* pc_ui_uv_json_skip_space(char* p)
+{
+    while (p && (*p == ' ' || *p == '\t' || *p == '\r' || *p == '\n')) ++p;
+    return p;
+}
+
+static char* pc_ui_uv_json_member(char* line, const char* name)
+{
+    char needle[80];
+    char* p;
+    snprintf(needle, sizeof(needle), "\"%s\"", name);
+    p = strstr(line, needle);
+    if (!p) return NULL;
+    p = strchr(p, ':');
+    return p ? pc_ui_uv_json_skip_space(p + 1) : NULL;
+}
+
+static int pc_ui_uv_json_string(char* line, const char* name, char* out, size_t out_size)
+{
+    char* p = pc_ui_uv_json_member(line, name);
+    char* end;
+    size_t n;
+    if (!p || *p != '"' || out_size == 0) return 0;
+    end = strchr(++p, '"');
+    if (!end) return 0;
+    n = (size_t)(end - p);
+    if (n >= out_size) return 0;
+    memcpy(out, p, n);
+    out[n] = '\0';
+    return 1;
+}
+
+static int pc_ui_uv_json_hex(char* line, const char* name, uint64_t* out)
+{
+    char value[32];
+    char* end;
+    unsigned long long parsed;
+    if (!pc_ui_uv_json_string(line, name, value, sizeof(value))) return 0;
+    parsed = strtoull(value, &end, 16);
+    if (end == value || *end != '\0') return 0;
+    *out = (uint64_t)parsed;
+    return 1;
+}
+
+static int pc_ui_uv_json_uint(char* line, const char* name, unsigned int* out)
+{
+    char* p = pc_ui_uv_json_member(line, name);
+    char* end;
+    unsigned long long parsed;
+    if (!p || *p < '0' || *p > '9') return 0;
+    parsed = strtoull(p, &end, 10);
+    if (end == p || parsed > 0xFFFFFFFFULL) return 0;
+    *out = (unsigned int)parsed;
+    return 1;
+}
+
+static int pc_ui_uv_json_expect(char** p, char expected)
+{
+    *p = pc_ui_uv_json_skip_space(*p);
+    if (!*p || **p != expected) return 0;
+    ++*p;
+    return 1;
+}
+
+static int pc_ui_uv_json_parse_uv(char* line, unsigned int count, int fst, void** out)
+{
+    char* p = pc_ui_uv_json_member(line, fst ? "uv_raw" : "uv_st");
+    unsigned int i;
+    if (!p || !pc_ui_uv_json_expect(&p, '[')) return 0;
+    if (fst) {
+        uint32_t* values = (uint32_t*)malloc((size_t)count * 2u * sizeof(*values));
+        if (!values) return 0;
+        for (i = 0; i < count; ++i) {
+            unsigned int axis;
+            if (!pc_ui_uv_json_expect(&p, '[')) { free(values); return 0; }
+            for (axis = 0; axis < 2; ++axis) {
+                char* end;
+                unsigned long long value;
+                p = pc_ui_uv_json_skip_space(p);
+                if (!p || *p < '0' || *p > '9') { free(values); return 0; }
+                value = strtoull(p, &end, 10);
+                if (end == p || value > 0x3FFFu) { free(values); return 0; }
+                values[i * 2u + axis] = (uint32_t)value;
+                p = end;
+                if (axis == 0 && !pc_ui_uv_json_expect(&p, ',')) { free(values); return 0; }
+            }
+            if (!pc_ui_uv_json_expect(&p, ']')) { free(values); return 0; }
+            if (i + 1u < count && !pc_ui_uv_json_expect(&p, ',')) { free(values); return 0; }
+        }
+        if (!pc_ui_uv_json_expect(&p, ']')) { free(values); return 0; }
+        *out = values;
+        return 1;
+    } else {
+        float* values = (float*)malloc((size_t)count * 2u * sizeof(*values));
+        if (!values) return 0;
+        for (i = 0; i < count; ++i) {
+            unsigned int axis;
+            if (!pc_ui_uv_json_expect(&p, '[')) { free(values); return 0; }
+            for (axis = 0; axis < 2; ++axis) {
+                char* end;
+                double value;
+                p = pc_ui_uv_json_skip_space(p);
+                if (!p) { free(values); return 0; }
+                value = strtod(p, &end);
+                if (end == p || !(value >= -FLT_MAX && value <= FLT_MAX)) {
+                    free(values);
+                    return 0;
+                }
+                values[i * 2u + axis] = (float)value;
+                p = end;
+                if (axis == 0 && !pc_ui_uv_json_expect(&p, ',')) { free(values); return 0; }
+            }
+            if (!pc_ui_uv_json_expect(&p, ']')) { free(values); return 0; }
+            if (i + 1u < count && !pc_ui_uv_json_expect(&p, ',')) { free(values); return 0; }
+        }
+        if (!pc_ui_uv_json_expect(&p, ']')) { free(values); return 0; }
+        *out = values;
+        return 1;
+    }
+}
+
+static int pc_ui_uv_patch_parse_record(char* line, PcUiUvPatchEntry* entry)
+{
+    char mode[32];
+    memset(entry, 0, sizeof(*entry));
+    if (!pc_ui_uv_json_hex(line, "id", &entry->id) ||
+        !pc_ui_uv_json_hex(line, "signature", &entry->signature) ||
+        !pc_ui_uv_json_uint(line, "schema", &entry->vertex_count)) return 0;
+    if (entry->vertex_count != 1u) return 0; /* temporary schema storage; replaced below */
+    if (!pc_ui_uv_json_uint(line, "gindex", &entry->gindex) ||
+        !pc_ui_uv_json_uint(line, "bank", &entry->bank) ||
+        !pc_ui_uv_json_uint(line, "pict_format", &entry->pict_format) ||
+        !pc_ui_uv_json_uint(line, "texture_width", &entry->width) ||
+        !pc_ui_uv_json_uint(line, "texture_height", &entry->height) ||
+        !pc_ui_uv_json_uint(line, "topology", &entry->topology) ||
+        !pc_ui_uv_json_uint(line, "vertex_count", &entry->vertex_count) ||
+        !pc_ui_uv_json_string(line, "uv_mode", mode, sizeof(mode))) return 0;
+    if (entry->id != entry->signature || !entry->width || !entry->height ||
+        entry->width > 2048u || entry->height > 2048u ||
+        !entry->vertex_count || entry->vertex_count > 16384u || entry->topology > 7u)
+        return 0;
+    if (strcmp(mode, "FST_12_4") == 0) entry->fst = 1;
+    else if (strcmp(mode, "ST_FLOAT") == 0) entry->fst = 0;
+    else return 0;
+    if (!pc_ui_uv_json_parse_uv(line, entry->vertex_count, entry->fst, &entry->values))
+        return 0;
+    return 1;
+}
+
+static void pc_ui_uv_patch_load(void)
+{
+    static char line[PC_UI_UV_PATCH_LINE_MAX];
+    char path[1200];
+    FILE* file;
+    unsigned int line_no = 0, invalid = 0;
+    if (pc_ui_uv_patch_loaded) return;
+    pc_ui_uv_patch_loaded = 1;
+    pcPlatformExeDir(path, (int)sizeof(path));
+#ifdef _WIN32
+    strncat(path, "\\menu_uv_patch.jsonl", sizeof(path) - strlen(path) - 1);
+#else
+    strncat(path, "/menu_uv_patch.jsonl", sizeof(path) - strlen(path) - 1);
+#endif
+    file = fopen(path, "rb");
+    if (!file) return; /* No patch is a normal configuration. */
+    while (fgets(line, (int)sizeof(line), file)) {
+        PcUiUvPatchEntry entry;
+        unsigned int i;
+        ++line_no;
+        if (!strstr(line, "\"id\"")) continue; /* header/blank/comment line */
+        if (!strchr(line, '\n') && !feof(file)) {
+            int ch;
+            while ((ch = fgetc(file)) != '\n' && ch != EOF) {}
+            ++invalid;
+            continue;
+        }
+        if (!pc_ui_uv_patch_parse_record(line, &entry)) {
+            ++invalid;
+            continue;
+        }
+        for (i = 0; i < pc_ui_uv_patch_count; ++i)
+            if (pc_ui_uv_patches[i].id == entry.id) break;
+        if (i != pc_ui_uv_patch_count || pc_ui_uv_patch_count >= PC_UI_UV_PATCH_MAX) {
+            free(entry.values);
+            ++invalid;
+            continue;
+        }
+        pc_ui_uv_patches[pc_ui_uv_patch_count++] = entry;
+    }
+    fclose(file);
+    pcLog("UI UV patch: loaded %u records from menu_uv_patch.jsonl (%u skipped)",
+          pc_ui_uv_patch_count, invalid);
+}
+
+static PcUiUvPatchEntry* pc_ui_uv_patch_find(const unsigned int* source,
+                                              unsigned int count, unsigned long prim)
+{
+    unsigned int i, gindex, bank, pict_format, width, height;
+    uint64_t signature;
+    if (!source || !count || count > 16384u) return NULL;
+    pc_ui_uv_patch_load();
+    if (!pc_ui_uv_patch_count ||
+        !pc_ui_uv_texture_identity(&gindex, &bank, &pict_format, &width, &height))
+        return NULL;
+    signature = pc_ui_uv_source_signature(source, count, prim, gindex, bank,
+                                          pict_format, width, height);
+    for (i = 0; i < pc_ui_uv_patch_count; ++i) {
+        PcUiUvPatchEntry* entry = &pc_ui_uv_patches[i];
+        if (entry->signature == signature && entry->id == signature &&
+            entry->gindex == gindex && entry->bank == bank &&
+            entry->pict_format == pict_format && entry->width == width &&
+            entry->height == height && entry->vertex_count == count &&
+            entry->topology == (unsigned int)(((uint64_t)prim >> 47) & 7u) &&
+            entry->fst == (((uint64_t)prim & UINT64_C(0x80000000000000)) != 0))
+            return entry;
+    }
+    return NULL;
+}
+
+static void pc_ui_uv_patch_apply(PcUiUvPatchEntry* entry, unsigned int* target)
+{
+    unsigned int i;
+    if (!entry || !target || !entry->values) return;
+    if (entry->fst) {
+        const uint32_t* values = (const uint32_t*)entry->values;
+        for (i = 0; i < entry->vertex_count; ++i) {
+            target[i * 12u] = (target[i * 12u] & ~0x3FFFu) | (values[i * 2u] & 0x3FFFu);
+            target[i * 12u + 1u] = (target[i * 12u + 1u] & ~0x3FFFu) | (values[i * 2u + 1u] & 0x3FFFu);
+        }
+    } else {
+        const float* values = (const float*)entry->values;
+        for (i = 0; i < entry->vertex_count; ++i) {
+            memcpy(&target[i * 12u], &values[i * 2u], sizeof(float));
+            memcpy(&target[i * 12u + 1u], &values[i * 2u + 1u], sizeof(float));
+        }
+    }
+    if (!entry->applied_logged) {
+        pcLog("UI UV patch: applied %s (G%u/F%u, %u vertices)",
+              entry->id ? "source primitive" : "primitive", entry->gindex,
+              entry->pict_format, entry->vertex_count);
+        entry->applied_logged = 1;
+    }
+}
+
+static unsigned int* pc_ui_uv_patch_buffer_reserve(unsigned int count)
+{
+    size_t words = (size_t)count * 12u;
+    unsigned int* resized;
+    if (words <= pc_ui_uv_patch_buffer_words) return pc_ui_uv_patch_buffer;
+    resized = (unsigned int*)realloc(pc_ui_uv_patch_buffer, words * sizeof(unsigned int));
+    if (!resized) return NULL;
+    pc_ui_uv_patch_buffer = resized;
+    pc_ui_uv_patch_buffer_words = words;
+    return pc_ui_uv_patch_buffer;
 }
 
 static void pc_ui_uv_apply_geometry(uint64_t key, unsigned int* vertices, unsigned int count)
@@ -1820,6 +2108,8 @@ void Ps2AddPrim(unsigned long prim, void* dp, unsigned int num, unsigned int cli
     static unsigned int wide_buf[64 * 12];
     uint64_t ui_uv_element_key = 0;
     int ui_uv_selected_draw = 0;
+    const unsigned int* ui_uv_source_words = (const unsigned int*)dp;
+    PcUiUvPatchEntry* ui_uv_patch_entry = NULL;
 #endif
 
 #ifdef TARGET_PC
@@ -1857,13 +2147,19 @@ void Ps2AddPrim(unsigned long prim, void* dp, unsigned int num, unsigned int cli
     /* Capture all textured 2D source streams, including ST (non-FST) and >64 vertices.
      * The interactive selector remains narrower; export must not inherit that UI limitation. */
     if ((clip_3d_on == 0) && (prim & 0x8000000000000ULL) && Ps2_now_tex != NULL)
-        pc_ui_uv_capture_geometry((const unsigned int*)dp, num, prim);
+        pc_ui_uv_capture_geometry(ui_uv_source_words, num, prim);
+
+    if (clip_3d_on == 0)
+        ui_uv_patch_entry = pc_ui_uv_patch_find(ui_uv_source_words, num, prim);
 
     if ((clip_3d_on == 0) && (prim & 0x8000000000000) && (prim & 0x80000000000000) && (num <= 64))
     {
-        memcpy(wide_buf, dp, num * 48);
-        dp = wide_buf;
+        memcpy(wide_buf, ui_uv_source_words, num * 48);
         ui_uv_element_key = pc_ui_uv_register_geometry(wide_buf, num, prim, &ui_uv_selected_draw);
+        /* Register the unmodified stream first so existing tuner IDs remain stable. */
+        if (ui_uv_patch_entry)
+            pc_ui_uv_patch_apply(ui_uv_patch_entry, wide_buf);
+        dp = wide_buf;
         if (pc_ui_snap_uv_enabled())
         {
             pc_snap_uv((unsigned int*)wide_buf, num);
@@ -1909,6 +2205,21 @@ void Ps2AddPrim(unsigned long prim, void* dp, unsigned int num, unsigned int cli
         }
 
         pc_ui_uv_apply_geometry(ui_uv_element_key, wide_buf, num);
+    }
+    else if ((clip_3d_on == 0) && ui_uv_patch_entry)
+    {
+        unsigned int* patched = pc_ui_uv_patch_buffer_reserve(num);
+        if (patched) {
+            memcpy(patched, ui_uv_source_words, (size_t)num * 12u * sizeof(unsigned int));
+            pc_ui_uv_patch_apply(ui_uv_patch_entry, patched);
+            dp = patched;
+        } else {
+            static int allocation_warned;
+            if (!allocation_warned) {
+                pcLog("UI UV patch: could not allocate %u-vertex source copy; patch skipped", num);
+                allocation_warned = 1;
+            }
+        }
     }
 
     /* widescreen: 2D keeps its 4:3 layout in the middle of the stretched frame. Primitives
