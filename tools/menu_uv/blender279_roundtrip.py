@@ -146,6 +146,7 @@ def import_record(record):
     obj["recvx_texture_width"] = int(record["texture_width"])
     obj["recvx_texture_height"] = int(record["texture_height"])
     obj["recvx_topology"] = topology
+    obj["recvx_uv_mode"] = record.get("uv_mode", "FST_12_4")
     obj["recvx_sprite"] = bool(sprite)
     obj["recvx_original_uv"] = json.dumps(source_original_uv)
     obj["recvx_original_vertex_count"] = source_count
@@ -169,7 +170,7 @@ def import_all():
     print("RECVX: texture images are matched by *g<Gindex>*f<format>* in %s" % TEXTURE_DIR)
 
 def export_patch():
-    patch = {"schema": 1, "coordinate_space": "texels_12_4", "records": []}
+    patch = {"schema": 1, "coordinate_space": "per_record_source_uv", "records": []}
     for obj in bpy.context.scene.objects:
         if obj.type != "MESH" or int(obj.get("recvx_schema", 0)) != 1:
             continue
@@ -221,10 +222,12 @@ def export_patch():
         if len(values) != len(original):
             print("RECVX: skip %s: UV/source vertex count mismatch" % obj.name)
             continue
-        raw_uv = []
-        for u, v in values:
-            raw_uv.append([int(round(u * 16.0)), int(round(v * 16.0))])
-        patch["records"].append({
+        uv_mode = obj.get("recvx_uv_mode", "FST_12_4")
+        if uv_mode == "FST_12_4":
+            uv_payload = {"uv_raw": [[int(round(u * 16.0)), int(round(v * 16.0))] for u, v in values]}
+        else:
+            uv_payload = {"uv_st": [[u / width, v / height] for u, v in values]}
+        item = {
             "id": obj["recvx_id"],
             "signature": obj["recvx_signature"],
             "gindex": int(obj["recvx_gindex"]),
@@ -233,10 +236,12 @@ def export_patch():
             "texture_width": int(obj["recvx_texture_width"]),
             "texture_height": int(obj["recvx_texture_height"]),
             "topology": int(obj["recvx_topology"]),
+            "uv_mode": uv_mode,
             "sprite": sprite,
-            "vertex_count": len(raw_uv),
-            "uv_raw": raw_uv
-        })
+            "vertex_count": len(values)
+        }
+        item.update(uv_payload)
+        patch["records"].append(item)
     with open(PATCH_JSON, "w") as stream:
         json.dump(patch, stream, indent=2, sort_keys=True)
     print("RECVX: wrote %d UV-only records to %s" % (len(patch["records"]), PATCH_JSON))
