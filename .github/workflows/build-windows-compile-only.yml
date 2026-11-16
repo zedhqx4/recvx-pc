@@ -6,6 +6,7 @@ on:
     branches:
       - OpenGl-3.3
       - render-nativo
+      - experimental/antialias
     paths:
       - 'pc/src/**'
       - 'pc/include/**'
@@ -15,6 +16,7 @@ on:
       - 'build.ps1'
       - 'build.bat'
       - 'pc/tools/**'
+      - 'pc/res/smaa_*.r*'
       - '.github/workflows/build-windows-compile-only.yml'
 
 permissions:
@@ -55,7 +57,7 @@ jobs:
         shell: pwsh
         run: |
           $dir = Join-Path $env:GITHUB_WORKSPACE 'build_pc'
-          $required = @('recvx.exe', 'recvx-config.exe', 'SDL3.dll', 'libusb-1.0.dll')
+          $required = @('recvx.exe', 'recvx-config.exe', 'SDL3.dll', 'libusb-1.0.dll', 'smaa_area.rg8', 'smaa_search.r8')
           foreach ($name in $required) {
             $file = Join-Path $dir $name
             if (-not (Test-Path $file)) { throw "Expected build artifact not found: $file" }
@@ -65,10 +67,12 @@ jobs:
       - name: Upload Windows build
         uses: actions/upload-artifact@v4
         with:
-          name: recvx-pc-windows-opengl-3.3-compile-only
+          name: recvx-pc-windows-antialias-compile-only
           path: |
             build_pc/recvx.exe
             build_pc/recvx-config.exe
             build_pc/SDL3.dll
             build_pc/libusb-1.0.dll
+            build_pc/smaa_area.rg8
+            build_pc/smaa_search.r8
           if-no-files-found: error

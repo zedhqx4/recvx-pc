@@ -8,6 +8,7 @@
 #include <SDL3/SDL.h>
 
 #include "pc_gl.h"
+#include "pc_antialias.h"
 #include "pc_renderer.h"
 #include "pc_platform.h"
 
@@ -116,6 +117,7 @@ uint64_t pcRendererFrameNumber(void) { return (uint64_t)frame_number; }
 static void flush_pending_deletes(void);
 static unsigned stat_immediate, stat_queued, stat_vertices, stat_screen_space;
 static int debug_magenta = -1;
+static int antialias_flags;
 
 /* CLAUDE-NOTE[N5][CORREGIDO]: vertex shader con problemas de clipping.
  *  - max(z, 0.00001) MUEVE los vertices con z<=0 en vez de recortarlos: un triangulo que cruza el plano de la
@@ -340,6 +342,11 @@ int pcRendererInit(int width, int height)
 
     if (!create_targets(width, height)) return 0;
     ready = 1;
+    antialias_flags = pcAaInit(render_width, render_height,
+                              pcIniGetInt("fxaa", 0) != 0,
+                              pcIniGetInt("smaa", 0) != 0);
+    if (!antialias_flags && (pcIniGetInt("fxaa", 0) || pcIniGetInt("smaa", 0)))
+        pcLog("antialias: requested filter could not be initialized; continuing without AA");
     pcLog("native renderer: OpenGL 3.3 initialized (%dx%d render target)", width, height);
     return 1;
 }
@@ -348,6 +355,8 @@ int pcRendererInit(int width, int height)
 void pcRendererShutdown(void)
 {
     if (!ready) return;
+    pcAaShutdown();
+    antialias_flags = 0;
     glDeleteBuffers(1, &vertex_buffer);
     glDeleteVertexArrays(1, &vertex_array);
     if (render_texture_fbo) glDeleteFramebuffers(1, &render_texture_fbo);
@@ -479,7 +488,13 @@ void pcRendererSetRenderScale(float sx, float sy)
     if (w < 1) w = 1;
     if (h < 1) h = 1;
     if (ready && (w != render_width || h != render_height)) {
-        if (!create_targets(w, h)) pcPlatformFatal("The native renderer could not create its %dx%d render targets.", w, h);
+        if (!create_targets(w, h)) {
+            pcPlatformFatal("The native renderer could not create its %dx%d render targets.", w, h);
+        } else if (antialias_flags && !pcAaResize(w, h)) {
+            pcLog("antialias: could not resize post-process targets; disabling AA");
+            pcAaShutdown();
+            antialias_flags = 0;
+        }
     }
 }
 
@@ -1553,15 +1568,23 @@ void pcRendererPresent(void)
     SDL_Window* window;
     int ww = 0, wh = 0;
     float aspect;
+    GLuint present_framebuffer;
     if (ready) debug_dump_frame();
     int vw, vh, x, y;
     if (!ready) return;
+
+    present_framebuffer = framebuffer;
+    if (antialias_flags) {
+        GLuint aa_framebuffer = 0;
+        if (pcAaProcess(color_target, antialias_flags, &aa_framebuffer) && aa_framebuffer)
+            present_framebuffer = aa_framebuffer;
+    }
 
     window = SDL_GL_GetCurrentWindow();
     if (window) SDL_GetWindowSizeInPixels(window, &ww, &wh);
     if (ww <= 0 || wh <= 0) return;
 
-    glBindFramebuffer(GL_READ_FRAMEBUFFER, framebuffer);
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, present_framebuffer);
     glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
     glDisable(GL_SCISSOR_TEST);
     glDisable(GL_DEPTH_TEST);

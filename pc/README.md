@@ -98,6 +98,13 @@ Live tuning (requires `debug=1`; no restart required after the initial config is
 - `Backspace` resets the selected edge to zero; `Shift+Backspace` resets all four edges to zero. `F12` toggles the wireframe while tuning.
 - Every live change takes effect on the next UI draw and is written to `recvx.ini` automatically.
 
+Optional native-renderer post-process anti-aliasing (read from `recvx.ini` at startup):
+- `fxaa=0` disables FXAA; `fxaa=1` enables the single-pass FXAA filter.
+- `smaa=0` disables SMAA; `smaa=1` enables SMAA 1x (edge detection, blending weights and neighborhood blending).
+- The filters are independent. With both enabled, SMAA runs first and FXAA runs afterward; this combination is experimental and may soften the image more than either filter alone.
+- Both filters operate on the final rendered color image at the selected internal render resolution. They do not alter geometry or the depth/shadow targets. The debug frame-dump path remains an unfiltered capture for renderer diagnosis.
+- SMAA's reference AreaTex and SearchTex lookup tables are copied beside `recvx.exe` by the Windows build.
+
 Environment variables for testing:
 
 | Variable | Effect |

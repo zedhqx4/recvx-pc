@@ -16,6 +16,7 @@ on:
       - alpha
       - experimental/workbench-rendering
       - c3853984-baseline
+      - experimental/antialias
       - merge-c3853984-into-graphics-fixes
     paths-ignore:
       - '**.md'
@@ -67,7 +68,7 @@ jobs:
         shell: pwsh
         run: |
           $dir = Join-Path $env:GITHUB_WORKSPACE 'build_pc'
-          $required = @('recvx.exe', 'recvx-config.exe', 'SDL3.dll', 'libusb-1.0.dll')
+          $required = @('recvx.exe', 'recvx-config.exe', 'SDL3.dll', 'libusb-1.0.dll', 'smaa_area.rg8', 'smaa_search.r8')
           foreach ($name in $required) {
             $file = Join-Path $dir $name
             if (-not (Test-Path $file)) {
@@ -78,13 +79,24 @@ jobs:
       - name: Upload experimental Windows build
         uses: actions/upload-artifact@v4
         with:
-          name: recvx-pc-windows-clut-frame-diagnostics
+          name: recvx-pc-windows-antialias
           path: |
             build_pc/recvx.exe
             build_pc/recvx-config.exe
             build_pc/SDL3.dll
             build_pc/libusb-1.0.dll
+            build_pc/smaa_area.rg8
+            build_pc/smaa_search.r8
           if-no-files-found: error
+
+      - name: Enable AA shader smoke test
+        shell: pwsh
+        run: |
+          $dir = Join-Path $env:GITHUB_WORKSPACE 'build_pc'
+          @'
+          fxaa=1
+          smaa=1
+          '@ | Set-Content -Path (Join-Path $dir 'recvx.ini') -Encoding ascii
 
       - name: Smoke-test executable startup
         shell: pwsh
@@ -123,7 +135,11 @@ jobs:
           if (-not (Select-String -Path $trace -Pattern 'pcVideoInit: OpenGL context created' -Quiet)) {
             throw 'recvx did not reach a working SDL window and OpenGL context; see the startup trace above.'
           }
-          Write-Host 'Startup smoke test passed: main, SDL initialization, window, and OpenGL context.'
+          if (-not (Select-String -Path $log -Pattern 'antialias: active FXAA SMAA 1x' -Quiet)) {
+            throw 'FXAA and SMAA did not both initialize; see recvx.log above.'
+          }
+          Write-Host 'AA smoke test passed: FXAA and SMAA shaders and lookup textures initialized.'
+          Write-Host 'Startup smoke test passed: main, SDL initialization, window, OpenGL context, and AA shaders.'
 
       - name: Verify executables
         shell: pwsh

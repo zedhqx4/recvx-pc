@@ -124,6 +124,16 @@ def main():
         print("missing SDL dependency: " + libusb_src)
         return 1
     shutil.copyfile(libusb_src, libusb_dst)
+
+    # SMAA 1x uses the reference AreaTex and SearchTex lookup tables at runtime.
+    for name in ("smaa_area.rg8", "smaa_search.r8"):
+        src = os.path.join(common.ROOT, "pc", "res", name)
+        dst = os.path.join(common.BUILD, name)
+        if not os.path.isfile(src):
+            print("missing anti-aliasing asset: " + src)
+            return 1
+        shutil.copyfile(src, dst)
+
     print("built " + EXE + " (SDL3 HIDAPI/libusb)")
     return build_config(sdl, opts.debug)
 

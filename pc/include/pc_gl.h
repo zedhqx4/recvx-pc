@@ -89,9 +89,11 @@ typedef ptrdiff_t GLintptr;
     X(GLuint, glCreateShader, (GLenum type)) \
     X(void, glShaderSource, (GLuint s, GLsizei n, const GLchar* const* src, const GLint* len)) \
     X(void, glCompileShader, (GLuint s)) \
+    X(void, glDeleteShader, (GLuint s)) \
     X(void, glGetShaderiv, (GLuint s, GLenum p, GLint* v)) \
     X(void, glGetShaderInfoLog, (GLuint s, GLsizei max, GLsizei* len, GLchar* log)) \
     X(GLuint, glCreateProgram, (void)) \
+    X(void, glDeleteProgram, (GLuint p)) \
     X(void, glAttachShader, (GLuint p, GLuint s)) \
     X(void, glBindAttribLocation, (GLuint p, GLuint i, const GLchar* name)) \
     X(void, glLinkProgram, (GLuint p)) \
@@ -154,9 +156,11 @@ PC_GL_FUNCS(PC_GL_DECLARE)
 #define glCreateShader pc_glCreateShader
 #define glShaderSource pc_glShaderSource
 #define glCompileShader pc_glCompileShader
+#define glDeleteShader pc_glDeleteShader
 #define glGetShaderiv pc_glGetShaderiv
 #define glGetShaderInfoLog pc_glGetShaderInfoLog
 #define glCreateProgram pc_glCreateProgram
+#define glDeleteProgram pc_glDeleteProgram
 #define glAttachShader pc_glAttachShader
 #define glBindAttribLocation pc_glBindAttribLocation
 #define glLinkProgram pc_glLinkProgram
