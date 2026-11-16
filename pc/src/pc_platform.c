@@ -889,8 +889,7 @@ static int pause_until_active(void)
 
 static Uint64 last_mouse_move;
 
-/* RGB range debug controls are intentionally independent of the broader debug= option. */
-/* Independent from debug= and RGBRangedebug. Settings are written to recvx.ini on every change. */
+/* Image adjustment controls are independent of debug= and RGBRangedebug. Values are saved to recvx.ini on each change. */
 static int pc_image_adjustment_debug_enabled(void)
 {
     static int enabled = -1;
@@ -950,6 +949,7 @@ static int pc_image_adjustment_debug_handle_event(const SDL_Event* ev)
     return 1;
 }
 
+/* RGB range debug controls are independent of debug= and image_adjustment_debug. */
 static int pc_rgb_range_debug_enabled(void)
 {
     static int enabled = -1;
