@@ -308,3 +308,11 @@ Objetivo: quitar capas de compatibilidad PS2 (GS/VU1/VU0/EE/GIF) donde no aporta
   la diferencia con la historia es enorme (cortes de camara sin fantasma). Solo afecta lo que se ve en la ventana: el Z, la niebla, la aritmetica de la GS y las
   capturas F8 quedan intactos. Limites conocidos: mezcla tambien la UI/menus (estela en texto que se mueve); como todo desenfoque por mezcla de frames, se nota
   mas cuanto mayor sea la tasa de presentado respecto a la del juego. Un desenfoque real por velocidad (solo 3D) exigiria vectores de movimiento por vertice.
+
+## Milestone y rama de optimizacion (15 nov)
+
+- `milestone/0.9.131` y tag `milestone-0.9.131` = commit 05f9663 (aritmetica entera de la GS). Punto estable al que volver; no se hizo revert destructivo: 0.9.132-0.9.134 siguen en `render-nativo` (3c85081).
+- `optimizacion` parte de 3c85081 (0.9.134). `render-nativo` queda como estaba.
+- Motion blur: ya es `motion_blur=0` por defecto (pc_renderer.c, recvx_config.c quita la clave al desmarcar). El log 492e3171 dice "motion blur desactivado".
+- Log 492e3171 (blur apagado): todos los tramos a 33.4 ms (tope de 30 fps), GPU esperando 0.1 ms. El coste esta en CPU: `draw-model` hasta 23/35 ms de media/max en la sala con agua (room geometry 10.3 ms, water 6.2 ms, CNK plist 9.8 ms con 113 chunks/frame). Los 24 fps del blur son esos ~41 ms: CPU ya al limite + pasada extra de pantalla completa.
+- Objetivos de optimizacion: (1) CNK plist/room geometry, (2) agua, (3) blur a media resolucion y sin copias extra.
