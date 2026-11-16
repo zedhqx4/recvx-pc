@@ -30,6 +30,8 @@ int pcUiUvElementSelectAt(float x, float y);
 int pcUiUvElementSelectNext(void);
 int pcUiUvElementSelectPrevious(void);
 int pcUiUvElementGetStatus(int profile, char* out, int out_size);
+/* F9 while the UV tuner is active: append unique raw 2D UI primitives to menu_uv_capture.jsonl. */
+void pcUiUvCaptureToggle(void);
 void pcUiUvElementAdjust(int profile, int edge, int delta);
 void pcUiUvElementReset(int profile, int edge);
 
