@@ -1774,6 +1774,7 @@ void pcRendererPresent(void)
         GLuint source_texture = (present_source == framebuffer) ? color_target : blur_tex[blur_history];
         glBindFramebuffer(GL_FRAMEBUFFER, 0);
         glViewport(x, y, vw, vh);
+        glDisable(GL_CULL_FACE);
         glUseProgram(rgb_range_program);
         glActiveTexture(GL_TEXTURE0);
         glBindTexture(GL_TEXTURE_2D, source_texture);
