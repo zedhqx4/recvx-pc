@@ -171,8 +171,19 @@ def import_all():
 
 def export_patch():
     patch = {"schema": 1, "coordinate_space": "per_record_source_uv", "records": []}
+    source_records = dict((record["id"], record) for record in read_records(INPUT_JSONL))
     for obj in bpy.context.scene.objects:
         if obj.type != "MESH" or int(obj.get("recvx_schema", 0)) != 1:
+            continue
+        source = source_records.get(obj.get("recvx_id", ""))
+        if source is None or source.get("signature") != obj.get("recvx_signature"):
+            print("RECVX: skip %s: source ID/signature no longer matches capture" % obj.name)
+            continue
+        if len(source.get("vertices", [])) != int(obj.get("recvx_original_vertex_count", -1)):
+            print("RECVX: skip %s: original source vertex count mismatch" % obj.name)
+            continue
+        if source.get("uv_mode", "FST_12_4") != obj.get("recvx_uv_mode", "FST_12_4"):
+            print("RECVX: skip %s: UV encoding changed since import" % obj.name)
             continue
         mesh = obj.data
         if not mesh.uv_layers.active:
