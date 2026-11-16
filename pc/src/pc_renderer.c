@@ -1763,7 +1763,7 @@ void pcRendererPresent(void)
     glDisable(GL_DEPTH_TEST);
     glDisable(GL_BLEND);
     glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
-    { float black = (RGBRange == 1) ? 0.0f : (16.0f / 255.0f); glClearColor(black, black, black, 1.0f); }
+    { float black = (RGBRange == 2) ? (16.0f / 255.0f) : 0.0f; glClearColor(black, black, black, 1.0f); }
     glClear(GL_COLOR_BUFFER_BIT);
 
     aspect = pcVideoAspect();
