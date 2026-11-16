@@ -1796,6 +1796,38 @@ void pcRendererPresent(void)
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
 }
 
+int pcRendererGetRgbRange(void)
+{
+    return RGBRange;
+}
+
+int pcRendererSetRgbRange(int mode)
+{
+    if (mode < 0 || mode > 2) {
+        pcLog("native renderer: ignored invalid RGBRange mode %d (valid: 0..2)", mode);
+        return 0;
+    }
+
+    /* Lazy creation lets the mode be changed at runtime even when startup used passthrough mode 0. */
+    if (mode != 0 && !rgb_range_program) {
+        rgb_range_program = create_rgb_range_program();
+        if (!rgb_range_program) {
+            pcLog("native renderer: cannot activate RGBRange=%d; keeping mode %d", mode, RGBRange);
+            return 0;
+        }
+    }
+
+    if (RGBRange != mode) {
+        RGBRange = mode;
+        pcLog("native renderer: RGBRange changed at runtime to %d (%s)", RGBRange,
+              RGBRange == 0 ? "limited passthrough" :
+              RGBRange == 1 ? "limited 16-235 -> full 0-255" :
+                              "full 0-255 -> limited 16-235");
+    }
+
+    return 1;
+}
+
 void pcRendererSetTextureCombine(int function, int texture_alpha)
 {
     current_texture_function = (function >= 0 && function <= 3) ? function : 0;
