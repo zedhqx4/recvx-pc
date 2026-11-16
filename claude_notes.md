@@ -352,3 +352,9 @@ Regla: cada paso hace lo que hace el hardware. Truncar: FMAC de VU/FPU del EE (c
 
 ### 0.9.139: opciones tambien en recvx.ini
 Las opciones de depuracion solo existian como variable de entorno (`getenv`), incomodas en Windows. Ahora el entorno manda y, si no existe, se lee `recvx.ini`: `vu1=1` (RECVX_VU1), `vu0_native=0|1|2` (RECVX_VU0_NATIVE), `gs_int=0|1` (RECVX_GS_INT), `vu_trunc=0|1` (ya leia el ini). Siguen solo por entorno: RECVX_VU0_BATCH, RECVX_CV_VN_BATCH, RECVX_FRAME_DUMP y las de volcado/diagnostico.
+
+### 0.9.140: lo que dicen los logs vu0_native=2 y =1 (usuario, 16 nov)
+- A/B (`vu0_native=2`): 0 `vu0 native MISMATCH` sobre ~6.8 millones de vertices reales (OpaqueDouble/TransDouble) con truncacion activa: el VU0 nativo da el mismo estado que el interprete en datos de juego. Con `vu0_native=1` va a 33,4 ms (tope 30 fps), ventanas de hasta 38 ms en 5 de 59.
+- Perfil vu1Draw (nativo): ~0.95 us/vertice, de los que 0.63 son el envio (`Ps2AddPrim3DEx`: 5 malloc/free + `draw_immediate`, un draw call por tira de ~6 vertices, ~550 tiras/frame = ~2 ms/frame) y 0.31 color+recorte+resto (~1 ms/frame). Total vu1Draw ~3 ms/frame; el tipo 8 de CNK cuesta ~12 ms/frame, o sea ~9 ms estan FUERA de vu1Draw: bucle por vertice de la ruta del EE (`copia 48 B + _CVV`) sobre tiras que luego se descartan por frustum.
+- 0.9.137 puso LDMXCSR (enter/leave del modo de redondeo) dentro de `_CVV`, es decir POR VERTICE: caro. Ahora se hace una vez por chunk (bucle por defecto de njCnkCsUvh/Uvn).
+- Perfil nuevo `PROFILE cnk strips`: tiras vistas / descartadas por frustum / vertices por _CVV. Si el % descartado es alto, el siguiente paso es el descarte por chunk (caja envolvente) antes de tocar vertices.

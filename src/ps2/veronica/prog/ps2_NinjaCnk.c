@@ -2257,7 +2257,6 @@ int _CVV(float* v0)
         float aw;
         unsigned int f = 0;
         int k_;
-        const unsigned int csr_ = pcVuRoundEnter();   /* truncar hacia cero como la VU */
 
         for (k_ = 0; k_ < 4; k_++)
         {
@@ -2273,7 +2272,6 @@ int _CVV(float* v0)
         if (r[2] < -aw) f |= 0x20;
 
         pcVu0.clip = ((pcVu0.clip << 6) | f) & 0xFFFFFF;
-        pcVuRoundLeave(csr_);
         return (int)pcVu0.clip;
     }
 #else
@@ -2707,6 +2705,7 @@ CHUNK_HEAD* njCnkCsUvh(CHUNK_HEAD* pCnk)
     }
     else
     {
+        const unsigned int pc_csr = pcVuRoundEnter();   /* VU: truncar hacia cero, una vez por chunk (LDMXCSR es caro por vertice) */
         for (; usStrip; usStrip--)
         {
             pS = NaCnkStrBufTop;
@@ -2767,6 +2766,7 @@ CHUNK_HEAD* njCnkCsUvh(CHUNK_HEAD* pCnk)
                 }
             }
         }
+        pcVuRoundLeave(pc_csr);
     }
     
     return (CHUNK_HEAD*)uspCnk;
@@ -3174,6 +3174,7 @@ CHUNK_HEAD* njCnkCsUvn(CHUNK_HEAD* pCnk)
     }
     else
     {
+        const unsigned int pc_csr = pcVuRoundEnter();   /* VU: truncar hacia cero, una vez por chunk (LDMXCSR es caro por vertice) */
         for (; usStrip; usStrip--)
         {
             pS = NaCnkStrBufTop;
@@ -3234,6 +3235,7 @@ CHUNK_HEAD* njCnkCsUvn(CHUNK_HEAD* pCnk)
                 }
             }
         }
+        pcVuRoundLeave(pc_csr);
     }
     
     return (CHUNK_HEAD*)uspCnk;
