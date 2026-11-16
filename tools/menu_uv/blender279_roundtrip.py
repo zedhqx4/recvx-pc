@@ -119,8 +119,7 @@ def import_record(record):
     obj = bpy.data.objects.new("UI_G%d_F%d_%s" % (record["gindex"], record["pict_format"], record["id"]), mesh)
     bpy.context.scene.objects.link(obj)
 
-    uv_layer = mesh.uv_layers.new()
-    uv_layer.name = "UVMap"
+    uv_layer = mesh.uv_layers.new()  # Blender 2.79 defaults this layer to "UVMap"
     for poly in mesh.polygons:
         for loop_index in poly.loop_indices:
             vertex_index = mesh.loops[loop_index].vertex_index
