@@ -1876,7 +1876,6 @@ int pcRendererSetRgbRange(int mode)
               RGBRange == 0 ? "limited passthrough" :
               RGBRange == 1 ? "limited 16-235 -> full 0-255" :
                               "full 0-255 -> limited 16-235");
-        { char value[16]; snprintf(value, sizeof(value), "%d", RGBRange); pcIniSet("RGBRange", value); }
     }
 
     return 1;
