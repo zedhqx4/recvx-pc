@@ -903,6 +903,7 @@ static int pc_debug_mode_enabled(void)
 }
 
 static int ui_uv_tuning;
+static int ui_uv_outline_visible = 1;
 int pcUiUvTuningActive(void) { return ui_uv_tuning != 0; }
 static int ui_uv_crop_selected_edge;
 static int ui_uv_crop_rot90_cw;
@@ -965,7 +966,7 @@ static int ui_uv_crop_handle_event(const SDL_Event* ev)
             if (ui_uv_tuning) {
                 if (!pcUiUvElementGetStatus(ui_uv_crop_rot90_cw, NULL, 0))
                     pcUiUvElementSelectNext();
-                ui_uv_crop_show_status("ON (PAGEUP next element, TAB edge, UP/DOWN adjust, BS reset)");
+                ui_uv_crop_show_status("ON (PGUP next, PGDN previous, F12 outline, TAB edge, UP/DOWN adjust, BS reset)");
             } else {
                 ui_uv_crop_show_status("OFF");
             }
@@ -1017,6 +1018,13 @@ static int ui_uv_crop_handle_event(const SDL_Event* ev)
             ui_uv_crop_show_status("NO VISIBLE 2D UV ELEMENT");
         break;
 
+    case SDL_SCANCODE_PAGEDOWN:
+        if (pcUiUvElementSelectPrevious())
+            ui_uv_crop_show_status("PREVIOUS ELEMENT SELECTED");
+        else
+            ui_uv_crop_show_status("NO VISIBLE 2D UV ELEMENT");
+        break;
+
     case SDL_SCANCODE_R:
         ui_uv_crop_rot90_cw = !ui_uv_crop_rot90_cw;
         ui_uv_crop_show_status("ELEMENT PROFILE SELECTED");
@@ -1047,8 +1055,9 @@ static int ui_uv_crop_handle_event(const SDL_Event* ev)
         break;
 
     case SDL_SCANCODE_F12:
-        /* GS diagnostic removed */
-        ui_uv_crop_show_status("WIREFRAME TOGGLED");
+        ui_uv_outline_visible = !ui_uv_outline_visible;
+        pcRendererSetUiUvDebugOutlineEnabled(ui_uv_outline_visible);
+        ui_uv_crop_show_status(ui_uv_outline_visible ? "SELECTION OUTLINE ON" : "SELECTION OUTLINE OFF");
         break;
 
     default:
@@ -1106,8 +1115,8 @@ int pcVideoPumpEvents(void)
             continue;
         }
 
-        /* F12: toggle a wireframe overlay on textured 2D primitives for graphics diagnosis.
-         * F12 is not one of the default game bindings (F11 fullscreen, F9 title, F5 save). */
+        /* F12 is consumed by the UV tuner while active; outside it, show renderer identity.
+         * It is not one of the default game bindings (F11 fullscreen, F9 title, F5 save). */
         if ((ev.type == SDL_EVENT_KEY_DOWN) && !ev.key.repeat && (ev.key.scancode == SDL_SCANCODE_F12))
         {
             title_notice_show("NATIVE OPENGL RENDERER");

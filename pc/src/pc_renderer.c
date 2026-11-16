@@ -96,6 +96,7 @@ static int depth_override_test = -1;
 static int depth_override_write = -1;
 static int burst_remaining, burst_index;   /* captura en rafaga (F8), ver pcRendererCaptureBurst */
 static int ui_uv_debug_rect_valid;
+static int ui_uv_debug_outline_enabled = 1;
 static float ui_uv_debug_rect[4];
 
 /* diagnostico para codigo del juego: hay una rafaga F8 en sus dos primeros frames */
@@ -124,6 +125,11 @@ void pcRendererSetUiUvDebugRect(float x0, float y0, float x1, float y1)
     ui_uv_debug_rect[2] = x1;
     ui_uv_debug_rect[3] = y1;
     ui_uv_debug_rect_valid = 1;
+}
+
+void pcRendererSetUiUvDebugOutlineEnabled(int enabled)
+{
+    ui_uv_debug_outline_enabled = enabled != 0;
 }
 
 static void flush_pending_deletes(void);
@@ -1513,6 +1519,7 @@ static void draw_ui_uv_debug_rect(void)
 
     if (!ready || !ui_uv_debug_rect_valid) return;
     ui_uv_debug_rect_valid = 0;
+    if (!ui_uv_debug_outline_enabled) return;
     x0 = ui_uv_debug_rect[0]; y0 = ui_uv_debug_rect[1];
     x1 = ui_uv_debug_rect[2]; y1 = ui_uv_debug_rect[3];
     if (x1 - x0 < 1.0f || y1 - y0 < 1.0f) return;

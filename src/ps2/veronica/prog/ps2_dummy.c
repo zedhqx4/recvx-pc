@@ -1508,6 +1508,22 @@ int pcUiUvElementSelectNext(void)
     return 1;
 }
 
+/* Move backward through the same per-frame registry; wrap from the first element to the last. */
+int pcUiUvElementSelectPrevious(void)
+{
+    unsigned int i;
+    if (pc_ui_uv_draw_count == 0) return 0;
+    for (i = 0; i < pc_ui_uv_draw_count; i++) {
+        if (pc_ui_uv_draws[i].key == pc_ui_uv_selected_key) {
+            pc_ui_uv_selected_key =
+                pc_ui_uv_draws[(i == 0) ? (pc_ui_uv_draw_count - 1u) : (i - 1u)].key;
+            return 1;
+        }
+    }
+    pc_ui_uv_selected_key = pc_ui_uv_draws[pc_ui_uv_draw_count - 1u].key;
+    return 1;
+}
+
 int pcUiUvElementGetStatus(int profile, char* out, int out_size)
 {
     PcUiUvDraw* draw = pc_ui_uv_selected_draw();

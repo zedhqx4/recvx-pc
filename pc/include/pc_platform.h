@@ -26,6 +26,7 @@ void pcIniSet(const char* key, const char* value);
  * profile: 0=standard, 1=clockwise-90; edge: left=0, right=1, top=2, bottom=3. */
 int pcUiUvTuningActive(void);
 int pcUiUvElementSelectNext(void);
+int pcUiUvElementSelectPrevious(void);
 int pcUiUvElementGetStatus(int profile, char* out, int out_size);
 void pcUiUvElementAdjust(int profile, int edge, int delta);
 void pcUiUvElementReset(int profile, int edge);
