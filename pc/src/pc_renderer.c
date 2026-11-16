@@ -81,7 +81,7 @@ static GLint u_textured, u_texture, u_fog_enabled, u_fog_color, u_alpha_test, u_
 static GLint u_screen_space, u_texture_size, u_texture_function, u_texture_alpha, u_texture_perspective, u_alpha_pass;
 static int output_width = 640;
 static int output_height = 480;
-/* Final output range only: 1 = native full range (unchanged), 0 = RGB limited range (16..235). */
+/* Target output range only: 1 = expand the game's limited RGB (16..235) to full (0..255); 0 = leave it limited. */
 static int RGBRangeFull = 1;
 static GLuint rgb_range_program;
 static GLint rgb_range_source = -1;
@@ -240,7 +240,7 @@ static GLuint create_rgb_range_program(void)
     static const char* fs_src =
         "#version 330 core\nin vec2 vUv; uniform sampler2D uSource; out vec4 oColor;\n"
         "void main(){ vec4 c=texture(uSource,vUv); "
-        "c.rgb=c.rgb*(219.0/255.0)+(16.0/255.0); oColor=c; }\n";
+        "c.rgb=clamp((c.rgb*255.0-16.0)/219.0,0.0,1.0); oColor=c; }\n";
     GLuint vs = compile_shader(GL_VERTEX_SHADER, vs_src);
     GLuint fs = compile_shader(GL_FRAGMENT_SHADER, fs_src);
     GLuint p = 0;
@@ -365,15 +365,15 @@ int pcRendererInit(int width, int height)
     if (!program) return 0;
 
     RGBRangeFull = pcIniGetInt("RGBRangeFull", 1) != 0;
-    if (!RGBRangeFull) {
+    if (RGBRangeFull) {
         rgb_range_program = create_rgb_range_program();
         if (!rgb_range_program) {
-            pcLog("native renderer: RGBRangeFull=0 requested, but output conversion could not be initialized; using full range");
-            RGBRangeFull = 1;
+            pcLog("native renderer: RGBRangeFull=1 requested, but limited-to-full expansion could not be initialized; keeping limited output");
+            RGBRangeFull = 0;
         }
     }
     pcLog("native renderer: output RGB range: %s (RGBRangeFull=%d)",
-          RGBRangeFull ? "full / unchanged" : "limited / 16-235", RGBRangeFull);
+          RGBRangeFull ? "full / expand limited 16-235 to 0-255" : "limited / passthrough", RGBRangeFull);
 
     u_target = glGetUniformLocation(program, "uTarget");
     u_projection = glGetUniformLocation(program, "uProjection");
@@ -1765,12 +1765,12 @@ void pcRendererPresent(void)
     }
     x = (ww - vw) / 2;
     y = (wh - vh) / 2;
-    if (RGBRangeFull) {
-        /* Preserve the existing full-range path byte-for-byte. */
+    if (!RGBRangeFull) {
+        /* Preserve the existing limited-range path byte-for-byte. */
         glBlitFramebuffer(0, 0, render_width, render_height,
                           x, y, x + vw, y + vh, GL_COLOR_BUFFER_BIT, GL_LINEAR);
     } else {
-        /* Convert only the final window output; the game framebuffer and captures stay full-range. */
+        /* Expand only the final window output; the game framebuffer and captures stay limited-range. */
         GLuint source_texture = (present_source == framebuffer) ? color_target : blur_tex[blur_history];
         glBindFramebuffer(GL_FRAMEBUFFER, 0);
         glViewport(x, y, vw, vh);
