@@ -903,8 +903,10 @@ static int pc_debug_mode_enabled(void)
 }
 
 static int ui_uv_tuning;
+static int ui_uv_element_mode;
 static int ui_uv_outline_visible = 1;
 int pcUiUvTuningActive(void) { return ui_uv_tuning != 0; }
+int pcUiUvElementModeActive(void) { return ui_uv_tuning && ui_uv_element_mode; }
 static int ui_uv_crop_selected_edge;
 static int ui_uv_crop_rot90_cw;
 static int ui_uv_consume_escape_up;
@@ -923,7 +925,8 @@ static void ui_uv_crop_show_status(const char* state)
 
     {
         char element[112];
-        if (ui_uv_tuning && pcUiUvElementGetStatus(ui_uv_crop_rot90_cw, element, (int)sizeof(element))) {
+        if (ui_uv_tuning && ui_uv_element_mode &&
+            pcUiUvElementGetStatus(ui_uv_crop_rot90_cw, element, (int)sizeof(element))) {
             snprintf(notice, sizeof(notice), "UV %s | %s | EDGE:%s",
                      state, element, ui_uv_crop_edge_names[ui_uv_crop_selected_edge]);
             pcLog("UI UV element %s; %s; edge=%s; values use the existing 1/16-texel representation",
@@ -945,6 +948,46 @@ static int ui_uv_crop_handle_event(const SDL_Event* ev)
     int down = (ev->type == SDL_EVENT_KEY_DOWN);
     SDL_Scancode key;
 
+    if (ev->type == SDL_EVENT_MOUSE_BUTTON_DOWN || ev->type == SDL_EVENT_MOUSE_BUTTON_UP) {
+        if (!pc_debug_mode_enabled() || !ui_uv_tuning || !ui_uv_element_mode)
+            return 0;
+        if (ev->type == SDL_EVENT_MOUSE_BUTTON_UP)
+            return ev->button.button == SDL_BUTTON_LEFT;
+        if (ev->button.button == SDL_BUTTON_LEFT) {
+            int ww = 0, wh = 0;
+            float aspect, viewport_w, viewport_h, viewport_x, viewport_y;
+            float mouse_x = ev->button.x, mouse_y = ev->button.y;
+            float game_x, game_y;
+            if (window) SDL_GetWindowSize(window, &ww, &wh);
+            if (ww <= 0 || wh <= 0) {
+                ui_uv_crop_show_status("MOUSE SELECT: WINDOW SIZE UNAVAILABLE");
+                return 1;
+            }
+            aspect = pcVideoAspect();
+            viewport_w = (float)ww;
+            viewport_h = viewport_w / aspect;
+            if (viewport_h > (float)wh) {
+                viewport_h = (float)wh;
+                viewport_w = viewport_h * aspect;
+            }
+            viewport_x = ((float)ww - viewport_w) * 0.5f;
+            viewport_y = ((float)wh - viewport_h) * 0.5f;
+            if (mouse_x < viewport_x || mouse_x >= viewport_x + viewport_w ||
+                mouse_y < viewport_y || mouse_y >= viewport_y + viewport_h) {
+                ui_uv_crop_show_status("CLICK INSIDE GAME IMAGE");
+                return 1;
+            }
+            game_x = (mouse_x - viewport_x) * (640.0f / viewport_w);
+            game_y = (mouse_y - viewport_y) * (480.0f / viewport_h);
+            if (pcUiUvElementSelectAt(game_x, game_y))
+                ui_uv_crop_show_status("SELECTED; CLICK SAME SPOT TO CYCLE OVERLAPS");
+            else
+                ui_uv_crop_show_status("NO UV ELEMENT AT THIS POSITION");
+            return 1;
+        }
+        return 1;
+    }
+
     if (!down && ev->type != SDL_EVENT_KEY_UP)
     {
         return 0;
@@ -963,10 +1006,9 @@ static int ui_uv_crop_handle_event(const SDL_Event* ev)
         if (down && !ev->key.repeat)
         {
             ui_uv_tuning = !ui_uv_tuning;
+            ui_uv_element_mode = 0; /* Always open in the global UV controls. */
             if (ui_uv_tuning) {
-                if (!pcUiUvElementGetStatus(ui_uv_crop_rot90_cw, NULL, 0))
-                    pcUiUvElementSelectNext();
-                ui_uv_crop_show_status("ON (PGUP next, PGDN previous, F12 outline, TAB edge, UP/DOWN adjust, BS reset)");
+                ui_uv_crop_show_status("GLOBAL UV (E=element mode, arrows=adjust, TAB=edge, R=profile)");
             } else {
                 ui_uv_crop_show_status("OFF");
             }
@@ -978,9 +1020,14 @@ static int ui_uv_crop_handle_event(const SDL_Event* ev)
     {
         if (down && ui_uv_tuning && !ev->key.repeat)
         {
-            ui_uv_tuning = 0;
-            ui_uv_consume_escape_up = 1;
-            ui_uv_crop_show_status("TUNING OFF");
+            if (ui_uv_element_mode) {
+                ui_uv_element_mode = 0;
+                ui_uv_crop_show_status("GLOBAL UV MODE");
+            } else {
+                ui_uv_tuning = 0;
+                ui_uv_consume_escape_up = 1;
+                ui_uv_crop_show_status("TUNING OFF");
+            }
             return 1;
         }
         if (!down && ui_uv_consume_escape_up)
@@ -1006,28 +1053,48 @@ static int ui_uv_crop_handle_event(const SDL_Event* ev)
 
     switch (key)
     {
+    case SDL_SCANCODE_G:
+        ui_uv_element_mode = 0;
+        ui_uv_crop_show_status("GLOBAL UV MODE");
+        break;
+
+    case SDL_SCANCODE_E:
+        ui_uv_element_mode = 1;
+        ui_uv_crop_show_status("ELEMENT MODE: CLICK DRAWING; G/ESC=GLOBAL UV");
+        break;
+
     case SDL_SCANCODE_TAB:
         ui_uv_crop_selected_edge = (ui_uv_crop_selected_edge + 1) & 3;
         ui_uv_crop_show_status("EDGE SELECTED");
         break;
 
     case SDL_SCANCODE_PAGEUP:
-        if (pcUiUvElementSelectNext())
-            ui_uv_crop_show_status("ELEMENT SELECTED");
-        else
-            ui_uv_crop_show_status("NO VISIBLE 2D UV ELEMENT");
+        if (!ui_uv_element_mode) {
+            ui_uv_crop_show_status("PRESS E FOR ELEMENT MODE");
+        } else if (!pcUiUvElementGetStatus(ui_uv_crop_rot90_cw, NULL, 0)) {
+            ui_uv_crop_show_status("CLICK A VISIBLE UI ELEMENT FIRST");
+        } else if (pcUiUvElementSelectNext()) {
+            ui_uv_crop_show_status("NEXT ELEMENT (SAME TEXTURE)");
+        } else {
+            ui_uv_crop_show_status("ONLY ONE ELEMENT FOR THIS TEXTURE");
+        }
         break;
 
     case SDL_SCANCODE_PAGEDOWN:
-        if (pcUiUvElementSelectPrevious())
-            ui_uv_crop_show_status("PREVIOUS ELEMENT SELECTED");
-        else
-            ui_uv_crop_show_status("NO VISIBLE 2D UV ELEMENT");
+        if (!ui_uv_element_mode) {
+            ui_uv_crop_show_status("PRESS E FOR ELEMENT MODE");
+        } else if (!pcUiUvElementGetStatus(ui_uv_crop_rot90_cw, NULL, 0)) {
+            ui_uv_crop_show_status("CLICK A VISIBLE UI ELEMENT FIRST");
+        } else if (pcUiUvElementSelectPrevious()) {
+            ui_uv_crop_show_status("PREVIOUS ELEMENT (SAME TEXTURE)");
+        } else {
+            ui_uv_crop_show_status("ONLY ONE ELEMENT FOR THIS TEXTURE");
+        }
         break;
 
     case SDL_SCANCODE_R:
         ui_uv_crop_rot90_cw = !ui_uv_crop_rot90_cw;
-        ui_uv_crop_show_status("ELEMENT PROFILE SELECTED");
+        ui_uv_crop_show_status("UV PROFILE SELECTED");
         break;
 
     case SDL_SCANCODE_UP:
@@ -1035,29 +1102,49 @@ static int ui_uv_crop_handle_event(const SDL_Event* ev)
     {
         int step = (ev->key.mod & SDL_KMOD_SHIFT) ? 4 : 1;
         int delta = (key == SDL_SCANCODE_UP) ? step : -step;
-        if (pcUiUvElementGetStatus(ui_uv_crop_rot90_cw, NULL, 0)) {
-            pcUiUvElementAdjust(ui_uv_crop_rot90_cw, ui_uv_crop_selected_edge, delta);
-            ui_uv_crop_show_status("ELEMENT VALUE CHANGED");
+        if (ui_uv_element_mode) {
+            if (pcUiUvElementGetStatus(ui_uv_crop_rot90_cw, NULL, 0)) {
+                pcUiUvElementAdjust(ui_uv_crop_rot90_cw, ui_uv_crop_selected_edge, delta);
+                ui_uv_crop_show_status("ELEMENT VALUE CHANGED");
+            } else {
+                ui_uv_crop_show_status("CLICK A VISIBLE UI ELEMENT FIRST");
+            }
         } else {
-            ui_uv_crop_show_status("NO ELEMENT; PRESS PAGEUP");
+            if (ui_uv_crop_rot90_cw)
+                pcUiUvCropRot90CWAdjust(ui_uv_crop_selected_edge, delta);
+            else
+                pcUiUvCropAdjust(ui_uv_crop_selected_edge, delta);
+            ui_uv_crop_show_status("GLOBAL VALUE CHANGED");
         }
         break;
     }
 
     case SDL_SCANCODE_BACKSPACE:
-        if (pcUiUvElementGetStatus(ui_uv_crop_rot90_cw, NULL, 0)) {
-            pcUiUvElementReset(ui_uv_crop_rot90_cw,
-                               (ev->key.mod & SDL_KMOD_SHIFT) ? -1 : ui_uv_crop_selected_edge);
-            ui_uv_crop_show_status((ev->key.mod & SDL_KMOD_SHIFT) ? "ELEMENT PROFILE RESET" : "ELEMENT EDGE RESET");
+        if (ui_uv_element_mode) {
+            if (pcUiUvElementGetStatus(ui_uv_crop_rot90_cw, NULL, 0)) {
+                pcUiUvElementReset(ui_uv_crop_rot90_cw,
+                                   (ev->key.mod & SDL_KMOD_SHIFT) ? -1 : ui_uv_crop_selected_edge);
+                ui_uv_crop_show_status((ev->key.mod & SDL_KMOD_SHIFT) ? "ELEMENT PROFILE RESET" : "ELEMENT EDGE RESET");
+            } else {
+                ui_uv_crop_show_status("CLICK A VISIBLE UI ELEMENT FIRST");
+            }
         } else {
-            ui_uv_crop_show_status("NO ELEMENT; PRESS PAGEUP");
+            if (ui_uv_crop_rot90_cw)
+                pcUiUvCropRot90CWReset((ev->key.mod & SDL_KMOD_SHIFT) ? -1 : ui_uv_crop_selected_edge);
+            else
+                pcUiUvCropReset((ev->key.mod & SDL_KMOD_SHIFT) ? -1 : ui_uv_crop_selected_edge);
+            ui_uv_crop_show_status((ev->key.mod & SDL_KMOD_SHIFT) ? "GLOBAL PROFILE RESET" : "GLOBAL EDGE RESET");
         }
         break;
 
     case SDL_SCANCODE_F12:
-        ui_uv_outline_visible = !ui_uv_outline_visible;
-        pcRendererSetUiUvDebugOutlineEnabled(ui_uv_outline_visible);
-        ui_uv_crop_show_status(ui_uv_outline_visible ? "SELECTION OUTLINE ON" : "SELECTION OUTLINE OFF");
+        if (!ui_uv_element_mode) {
+            ui_uv_crop_show_status("OUTLINE IS ONLY USED IN ELEMENT MODE");
+        } else {
+            ui_uv_outline_visible = !ui_uv_outline_visible;
+            pcRendererSetUiUvDebugOutlineEnabled(ui_uv_outline_visible);
+            ui_uv_crop_show_status(ui_uv_outline_visible ? "SELECTION OUTLINE ON" : "SELECTION OUTLINE OFF");
+        }
         break;
 
     default:

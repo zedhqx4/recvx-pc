@@ -1243,6 +1243,8 @@ static void pcPrimDiag(const char* who, unsigned long prim, const void* dp, unsi
 typedef struct {
     uint64_t key, signature;
     unsigned int gindex, bank, pict_format, width, height, occurrence;
+    float x0, y0, x1, y1;
+    int bounds_valid;
 } PcUiUvDraw;
 
 typedef struct {
@@ -1266,6 +1268,104 @@ static uint64_t pc_ui_uv_registry_frame = UINT64_MAX;
 static uint64_t pc_ui_uv_selected_key;
 static int pc_ui_uv_adjustments_loaded;
 static int pc_ui_uv_adjustments_warned_full;
+
+static void pc_ui_uv_update_bounds(uint64_t key, const PcNativeVertex* vertices, unsigned int count)
+{
+    unsigned int i, draw_index;
+    PcUiUvDraw* draw = NULL;
+    float x0 = 1.0e30f, y0 = 1.0e30f, x1 = -1.0e30f, y1 = -1.0e30f;
+
+    if (!key || !vertices || !count) return;
+    for (draw_index = 0; draw_index < pc_ui_uv_draw_count; draw_index++) {
+        if (pc_ui_uv_draws[draw_index].key == key) {
+            draw = &pc_ui_uv_draws[draw_index];
+            break;
+        }
+    }
+    if (!draw) return;
+
+    for (i = 0; i < count; i++) {
+        if (vertices[i].x < x0) x0 = vertices[i].x;
+        if (vertices[i].x > x1) x1 = vertices[i].x;
+        if (vertices[i].y < y0) y0 = vertices[i].y;
+        if (vertices[i].y > y1) y1 = vertices[i].y;
+    }
+    if (x1 <= x0 || y1 <= y0) return;
+    draw->x0 = x0;
+    draw->y0 = y0;
+    draw->x1 = x1;
+    draw->y1 = y1;
+    draw->bounds_valid = 1;
+}
+
+/* Mouse selection uses the previous completed frame's screen-space bounds.
+ * Clicking the same point again walks overlapping primitives, so an obscured item remains reachable. */
+int pcUiUvElementSelectAt(float x, float y)
+{
+    static int last_pick_valid;
+    static float last_pick_x, last_pick_y;
+    static uint64_t last_pick_key;
+    unsigned int i, start = 0;
+    PcUiUvDraw* best = NULL;
+    float best_area = 1.0e30f;
+    int cycle_overlap = last_pick_valid &&
+        (x - last_pick_x >= -4.0f && x - last_pick_x <= 4.0f) &&
+        (y - last_pick_y >= -4.0f && y - last_pick_y <= 4.0f);
+
+    if (cycle_overlap) {
+        for (i = 0; i < pc_ui_uv_draw_count; i++) {
+            if (pc_ui_uv_draws[i].key == last_pick_key) {
+                start = i;
+                break;
+            }
+        }
+        if (i == pc_ui_uv_draw_count)
+            cycle_overlap = 0;
+    }
+
+    if (cycle_overlap) {
+        unsigned int step;
+        for (step = 1; step <= pc_ui_uv_draw_count; step++) {
+            unsigned int index = (start + step) % pc_ui_uv_draw_count;
+            PcUiUvDraw* draw = &pc_ui_uv_draws[index];
+            if (draw->bounds_valid && x >= draw->x0 && x <= draw->x1 &&
+                y >= draw->y0 && y <= draw->y1) {
+                best = draw;
+                break;
+            }
+        }
+    } else {
+        for (i = 0; i < pc_ui_uv_draw_count; i++) {
+            PcUiUvDraw* draw = &pc_ui_uv_draws[i];
+            float area;
+            if (!draw->bounds_valid || x < draw->x0 || x > draw->x1 ||
+                y < draw->y0 || y > draw->y1)
+                continue;
+            area = (draw->x1 - draw->x0) * (draw->y1 - draw->y0);
+            /* First click prefers the smallest containing primitive. */
+            if (!best || area <= best_area) {
+                best = draw;
+                best_area = area;
+            }
+        }
+    }
+    if (!best) {
+        last_pick_valid = 0;
+        return 0;
+    }
+    pc_ui_uv_selected_key = best->key;
+    last_pick_x = x;
+    last_pick_y = y;
+    last_pick_key = best->key;
+    last_pick_valid = 1;
+    return 1;
+}
+
+static int pc_ui_uv_same_texture(const PcUiUvDraw* a, const PcUiUvDraw* b)
+{
+    /* Navigation is grouped by the on-disk texture identity used by recvx_tex_* dumps. */
+    return a && b && a->gindex == b->gindex && a->pict_format == b->pict_format;
+}
 
 static uint64_t pc_ui_uv_hash_add(uint64_t hash, uint64_t value)
 {
@@ -1467,6 +1567,7 @@ static uint64_t pc_ui_uv_register_geometry(const unsigned int* vertices, unsigne
         draw->width = width;
         draw->height = height;
         draw->occurrence = occurrence;
+        draw->bounds_valid = 0;
     }
     if (selected && key == pc_ui_uv_selected_key) *selected = 1;
     return key;
@@ -1494,34 +1595,41 @@ static PcUiUvDraw* pc_ui_uv_selected_draw(void)
     return NULL;
 }
 
-int pcUiUvElementSelectNext(void)
+static int pc_ui_uv_select_relative(int direction)
 {
-    unsigned int i;
-    if (pc_ui_uv_draw_count == 0) return 0;
+    unsigned int i, step, start = 0;
+    PcUiUvDraw* selected = pc_ui_uv_selected_draw();
+    if (!pc_ui_uv_draw_count) return 0;
+
+    if (!selected) return 0; /* Mouse click establishes the target texture first. */
+
     for (i = 0; i < pc_ui_uv_draw_count; i++) {
-        if (pc_ui_uv_draws[i].key == pc_ui_uv_selected_key) {
-            pc_ui_uv_selected_key = pc_ui_uv_draws[(i + 1u) % pc_ui_uv_draw_count].key;
+        if (&pc_ui_uv_draws[i] == selected) {
+            start = i;
+            break;
+        }
+    }
+
+    for (step = 1; step < pc_ui_uv_draw_count; step++) {
+        unsigned int index = (direction > 0)
+            ? (start + step) % pc_ui_uv_draw_count
+            : (start + pc_ui_uv_draw_count - (step % pc_ui_uv_draw_count)) % pc_ui_uv_draw_count;
+        if (pc_ui_uv_same_texture(selected, &pc_ui_uv_draws[index])) {
+            pc_ui_uv_selected_key = pc_ui_uv_draws[index].key;
             return 1;
         }
     }
-    pc_ui_uv_selected_key = pc_ui_uv_draws[0].key;
-    return 1;
+    return 0; /* There is only one visible primitive for this texture. */
 }
 
-/* Move backward through the same per-frame registry; wrap from the first element to the last. */
+int pcUiUvElementSelectNext(void)
+{
+    return pc_ui_uv_select_relative(1);
+}
+
 int pcUiUvElementSelectPrevious(void)
 {
-    unsigned int i;
-    if (pc_ui_uv_draw_count == 0) return 0;
-    for (i = 0; i < pc_ui_uv_draw_count; i++) {
-        if (pc_ui_uv_draws[i].key == pc_ui_uv_selected_key) {
-            pc_ui_uv_selected_key =
-                pc_ui_uv_draws[(i == 0) ? (pc_ui_uv_draw_count - 1u) : (i - 1u)].key;
-            return 1;
-        }
-    }
-    pc_ui_uv_selected_key = pc_ui_uv_draws[pc_ui_uv_draw_count - 1u].key;
-    return 1;
+    return pc_ui_uv_select_relative(-1);
 }
 
 int pcUiUvElementGetStatus(int profile, char* out, int out_size)
@@ -1877,6 +1985,8 @@ void Ps2AddPrim(unsigned long prim, void* dp, unsigned int num, unsigned int cli
             }
         }
 
+        pc_ui_uv_update_bounds(ui_uv_element_key, vertices, (unsigned int)count);
+
         memset(&state, 0, sizeof(state));
         state.texture = pcRendererCurrentTexture();
         pcRendererCurrentTextureSize(&texture_width, &texture_height);
@@ -1902,7 +2012,7 @@ void Ps2AddPrim(unsigned long prim, void* dp, unsigned int num, unsigned int cli
             state.ot_queue = 1;
         }
 
-        if (ui_uv_selected_draw && pcUiUvTuningActive()) {
+        if (ui_uv_selected_draw && pcUiUvElementModeActive()) {
             float x0 = 1.0e9f, y0 = 1.0e9f, x1 = -1.0e9f, y1 = -1.0e9f;
             unsigned int k;
             for (k = 0; k < (unsigned int)count; k++) {

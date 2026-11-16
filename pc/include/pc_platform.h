@@ -25,6 +25,8 @@ void pcIniSet(const char* key, const char* value);
 /* Live UI UV tuner. Per-element values are stored separately in menu_uv_adjustments.ini.
  * profile: 0=standard, 1=clockwise-90; edge: left=0, right=1, top=2, bottom=3. */
 int pcUiUvTuningActive(void);
+int pcUiUvElementModeActive(void);
+int pcUiUvElementSelectAt(float x, float y);
 int pcUiUvElementSelectNext(void);
 int pcUiUvElementSelectPrevious(void);
 int pcUiUvElementGetStatus(int profile, char* out, int out_size);
