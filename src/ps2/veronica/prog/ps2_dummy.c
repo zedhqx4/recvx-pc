@@ -1748,7 +1748,7 @@ static int pc_ui_uv_json_hex(char* line, const char* name, uint64_t* out)
 {
     char value[32];
     char* end;
-    unsigned long long parsed;
+    uint64_t parsed;
     if (!pc_ui_uv_json_string(line, name, value, sizeof(value))) return 0;
     parsed = strtoull(value, &end, 16);
     if (end == value || *end != '\0') return 0;
@@ -1760,7 +1760,7 @@ static int pc_ui_uv_json_uint(char* line, const char* name, unsigned int* out)
 {
     char* p = pc_ui_uv_json_member(line, name);
     char* end;
-    unsigned long long parsed;
+    uint64_t parsed;
     if (!p || *p < '0' || *p > '9') return 0;
     parsed = strtoull(p, &end, 10);
     if (end == p || parsed > 0xFFFFFFFFULL) return 0;
@@ -1789,7 +1789,7 @@ static int pc_ui_uv_json_parse_uv(char* line, unsigned int count, int fst, void*
             if (!pc_ui_uv_json_expect(&p, '[')) { free(values); return 0; }
             for (axis = 0; axis < 2; ++axis) {
                 char* end;
-                unsigned long long value;
+                uint64_t value;
                 p = pc_ui_uv_json_skip_space(p);
                 if (!p || *p < '0' || *p > '9') { free(values); return 0; }
                 value = strtoull(p, &end, 10);
