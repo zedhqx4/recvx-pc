@@ -1836,12 +1836,12 @@ static int pc_ui_uv_json_parse_uv(char* line, unsigned int count, int fst, void*
 static int pc_ui_uv_patch_parse_record(char* line, PcUiUvPatchEntry* entry)
 {
     char mode[32];
+    unsigned int schema;
     memset(entry, 0, sizeof(*entry));
     if (!pc_ui_uv_json_hex(line, "id", &entry->id) ||
         !pc_ui_uv_json_hex(line, "signature", &entry->signature) ||
-        !pc_ui_uv_json_uint(line, "schema", &entry->vertex_count)) return 0;
-    if (entry->vertex_count != 1u) return 0; /* temporary schema storage; replaced below */
-    if (!pc_ui_uv_json_uint(line, "gindex", &entry->gindex) ||
+        !pc_ui_uv_json_uint(line, "schema", &schema) || schema != 1u ||
+        !pc_ui_uv_json_uint(line, "gindex", &entry->gindex) ||
         !pc_ui_uv_json_uint(line, "bank", &entry->bank) ||
         !pc_ui_uv_json_uint(line, "pict_format", &entry->pict_format) ||
         !pc_ui_uv_json_uint(line, "texture_width", &entry->width) ||
@@ -1949,9 +1949,8 @@ static void pc_ui_uv_patch_apply(PcUiUvPatchEntry* entry, unsigned int* target)
         }
     }
     if (!entry->applied_logged) {
-        pcLog("UI UV patch: applied %s (G%u/F%u, %u vertices)",
-              entry->id ? "source primitive" : "primitive", entry->gindex,
-              entry->pict_format, entry->vertex_count);
+        pcLog("UI UV patch: applied id=%016" PRIx64 " (G%u/F%u, %u vertices)",
+              entry->id, entry->gindex, entry->pict_format, entry->vertex_count);
         entry->applied_logged = 1;
     }
 }
