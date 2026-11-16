@@ -1573,6 +1573,85 @@ static uint64_t pc_ui_uv_register_geometry(const unsigned int* vertices, unsigne
     return key;
 }
 
+/* Optional one-shot export of unique source UI primitives. JSON Lines keeps the
+ * capture stream append-only and avoids imposing an OBJ topology on the raw data. */
+#define PC_UI_UV_CAPTURE_SEEN_MAX 4096
+static FILE* pc_ui_uv_capture_file;
+static uint64_t pc_ui_uv_capture_seen[PC_UI_UV_CAPTURE_SEEN_MAX];
+static unsigned int pc_ui_uv_capture_seen_count;
+
+void pcUiUvCaptureToggle(void)
+{
+    char path[1200];
+    if (pc_ui_uv_capture_file) {
+        fflush(pc_ui_uv_capture_file);
+        fclose(pc_ui_uv_capture_file);
+        pc_ui_uv_capture_file = NULL;
+        pcLog("UI UV capture stopped (%u unique primitives)", pc_ui_uv_capture_seen_count);
+        return;
+    }
+    pc_ui_uv_capture_seen_count = 0;
+    memset(pc_ui_uv_capture_seen, 0, sizeof(pc_ui_uv_capture_seen));
+    pcPlatformExeDir(path, (int)sizeof(path));
+#ifdef _WIN32
+    strncat(path, "\\menu_uv_capture.jsonl", sizeof(path) - strlen(path) - 1);
+#else
+    strncat(path, "/menu_uv_capture.jsonl", sizeof(path) - strlen(path) - 1);
+#endif
+    pc_ui_uv_capture_file = fopen(path, "ab");
+    if (!pc_ui_uv_capture_file) {
+        pcLog("UI UV capture: cannot open %s", path);
+        return;
+    }
+    pcLog("UI UV capture started: %s (F9 to stop)", path);
+}
+
+static void pc_ui_uv_capture_geometry(uint64_t key, const unsigned int* words,
+                                      unsigned int count, unsigned long prim)
+{
+    PcUiUvDraw* draw = NULL;
+    unsigned int i, j, gindex, bank, pict_format, width, height;
+    uint64_t raw_prim = (uint64_t)prim;
+    if (!pc_ui_uv_capture_file || !key || !words || !count || count > 64) return;
+    for (i = 0; i < pc_ui_uv_capture_seen_count; i++)
+        if (pc_ui_uv_capture_seen[i] == key) return;
+    if (pc_ui_uv_capture_seen_count >= PC_UI_UV_CAPTURE_SEEN_MAX) return;
+    for (i = 0; i < pc_ui_uv_draw_count; i++)
+        if (pc_ui_uv_draws[i].key == key) { draw = &pc_ui_uv_draws[i]; break; }
+    if (!draw || !pc_ui_uv_texture_identity(&gindex, &bank, &pict_format, &width, &height)) return;
+
+    fprintf(pc_ui_uv_capture_file,
+            "{\"schema\":1,\"frame\":%" PRIu64 ",\"id\":\"%016" PRIx64
+            "\",\"signature\":\"%016" PRIx64 "\",\"occurrence\":%u,"
+            "\"gindex\":%u,\"bank\":%u,\"pict_format\":%u,\"texture_width\":%u,"
+            "\"texture_height\":%u,\"prim\":\"%016" PRIx64 "\",\"topology\":%u,"
+            "\"textured\":1,\"use_uv\":1,\"vertex_count\":%u,\"vertices\":[",
+            pcRendererFrameNumber(), key, draw->signature, draw->occurrence,
+            gindex, bank, pict_format, width, height, raw_prim,
+            (unsigned int)((raw_prim >> 47) & 7u), count);
+    for (j = 0; j < count; j++) {
+        uint32_t u_bits, v_bits, color[4];
+        float x, y, z;
+        memcpy(&u_bits, &words[j * 12u], sizeof(u_bits));
+        memcpy(&v_bits, &words[j * 12u + 1u], sizeof(v_bits));
+        memcpy(&color[0], &words[j * 12u + 4u], sizeof(color));
+        x = ((const float*)words)[j * 12u + 8u];
+        y = ((const float*)words)[j * 12u + 9u];
+        z = ((const float*)words)[j * 12u + 10u];
+        fprintf(pc_ui_uv_capture_file,
+                "%s{\"x\":%.9g,\"y\":%.9g,\"z\":%.9g,"
+                "\"u_raw\":%u,\"v_raw\":%u,\"u\":%.6f,\"v\":%.6f,"
+                "\"color\":[%u,%u,%u,%u]}",
+                j ? "," : "", x, y, z, u_bits & 0x3FFFu, v_bits & 0x3FFFu,
+                (float)(u_bits & 0x3FFFu) / 16.0f,
+                (float)(v_bits & 0x3FFFu) / 16.0f,
+                color[0], color[1], color[2], color[3]);
+    }
+    fputs("]}\n", pc_ui_uv_capture_file);
+    fflush(pc_ui_uv_capture_file);
+    pc_ui_uv_capture_seen[pc_ui_uv_capture_seen_count++] = key;
+}
+
 static void pc_ui_uv_apply_geometry(uint64_t key, unsigned int* vertices, unsigned int count)
 {
     PcUiUvAdjustment* entry;
@@ -1752,6 +1831,7 @@ void Ps2AddPrim(unsigned long prim, void* dp, unsigned int num, unsigned int cli
         memcpy(wide_buf, dp, num * 48);
         dp = wide_buf;
         ui_uv_element_key = pc_ui_uv_register_geometry(wide_buf, num, prim, &ui_uv_selected_draw);
+        pc_ui_uv_capture_geometry(ui_uv_element_key, wide_buf, num, prim);
         if (pc_ui_snap_uv_enabled())
         {
             pc_snap_uv((unsigned int*)wide_buf, num);
