@@ -14,7 +14,6 @@ on:
       - experiment/clut-identical-skip
       - experiment/ps2-tex-cache
       - alpha
-      - debug/menu-uv-export
       - experimental/workbench-rendering
       - c3853984-baseline
       - merge-c3853984-into-graphics-fixes
@@ -79,7 +78,7 @@ jobs:
       - name: Upload experimental Windows build
         uses: actions/upload-artifact@v4
         with:
-          name: recvx-pc-menu-uv-export
+          name: recvx-pc-windows-clut-frame-diagnostics
           path: |
             build_pc/recvx.exe
             build_pc/recvx-config.exe

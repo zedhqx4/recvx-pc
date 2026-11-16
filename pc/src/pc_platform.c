@@ -1008,9 +1008,8 @@ static int ui_uv_crop_handle_event(const SDL_Event* ev)
             ui_uv_tuning = !ui_uv_tuning;
             ui_uv_element_mode = 0; /* Always open in the global UV controls. */
             if (ui_uv_tuning) {
-                ui_uv_crop_show_status("GLOBAL UV (E=element mode, F9=capture, arrows=adjust, TAB=edge, R=profile)");
+                ui_uv_crop_show_status("GLOBAL UV (E=element mode, arrows=adjust, TAB=edge, R=profile)");
             } else {
-                pcUiUvCaptureStop();
                 ui_uv_crop_show_status("OFF");
             }
         }
@@ -1027,7 +1026,6 @@ static int ui_uv_crop_handle_event(const SDL_Event* ev)
             } else {
                 ui_uv_tuning = 0;
                 ui_uv_consume_escape_up = 1;
-                pcUiUvCaptureStop();
                 ui_uv_crop_show_status("TUNING OFF");
             }
             return 1;
@@ -1063,11 +1061,6 @@ static int ui_uv_crop_handle_event(const SDL_Event* ev)
     case SDL_SCANCODE_E:
         ui_uv_element_mode = 1;
         ui_uv_crop_show_status("ELEMENT MODE: CLICK DRAWING; G/ESC=GLOBAL UV");
-        break;
-
-    case SDL_SCANCODE_F9:
-        pcUiUvCaptureToggle();
-        ui_uv_crop_show_status("RAW GEOMETRY CAPTURE TOGGLED (menu_uv_capture.jsonl)");
         break;
 
     case SDL_SCANCODE_TAB:
