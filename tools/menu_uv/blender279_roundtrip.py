@@ -129,7 +129,12 @@ def import_record(record):
     if image_path:
         try:
             image = bpy.data.images.load(image_path, check_existing=True)
-            image.pack()
+            if int(image.size[0]) != int(record["texture_width"]) or int(image.size[1]) != int(record["texture_height"]):
+                print("RECVX: texture dimensions mismatch for %s: dump is %dx%d, capture expects %dx%d" %
+                      (image_path, image.size[0], image.size[1], record["texture_width"], record["texture_height"]))
+                image = None
+            elif image is not None:
+                image.pack()
         except Exception as exc:
             print("RECVX: could not load texture %s: %s" % (image_path, exc))
     mat = make_material("MAT_G%d_F%d" % (record["gindex"], record["pict_format"]), image)
