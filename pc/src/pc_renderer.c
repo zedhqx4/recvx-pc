@@ -1218,10 +1218,9 @@ static int ensure_render_texture(void)
     }
     /* El tamaño registrado es lógico; el almacenamiento GL es size x size. */
     remember_texture(render_texture, RENDER_TEXTURE_SIZE, RENDER_TEXTURE_SIZE, 0);
-    {
-        const GLfloat clear_color[4] = {0.0f, 0.0f, 0.0f, 0.0f};
-        glClearBufferfv(GL_COLOR, 0, clear_color);
-    }
+    glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+    glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
+    glClear(GL_COLOR_BUFFER_BIT);
     glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
     glViewport(0, 0, render_width, render_height);
     return 1;
@@ -1263,8 +1262,6 @@ int pcRendererCopyScreenRectToTexture(unsigned int* texture, int x, int y, int w
     float kx, ky;
     int vw, vh, scale, known = 0, oldw = 0, oldh = 0, i;
     GLuint id;
-    const GLfloat clear_color[4] = {0.0f, 0.0f, 0.0f, 1.0f};
-
     if (!ready || texture == NULL || x < 0 || y < 0 || w <= 0 || h <= 0 ||
         image_width <= 0 || image_height <= 0 || image_width > 512 || image_height > 512)
         return 0;
@@ -1325,7 +1322,9 @@ int pcRendererCopyScreenRectToTexture(unsigned int* texture, int x, int y, int w
     glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
     if (y == 0) {
         /* Cada captura comienza con negro; las filas 480..511 permanecen negras. */
-        glClearBufferfv(GL_COLOR, 0, clear_color);
+        glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+        glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+        glClear(GL_COLOR_BUFFER_BIT);
     }
     if (vw > 0 && vh > 0) {
         glBlitFramebuffer((GLint)(x * kx), render_height - (GLint)(y * ky),
@@ -1336,7 +1335,8 @@ int pcRendererCopyScreenRectToTexture(unsigned int* texture, int x, int y, int w
 
     /* En el buffer PS2 cada texel RGB32 se entrega con A=0x80, equivalente a GL alpha=1. */
     glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_TRUE);
-    glClearBufferfv(GL_COLOR, 0, clear_color);
+    glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+    glClear(GL_COLOR_BUFFER_BIT);
     glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 
     glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
