@@ -85,7 +85,17 @@ int sceGsExecStoreImage(sceGsStoreImage* sp, u_long128* dstaddr)
     pcRendererFlushTransparent();   /* lo diferido (OT) debe estar ya en el framebuffer */
     {
         extern void pcTextureInvalidateSources(void);
+        extern int pcTextureStoreScreenRect(const void* image, int x, int y, int width, int height);
+        extern void pcTextureInvalidateRenderTarget(const void* image);
         pcTextureInvalidateSources();   /* la imagen de la textura de destino cambia */
+
+        if (pcIniGetInt("rtt_gpu_copy", 1) != 0) {
+            /* La primera captura conserva el readback para validar el payload TIM2; luego se copia FBO -> textura GL. */
+            if (pcTextureStoreScreenRect(dstaddr, sp->pc_x, sp->pc_y, sp->pc_w, sp->pc_h))
+                return 0;
+        } else {
+            pcTextureInvalidateRenderTarget(dstaddr);
+        }
     }
     if (!pcRendererReadScreenRect(sp->pc_x, sp->pc_y, sp->pc_w, sp->pc_h, rgba)) return 0;
     n = sp->pc_w * sp->pc_h;

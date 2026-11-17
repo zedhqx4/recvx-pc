@@ -213,7 +213,7 @@ Sint32	njLoadTexture(NJS_TEXLIST *texlist)
     NJS_TEXMEMLIST* addr; 
     
 #ifdef TARGET_PC
-    { extern void pcTextureInvalidateSources(void); pcTextureInvalidateSources(); }   /* memoria de texturas recargada/liberada */
+    { extern void pcTextureInvalidateSources(void); pcTextureInvalidateSources(); }
 #endif
     no = Ps2_texcontinue_no;
     
@@ -570,7 +570,8 @@ void 	njSetPaletteData(Sint32 offset,Sint32 count,void* data)
 void	njGarbageTexture(NJS_TEXMEMLIST *addr,Uint32 n)
 {
 #ifdef TARGET_PC
-    { extern void pcTextureInvalidateSources(void); pcTextureInvalidateSources(); }   /* memoria de texturas recargada/liberada */
+    { extern void pcTextureInvalidateSources(void); pcTextureInvalidateSources(); }
+    { extern void pcTextureReleaseRenderTargets(void); pcTextureReleaseRenderTargets(); } /* el GC compacta el heap y puede mover los TIM2 */
 #endif
     Ps2TextureGarbageCollectionAll();
 }
@@ -669,6 +670,10 @@ int Ps2TextureMalloc(NJS_TEXMEMLIST* p)
 // 100% matching!
 int Ps2TextureFree(NJS_TEXMEMLIST* p) 
 {
+#ifdef TARGET_PC
+    /* A freed TIM2 allocation may be reused at the same address; discard RTT pointer mappings. */
+    { extern void pcTextureReleaseRenderTargets(void); pcTextureReleaseRenderTargets(); }
+#endif
     unsigned int size; 
     TIM2_PICTUREHEADER_EX* before; 
     TIM2_PICTUREHEADER_EX* after; 

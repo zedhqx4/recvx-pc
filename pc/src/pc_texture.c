@@ -23,6 +23,88 @@ typedef struct {
 
 static PcNativeTextureEntry texture_cache[PC_TEX_CACHE_MAX];
 
+#define PC_RENDER_TARGET_MAX 16
+typedef struct {
+    const unsigned char* image;
+    unsigned int texture;
+    unsigned short width, height;
+    unsigned char used, validated, copied, logged;
+} PcRenderTargetEntry;
+
+static PcRenderTargetEntry render_targets[PC_RENDER_TARGET_MAX];
+
+static PcRenderTargetEntry* find_render_target(const unsigned char* image)
+{
+    int i;
+    for (i = 0; i < PC_RENDER_TARGET_MAX; i++)
+        if (render_targets[i].used && render_targets[i].image == image)
+            return &render_targets[i];
+    return NULL;
+}
+
+/* Primera captura: mantiene el readback tradicional para que el TIM2 se llene y podamos validar
+ * que dstaddr apunta exactamente al payload Image. Las capturas siguientes ya pueden ser GPU-only. */
+int pcTextureStoreScreenRect(const void* image, int x, int y, int width, int height)
+{
+    PcRenderTargetEntry* entry;
+    int i;
+
+    if (image == NULL || width <= 0 || height <= 0 || width > 512 || height > 512)
+        return 0;
+
+    entry = find_render_target((const unsigned char*)image);
+    if (entry == NULL) {
+        for (i = 0; i < PC_RENDER_TARGET_MAX; i++) {
+            if (!render_targets[i].used) {
+                entry = &render_targets[i];
+                memset(entry, 0, sizeof(*entry));
+                entry->used = 1;
+                entry->image = (const unsigned char*)image;
+                entry->width = (unsigned short)width;
+                entry->height = (unsigned short)height;
+                break;
+            }
+        }
+    }
+    if (entry == NULL)
+        return 0;
+
+    if (entry->width != width || entry->height != height) {
+        entry->width = (unsigned short)width;
+        entry->height = (unsigned short)height;
+        entry->validated = 0;
+        entry->copied = 0;
+    }
+
+    if (!entry->validated)
+        return 0;   /* primera vez: sceGsExecStoreImage llena el buffer CPU como siempre */
+
+    entry->copied = pcRendererCopyScreenRectToTexture(&entry->texture, x, y, width, height) != 0;
+    if (!entry->logged && entry->copied) {
+        pcLog("render texture: GPU copy active image=%p size=%dx%d (CPU readback skipped)",
+              image, width, height);
+        entry->logged = 1;
+    }
+    return entry->copied != 0;
+}
+
+void pcTextureInvalidateRenderTarget(const void* image)
+{
+    PcRenderTargetEntry* entry = find_render_target((const unsigned char*)image);
+    if (entry != NULL)
+        entry->copied = 0;
+}
+
+void pcTextureReleaseRenderTargets(void)
+{
+    int i;
+    for (i = 0; i < PC_RENDER_TARGET_MAX; i++) {
+        if (render_targets[i].used && render_targets[i].texture != 0)
+            pcRendererDeleteTexture(render_targets[i].texture);
+        memset(&render_targets[i], 0, sizeof(render_targets[i]));
+    }
+}
+
 static const unsigned char block32[4][8] = {
     {0,1,4,5,16,17,20,21},{2,3,6,7,18,19,22,23},
     {8,9,12,13,24,25,28,29},{10,11,14,15,26,27,30,31}
@@ -143,6 +225,7 @@ void pcTextureInvalidateSources(void)
 {
     bind_memo.valid = 0;
 }
+
 
 static unsigned char clamp_byte(unsigned int x)
 {
@@ -462,6 +545,24 @@ int pcNativeTextureLoad(NJS_TEXMEMLIST* addr)
 
     image = (const unsigned char*)ph + ph->HeaderSize;
     clut = image + ph->ImageSize;
+
+    {
+        PcRenderTargetEntry* render_target = find_render_target(image);
+        if (render_target != NULL &&
+            render_target->width == ph->ImageWidth && render_target->height == ph->ImageHeight &&
+            ph->ImageType == TIM2_RGB32 &&
+            (size_t)ph->ImageSize >= (size_t)ph->ImageWidth * (size_t)ph->ImageHeight * 4u) {
+            if (!render_target->validated) {
+                pcLog("render texture: validated TIM2 image pointer=%p size=%ux%u; next capture will use GPU copy",
+                      (const void*)image, (unsigned int)ph->ImageWidth, (unsigned int)ph->ImageHeight);
+                render_target->validated = 1;
+            }
+            if (render_target->copied) {
+                texture = render_target->texture;
+                goto bind;
+            }
+        }
+    }
     image_size = ph->ImageSize;
     clut_size = ph->ClutSize;
     gindex = ext->Gindex;
