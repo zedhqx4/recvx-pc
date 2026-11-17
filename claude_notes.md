@@ -371,3 +371,11 @@ Log 038a2a65 (0.9.141): el coste de envio NO bajo (1.6us/vertice, ~3950 tiras po
 - Se vacia el lote antes de cualquier cambio de estado global o GL (setters, sombras, copias, texturas, clear, present) y durante el vaciado del OT no se agrupa (`batch_lock`). `gl_batch=0` en recvx.ini lo apaga.
 - El log "last frame draws=N (GL batches=M)" compara draws logicos contra draws GL reales.
 - Dato nuevo del log: en la sala del gas "render-texture" (17.6 ms) es bhAllDrawModel dentro de bhDrawFullScreenRenderTexture, no una copia: es la misma geometria. plist de sala 15 ms/frame (123us/chunk).
+
+## 0.9.143: el redondeo de la VU ya no envuelve el envio a GL
+Reporte (agua): 0.9.131 ~29 fps, 0.9.141 cae a ~20 fps. Revision del codigo:
+- DEFECTO: en 0.9.140 puse pcVuRoundEnter() una vez por chunk alrededor de TODO el bucle de tiras de njCnkCsUvh/Uvn. Como los enter de vu1Draw* anidaban sobre ese, su "leave" restauraba el estado YA truncado: Ps2AddPrim3DEx, el renderer y el driver de GL corrian con RC=truncar + FTZ + DAZ. Contradice el invariante de pc_vu.h ("solo mientras corre matematica de VU; el driver de GL, SDL y el resto siguen con el redondeo normal").
+- Ahora el enter/leave envuelve solo el bucle de vertices (_CVV + U/V) y las funciones vu1Draw* hasta justo antes del envio. Sin cambio de resultados de VU (mismas operaciones, mismo modo).
+- No esta demostrado que esto explique los ~9 fps; pendiente medir con vu_trunc=0 / gl_batch=0 / gl_shadow=0 / vu0_native=0 en la misma sala.
+- Dato del log f8f5fe28 (agua): ~1270 draws GL por frame, ~8000 vertices (6.4 por draw) => el coste esta en la cantidad de draws (llamadas de driver en un FX-8350), no en la matematica de VU.
+- Acoplamiento a OpenGL: la interfaz publica (pc_renderer.h) ya es neutra (PcNativeVertex/PcNativeDrawState, handles de textura enteros, registro ALPHA de la GS); GL vive en pc_renderer.c (1872 lineas), pc_gl.c/pc_gl.h (cargador), pc_platform.c (contexto SDL) y el legado gs/gs_gl.c (3112 lineas, GS emulada, deprecado). Fugas a limpiar para otro backend: GLSL embebido, estado GL mezclado con el estado del juego en apply_state, uso directo de FBO para mascara de sombra y render-texture.

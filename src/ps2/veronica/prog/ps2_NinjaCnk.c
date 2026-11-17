@@ -2724,7 +2724,6 @@ CHUNK_HEAD* njCnkCsUvh(CHUNK_HEAD* pCnk)
     }
     else
     {
-        const unsigned int pc_csr = pcVuRoundEnter();   /* VU: truncar hacia cero, una vez por chunk (LDMXCSR es caro por vertice) */
         for (; usStrip; usStrip--)
         {
             pS = NaCnkStrBufTop;
@@ -2756,18 +2755,24 @@ CHUNK_HEAD* njCnkCsUvh(CHUNK_HEAD* pCnk)
                     sExit = 1;
                 }
                 
-                for (usCnt = usMax; usCnt; usCnt--, pS++) 
                 {
-                    pV = &pNaCnkVerBufTop[*uspCnk++];
+                    /* VU: truncar hacia cero SOLO mientras corre la matematica de la VU (_CVV, U/V); el envio a la GPU
+                     * (pVu1Func -> Ps2AddPrim3DEx -> driver de GL) queda con el redondeo normal del host. */
+                    const unsigned int pc_csr = pcVuRoundEnter();
+                    for (usCnt = usMax; usCnt; usCnt--, pS++) 
+                    {
+                        pV = &pNaCnkVerBufTop[*uspCnk++];
                     
-                    *(u_long128*)&pS->fVx = *(u_long128*)&pV->fVx;
-                    *(u_long128*)&pS->fSx = *(u_long128*)&pV->fSx;
-                    *(u_long128*)&pS->fIr = *(u_long128*)&pV->fIr;
+                        *(u_long128*)&pS->fVx = *(u_long128*)&pV->fVx;
+                        *(u_long128*)&pS->fSx = *(u_long128*)&pV->fSx;
+                        *(u_long128*)&pS->fIr = *(u_long128*)&pV->fIr;
                     
-                    pS->fU = 0.0009775171f * *uspCnk++;
-                    pS->fV = 0.0009775171f * *uspCnk++;
+                        pS->fU = 0.0009775171f * *uspCnk++;
+                        pS->fV = 0.0009775171f * *uspCnk++;
                     
-                    cflag &= _CVV(&pV->fVx);
+                        cflag &= _CVV(&pV->fVx);
+                    }
+                    pcVuRoundLeave(pc_csr);
                 }
              
                 PC_CNK_COUNT(usMax, cflag != 0);
@@ -2786,7 +2791,6 @@ CHUNK_HEAD* njCnkCsUvh(CHUNK_HEAD* pCnk)
                 }
             }
         }
-        pcVuRoundLeave(pc_csr);
     }
     
     return (CHUNK_HEAD*)uspCnk;
@@ -3194,7 +3198,6 @@ CHUNK_HEAD* njCnkCsUvn(CHUNK_HEAD* pCnk)
     }
     else
     {
-        const unsigned int pc_csr = pcVuRoundEnter();   /* VU: truncar hacia cero, una vez por chunk (LDMXCSR es caro por vertice) */
         for (; usStrip; usStrip--)
         {
             pS = NaCnkStrBufTop;
@@ -3226,18 +3229,24 @@ CHUNK_HEAD* njCnkCsUvn(CHUNK_HEAD* pCnk)
                     sExit = 1;
                 }
                 
-                for (usCnt = usMax; usCnt; usCnt--, pS++) 
                 {
-                    pV = &pNaCnkVerBufTop[*uspCnk++];
+                    /* VU: truncar hacia cero SOLO mientras corre la matematica de la VU (_CVV, U/V); el envio a la GPU
+                     * (pVu1Func -> Ps2AddPrim3DEx -> driver de GL) queda con el redondeo normal del host. */
+                    const unsigned int pc_csr = pcVuRoundEnter();
+                    for (usCnt = usMax; usCnt; usCnt--, pS++) 
+                    {
+                        pV = &pNaCnkVerBufTop[*uspCnk++];
                     
-                    *(u_long128*)&pS->fVx = *(u_long128*)&pV->fVx;
-                    *(u_long128*)&pS->fSx = *(u_long128*)&pV->fSx;
-                    *(u_long128*)&pS->fIr = *(u_long128*)&pV->fIr;
+                        *(u_long128*)&pS->fVx = *(u_long128*)&pV->fVx;
+                        *(u_long128*)&pS->fSx = *(u_long128*)&pV->fSx;
+                        *(u_long128*)&pS->fIr = *(u_long128*)&pV->fIr;
                     
-                    pS->fU = 0.003921569f * *uspCnk++;
-                    pS->fV = 0.003921569f * *uspCnk++;
+                        pS->fU = 0.003921569f * *uspCnk++;
+                        pS->fV = 0.003921569f * *uspCnk++;
                     
-                    cflag &= _CVV(&pV->fVx);
+                        cflag &= _CVV(&pV->fVx);
+                    }
+                    pcVuRoundLeave(pc_csr);
                 }
              
                 PC_CNK_COUNT(usMax, cflag != 0);
@@ -3256,7 +3265,6 @@ CHUNK_HEAD* njCnkCsUvn(CHUNK_HEAD* pCnk)
                 }
             }
         }
-        pcVuRoundLeave(pc_csr);
     }
     
     return (CHUNK_HEAD*)uspCnk;
