@@ -213,7 +213,7 @@ Sint32	njLoadTexture(NJS_TEXLIST *texlist)
     NJS_TEXMEMLIST* addr; 
     
 #ifdef TARGET_PC
-    { extern void pcTextureInvalidateSources(void); pcTextureInvalidateSources(); }   /* memoria de texturas recargada/liberada */
+    { extern void pcTextureInvalidateSources(void); pcTextureInvalidateSources(); }
 #endif
     no = Ps2_texcontinue_no;
     
@@ -570,7 +570,7 @@ void 	njSetPaletteData(Sint32 offset,Sint32 count,void* data)
 void	njGarbageTexture(NJS_TEXMEMLIST *addr,Uint32 n)
 {
 #ifdef TARGET_PC
-    { extern void pcTextureInvalidateSources(void); pcTextureInvalidateSources(); }   /* memoria de texturas recargada/liberada */
+    { extern void pcTextureInvalidateSources(void); pcTextureInvalidateSources(); }
 #endif
     Ps2TextureGarbageCollectionAll();
 }
@@ -692,6 +692,9 @@ int Ps2TextureFree(NJS_TEXMEMLIST* p)
     
     if (*temp2 == 0) 
     {
+#ifdef TARGET_PC
+        { extern void pcTextureForgetRenderTarget(const void* image); pcTextureForgetRenderTarget((const unsigned char*)timp + 256); }
+#endif
         before = timp->admin.before;
         after = timp->admin.after;
         
@@ -785,6 +788,9 @@ int Ps2TextureGarbageCollectionAll()
             size = temp->admin.size / 4;
 
             Ps2MemCopy4(real_p, temp, size);
+#ifdef TARGET_PC
+            { extern void pcTextureRemapRenderTarget(const void* old_image, const void* new_image); pcTextureRemapRenderTarget((const unsigned char*)temp + 256, (const unsigned char*)real_p + 256); }
+#endif
         
             Ps2ReplaceTexAddr(after2->admin.gindex, real_p);
         }

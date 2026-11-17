@@ -79,6 +79,8 @@ void pcRendererBindRenderTexture(void);
 uint64_t pcRendererFrameNumber(void);
 void pcRendererCaptureBurst(int frames);   /* guarda los N frames siguientes como recvx_burst_K.bmp (F8) */
 int pcRendererReadScreenRect(int x, int y, int w, int h, unsigned char* rgba);
+/* Copy a screen rectangle directly into a persistent GPU texture; no CPU readback. */
+int pcRendererCopyScreenRectToTexture(unsigned int* texture, int x, int y, int w, int h, int image_width, int image_height);
 /* Shadow volumes (Ps2ShadowStart..End). The GS drew the volume faces into a second 16-bit frame (FRAME_2, FBP 380)
  * that shares the scene Z buffer; here that frame is an offscreen target that shares the scene depth texture.
  *   Begin   : context 2 becomes the draw target and its mask is cleared

@@ -23,6 +23,118 @@ typedef struct {
 
 static PcNativeTextureEntry texture_cache[PC_TEX_CACHE_MAX];
 
+#define PC_RENDER_TARGET_MAX 16
+typedef struct {
+    const unsigned char* image;
+    unsigned int texture;
+    unsigned short width, height, captured_rows;
+    unsigned char used, copied, logged;
+} PcRenderTargetEntry;
+
+static PcRenderTargetEntry render_targets[PC_RENDER_TARGET_MAX];
+
+static PcRenderTargetEntry* find_render_target(const unsigned char* image)
+{
+    int i;
+    for (i = 0; i < PC_RENDER_TARGET_MAX; i++)
+        if (render_targets[i].used && render_targets[i].image == image)
+            return &render_targets[i];
+    return NULL;
+}
+
+int pcTextureStoreScreenRect(const void* image, int x, int y, int width, int height,
+                             int image_width, int image_height)
+{
+    PcRenderTargetEntry* entry;
+    int i;
+
+    if (image == NULL || width <= 0 || height <= 0 ||
+        image_width <= 0 || image_height <= 0 || image_width > 512 || image_height > 512)
+        return 0;
+
+    entry = find_render_target((const unsigned char*)image);
+    if (entry == NULL) {
+        for (i = 0; i < PC_RENDER_TARGET_MAX; i++) {
+            if (!render_targets[i].used) {
+                entry = &render_targets[i];
+                memset(entry, 0, sizeof(*entry));
+                entry->used = 1;
+                entry->image = (const unsigned char*)image;
+                entry->width = (unsigned short)image_width;
+                entry->height = (unsigned short)image_height;
+                break;
+            }
+        }
+    }
+    if (entry == NULL) return 0;
+
+    if (entry->width != image_width || entry->height != image_height) {
+        if (entry->texture != 0) pcRendererDeleteTexture(entry->texture);
+        memset(entry, 0, sizeof(*entry));
+        entry->used = 1;
+        entry->image = (const unsigned char*)image;
+        entry->width = (unsigned short)image_width;
+        entry->height = (unsigned short)image_height;
+    }
+
+    if (y == 0) {
+        entry->captured_rows = 0;
+        entry->copied = 0;
+    }
+    if (y != entry->captured_rows) return 0;
+    if (!pcRendererCopyScreenRectToTexture(&entry->texture, x, y, width, height, image_width, image_height)) {
+        entry->copied = 0;
+        return 0;
+    }
+
+    entry->captured_rows = (unsigned short)(y + height);
+    if (entry->captured_rows >= image_height) {
+        entry->copied = 1;
+        if (!entry->logged) {
+            pcLog("render texture: GPU-only capture active image=%p logical=%dx%d physical=%dx%d",
+                  image, image_width, image_height,
+                  image_width * pcIniGetInt("render_texture_scale", 2),
+                  image_height * pcIniGetInt("render_texture_scale", 2));
+            entry->logged = 1;
+        }
+    }
+    return 1;
+}
+
+void pcTextureInvalidateRenderTarget(const void* image)
+{
+    PcRenderTargetEntry* entry = find_render_target((const unsigned char*)image);
+    if (entry != NULL) {
+        entry->copied = 0;
+        entry->captured_rows = 0;
+    }
+}
+
+void pcTextureRemapRenderTarget(const void* old_image, const void* new_image)
+{
+    PcRenderTargetEntry* entry = find_render_target((const unsigned char*)old_image);
+    if (entry != NULL && new_image != NULL)
+        entry->image = (const unsigned char*)new_image;
+}
+
+void pcTextureForgetRenderTarget(const void* image)
+{
+    PcRenderTargetEntry* entry = find_render_target((const unsigned char*)image);
+    if (entry == NULL) return;
+    if (entry->texture != 0) pcRendererDeleteTexture(entry->texture);
+    memset(entry, 0, sizeof(*entry));
+}
+
+void pcTextureReleaseRenderTargets(void)
+{
+    int i;
+    for (i = 0; i < PC_RENDER_TARGET_MAX; i++) {
+        if (render_targets[i].used && render_targets[i].texture != 0)
+            pcRendererDeleteTexture(render_targets[i].texture);
+        memset(&render_targets[i], 0, sizeof(render_targets[i]));
+    }
+}
+
 static const unsigned char block32[4][8] = {
     {0,1,4,5,16,17,20,21},{2,3,6,7,18,19,22,23},
     {8,9,12,13,24,25,28,29},{10,11,14,15,26,27,30,31}
@@ -143,6 +255,7 @@ void pcTextureInvalidateSources(void)
 {
     bind_memo.valid = 0;
 }
+
 
 static unsigned char clamp_byte(unsigned int x)
 {
@@ -462,6 +575,18 @@ int pcNativeTextureLoad(NJS_TEXMEMLIST* addr)
 
     image = (const unsigned char*)ph + ph->HeaderSize;
     clut = image + ph->ImageSize;
+
+    {
+        PcRenderTargetEntry* render_target = find_render_target(image);
+        if (render_target != NULL &&
+            render_target->width == ph->ImageWidth && render_target->height == ph->ImageHeight &&
+            ph->ImageType == TIM2_RGB32 &&
+            (size_t)ph->ImageSize >= (size_t)ph->ImageWidth * (size_t)ph->ImageHeight * 4u &&
+            render_target->copied && render_target->texture != 0) {
+            texture = render_target->texture;
+            goto bind;
+        }
+    }
     image_size = ph->ImageSize;
     clut_size = ph->ClutSize;
     gindex = ext->Gindex;
