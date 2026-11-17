@@ -1802,6 +1802,24 @@ static unsigned int pcAssemblePrepared(const PcNativeVertex* v, const unsigned c
     return n;
 }
 
+/* Buffers de trabajo de los envios nativos: crecen una vez y se reutilizan (antes, 4-5 malloc/free POR TIRA, ~550 tiras por
+ * frame). El juego envia desde un solo hilo y estos envios no se anidan entre si (cada ranura la usa un solo nivel). */
+static void* pcScratch(int slot, size_t bytes)
+{
+    static void* buf[6];
+    static size_t cap[6];
+    if (bytes > cap[slot])
+    {
+        size_t want = bytes * 2u + 256u;
+        void* grown = realloc(buf[slot], want);
+        if (grown == NULL)
+            return NULL;
+        buf[slot] = grown;
+        cap[slot] = want;
+    }
+    return buf[slot];
+}
+
 /* FTOI0 de la VU1 (truncar hacia cero) tras fijar al rango del campo de 8 bits: asi llegan a la GS el color RGBA y la F de
  * la niebla. El float de la VU se queda en el entero de abajo; no se redondea al mas cercano. */
 static float pcFtoi0Sat(float x)
@@ -1821,7 +1839,7 @@ static void pcSubmitVertices(unsigned long prim, const PcNativeVertex* vertices,
     int textured = (prim & PC_GIF_PRIM_TME) != 0;
     int blend = (prim & PC_GIF_PRIM_ABE) != 0;
 
-    assembled = (PcNativeVertex*)malloc((size_t)count * 3u * sizeof(*assembled));
+    assembled = (PcNativeVertex*)pcScratch(0, (size_t)count * 3u * sizeof(*assembled));
     if (assembled == NULL)
         return;
 
@@ -1886,7 +1904,7 @@ static void pcSubmitVertices(unsigned long prim, const PcNativeVertex* vertices,
     }
 
 done:
-    free(assembled);
+    return;
 }
 
 static void pcSubmitPrepared3D(unsigned long prim, const void* data, unsigned int count, const PcPrim3D* mode)
@@ -1906,10 +1924,10 @@ static void pcSubmitPrepared3D(unsigned long prim, const void* data, unsigned in
     if (textured && texture == 0)
         return;
 
-    packed = (uint32_t*)malloc(((size_t)count * 12u + 4u) * sizeof(*packed));
-    vertices = (PcNativeVertex*)malloc((size_t)count * sizeof(*vertices));
-    kick = (unsigned char*)malloc(count);
-    gs_z = (float*)malloc((size_t)count * sizeof(*gs_z));
+    packed = (uint32_t*)pcScratch(1, ((size_t)count * 12u + 4u) * sizeof(*packed));
+    vertices = (PcNativeVertex*)pcScratch(2, (size_t)count * sizeof(*vertices));
+    kick = (unsigned char*)pcScratch(3, count);
+    gs_z = (float*)pcScratch(4, (size_t)count * sizeof(*gs_z));
     if (packed == NULL || vertices == NULL || kick == NULL || gs_z == NULL)
         goto done;
 
@@ -1952,10 +1970,7 @@ static void pcSubmitPrepared3D(unsigned long prim, const void* data, unsigned in
     pcSubmitVertices(prim, vertices, kick, gs_z, count, mode, average_z, tex_width, tex_height, texture, 1);
 
 done:
-    free(packed);
-    free(vertices);
-    free(kick);
-    free(gs_z);
+    return;
 }
 
 /* Tiras 3D de los modelos (vu1DrawTriangleStrip*): registros VU1_PRIM_BUF de 12 floats que el juego ya dejo proyectados
@@ -1978,9 +1993,9 @@ static void pcSubmitStrip3D(unsigned long prim, const void* data, unsigned int c
     if ((prim & PC_GIF_PRIM_TME) && texture == 0)
         return;
 
-    vertices = (PcNativeVertex*)malloc((size_t)count * sizeof(*vertices));
-    kick = (unsigned char*)malloc(count);
-    gs_z = (float*)malloc((size_t)count * sizeof(*gs_z));
+    vertices = (PcNativeVertex*)pcScratch(2, (size_t)count * sizeof(*vertices));
+    kick = (unsigned char*)pcScratch(3, count);
+    gs_z = (float*)pcScratch(4, (size_t)count * sizeof(*gs_z));
     if (vertices == NULL || kick == NULL || gs_z == NULL)
         goto done;
 
@@ -2055,9 +2070,7 @@ static void pcSubmitStrip3D(unsigned long prim, const void* data, unsigned int c
     pcSubmitVertices(prim, vertices, kick, gs_z, count, mode, zsum / (float)count, tex_width, tex_height, texture, 2);
 
 done:
-    free(vertices);
-    free(kick);
-    free(gs_z);
+    return;
 }
 
 /* ---- Salida de la VU1 (XGKICK): paquetes GIF PACKED con ST / RGBAQ / XYZF2 por vertice ----

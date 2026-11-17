@@ -228,6 +228,26 @@ static GLuint create_program(void)
     return p;
 }
 
+/* Sombra del estado GL que apply_state fija en cada draw. En escenas de ~550 tiras por frame, 15-20 llamadas GL por tira
+ * (FBO, viewport, profundidad, mezcla, culling, scissor, programa) eran la mayor parte del coste de envio, y casi todas
+ * repetian el valor anterior. Solo se emite lo que cambia. Cualquier funcion que toque ese estado fuera de apply_state
+ * (limpiar, sombras, copias, lectura, desenfoque, presentar...) invalida la sombra al entrar y al salir. gl_shadow=0
+ * (recvx.ini) la desactiva para comparar. */
+typedef struct {
+    int valid;
+    GLuint fbo, program;
+    int vw, vh;
+    int depth_test, depth_mask, blend, cull, scissor;
+    int premult;
+    GLenum eq, src, dst;
+    float fix;
+    int sc[4];
+} GlShadow;
+static GlShadow gls;
+static int gl_shadow_on = -1;
+static void gl_shadow_invalidate(void) { gls.valid = 0; }
+
+
 static int create_targets(int width, int height)
 {
     GLenum status;
@@ -283,6 +303,7 @@ static int create_targets(int width, int height)
         pcLog("native renderer: shadow mask framebuffer incomplete (0x%04x)", (unsigned int)status);
         return 0;
     }
+    gl_shadow_invalidate();
     return 1;
 }
 
@@ -376,6 +397,7 @@ void pcRendererShutdown(void)
  * despues (ver N2). Tambien conviene contar draws por frame y hacer glGetError()/glReadPixels() en debug=1. */
 void pcRendererBeginFrame(void)
 {
+    gl_shadow_invalidate();
     stream_cursor = 0;
     if (!ready) return;
     frame_number++;
@@ -409,6 +431,7 @@ void pcRendererBeginFrame(void)
     else glClearColor(clear_color[0], clear_color[1], clear_color[2], clear_color[3]);
     glClearDepth(1.0);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    gl_shadow_invalidate();
 }
 
 /* CLAUDE-FIX[N8/N10]: la GS usaba UN solo espacio Z (near 1, far 65535, ver CalcPs2ZbuffAB) para 3D y 2D. Aqui cada draw
@@ -515,6 +538,7 @@ void pcRendererClear(float r, float g, float b, float a, int clear_depth)
         mask |= GL_DEPTH_BUFFER_BIT;
     }
     glClear(mask);
+    gl_shadow_invalidate();
 }
 
 /* CLAUDE-NOTE[N10][PARCIAL]: override GLOBAL y persistente (Ps2ZbuffOff/Off2/On). Se queda "pegado" si nadie lo restaura. Debe ser
@@ -600,7 +624,11 @@ static int uniform_cache_valid;
 
 static void apply_state(const PcNativeDrawState* st)
 {
+    int sv;   /* la sombra es fiable en esta llamada */
     PcNativeDrawState d;
+    if (gl_shadow_on < 0) gl_shadow_on = pcIniGetInt("gl_shadow", 1) != 0;
+    if (!gl_shadow_on) gls.valid = 0;
+    sv = gls.valid;
     if (!st) {
         memset(&d, 0, sizeof(d));
         d.depth_test = 1;
@@ -608,8 +636,14 @@ static void apply_state(const PcNativeDrawState* st)
         st = &d;
     }
 
-    glBindFramebuffer(GL_FRAMEBUFFER, active_target == TARGET_MASK ? mask_framebuffer : framebuffer);
-    glViewport(0, 0, render_width, render_height);
+    {
+        const GLuint want_fbo = (active_target == TARGET_MASK) ? mask_framebuffer : framebuffer;
+        if (!sv || gls.fbo != want_fbo) { glBindFramebuffer(GL_FRAMEBUFFER, want_fbo); gls.fbo = want_fbo; }
+        if (!sv || gls.vw != render_width || gls.vh != render_height) {
+            glViewport(0, 0, render_width, render_height);
+            gls.vw = render_width; gls.vh = render_height;
+        }
+    }
     {
         /* La GS siempre hacia test de Z (ZTE=1, GEQUAL); Ps2ZbuffOn/Off solo cambian la MASCARA de escritura (ZMSK).
          * Los draws de pantalla sin depth (overlays propios) quedan sin test ni escritura. */
@@ -624,36 +658,59 @@ static void apply_state(const PcNativeDrawState* st)
             if (st->blend && !st->immediate && !ot_writes_depth) write = 0;
             if (alpha_pass == ALPHA_PASS_TRANSLUCENT) write = 0;   /* Ps2ZbuffOff2: ZBUF_1.ZMSK = 1 */
         }
-        if (test) glEnable(GL_DEPTH_TEST); else glDisable(GL_DEPTH_TEST);
-        glDepthMask(write ? GL_TRUE : GL_FALSE);
+        test = test != 0; write = write != 0;
+        if (!sv || gls.depth_test != test) { if (test) glEnable(GL_DEPTH_TEST); else glDisable(GL_DEPTH_TEST); gls.depth_test = test; }
+        if (!sv || gls.depth_mask != write) { glDepthMask(write ? GL_TRUE : GL_FALSE); gls.depth_mask = write; }
     }
     if (st->blend) {
         const GsBlend* b = (active_target == TARGET_MASK) ? &gs_blend2 : &gs_blend;
-        glEnable(GL_BLEND);
-        glBlendColor(0.0f, 0.0f, 0.0f, b->fix);
-        if (st->premultiplied_alpha) {
-            glBlendEquationSeparate(GL_FUNC_ADD, GL_FUNC_ADD);
-            glBlendFuncSeparate(GL_ONE, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
-        } else {
-            glBlendEquationSeparate(b->equation, GL_FUNC_ADD);
-            glBlendFuncSeparate(b->src, b->dst, GL_ONE, GL_ZERO);   /* alfa: lo escribe la fuente, como la GS */
+        const int pm = st->premultiplied_alpha != 0;
+        const GLenum eq = pm ? GL_FUNC_ADD : b->equation;
+        const GLenum src = pm ? GL_ONE : b->src;
+        const GLenum dst = pm ? GL_ONE_MINUS_SRC_ALPHA : b->dst;
+        if (!sv || !gls.blend) glEnable(GL_BLEND);
+        if (!sv || !gls.blend || gls.fix != b->fix) glBlendColor(0.0f, 0.0f, 0.0f, b->fix);
+        if (!sv || !gls.blend || gls.premult != pm || gls.eq != eq || gls.src != src || gls.dst != dst) {
+            if (pm) {
+                glBlendEquationSeparate(GL_FUNC_ADD, GL_FUNC_ADD);
+                glBlendFuncSeparate(GL_ONE, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
+            } else {
+                glBlendEquationSeparate(b->equation, GL_FUNC_ADD);
+                glBlendFuncSeparate(b->src, b->dst, GL_ONE, GL_ZERO);   /* alfa: lo escribe la fuente, como la GS */
+            }
         }
-    } else glDisable(GL_BLEND);
-    if (st->cull_backfaces) {
-        glEnable(GL_CULL_FACE);
-        glCullFace(GL_BACK);
-    } else glDisable(GL_CULL_FACE);
+        gls.blend = 1; gls.fix = b->fix; gls.premult = pm; gls.eq = eq; gls.src = src; gls.dst = dst;
+    } else {
+        if (!sv || gls.blend) glDisable(GL_BLEND);
+        gls.blend = 0;
+    }
+    {
+        const int cull = st->cull_backfaces != 0;
+        if (!sv || gls.cull != cull) {
+            if (cull) { glEnable(GL_CULL_FACE); glCullFace(GL_BACK); } else glDisable(GL_CULL_FACE);
+            gls.cull = cull;
+        }
+    }
 
     if (scissor_enabled) {
-        glEnable(GL_SCISSOR_TEST);
         int sx = (int)((float)scissor_rect[0] * (float)render_width / (float)output_width + 0.5f);
         int sy = (int)((float)scissor_rect[1] * (float)render_height / (float)output_height + 0.5f);
         int sw = (int)((float)scissor_rect[2] * (float)render_width / (float)output_width + 0.5f);
         int sh = (int)((float)scissor_rect[3] * (float)render_height / (float)output_height + 0.5f);
-        glScissor(sx, render_height - sy - sh, sw, sh);
-    } else glDisable(GL_SCISSOR_TEST);
+        const int sc[4] = { sx, render_height - sy - sh, sw, sh };
+        if (!sv || !gls.scissor) glEnable(GL_SCISSOR_TEST);
+        if (!sv || !gls.scissor || memcmp(gls.sc, sc, sizeof(sc)) != 0) {
+            glScissor(sc[0], sc[1], sc[2], sc[3]);
+            memcpy(gls.sc, sc, sizeof(sc));
+        }
+        gls.scissor = 1;
+    } else {
+        if (!sv || gls.scissor) glDisable(GL_SCISSOR_TEST);
+        gls.scissor = 0;
+    }
 
-    glUseProgram(program);
+    if (!sv || gls.program != program) { glUseProgram(program); gls.program = program; }
+    gls.valid = gl_shadow_on != 0;
     {
         /* Los uniformes pertenecen al programa: solo se suben los que cambian respecto al draw anterior
          * (en escenas de ~1000 draws por frame esto es lo que mas CPU consumia). */
@@ -712,29 +769,9 @@ static void draw_immediate(const PcNativeVertex* vertices, int count, const PcNa
     NativeGpuVertex* upload;
     int i;
     if (!ready || vertices == NULL || count <= 0 || (unsigned)count > STREAM_VERTICES) return;
-    if (count > scratch_capacity) {
-        NativeGpuVertex* grown = (NativeGpuVertex*)realloc(scratch, (size_t)count * 2 * sizeof(*scratch));
-        if (!grown) {
-            pcLog("native renderer: vertex upload allocation failed for %d vertices", count);
-            return;
-        }
-        scratch = grown;
-        scratch_capacity = count * 2;
-    }
-    upload = scratch;
-    for (i = 0; i < count; i++) {
-        upload[i].x = vertices[i].x;
-        upload[i].y = vertices[i].y;
-        upload[i].z = vertices[i].z;
-        upload[i].r = vertices[i].r;
-        upload[i].g = vertices[i].g;
-        upload[i].b = vertices[i].b;
-        upload[i].a = vertices[i].a;
-        upload[i].u = vertices[i].u;
-        upload[i].v = vertices[i].v;
-        upload[i].q = vertices[i].q;
-        upload[i].fog = vertices[i].fog;
-    }
+    /* PcNativeVertex y NativeGpuVertex tienen el mismo diseno (11 floats): se sube directo, sin copiar vertice a vertice */
+    typedef char pc_vertex_layout_check[(sizeof(PcNativeVertex) == sizeof(NativeGpuVertex)) ? 1 : -1];
+    upload = (NativeGpuVertex*)vertices;
     stat_immediate++; stat_vertices += (unsigned)count; if (state && state->screen_space) stat_screen_space++;
     if (((frame_number % 120 == 119 && stat_immediate <= 150) || (burst_remaining > 0 && burst_index < 2 && stat_immediate <= 2500)) && state) {
         const PcNativeVertex* last = &vertices[count - 1];
@@ -1010,6 +1047,7 @@ void pcRendererFlushTransparentI(void) { flush_transparent(1); }
 
 void pcRendererShadowBegin(void)
 {
+    gl_shadow_invalidate();
     if (!ready) return;
     active_target = TARGET_MASK;
     glBindFramebuffer(GL_FRAMEBUFFER, mask_framebuffer);
@@ -1018,13 +1056,16 @@ void pcRendererShadowBegin(void)
     glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
     glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
     glClear(GL_COLOR_BUFFER_BIT);   /* sprite RGBAQ=0 sobre toda la pantalla en FRAME_2 */
+    gl_shadow_invalidate();
 }
 
 void pcRendererShadowEnd(void)
 {
+    gl_shadow_invalidate();
     if (!ready) return;
     active_target = TARGET_SCREEN;
     glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
+    gl_shadow_invalidate();
 }
 
 /* Ps2ShadowDraw: sprite con la mascara como textura (MODULATE con RGB = shade, TCC=1, alfa de 1 bit expandido por TEXA), prueba
@@ -1091,6 +1132,7 @@ void pcRendererShadowCompose(float x0, float y0, float x1, float y1, int shade)
         glDisable(GL_SCISSOR_TEST);
         glBindFramebuffer(GL_FRAMEBUFFER, saved_target == TARGET_MASK ? mask_framebuffer : framebuffer);
     }
+    gl_shadow_invalidate();
 }
 
 static void remember_texture(GLuint id, int width, int height, int translucent)
@@ -1176,6 +1218,7 @@ static unsigned render_texture_copies, render_texture_binds;
 
 static int ensure_render_texture(void)
 {
+    gl_shadow_invalidate();
     if (render_texture) return 1;
     if (!ready) return 0;
     glGenTextures(1, &render_texture);
@@ -1192,6 +1235,7 @@ static int ensure_render_texture(void)
     glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
     glClear(GL_COLOR_BUFFER_BIT);
     glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
+    gl_shadow_invalidate();
     return 1;
 }
 
@@ -1227,6 +1271,7 @@ void pcRendererCopyScreenToRenderTexture(int sx0, int sy0, int sx1, int sy1, int
               render_texture_binds);
     }
     glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
+    gl_shadow_invalidate();
 }
 
 /* Lee el rectangulo (x,y,w,h) de la pantalla de juego (pixeles de 640x480 de la GS, y hacia abajo) a RGBA8, fila 0 arriba.
@@ -1268,6 +1313,7 @@ int pcRendererReadScreenRect(int x, int y, int w, int h, unsigned char* rgba)
         glReadPixels(0, 0, w, h, GL_RGBA, GL_UNSIGNED_BYTE, rgba);
     }
     glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
+    gl_shadow_invalidate();
     return 1;
 }
 
@@ -1474,6 +1520,7 @@ static void debug_dump_frame(void)
         dumps++;
     }
     free(px);
+    gl_shadow_invalidate();
 }
 
 /* Motion blur (recvx.ini: motion_blur=1, motion_blur_strength=0..90, por defecto 50): mezcla cada imagen con la anterior YA mezclada
@@ -1526,6 +1573,7 @@ static int blur_prepare(void)
             glBindFramebuffer(GL_FRAMEBUFFER, blur_fbo[i]);
             glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, blur_tex[i], 0);
             if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
+                gl_shadow_invalidate();
                 glBindFramebuffer(GL_FRAMEBUFFER, 0);
                 pcLog("native renderer: motion blur: framebuffer incomplete");
                 return 0;
@@ -1536,6 +1584,7 @@ static int blur_prepare(void)
         blur_valid = 0;
         blur_history = 0;
     }
+    gl_shadow_invalidate();
     return 1;
 }
 
@@ -1574,11 +1623,13 @@ static GLuint blur_apply(void)
     glActiveTexture(GL_TEXTURE0);
     blur_history = out;
     blur_valid = 1;
+    gl_shadow_invalidate();
     return blur_fbo[out];
 }
 
 void pcRendererPresent(void)
 {
+    gl_shadow_invalidate();
     /* Native GDI overlays are composed into the same framebuffer before the final blit. */
     {
         extern const unsigned char* pcOverlayImage(int height, int* width, int* image_height);
@@ -1694,6 +1745,7 @@ void pcRendererPresent(void)
     glBlitFramebuffer(0, 0, render_width, render_height,
                       x, y, x + vw, y + vh, GL_COLOR_BUFFER_BIT, GL_LINEAR);
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    gl_shadow_invalidate();
 }
 
 void pcRendererSetTextureCombine(int function, int texture_alpha)

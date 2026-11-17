@@ -358,3 +358,9 @@ Las opciones de depuracion solo existian como variable de entorno (`getenv`), in
 - Perfil vu1Draw (nativo): ~0.95 us/vertice, de los que 0.63 son el envio (`Ps2AddPrim3DEx`: 5 malloc/free + `draw_immediate`, un draw call por tira de ~6 vertices, ~550 tiras/frame = ~2 ms/frame) y 0.31 color+recorte+resto (~1 ms/frame). Total vu1Draw ~3 ms/frame; el tipo 8 de CNK cuesta ~12 ms/frame, o sea ~9 ms estan FUERA de vu1Draw: bucle por vertice de la ruta del EE (`copia 48 B + _CVV`) sobre tiras que luego se descartan por frustum.
 - 0.9.137 puso LDMXCSR (enter/leave del modo de redondeo) dentro de `_CVV`, es decir POR VERTICE: caro. Ahora se hace una vez por chunk (bucle por defecto de njCnkCsUvh/Uvn).
 - Perfil nuevo `PROFILE cnk strips`: tiras vistas / descartadas por frustum / vertices por _CVV. Si el % descartado es alto, el siguiente paso es el descarte por chunk (caja envolvente) antes de tocar vertices.
+
+## 0.9.141 (rama optimizacion): coste de envio por tira
+Medicion previa (escena pesada): ~11.9us/tira, ~1.6us/vertice en el envio, ~527 tiras/frame, tiras de ~6 vertices => un draw GL por tira con 15-20 llamadas GL de estado y 4-5 malloc/free.
+- `apply_state()` ahora lleva una sombra del estado GL (FBO, viewport, prueba/mascara de profundidad, mezcla, culling, scissor, programa) y solo emite lo que cambia. Las funciones que tocan estado fuera de apply_state (clear, sombras, copias, lectura, desenfoque, present, creacion de targets) invalidan la sombra. `gl_shadow=0` en recvx.ini la desactiva para comparar. Resultado de imagen identico: solo se omiten llamadas redundantes.
+- ps2_dummy.c: buffers de trabajo reutilizados (`pcScratch`) en lugar de malloc/free por tira.
+- Pendiente: medir con debug=1 + profile_game=1 (PROFILE vu1Draw submit us/vertice; antes 0.63 y 1.6); despues, agrupar tiras contiguas compatibles.
