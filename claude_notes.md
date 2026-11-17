@@ -364,3 +364,10 @@ Medicion previa (escena pesada): ~11.9us/tira, ~1.6us/vertice en el envio, ~527 
 - `apply_state()` ahora lleva una sombra del estado GL (FBO, viewport, prueba/mascara de profundidad, mezcla, culling, scissor, programa) y solo emite lo que cambia. Las funciones que tocan estado fuera de apply_state (clear, sombras, copias, lectura, desenfoque, present, creacion de targets) invalidan la sombra. `gl_shadow=0` en recvx.ini la desactiva para comparar. Resultado de imagen identico: solo se omiten llamadas redundantes.
 - ps2_dummy.c: buffers de trabajo reutilizados (`pcScratch`) en lugar de malloc/free por tira.
 - Pendiente: medir con debug=1 + profile_game=1 (PROFILE vu1Draw submit us/vertice; antes 0.63 y 1.6); despues, agrupar tiras contiguas compatibles.
+
+## 0.9.142 (optimizacion): agrupacion de draws inmediatos
+Log 038a2a65 (0.9.141): el coste de envio NO bajo (1.6us/vertice, ~3950 tiras por ventana). Sombra de estado + buffers no eran el cuello: queda el glBufferSubData+glDrawArrays por tira de ~6 vertices (llamadas de driver) -> se agrupan.
+- `draw_immediate` acumula draws consecutivos TRIANGLE_STRIP/TRIANGLES con estado identico (memcmp de PcNativeDrawState + destino) y los emite en un draw; las tiras se unen con vertices repetidos (degenerados) y paridad par, asi cada triangulo conserva orden y sentido (verificado con harness /tmp: 20000 casos aleatorios, 0 diferencias). Mismo orden de envio => misma profundidad/mezcla por pixel.
+- Se vacia el lote antes de cualquier cambio de estado global o GL (setters, sombras, copias, texturas, clear, present) y durante el vaciado del OT no se agrupa (`batch_lock`). `gl_batch=0` en recvx.ini lo apaga.
+- El log "last frame draws=N (GL batches=M)" compara draws logicos contra draws GL reales.
+- Dato nuevo del log: en la sala del gas "render-texture" (17.6 ms) es bhAllDrawModel dentro de bhDrawFullScreenRenderTexture, no una copia: es la misma geometria. plist de sala 15 ms/frame (123us/chunk).

@@ -246,11 +246,14 @@ typedef struct {
 static GlShadow gls;
 static int gl_shadow_on = -1;
 static void gl_shadow_invalidate(void) { gls.valid = 0; }
+static unsigned stat_batches;
+static void batch_flush(void);   /* agrupacion de draws inmediatos, mas abajo */
 
 
 static int create_targets(int width, int height)
 {
     GLenum status;
+    batch_flush();
     render_width = width;
     render_height = height;
 
@@ -377,6 +380,7 @@ int pcRendererInit(int width, int height)
 /* CLAUDE-NOTE[N11]: no borra vertex_array, program ni las texturas de native_textures (fugas al cerrar/recrear). */
 void pcRendererShutdown(void)
 {
+    batch_flush();
     if (!ready) return;
     glDeleteBuffers(1, &vertex_buffer);
     glDeleteVertexArrays(1, &vertex_array);
@@ -397,6 +401,7 @@ void pcRendererShutdown(void)
  * despues (ver N2). Tambien conviene contar draws por frame y hacer glGetError()/glReadPixels() en debug=1. */
 void pcRendererBeginFrame(void)
 {
+    batch_flush();
     gl_shadow_invalidate();
     stream_cursor = 0;
     if (!ready) return;
@@ -404,8 +409,8 @@ void pcRendererBeginFrame(void)
     if (debug_magenta < 0) { const char* e = getenv("RECVX_CLEAR_DEBUG"); debug_magenta = (e && *e && *e != '0'); }
     if (frame_number % 120 == 0) {
         /* A frame with 0 draws means the problem is before the renderer; >0 means it is in the renderer. */
-        pcLog("native renderer: last frame draws=%u (2D/screen-space=%u) vertices=%u queued_blend=%u",
-              stat_immediate, stat_screen_space, stat_vertices, stat_queued);
+        pcLog("native renderer: last frame draws=%u (GL batches=%u) (2D/screen-space=%u) vertices=%u queued_blend=%u",
+              stat_immediate, stat_batches, stat_screen_space, stat_vertices, stat_queued);
     }
     if (frame_number % 120 == 0 && alpha_histogram_used) {
         char line[ALPHA_HISTOGRAM * 28 + 1];
@@ -469,6 +474,7 @@ void pcRendererSetProjection(float projection, float aw, float ah,
     static int projection_log_valid;
     static float logged_projection, logged_aspect_w, logged_aspect_h;
     static float logged_offset_x, logged_offset_y, logged_near, logged_far;
+    batch_flush();
 
     projection_value = projection;
     aspect_w = aw;
@@ -508,6 +514,7 @@ void pcRendererSetRenderScale(float sx, float sy)
 {
     int w = (int)(output_width * sx + 0.5f);
     int h = (int)(output_height * sy + 0.5f);
+    batch_flush();
     if (w < 1) w = 1;
     if (h < 1) h = 1;
     if (ready && (w != render_width || h != render_height)) {
@@ -526,6 +533,7 @@ void pcRendererSetClearColor(float r, float g, float b, float a)
 void pcRendererClear(float r, float g, float b, float a, int clear_depth)
 {
     GLbitfield mask = GL_COLOR_BUFFER_BIT;
+    batch_flush();
     if (!ready) return;
     glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
     glViewport(0, 0, render_width, render_height);
@@ -545,6 +553,7 @@ void pcRendererClear(float r, float g, float b, float a, int clear_depth)
  * parte del estado de cada draw/pasada, no un global que pisa al estado del draw. */
 void pcRendererSetDepthMode(int depth_test, int depth_write)
 {
+    batch_flush();
     depth_override_test = depth_test < 0 ? -1 : (depth_test != 0);
     depth_override_write = depth_write < 0 ? -1 : (depth_write != 0);
 }
@@ -552,12 +561,14 @@ void pcRendererSetDepthMode(int depth_test, int depth_write)
 
 void pcRendererSetScissor(int enabled, int x, int y, int width, int height)
 {
+    batch_flush();
     scissor_enabled = enabled != 0;
     scissor_rect[0] = x; scissor_rect[1] = y; scissor_rect[2] = width; scissor_rect[3] = height;
 }
 
 void pcRendererSetGlobalFog(int enabled, float r, float g, float b)
 {
+    batch_flush();
     global_fog_enabled = enabled != 0;
     global_fog_color[0] = r; global_fog_color[1] = g; global_fog_color[2] = b;
 }
@@ -600,12 +611,13 @@ static void gs_alpha_decode(uint64_t reg, GsBlend* out)
 void pcRendererSetGsAlpha(uint64_t reg)
 {
     int i;
+    batch_flush();
     for (i = 0; i < alpha_histogram_used && alpha_histogram[i].reg != reg; i++);
     if (i == alpha_histogram_used && i < ALPHA_HISTOGRAM) { alpha_histogram[i].reg = reg; alpha_histogram[i].count = 0; alpha_histogram_used++; }
     if (i < ALPHA_HISTOGRAM) alpha_histogram[i].count++;
     gs_alpha_decode(reg, &gs_blend);
 }
-void pcRendererSetGsAlpha2(uint64_t reg) { gs_alpha_decode(reg, &gs_blend2); }
+void pcRendererSetGsAlpha2(uint64_t reg) { batch_flush(); gs_alpha_decode(reg, &gs_blend2); }
 
 /* CLAUDE-NOTE[N3][CORREGIDO]: apply_state() lee GLOBALES (projection_value, aspect, offset, near/far, global_fog_*,
  * blend_*_rgb/alpha, scissor_*, depth_override_*), no el estado del draw. Para los draws opacos da igual (se dibujan al
@@ -764,6 +776,83 @@ static void apply_state(const PcNativeDrawState* st)
 
 /* Los vertices se escriben en un buffer circular grande (un glBufferSubData por draw, sin malloc ni reasignar el almacen);
  * se reinicia al empezar cada frame. */
+/* ---- Agrupacion de draws inmediatos --------------------------------------------------------------------------------------
+ * Las tiras de los modelos son de ~6 vertices: un glBufferSubData + glDrawArrays por tira costaba ~10us de CPU cada una (~530 por
+ * frame). Los draws inmediatos consecutivos con el MISMO estado (misma textura, mezcla, profundidad, scissor, niebla, destino...) se
+ * acumulan y salen en un solo draw, en el mismo orden de envio: el resultado de pixeles es identico (las tiras se unen con
+ * triangulos degenerados que no generan fragmentos, y se conserva la paridad de cada tira, asi que el sentido de los triangulos no
+ * cambia). Todo lo que cambie estado GL o global del renderer vacia el lote antes (batch_flush). gl_batch=0 en recvx.ini lo desactiva. */
+#define BATCH_MAX_VERTICES 65536
+static NativeGpuVertex* batch_vertices;
+static int batch_count, batch_target, batch_lock;
+static GLenum batch_topology;
+static PcNativeDrawState batch_state;
+
+static int gl_batch_on(void)
+{
+    static int on = -1;
+    if (on < 0) on = pcIniGetInt("gl_batch", 1) != 0;
+    return on;
+}
+
+static void emit_draw(const NativeGpuVertex* upload, int count, const PcNativeDrawState* state, GLenum topology)
+{
+    apply_state(state);
+    glBindVertexArray(vertex_array);
+    glBindBuffer(GL_ARRAY_BUFFER, vertex_buffer);
+    if (stream_cursor + (unsigned)count > STREAM_VERTICES) {   /* buffer lleno: se suelta el almacen anterior (orphaning) */
+        glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)(STREAM_VERTICES * sizeof(NativeGpuVertex)), NULL, GL_STREAM_DRAW);
+        stream_cursor = 0;
+    }
+    glBufferSubData(GL_ARRAY_BUFFER, (GLintptr)((size_t)stream_cursor * sizeof(NativeGpuVertex)),
+                    (GLsizeiptr)((size_t)count * sizeof(NativeGpuVertex)), upload);
+    glDrawArrays(topology, (GLint)stream_cursor, count);
+    stream_cursor += (unsigned)count;
+    glBindVertexArray(0);
+}
+
+static void batch_flush(void)
+{
+    int saved_target;
+    if (batch_count <= 0) return;
+    saved_target = active_target;
+    active_target = batch_target;
+    emit_draw(batch_vertices, batch_count, &batch_state, batch_topology);
+    active_target = saved_target;
+    batch_count = 0;
+    stat_batches++;
+}
+
+static void batch_add(const NativeGpuVertex* v, int count, const PcNativeDrawState* state, GLenum topology)
+{
+    int extra, parity_fix = 0;
+    if (topology == GL_TRIANGLES) count -= count % 3;
+    if (count < 3) return;   /* GL no dibuja nada con menos de un triangulo */
+    if (batch_count > 0 && (topology != batch_topology || active_target != batch_target ||
+                            memcmp(state, &batch_state, sizeof(batch_state)) != 0))
+        batch_flush();
+    if (!batch_vertices) {
+        batch_vertices = (NativeGpuVertex*)malloc((size_t)BATCH_MAX_VERTICES * sizeof(*batch_vertices));
+        if (!batch_vertices) { emit_draw(v, count, state, topology); return; }
+    }
+    if (batch_count > 0 && topology == GL_TRIANGLE_STRIP) {
+        parity_fix = ((batch_count + 2) & 1) != 0;
+        extra = 2 + parity_fix;
+    } else extra = 0;
+    if (batch_count + extra + count > BATCH_MAX_VERTICES) batch_flush();
+    if (batch_count == 0) {
+        batch_state = *state; batch_topology = topology; batch_target = active_target;
+        extra = 0; parity_fix = 0;
+    }
+    if (extra) {
+        batch_vertices[batch_count] = batch_vertices[batch_count - 1]; batch_count++;   /* repite el ultimo de la tira anterior */
+        batch_vertices[batch_count++] = v[0];                                           /* y el primero de la nueva */
+        if (parity_fix) batch_vertices[batch_count++] = v[0];                           /* el primero real queda en indice par */
+    }
+    memcpy(&batch_vertices[batch_count], v, (size_t)count * sizeof(*v));
+    batch_count += count;
+}
+
 static void draw_immediate(const PcNativeVertex* vertices, int count, const PcNativeDrawState* state, GLenum topology)
 {
     NativeGpuVertex* upload;
@@ -800,18 +889,12 @@ static void draw_immediate(const PcNativeVertex* vertices, int count, const PcNa
             }
         }
     }
-    apply_state(state);
-    glBindVertexArray(vertex_array);
-    glBindBuffer(GL_ARRAY_BUFFER, vertex_buffer);
-    if (stream_cursor + (unsigned)count > STREAM_VERTICES) {   /* buffer lleno: se suelta el almacen anterior (orphaning) */
-        glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)(STREAM_VERTICES * sizeof(NativeGpuVertex)), NULL, GL_STREAM_DRAW);
-        stream_cursor = 0;
+    if (state && !batch_lock && gl_batch_on() && (topology == GL_TRIANGLE_STRIP || topology == GL_TRIANGLES) && count < 8192) {
+        batch_add(upload, count, state, topology);
+        return;
     }
-    glBufferSubData(GL_ARRAY_BUFFER, (GLintptr)((size_t)stream_cursor * sizeof(NativeGpuVertex)),
-                    (GLsizeiptr)((size_t)count * sizeof(NativeGpuVertex)), upload);
-    glDrawArrays(topology, (GLint)stream_cursor, count);
-    stream_cursor += (unsigned)count;
-    glBindVertexArray(0);
+    batch_flush();
+    emit_draw(upload, count, state, topology);
 }
 
 /* CLAUDE-NOTE[N8]: toda primitiva con blend se difiere hasta el flush, incluido el 2D (fades, paneles, UI translucida), por
@@ -973,6 +1056,8 @@ static void flush_transparent(int two_pass)
     int saved_target = active_target;
     if (!ready || transparent_count <= 0) return;
     NativeFrameState live;
+    batch_flush();
+    batch_lock++;   /* el OT cambia el estado global entre items: sin agrupar mientras se vacia */
     active_target = TARGET_SCREEN;   /* el OT siempre dibuja en la pantalla, nunca en la mascara de sombras */
     capture_frame_state(&live);
     qsort(transparent_queue, (size_t)transparent_count, sizeof(*transparent_queue), compare_transparent);
@@ -1038,6 +1123,7 @@ static void flush_transparent(int two_pass)
     restore_frame_state(&live);
     transparent_count = 0;
     active_target = saved_target;
+    batch_lock--;
 }
 
 void pcRendererFlushTransparent(void) { flush_transparent(0); }
@@ -1047,6 +1133,7 @@ void pcRendererFlushTransparentI(void) { flush_transparent(1); }
 
 void pcRendererShadowBegin(void)
 {
+    batch_flush();
     gl_shadow_invalidate();
     if (!ready) return;
     active_target = TARGET_MASK;
@@ -1061,6 +1148,7 @@ void pcRendererShadowBegin(void)
 
 void pcRendererShadowEnd(void)
 {
+    batch_flush();
     gl_shadow_invalidate();
     if (!ready) return;
     active_target = TARGET_SCREEN;
@@ -1072,6 +1160,7 @@ void pcRendererShadowEnd(void)
  * de alfa GREATER 0, sin Z, mezcla ALPHA_2 = (Cd - Cs); despues el rectangulo de la mascara se limpia a 0. */
 void pcRendererShadowCompose(float x0, float y0, float x1, float y1, int shade)
 {
+    batch_flush();
     PcNativeVertex v[6];
     PcNativeDrawState st;
     GsBlend saved_blend = gs_blend;
@@ -1108,6 +1197,7 @@ void pcRendererShadowCompose(float x0, float y0, float x1, float y1, int shade)
         gs_alpha_decode(0x80000000A1ULL, &gs_blend);     /* (Cd - Cs) * FIX/128 */
         active_target = TARGET_SCREEN;
         draw_immediate(v, 6, &st, GL_TRIANGLES);
+        batch_flush();
         gs_blend = saved_blend;
         active_target = saved_target;
     }
@@ -1196,6 +1286,7 @@ static int texture_is_translucent(GLuint id)
 unsigned int pcRendererLoadTextureRGBA(const unsigned char* rgba, int width, int height, int linear)
 {
     GLuint texture = 0;
+    batch_flush();
     if (!ready || !rgba || width <= 0 || height <= 0) return 0;
     glGenTextures(1, &texture);
     glBindTexture(GL_TEXTURE_2D, texture);
@@ -1244,6 +1335,7 @@ static int ensure_render_texture(void)
 void pcRendererCopyScreenToRenderTexture(int sx0, int sy0, int sx1, int sy1, int dx0, int dy0, int dx1, int dy1)
 {
     float kx, ky;
+    batch_flush();
     if (!ensure_render_texture()) return;
     kx = (float)render_width / 640.0f;
     ky = (float)render_height / 480.0f;
@@ -1282,6 +1374,7 @@ int pcRendererReadScreenRect(int x, int y, int w, int h, unsigned char* rgba)
 {
     float kx, ky;
     int vw, vh;
+    batch_flush();
     if (!ready || rgba == NULL || w <= 0 || h <= 0 || w > 512 || h > 512 || x < 0 || y < 0) return 0;
     if (!store_texture) {
         glGenTextures(1, &store_texture);
@@ -1319,6 +1412,7 @@ int pcRendererReadScreenRect(int x, int y, int w, int h, unsigned char* rgba)
 
 void pcRendererBindRenderTexture(void)
 {
+    batch_flush();
     if (!ensure_render_texture()) return;
     render_texture_binds++;
     if (render_texture_binds <= 8 && render_texture_copies == 0)
@@ -1330,6 +1424,7 @@ void pcRendererBindRenderTexture(void)
 int pcRendererUpdateTextureRGBA(unsigned int texture, const unsigned char* rgba, int width, int height)
 {
     int i;
+    batch_flush();
     if (!ready || texture == 0 || rgba == NULL || width <= 0 || height <= 0)
         return 0;
 
@@ -1372,6 +1467,7 @@ void pcRendererDeleteTexture(unsigned int texture)
 {
     GLuint t = (GLuint)texture;
     int i;
+    batch_flush();
     if (t) {
         if (pending_delete_count == pending_delete_capacity) {
             int cap = pending_delete_capacity ? pending_delete_capacity * 2 : 64;
@@ -1629,6 +1725,7 @@ static GLuint blur_apply(void)
 
 void pcRendererPresent(void)
 {
+    batch_flush();
     gl_shadow_invalidate();
     /* Native GDI overlays are composed into the same framebuffer before the final blit. */
     {
@@ -1702,6 +1799,7 @@ void pcRendererPresent(void)
             pcRendererDrawScreenTriangles(v, 6, &state);
         }
         pcRendererFlushTransparent();
+        batch_flush();
         scissor_enabled = saved_scissor;
         scissor_rect[0] = saved_scissor_rect[0];
         scissor_rect[1] = saved_scissor_rect[1];
@@ -1764,6 +1862,7 @@ void pcRendererConfigureTexture(unsigned int texture, int linear, int wrap_u, in
 {
     GLenum wu = (wrap_u == 1 || wrap_u == 2) ? GL_CLAMP_TO_EDGE : GL_REPEAT;
     GLenum wv = (wrap_v == 1 || wrap_v == 2) ? GL_CLAMP_TO_EDGE : GL_REPEAT;
+    batch_flush();
     if (!ready || texture == 0) return;
     glBindTexture(GL_TEXTURE_2D, (GLuint)texture);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, linear ? GL_LINEAR : GL_NEAREST);
