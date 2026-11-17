@@ -4659,8 +4659,7 @@ l_002CF178:
 }
 
 // 100% matching!
-/* CLAUDE-NOTE[N2]/[N7]: termina llamando a Ps2ScreenClear() (limpieza inmediata) y depende de render-to-texture, que en
- * PC no esta implementado (sceGsExecStoreImage es un no-op). */
+/* PC: el target de PS2_Render_Tex_Sub es una textura GPU escalable; las UV lógicas siguen siendo 256x256. */
 void PS2_Render_Tex_Sub() 
 {
     PS2_Render_tex_sub_flag = 1;

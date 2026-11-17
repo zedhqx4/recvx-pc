@@ -571,7 +571,6 @@ void	njGarbageTexture(NJS_TEXMEMLIST *addr,Uint32 n)
 {
 #ifdef TARGET_PC
     { extern void pcTextureInvalidateSources(void); pcTextureInvalidateSources(); }
-    { extern void pcTextureReleaseRenderTargets(void); pcTextureReleaseRenderTargets(); } /* el GC compacta el heap y puede mover los TIM2 */
 #endif
     Ps2TextureGarbageCollectionAll();
 }
@@ -670,10 +669,6 @@ int Ps2TextureMalloc(NJS_TEXMEMLIST* p)
 // 100% matching!
 int Ps2TextureFree(NJS_TEXMEMLIST* p) 
 {
-#ifdef TARGET_PC
-    /* A freed TIM2 allocation may be reused at the same address; discard RTT pointer mappings. */
-    { extern void pcTextureReleaseRenderTargets(void); pcTextureReleaseRenderTargets(); }
-#endif
     unsigned int size; 
     TIM2_PICTUREHEADER_EX* before; 
     TIM2_PICTUREHEADER_EX* after; 
@@ -697,6 +692,9 @@ int Ps2TextureFree(NJS_TEXMEMLIST* p)
     
     if (*temp2 == 0) 
     {
+#ifdef TARGET_PC
+        { extern void pcTextureForgetRenderTarget(const void* image); pcTextureForgetRenderTarget((const unsigned char*)timp + 256); }
+#endif
         before = timp->admin.before;
         after = timp->admin.after;
         
@@ -790,6 +788,9 @@ int Ps2TextureGarbageCollectionAll()
             size = temp->admin.size / 4;
 
             Ps2MemCopy4(real_p, temp, size);
+#ifdef TARGET_PC
+            { extern void pcTextureRemapRenderTarget(const void* old_image, const void* new_image); pcTextureRemapRenderTarget((const unsigned char*)temp + 256, (const unsigned char*)real_p + 256); }
+#endif
         
             Ps2ReplaceTexAddr(after2->admin.gindex, real_p);
         }

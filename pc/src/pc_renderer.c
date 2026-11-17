@@ -69,6 +69,7 @@ static int current_texture_function, current_texture_alpha = 1;
 static GLuint framebuffer;
 static GLuint render_texture, render_texture_fbo;   /* copia reducida de la pantalla usada como textura */
 static GLuint render_copy_fbo;                     /* FBO reutilizable para copias GPU -> texturas dinamicas */
+static int render_texture_scale = -1;
 static GLuint color_target;
 static GLuint depth_target;
 static GLuint mask_target, mask_framebuffer;   /* contexto 2 de la GS: mascara de sombras, comparte la profundidad */
@@ -1176,59 +1177,176 @@ unsigned int pcRendererLoadTextureRGBA(const unsigned char* rgba, int width, int
 #define RENDER_TEXTURE_SIZE 256
 static unsigned render_texture_copies, render_texture_binds;
 
+static int pcRendererRenderTextureScale(void)
+{
+    if (render_texture_scale < 0) {
+        render_texture_scale = pcIniGetInt("render_texture_scale", 2);
+        if (render_texture_scale < 1) render_texture_scale = 1;
+        if (render_texture_scale > 4) render_texture_scale = 4;
+        pcLog("native renderer: render_texture_scale=%dx (logical UV dimensions unchanged)", render_texture_scale);
+    }
+    return render_texture_scale;
+}
+
 static int ensure_render_texture(void)
 {
+    GLenum status;
+    int scale, size;
     if (render_texture) return 1;
     if (!ready) return 0;
+    scale = pcRendererRenderTextureScale();
+    size = RENDER_TEXTURE_SIZE * scale;
     glGenTextures(1, &render_texture);
     glBindTexture(GL_TEXTURE_2D, render_texture);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, RENDER_TEXTURE_SIZE, RENDER_TEXTURE_SIZE, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, size, size, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
-    remember_texture(render_texture, RENDER_TEXTURE_SIZE, RENDER_TEXTURE_SIZE, 0);
     glGenFramebuffers(1, &render_texture_fbo);
     glBindFramebuffer(GL_FRAMEBUFFER, render_texture_fbo);
     glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, render_texture, 0);
-    glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
-    glClear(GL_COLOR_BUFFER_BIT);
+    status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
+    if (status != GL_FRAMEBUFFER_COMPLETE) {
+        pcLog("native renderer: render-texture FBO incomplete (0x%04x)", (unsigned int)status);
+        glDeleteFramebuffers(1, &render_texture_fbo);
+        glDeleteTextures(1, &render_texture);
+        render_texture = render_texture_fbo = 0;
+        glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
+        glViewport(0, 0, render_width, render_height);
+        return 0;
+    }
+    /* El tamaño registrado es lógico; el almacenamiento GL es size x size. */
+    remember_texture(render_texture, RENDER_TEXTURE_SIZE, RENDER_TEXTURE_SIZE, 0);
+    {
+        const GLfloat clear_color[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+        glClearBufferfv(GL_COLOR, 0, clear_color);
+    }
     glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
+    glViewport(0, 0, render_width, render_height);
     return 1;
 }
 
-/* Copia el rectangulo (sx0,sy0)-(sx1,sy1) de la pantalla de juego (640x480, y hacia abajo) al rectangulo (dx0,dy0)-(dx1,dy1)
- * de la textura (texels, fila 0 arriba), con filtro lineal. Los trozos fuera de la textura se recortan como en la GS. */
+/* Copia el FBO de escena a una textura GPU. El factor escala solo el almacenamiento físico. */
 void pcRendererCopyScreenToRenderTexture(int sx0, int sy0, int sx1, int sy1, int dx0, int dy0, int dx1, int dy1)
 {
     float kx, ky;
+    int scale;
     if (!ensure_render_texture()) return;
+    scale = pcRendererRenderTextureScale();
     kx = (float)render_width / 640.0f;
     ky = (float)render_height / 480.0f;
     glDisable(GL_SCISSOR_TEST);
     glBindFramebuffer(GL_READ_FRAMEBUFFER, framebuffer);
     glBindFramebuffer(GL_DRAW_FRAMEBUFFER, render_texture_fbo);
-    glBlitFramebuffer((GLint)(sx0 * kx), render_height - (GLint)(sy0 * ky), (GLint)(sx1 * kx), render_height - (GLint)(sy1 * ky),
-                      dx0, dy0, dx1, dy1, GL_COLOR_BUFFER_BIT, GL_LINEAR);
+    glBlitFramebuffer((GLint)(sx0 * kx), render_height - (GLint)(sy0 * ky),
+                      (GLint)(sx1 * kx), render_height - (GLint)(sy1 * ky),
+                      dx0 * scale, dy0 * scale, dx1 * scale, dy1 * scale,
+                      GL_COLOR_BUFFER_BIT, GL_LINEAR);
     render_texture_copies++;
-    if (render_texture_copies <= 8 || render_texture_copies % 120 == 0) {
-        /* Diagnostico: contenido de la textura de render tras la copia (la lectura detiene la GPU, por eso se limita). */
-        static unsigned char pixels[RENDER_TEXTURE_SIZE * RENDER_TEXTURE_SIZE * 4];
-        unsigned long long sum[3] = {0, 0, 0};
-        int i, lit = 0;
-        glBindFramebuffer(GL_READ_FRAMEBUFFER, render_texture_fbo);
-        glReadPixels(0, 0, RENDER_TEXTURE_SIZE, RENDER_TEXTURE_SIZE, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
-        for (i = 0; i < RENDER_TEXTURE_SIZE * RENDER_TEXTURE_SIZE; i++) {
-            sum[0] += pixels[i * 4]; sum[1] += pixels[i * 4 + 1]; sum[2] += pixels[i * 4 + 2];
-            if (pixels[i * 4] | pixels[i * 4 + 1] | pixels[i * 4 + 2]) lit++;
-        }
-        pcLog("native renderer: render texture copy #%u src=(%d,%d)-(%d,%d) dst=(%d,%d)-(%d,%d) avg rgb=(%llu,%llu,%llu) non-black=%d%% (binds so far %u)",
-              render_texture_copies, sx0, sy0, sx1, sy1, dx0, dy0, dx1, dy1,
-              sum[0] / (RENDER_TEXTURE_SIZE * RENDER_TEXTURE_SIZE), sum[1] / (RENDER_TEXTURE_SIZE * RENDER_TEXTURE_SIZE),
-              sum[2] / (RENDER_TEXTURE_SIZE * RENDER_TEXTURE_SIZE), lit * 100 / (RENDER_TEXTURE_SIZE * RENDER_TEXTURE_SIZE),
-              render_texture_binds);
-    }
+    if (render_texture_copies <= 8 || render_texture_copies % 120 == 0)
+        pcLog("native renderer: render-texture GPU blit #%u src=(%d,%d)-(%d,%d) dst=(%d,%d)-(%d,%d) scale=%dx (binds %u)",
+              render_texture_copies, sx0, sy0, sx1, sy1, dx0, dy0, dx1, dy1, scale, render_texture_binds);
     glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
+    if (scissor_enabled) {
+        glEnable(GL_SCISSOR_TEST);
+        glScissor(scissor_rect[0], scissor_rect[1], scissor_rect[2], scissor_rect[3]);
+    }
+    glViewport(0, 0, render_width, render_height);
+}
+
+/* Copia una franja de un TIM2 renderizado a una unica textura GL persistente.
+ * width/height son dimensiones lógicas; el almacenamiento físico usa render_texture_scale. */
+int pcRendererCopyScreenRectToTexture(unsigned int* texture, int x, int y, int w, int h,
+                                      int image_width, int image_height)
+{
+    float kx, ky;
+    int vw, vh, scale, known = 0, oldw = 0, oldh = 0, i;
+    GLuint id;
+    const GLfloat clear_color[4] = {0.0f, 0.0f, 0.0f, 1.0f};
+
+    if (!ready || texture == NULL || x < 0 || y < 0 || w <= 0 || h <= 0 ||
+        image_width <= 0 || image_height <= 0 || image_width > 512 || image_height > 512)
+        return 0;
+
+    scale = pcRendererRenderTextureScale();
+    if (image_width * scale > 2048 || image_height * scale > 2048) return 0;
+    vw = (x + w > 640) ? 640 - x : w;
+    vh = (y + h > 480) ? 480 - y : h;
+    if (vw < 0) vw = 0;
+    if (vh < 0) vh = 0;
+
+    id = (GLuint)*texture;
+    if (id == 0) {
+        glGenTextures(1, &id);
+        if (id == 0) return 0;
+        *texture = (unsigned int)id;
+    }
+
+    for (i = 0; i < native_texture_count; i++) {
+        if (native_textures[i].id == id) {
+            known = 1;
+            oldw = native_textures[i].width;
+            oldh = native_textures[i].height;
+            break;
+        }
+    }
+
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, id);
+    if (!known || oldw != image_width || oldh != image_height) {
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, image_width * scale, image_height * scale,
+                     0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+    }
+
+    if (!render_copy_fbo) glGenFramebuffers(1, &render_copy_fbo);
+    if (!render_copy_fbo) return 0;
+
+    kx = (float)render_width / 640.0f;
+    ky = (float)render_height / 480.0f;
+    glDisable(GL_SCISSOR_TEST);
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, framebuffer);
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, render_copy_fbo);
+    glFramebufferTexture2D(GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, id, 0);
+    if (glCheckFramebufferStatus(GL_DRAW_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
+        glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
+        if (scissor_enabled) {
+            glEnable(GL_SCISSOR_TEST);
+            glScissor(scissor_rect[0], scissor_rect[1], scissor_rect[2], scissor_rect[3]);
+        }
+        glViewport(0, 0, render_width, render_height);
+        return 0;
+    }
+
+    glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+    if (y == 0) {
+        /* Cada captura comienza con negro; las filas 480..511 permanecen negras. */
+        glClearBufferfv(GL_COLOR, 0, clear_color);
+    }
+    if (vw > 0 && vh > 0) {
+        glBlitFramebuffer((GLint)(x * kx), render_height - (GLint)(y * ky),
+                          (GLint)((x + vw) * kx), render_height - (GLint)((y + vh) * ky),
+                          x * scale, y * scale, (x + vw) * scale, (y + vh) * scale,
+                          GL_COLOR_BUFFER_BIT, GL_LINEAR);
+    }
+
+    /* En el buffer PS2 cada texel RGB32 se entrega con A=0x80, equivalente a GL alpha=1. */
+    glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_TRUE);
+    glClearBufferfv(GL_COLOR, 0, clear_color);
+    glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+
+    glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
+    if (scissor_enabled) {
+        glEnable(GL_SCISSOR_TEST);
+        glScissor(scissor_rect[0], scissor_rect[1], scissor_rect[2], scissor_rect[3]);
+    }
+    glViewport(0, 0, render_width, render_height);
+    remember_texture(id, image_width, image_height, 0);
+    return 1;
 }
 
 /* Lee el rectangulo (x,y,w,h) de la pantalla de juego (pixeles de 640x480 de la GS, y hacia abajo) a RGBA8, fila 0 arriba.

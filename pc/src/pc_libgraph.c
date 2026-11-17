@@ -72,35 +72,90 @@ void sceGsSetDefStoreImage(sceGsStoreImage* sp, short sbp, short sbw, short spsm
     sp->pc_x = x; sp->pc_y = y; sp->pc_w = w; sp->pc_h = h;
 }
 
-/* Lectura del framebuffer a memoria (PSMCT32, filas de w pixeles consecutivas). El juego la usa en StoreRenderTex
- * (njRenderTextureNum/NumG: efectos que re-dibujan la sala como textura, agua, gas): la imagen leida pasa a ser los datos de
- * la textura RGBA32 de la lista ren_tlist. El alfa se entrega como 0x80 (opaco en la GS). */
+/* StoreRenderTex copia un TIM2 512x512 en tres franjas (255/255/2 filas).
+ * dstaddr avanza por franja: image_base normaliza la clave a la base del payload. */
+static const unsigned char* store_image_key;
+static int store_image_gpu_enabled;
+static int store_image_cpu_fallback_done;
+
 int sceGsExecStoreImage(sceGsStoreImage* sp, u_long128* dstaddr)
 {
     static unsigned char rgba[512 * 512 * 4];
     unsigned char* out = (unsigned char*)dstaddr;
-    int i, n;
+    unsigned char* image_base;
+    int i, n, is_render_texture;
 
     if (sp == NULL || dstaddr == NULL || sp->pc_w <= 0 || sp->pc_h <= 0) return 0;
-    pcRendererFlushTransparent();   /* lo diferido (OT) debe estar ya en el framebuffer */
+
+    is_render_texture = (sp->pc_x == 0 && sp->pc_w == 512 &&
+                         sp->pc_y >= 0 && sp->pc_h > 0 && sp->pc_y + sp->pc_h <= 512);
+    if (is_render_texture) {
+        image_base = out - (size_t)sp->pc_y * 512u * 4u;
+
+        if (sp->pc_y == 0 || store_image_key != image_base) {
+            store_image_key = image_base;
+            store_image_gpu_enabled = pcIniGetInt("rtt_gpu_copy", 1) != 0;
+            store_image_cpu_fallback_done = 0;
+            pcRendererFlushTransparent();
+            {
+                extern void pcTextureInvalidateSources(void);
+                pcTextureInvalidateSources();
+            }
+            if (!store_image_gpu_enabled) {
+                extern void pcTextureInvalidateRenderTarget(const void* image);
+                pcTextureInvalidateRenderTarget(image_base);
+            }
+        }
+
+        if (store_image_gpu_enabled) {
+            extern int pcTextureStoreScreenRect(const void* image, int x, int y, int width, int height,
+                                                int image_width, int image_height);
+            if (pcTextureStoreScreenRect(image_base, sp->pc_x, sp->pc_y, sp->pc_w, sp->pc_h, 512, 512)) {
+                if (sp->pc_y + sp->pc_h >= 512) {
+                    store_image_key = NULL;
+                    store_image_gpu_enabled = 0;
+                    store_image_cpu_fallback_done = 0;
+                }
+                return 0;
+            }
+
+            /* No mezclar franjas: si falla un blit, reconstruir el TIM2 completo desde el framebuffer. */
+            {
+                extern void pcTextureInvalidateRenderTarget(const void* image);
+                pcTextureInvalidateRenderTarget(image_base);
+            }
+            pcLog("render texture: GPU capture failed; using full CPU readback fallback");
+            store_image_gpu_enabled = 0;
+        }
+
+        if (!store_image_cpu_fallback_done) {
+            int pixels = 512 * 512;
+            if (!pcRendererReadScreenRect(0, 0, 512, 512, rgba)) return 0;
+            for (i = 0; i < pixels; i++) {
+                image_base[i * 4] = rgba[i * 4];
+                image_base[i * 4 + 1] = rgba[i * 4 + 1];
+                image_base[i * 4 + 2] = rgba[i * 4 + 2];
+                image_base[i * 4 + 3] = 0x80;
+            }
+            store_image_cpu_fallback_done = 1;
+        }
+        if (sp->pc_y + sp->pc_h >= 512) {
+            store_image_key = NULL;
+            store_image_gpu_enabled = 0;
+            store_image_cpu_fallback_done = 0;
+        }
+        return 0;
+    }
+
+    pcRendererFlushTransparent();
     {
         extern void pcTextureInvalidateSources(void);
-        extern int pcTextureStoreScreenRect(const void* image, int x, int y, int width, int height);
-        extern void pcTextureInvalidateRenderTarget(const void* image);
-        pcTextureInvalidateSources();   /* la imagen de la textura de destino cambia */
-
-        if (pcIniGetInt("rtt_gpu_copy", 1) != 0) {
-            /* La primera captura conserva el readback para validar el payload TIM2; luego se copia FBO -> textura GL. */
-            if (pcTextureStoreScreenRect(dstaddr, sp->pc_x, sp->pc_y, sp->pc_w, sp->pc_h))
-                return 0;
-        } else {
-            pcTextureInvalidateRenderTarget(dstaddr);
-        }
+        pcTextureInvalidateSources();
     }
     if (!pcRendererReadScreenRect(sp->pc_x, sp->pc_y, sp->pc_w, sp->pc_h, rgba)) return 0;
     n = sp->pc_w * sp->pc_h;
     for (i = 0; i < n; i++) {
-        out[i * 4]     = rgba[i * 4];
+        out[i * 4] = rgba[i * 4];
         out[i * 4 + 1] = rgba[i * 4 + 1];
         out[i * 4 + 2] = rgba[i * 4 + 2];
         out[i * 4 + 3] = 0x80;
