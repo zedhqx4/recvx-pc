@@ -2024,7 +2024,9 @@ static void pcSubmitStrip3D(unsigned long prim, const void* data, unsigned int c
     unsigned int i, texture = pcRendererCurrentTexture();
     float tex_width = 1.0f, tex_height = 1.0f, zsum = 0.0f;
     unsigned int clip_hist = 0;
-    const int gpu = pcGpuVertexEnabled();
+    /* Sprite (topologia 6): la GS usa Z/color/niebla del SEGUNDO vertice y la Q del primero para dos esquinas; el vertex shader
+     * saca Z de la Q del vertice, asi que no puede expresar eso. Ese caso sigue por la conversion de la CPU (mismo resultado). */
+    const int gpu = pcGpuVertexEnabled() && ((prim >> 47) & 7u) != 6u;
     const int need_z = !gpu || (prim & PC_GIF_PRIM_ABE) != 0;   /* en GPU, la Z entera solo hace falta en CPU para ordenar el OT */
     const int profile = pcGameProfileEnabled();
     double t_start = profile ? pcGameProfileNowMs() : 0.0, t_conv = 0.0;

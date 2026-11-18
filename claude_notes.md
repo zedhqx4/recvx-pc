@@ -407,3 +407,9 @@ Con `gpu_vertex=1` (screen_space 3) `a` es el registro crudo de la GS (0..128+),
 translucidos (tex 45, alfa 0.49) se dibujaban en la pasada opaca (con escritura de Z) y salian lechosos. Ahora se aplica la misma
 conversion que el vertex shader (floor/clamp/128) antes de comparar. Leccion: ningun codigo del renderer puede leer r,g,b,a,x,y,z,u,v
 de un vertice en modo 3 sin convertirlo; auditado, solo existia esta lectura con efecto (el resto es log).
+
+## 0.9.148 - gpu_vertex: auditoria de consumidores de vertices
+Tras el fallo del alfa (0.9.147) se audito todo lo que lee PcNativeVertex despues de pcSubmitStrip3D: renderer (draw_immediate,
+queue_transparent, item_may_be_translucent, logs), pcAssemblePrepared, pc_movie.c. Hallazgo: los sprites (topologia 6) copian
+Z/color/niebla del 2o vertice pero la Q del 1o en dos esquinas; con vertices crudos la Z sale de la Q en el shader, asi que el
+resultado cambiaba. Las tiras de topologia 6 se envian por la conversion CPU aunque gpu_vertex=1. El resto es equivalente.
