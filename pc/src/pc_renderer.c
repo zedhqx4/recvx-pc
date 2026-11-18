@@ -1602,7 +1602,7 @@ void pcRendererCopyScreenToRenderTexture(int sx0, int sy0, int sx1, int sy1, int
 
 /* Copia una franja de un TIM2 renderizado a una unica textura GL persistente.
  * width/height son dimensiones lógicas; el almacenamiento físico usa render_texture_scale. */
-/* ---- Copia a textura por draw (rtt_blit_draw=1) ----------------------------------------------------------------------------
+/* ---- Copia a textura por draw (rtt_blit_draw, 1 por defecto) ----------------------------------------------------------------------------
  * Ruta paralela a glBlitFramebuffer, activable por INI. La copia por blit costaba 3-6 ms de GPU por banda aunque la textura destino
  * fuera de 1024^2 o de 2048^2 y sin esperas de CPU (log 5eb925c7), asi que no era trabajo por pixel. Aqui se dibuja un triangulo
  * que cubre el rectangulo destino y el fragmento muestrea la pantalla con el MISMO mapeo que el blit: centro de cada pixel destino
@@ -1614,8 +1614,8 @@ static int rtt_blit_draw_on(void)
 {
     static int on = -1;
     if (on < 0) {
-        on = pcIniGetInt("rtt_blit_draw", 0) != 0;
-        if (on) pcLog("native renderer: rtt_blit_draw=1: copia a textura por draw en lugar de glBlitFramebuffer");
+        on = pcIniGetInt("rtt_blit_draw", 1) != 0;
+        pcLog("native renderer: rtt_blit_draw=%d: copia a textura por %s", on, on ? "draw (valor por defecto; rtt_blit_draw=0 usa glBlitFramebuffer)" : "glBlitFramebuffer");
     }
     return on;
 }

@@ -467,3 +467,8 @@ INI `rtt_blit_draw=1` dibuja un triangulo sobre el rectangulo destino y el fragm
 (centro de pixel destino -> origen + (px+0.5)*(ancho_origen/ancho_destino), Y invertido, LINEAR, borde fijado). Por defecto 0 (blit).
 Se compara con F8 (misma escena, 0 vs 1) y con "blit X ms" de PROFILE gpu passes. Si no cambia el tiempo, el coste no esta en el
 blit sino en otra cosa (p.ej. reloj de la GPU en frames ligeros) y la ruta se descarta. El orphaning de 0.9.153 queda (inofensivo).
+
+## 0.9.155 - rtt_blit_draw=1 por defecto
+Log 4b6f76c2 (0.9.154, scale 4, rtt_blit_draw=1): blit 8-18 ms -> 0.2 ms por frame de captura; GPU de escena (~4300 vertices) 18-20 -> 7.2 ms.
+Usuario: F8 sin diferencias visibles. `rtt_blit_draw=0` vuelve a glBlitFramebuffer (referencia). El CPU de la seccion render-texture
+(~21 ms, redibujo de la escena) no cambia: el siguiente cuello es CPU. Los picos de 144 ms GPU / 38 ms CPU eran el volcado de la rafaga F8.
