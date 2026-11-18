@@ -902,7 +902,7 @@ static int pc_debug_mode_enabled(void)
     return enabled;
 }
 
-/* Debug decal inspector controls: Numpad *, +, - and /. */
+/* Debug decal object inspector controls: Numpad *, +, - and /. */
 static int decal_debug_handle_event(const SDL_Event* ev)
 {
     SDL_Scancode key;
@@ -930,11 +930,11 @@ static int decal_debug_handle_event(const SDL_Event* ev)
 
     pcRendererDecalDebugStatus(&enabled, &selected, &count, &marked);
     if (!enabled)
-        snprintf(notice, sizeof(notice), "DECAL INSPECTOR OFF");
+        snprintf(notice, sizeof(notice), "DECAL OBJECT INSPECTOR OFF");
     else if (count <= 0)
-        snprintf(notice, sizeof(notice), "DECAL INSPECTOR: COLLECTING");
+        snprintf(notice, sizeof(notice), "DECAL OBJECTS: COLLECTING");
     else
-        snprintf(notice, sizeof(notice), "DECAL %d/%d%s", selected, count,
+        snprintf(notice, sizeof(notice), "OBJECT %d/%d%s", selected, count,
                  (key == SDL_SCANCODE_KP_DIVIDE) ? " MARKED/LOGGED" : "");
     title_notice_show(notice);
     return 1;

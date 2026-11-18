@@ -54,7 +54,7 @@ typedef struct {
     float sort_depth;
     GLenum topology;
     unsigned long long sequence;
-    int decal_candidate;
+    int decal_object;
 } NativeQueuedDraw;
 
 /* translucent: la textura tiene algun texel con alfa < 128 (escala GS), incluido 0: el filtro bilineal mezcla esos texels con los
@@ -129,11 +129,26 @@ static int debug_magenta = -1;
 #define NATIVE_DECAL_MARK_LIMIT 64
 typedef struct {
     uint64_t key;
+    const void* owner;
+    const void* object;
+    const void* transform;
+    unsigned int draw_count, vertex_count;
     unsigned int texture;
-    int topology, count, screen_space, blend, depth_write, textured, texture_function;
+    int topology, screen_space, blend, depth_write, textured, texture_function;
     float min_x, min_y, min_z, max_x, max_y, max_z;
 } NativeDecalCandidate;
+typedef struct {
+    const void* owner;
+    const void* object;
+    const void* transform;
+    int candidate;
+} NativeDecalObjectContext;
+#define NATIVE_DECAL_SCOPE_DEPTH 32
 static NativeDecalCandidate native_decal_candidates[NATIVE_DECAL_CANDIDATE_LIMIT];
+static NativeDecalObjectContext native_decal_scope_stack[NATIVE_DECAL_SCOPE_DEPTH];
+static NativeDecalObjectContext native_decal_object_context;
+static int native_decal_scope_depth;
+static int native_decal_scope_overflow;
 static uint64_t native_decal_marks[NATIVE_DECAL_MARK_LIMIT];
 static int native_decal_candidate_count;
 static int native_decal_mark_count;
@@ -145,63 +160,121 @@ static uint64_t native_decal_hash_add(uint64_t hash, uint32_t value)
     return (hash ^ (uint64_t)value) * UINT64_C(1099511628211);
 }
 
-static uint64_t native_decal_candidate_key(const PcNativeVertex* vertices, int count,
-                                           const PcNativeDrawState* state, GLenum topology)
+static uint64_t native_decal_hash_pointer(uint64_t hash, const void* pointer)
+{
+    uint64_t value = (uint64_t)(uintptr_t)pointer;
+    hash = native_decal_hash_add(hash, (uint32_t)value);
+    return native_decal_hash_add(hash, (uint32_t)(value >> 32));
+}
+
+static uint64_t native_decal_object_key(const void* owner, const void* object, const void* transform)
 {
     uint64_t hash = UINT64_C(1469598103934665603);
-    uint32_t bits;
-    int i;
-#define DECAL_HASH_FIELD(v) hash = native_decal_hash_add(hash, (uint32_t)(v))
-    DECAL_HASH_FIELD(state->texture);
-    DECAL_HASH_FIELD(topology);
-    DECAL_HASH_FIELD(count);
-    DECAL_HASH_FIELD(state->screen_space);
-    DECAL_HASH_FIELD(state->textured);
-    DECAL_HASH_FIELD(state->blend);
-    DECAL_HASH_FIELD(state->depth_test);
-    DECAL_HASH_FIELD(state->depth_write);
-    DECAL_HASH_FIELD(state->texture_function);
-    DECAL_HASH_FIELD(state->texture_alpha);
-    for (i = 0; i < count; i++) {
-        memcpy(&bits, &vertices[i].x, sizeof(bits)); DECAL_HASH_FIELD(bits);
-        memcpy(&bits, &vertices[i].y, sizeof(bits)); DECAL_HASH_FIELD(bits);
-        memcpy(&bits, &vertices[i].z, sizeof(bits)); DECAL_HASH_FIELD(bits);
-        memcpy(&bits, &vertices[i].u, sizeof(bits)); DECAL_HASH_FIELD(bits);
-        memcpy(&bits, &vertices[i].v, sizeof(bits)); DECAL_HASH_FIELD(bits);
-    }
-#undef DECAL_HASH_FIELD
+    hash = native_decal_hash_pointer(hash, owner);
+    hash = native_decal_hash_pointer(hash, object);
+    hash = native_decal_hash_pointer(hash, transform);
     return hash ? hash : UINT64_C(1);
 }
 
-/* Keep the registry per submitted draw so overlapping objects with the same texture/state
- * remain independently selectable. 2D screen UI, lines, points and shadow-mask draws are excluded. */
-static int native_decal_register_candidate(const PcNativeVertex* vertices, int count,
-                                           const PcNativeDrawState* state, GLenum topology)
+void pcRendererDecalObjectBegin(const void* owner, const void* object, const void* transform)
+{
+    if (!native_decal_debug_enabled)
+        return;
+    if (native_decal_scope_overflow > 0) {
+        native_decal_scope_overflow++;
+        return;
+    }
+    if (native_decal_scope_depth >= NATIVE_DECAL_SCOPE_DEPTH) {
+        native_decal_scope_overflow = 1;
+        pcLog("native decal inspector: object scope nesting exceeded %d", NATIVE_DECAL_SCOPE_DEPTH);
+        return;
+    }
+    native_decal_scope_stack[native_decal_scope_depth++] = native_decal_object_context;
+    native_decal_object_context.owner = owner;
+    native_decal_object_context.object = object;
+    native_decal_object_context.transform = transform;
+    native_decal_object_context.candidate = -1;
+}
+
+void pcRendererDecalObjectEnd(void)
+{
+    if (!native_decal_debug_enabled)
+        return;
+    if (native_decal_scope_overflow > 0) {
+        native_decal_scope_overflow--;
+        return;
+    }
+    if (native_decal_scope_depth > 0)
+        native_decal_object_context = native_decal_scope_stack[--native_decal_scope_depth];
+    else {
+        native_decal_object_context.owner = NULL;
+        native_decal_object_context.object = NULL;
+        native_decal_object_context.transform = NULL;
+        native_decal_object_context.candidate = -1;
+    }
+}
+
+/* Cada NJS_CNK_OBJECT de bhPutModel agrupa sus draws. La clave distingue instancias
+ * del mismo modelo y reutiliza el grupo si el juego vuelve a dibujarlo en otra pasada. */
+static int native_decal_find_object(const void* owner, const void* object, const void* transform)
+{
+    int i;
+    for (i = 0; i < native_decal_candidate_count; i++) {
+        const NativeDecalCandidate* c = &native_decal_candidates[i];
+        if (c->owner == owner && c->object == object && c->transform == transform)
+            return i;
+    }
+    return -1;
+}
+
+static int native_decal_register_object_draw(const PcNativeVertex* vertices, int count,
+                                             const PcNativeDrawState* state, GLenum topology)
 {
     NativeDecalCandidate* c;
-    int i;
+    int candidate, i;
     if (!native_decal_debug_enabled || active_target != TARGET_SCREEN || !vertices || !state ||
-        count < 3 || !state->depth_test || state->screen_space == 1 ||
+        !native_decal_object_context.object || count < 3 || !state->depth_test ||
+        state->screen_space == 1 ||
         (topology != GL_TRIANGLES && topology != GL_TRIANGLE_STRIP))
         return -1;
-    if (native_decal_candidate_count >= NATIVE_DECAL_CANDIDATE_LIMIT)
-        return -1;
 
-    c = &native_decal_candidates[native_decal_candidate_count];
-    memset(c, 0, sizeof(*c));
-    c->key = native_decal_candidate_key(vertices, count, state, topology);
-    c->texture = state->texture;
-    c->topology = (int)topology;
-    c->count = count;
-    c->screen_space = state->screen_space;
-    c->blend = state->blend;
-    c->depth_write = state->depth_write;
-    c->textured = state->textured;
-    c->texture_function = state->texture_function;
-    c->min_x = c->max_x = vertices[0].x;
-    c->min_y = c->max_y = vertices[0].y;
-    c->min_z = c->max_z = vertices[0].z;
-    for (i = 1; i < count; i++) {
+    candidate = native_decal_object_context.candidate;
+    if (candidate < 0) {
+        candidate = native_decal_find_object(native_decal_object_context.owner,
+                                              native_decal_object_context.object,
+                                              native_decal_object_context.transform);
+        if (candidate < 0) {
+            if (native_decal_candidate_count >= NATIVE_DECAL_CANDIDATE_LIMIT)
+                return -1;
+            candidate = native_decal_candidate_count++;
+            c = &native_decal_candidates[candidate];
+            memset(c, 0, sizeof(*c));
+            c->key = native_decal_object_key(native_decal_object_context.owner,
+                                             native_decal_object_context.object,
+                                             native_decal_object_context.transform);
+            c->owner = native_decal_object_context.owner;
+            c->object = native_decal_object_context.object;
+            c->transform = native_decal_object_context.transform;
+            c->min_x = c->max_x = vertices[0].x;
+            c->min_y = c->max_y = vertices[0].y;
+            c->min_z = c->max_z = vertices[0].z;
+            c->texture = state->texture;
+            c->topology = (int)topology;
+            c->screen_space = state->screen_space;
+            c->blend = state->blend;
+            c->depth_write = state->depth_write;
+            c->textured = state->textured;
+            c->texture_function = state->texture_function;
+            if (native_decal_selected < 0)
+                native_decal_selected = 0;
+        }
+        native_decal_object_context.candidate = candidate;
+    }
+
+    c = &native_decal_candidates[candidate];
+    c->draw_count++;
+    c->vertex_count += (unsigned int)count;
+    for (i = 0; i < count; i++) {
         if (vertices[i].x < c->min_x) c->min_x = vertices[i].x;
         if (vertices[i].x > c->max_x) c->max_x = vertices[i].x;
         if (vertices[i].y < c->min_y) c->min_y = vertices[i].y;
@@ -209,16 +282,14 @@ static int native_decal_register_candidate(const PcNativeVertex* vertices, int c
         if (vertices[i].z < c->min_z) c->min_z = vertices[i].z;
         if (vertices[i].z > c->max_z) c->max_z = vertices[i].z;
     }
-    if (native_decal_selected < 0)
-        native_decal_selected = 0;
-    return native_decal_candidate_count++;
+    return candidate;
 }
 
 void pcRendererDecalDebugToggle(void)
 {
     native_decal_debug_enabled = !native_decal_debug_enabled;
     native_decal_selected = native_decal_debug_enabled ? 0 : -1;
-    pcLog("native decal inspector: %s (candidates are individual 3D triangle draws)",
+    pcLog("native decal inspector: %s (candidates are CNK object instances)",
           native_decal_debug_enabled ? "enabled" : "disabled");
 }
 
@@ -239,8 +310,9 @@ void pcRendererDecalDebugCycle(int direction)
         if (native_decal_selected >= native_decal_candidate_count) native_decal_selected = 0;
         if (native_decal_selected < 0) native_decal_selected = native_decal_candidate_count - 1;
     }
-    pcLog("native decal inspector: candidate %d/%d",
-          native_decal_selected + 1, native_decal_candidate_count);
+    pcLog("native decal inspector: object %d/%d (draws=%u)",
+          native_decal_selected + 1, native_decal_candidate_count,
+          native_decal_candidates[native_decal_selected].draw_count);
 }
 
 int pcRendererDecalDebugMark(void)
@@ -249,13 +321,13 @@ int pcRendererDecalDebugMark(void)
     int i;
     if (!native_decal_debug_enabled || native_decal_selected < 0 ||
         native_decal_selected >= native_decal_candidate_count) {
-        pcLog("native decal inspector: no selected candidate to mark");
+        pcLog("native decal inspector: no selected object to mark");
         return 0;
     }
     c = &native_decal_candidates[native_decal_selected];
     for (i = 0; i < native_decal_mark_count; i++) {
         if (native_decal_marks[i] == c->key) {
-            pcLog("native decal inspector: selected draw was already marked (candidate %d/%d)",
+            pcLog("native decal inspector: selected object was already marked (object %d/%d)",
                   native_decal_selected + 1, native_decal_candidate_count);
             return 2;
         }
@@ -265,12 +337,13 @@ int pcRendererDecalDebugMark(void)
         return 0;
     }
     native_decal_marks[native_decal_mark_count++] = c->key;
-    pcLog("native decal marked #%d/%d: key=%016llx tex=%u topology=0x%x verts=%d screen=%d "
-          "textured=%d blend=%d depth=1/%d fn=%d bounds=(%.2f,%.2f,%.4f)-(%.2f,%.2f,%.4f)",
+    pcLog("native decal object marked #%d/%d: key=%016llx owner=%p object=%p transform=%p "
+          "draws=%u vertices=%u first_tex=%u first_topology=0x%x blend=%d depth=1/%d fn=%d "
+          "bounds=(%.2f,%.2f,%.4f)-(%.2f,%.2f,%.4f)",
           native_decal_selected + 1, native_decal_candidate_count,
-          (unsigned long long)c->key, c->texture, c->topology, c->count, c->screen_space,
-          c->textured, c->blend, c->depth_write, c->texture_function,
-          c->min_x, c->min_y, c->min_z, c->max_x, c->max_y, c->max_z);
+          (unsigned long long)c->key, (void*)c->owner, (void*)c->object, (void*)c->transform,
+          c->draw_count, c->vertex_count, c->texture, c->topology, c->blend, c->depth_write,
+          c->texture_function, c->min_x, c->min_y, c->min_z, c->max_x, c->max_y, c->max_z);
     return 1;
 }
 
@@ -686,6 +759,12 @@ void pcRendererBeginFrame(void)
     alpha_histogram_used = 0;
     stat_immediate = stat_queued = stat_vertices = stat_screen_space = stat_batches = 0;
     native_decal_candidate_count = 0;
+    native_decal_scope_depth = 0;
+    native_decal_scope_overflow = 0;
+    native_decal_object_context.owner = NULL;
+    native_decal_object_context.object = NULL;
+    native_decal_object_context.transform = NULL;
+    native_decal_object_context.candidate = -1;
     flush_pending_deletes();
     active_target = TARGET_SCREEN;
     glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
@@ -1154,7 +1233,7 @@ static void batch_add(const NativeGpuVertex* v, int count, const PcNativeDrawSta
 }
 
 static void draw_immediate(const PcNativeVertex* vertices, int count, const PcNativeDrawState* state,
-                           GLenum topology, int decal_candidate)
+                           GLenum topology, int decal_object)
 {
     NativeGpuVertex* upload;
     int i;
@@ -1190,8 +1269,8 @@ static void draw_immediate(const PcNativeVertex* vertices, int count, const PcNa
             }
         }
     }
-    if (decal_candidate >= 0 && native_decal_debug_enabled &&
-        decal_candidate == native_decal_selected) {
+    if (decal_object >= 0 && native_decal_debug_enabled &&
+        decal_object == native_decal_selected) {
         batch_flush();
         emit_draw(upload, count, state, topology);
         emit_decal_outline(upload, count, state, topology);
@@ -1230,7 +1309,7 @@ static void restore_frame_state(const NativeFrameState* f)
 }
 
 static void queue_transparent(const PcNativeVertex* vertices, int count, const PcNativeDrawState* state,
-                              GLenum topology, int decal_candidate)
+                              GLenum topology, int decal_object)
 {
     NativeQueuedDraw* item;
     float depth = 0.0f;
@@ -1254,7 +1333,7 @@ static void queue_transparent(const PcNativeVertex* vertices, int count, const P
     capture_frame_state(&item->frame);
     item->topology = topology;
     item->sequence = transparent_sequence++;
-    item->decal_candidate = decal_candidate;
+    item->decal_object = decal_object;
     /* Clave del OT original (Ps2AddOT): bucket = (int)sz >> 4 (0..4095), sz = Z de la GS del ULTIMO vertice, mayor = mas cerca.
      * Se pinta de bucket menor (lejos) a mayor (cerca); dentro de un bucket, por orden de envio. */
     {
@@ -1287,11 +1366,11 @@ static int compare_transparent(const void* a, const void* b)
 
 static void draw(const PcNativeVertex* v, int n, const PcNativeDrawState* state, GLenum topology)
 {
-    int decal_candidate = native_decal_register_candidate(v, n, state, topology);
+    int decal_object = native_decal_register_object_draw(v, n, state, topology);
     if (state && ((state->blend && !state->immediate) || state->ot_queue) && active_target == TARGET_SCREEN)
-        queue_transparent(v, n, state, topology, decal_candidate);
+        queue_transparent(v, n, state, topology, decal_object);
     else
-        draw_immediate(v, n, state, topology, decal_candidate);
+        draw_immediate(v, n, state, topology, decal_object);
 }
 
 void pcRendererDrawTriangleStrip(const PcNativeVertex* v, int n, const PcNativeDrawState* s)
@@ -1396,7 +1475,7 @@ static void draw_queued_item(NativeQueuedDraw* item, int pass)
     restore_frame_state(&item->frame);
     depth_override_test = 1;   /* ZTE=1 GEQUAL */
     depth_override_write = ot_writes_depth ? 1 : 0;   /* ZMSK = 0 / 1 */
-    draw_immediate(item->vertices, item->count, &item->state, item->topology, item->decal_candidate);
+    draw_immediate(item->vertices, item->count, &item->state, item->topology, item->decal_object);
 }
 
 static void flush_transparent(int two_pass)

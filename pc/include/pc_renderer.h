@@ -84,7 +84,9 @@ void pcRendererCopyScreenToRenderTexture(int sx0, int sy0, int sx1, int sy1, int
 void pcRendererBindRenderTexture(void);
 uint64_t pcRendererFrameNumber(void);
 void pcRendererCaptureBurst(int frames);   /* guarda los N frames siguientes como recvx_burst_K.bmp (F8) */
-/* Debug-only native decal inspector. Candidates are individual 3D triangle draws. */
+/* Debug-only native decal inspector. CNK object scopes group all component draws of one instance. */
+void pcRendererDecalObjectBegin(const void* owner, const void* object, const void* transform);
+void pcRendererDecalObjectEnd(void);
 void pcRendererDecalDebugToggle(void);
 void pcRendererDecalDebugCycle(int direction);
 int pcRendererDecalDebugMark(void);

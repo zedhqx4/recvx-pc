@@ -118,21 +118,23 @@ Environment variables for testing:
 | `RECVX_SNDLOG=1` | log sound sequence starts, rejected sequences, sequence uploads and reverb changes |
 | `RECVX_MCLOG=1` | log save-folder (memory card) calls |
 
-## Native decal inspector (debug branch)
+## Native decal object inspector (debug branch)
 
 On the `debug/decal-selector` branch, set `debug=1` in `recvx.ini` and use the numeric keypad:
 
 | Key | Action |
 |---|---|
 | `*` | Toggle the inspector |
-| `+` / `-` | Select the next / previous 3D triangle draw |
-| `/` | Write the selected draw's renderer state and bounds to `recvx.log` |
+| `+` / `-` | Select the next / previous CNK object instance |
+| `/` | Write the selected object's renderer state and bounds to `recvx.log` |
 
-The selected draw is outlined in magenta. The inspector collects up to 4096 individual
-3D triangle draws per frame; screen-space UI, lines, points, and shadow-mask geometry are
-excluded. It records the state and vertex bounds seen by the native renderer, not a stable
-game-side object or CNK material pointer. Selection follows draw submission order, so keep
-the same room/camera while cycling candidates. The tool does not change geometry or depth.
+The selected object is outlined in magenta across all of its submitted triangle draws. The
+inspector groups draws at the `bhPutModel` / `NJS_CNK_OBJECT` instance boundary, using the
+owning game object, CNK object entry, and per-object transform slot as the identity. This
+keeps multiple instances of the same model separate and reuses the same selection group when
+the game submits a second lighting pass. Transparent draws retain their object association
+when queued. Up to 4096 object instances are collected per frame; screen-space UI, lines,
+points, and shadow-mask geometry are excluded. The tool does not change geometry or depth.
 
 ## Tools
 

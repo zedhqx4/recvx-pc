@@ -4,6 +4,9 @@
 #include "../../../ps2/veronica/prog/ps2_NaTextureFunction.h"
 #include "../../../ps2/veronica/prog/ps2_NinjaCnk.h"
 #include "../../../ps2/veronica/prog/main.h"
+#ifdef TARGET_PC
+#include "../../../../pc/include/pc_renderer.h"
+#endif
 
 void (*bhJumpCnkDraw[4])(BH_PWORK* ewP, NJS_CNK_OBJECT* objP, O_WORK* owP, int obj_num) = 
 { 
@@ -154,7 +157,13 @@ static void EasyMultiDrawTreeCnk(BH_PWORK* ewP, NJS_CNK_OBJECT* objP, O_WORK* ow
         
         if ((objP->model != NULL) && (!(objP->evalflags & 0x8)))
         {
+#ifdef TARGET_PC
+            pcRendererDecalObjectBegin(ewP, objP, owP);
+#endif
             njCnkEasyMultiDrawModel(objP->model);
+#ifdef TARGET_PC
+            pcRendererDecalObjectEnd();
+#endif
         }
         
         njPopMatrixEx();
@@ -179,7 +188,13 @@ static void SimpleMultiDrawTreeCnk(BH_PWORK* ewP, NJS_CNK_OBJECT* objP, O_WORK* 
         
         if ((objP->model != NULL) && (!(objP->evalflags & 0x8)))
         {
+#ifdef TARGET_PC
+            pcRendererDecalObjectBegin(ewP, objP, owP);
+#endif
             njCnkSimpleMultiDrawModel(objP->model);
+#ifdef TARGET_PC
+            pcRendererDecalObjectEnd();
+#endif
         }
         
         njPopMatrixEx();
@@ -204,7 +219,13 @@ static void EasyDrawTreeCnk(BH_PWORK* ewP, NJS_CNK_OBJECT* objP, O_WORK* owP, in
         
         if ((objP->model != NULL) && (!(objP->evalflags & 0x8)))
         {
+#ifdef TARGET_PC
+            pcRendererDecalObjectBegin(ewP, objP, owP);
+#endif
             njCnkEasyDrawModel(objP->model);
+#ifdef TARGET_PC
+            pcRendererDecalObjectEnd();
+#endif
         }
         
         njPopMatrixEx();
@@ -229,7 +250,13 @@ static void SimpleDrawTreeCnk(BH_PWORK* ewP, NJS_CNK_OBJECT* objP, O_WORK* owP, 
         
         if ((objP->model != NULL) && (!(objP->evalflags & 0x8)))
         {
+#ifdef TARGET_PC
+            pcRendererDecalObjectBegin(ewP, objP, owP);
+#endif
             njCnkSimpleDrawModel(objP->model);
+#ifdef TARGET_PC
+            pcRendererDecalObjectEnd();
+#endif
         }
         
         njPopMatrixEx();
