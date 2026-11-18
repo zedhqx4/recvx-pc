@@ -444,7 +444,7 @@ static int gpuq_head = -1, gpu_prof = -1;
 /* Desglose por pasada: marcas GL_TIMESTAMP entre categorias. El intervalo entre dos marcas se atribuye a la categoria que estaba
  * activa al cerrarlo. TIME_ELAPSED solo da el total; ademas cuenta los huecos en que la GPU espera a la CPU, por eso se mide
  * tambien el tiempo de CPU que tarda la escena (begin..end) para compararlo con el de GPU. */
-enum { GPUCAT_DIRECT, GPUCAT_OT, GPUCAT_SHADOW, GPUCAT_RTT, GPUCAT_COUNT };
+enum { GPUCAT_DIRECT, GPUCAT_OT, GPUCAT_SHADOW, GPUCAT_RTT, GPUCAT_RTT_CLEAR, GPUCAT_RTT_BLIT, GPUCAT_RTT_ALPHA, GPUCAT_COUNT };
 #define GPUQ_TS_MAX 96
 static GLuint gpuq_ts[GPUQ_RING][GPUQ_TS_MAX];
 static unsigned char gpuq_ts_cat[GPUQ_RING][GPUQ_TS_MAX];
@@ -539,11 +539,12 @@ static void gpu_timer_end(void)
         pcLog("PROFILE gpu scene: %.3f ms avg / %.3f ms max over %u frames | per frame: %.0f vertices, %.0f draws, %.0f GL batches | %.1f ns/vertex",
               gpu_sum_ms / gpu_frames, gpu_max_ms, gpu_frames, gpu_sum_verts / gpu_frames, gpu_sum_draws / gpu_frames,
               gpu_sum_batches / gpu_frames, gpu_sum_verts > 0.0 ? gpu_sum_ms * 1.0e6 / gpu_sum_verts : 0.0);
-        pcLog("PROFILE gpu passes (ms/frame de GPU): directo %.2f (%.1f tramos) | OT %.2f (%.1f) | sombras %.2f (%.1f) | copia a textura %.2f (%.1f) | CPU de la escena (begin..end) %.2f",
+        pcLog("PROFILE gpu passes (ms/frame de GPU): directo %.2f (%.1f tramos) | OT %.2f (%.1f) | sombras %.2f (%.1f) | copia a textura: preparar %.2f, limpiar %.2f, blit %.2f, alfa %.2f (%.1f copias) | CPU de la escena (begin..end) %.2f",
               gpu_cat_ms[GPUCAT_DIRECT] / gpu_frames, gpu_cat_ivl[GPUCAT_DIRECT] / gpu_frames,
               gpu_cat_ms[GPUCAT_OT] / gpu_frames, gpu_cat_ivl[GPUCAT_OT] / gpu_frames,
               gpu_cat_ms[GPUCAT_SHADOW] / gpu_frames, gpu_cat_ivl[GPUCAT_SHADOW] / gpu_frames,
-              gpu_cat_ms[GPUCAT_RTT] / gpu_frames, gpu_cat_ivl[GPUCAT_RTT] / gpu_frames, gpu_cpu_span_sum / gpu_frames);
+              gpu_cat_ms[GPUCAT_RTT] / gpu_frames, gpu_cat_ms[GPUCAT_RTT_CLEAR] / gpu_frames, gpu_cat_ms[GPUCAT_RTT_BLIT] / gpu_frames,
+              gpu_cat_ms[GPUCAT_RTT_ALPHA] / gpu_frames, gpu_cat_ivl[GPUCAT_RTT_ALPHA] / gpu_frames, gpu_cpu_span_sum / gpu_frames);
         memset(gpu_cat_ms, 0, sizeof(gpu_cat_ms)); memset(gpu_cat_ivl, 0, sizeof(gpu_cat_ivl)); gpu_cpu_span_sum = 0.0;
         gpu_sum_ms = gpu_max_ms = gpu_sum_verts = gpu_sum_draws = gpu_sum_batches = 0.0;
         gpu_frames = 0;
@@ -1667,12 +1668,14 @@ static int copy_rect_to_texture_impl(unsigned int* texture, int x, int y, int w,
     }
 
     glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+    gpu_mark(GPUCAT_RTT_CLEAR);
     if (y == 0) {
         /* Cada captura comienza con negro; las filas 480..511 permanecen negras. */
         glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
         glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT);
     }
+    gpu_mark(GPUCAT_RTT_BLIT);
     if (vw > 0 && vh > 0) {
         glBlitFramebuffer((GLint)(x * kx), render_height - (GLint)(y * ky),
                           (GLint)((x + vw) * kx), render_height - (GLint)((y + vh) * ky),
@@ -1680,11 +1683,19 @@ static int copy_rect_to_texture_impl(unsigned int* texture, int x, int y, int w,
                           GL_COLOR_BUFFER_BIT, GL_LINEAR);
     }
 
-    /* En el buffer PS2 cada texel RGB32 se entrega con A=0x80, equivalente a GL alpha=1. */
-    glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_TRUE);
-    glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
-    glClear(GL_COLOR_BUFFER_BIT);
-    glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+    /* En el buffer PS2 cada texel RGB32 se entrega con A=0x80, equivalente a GL alpha=1. Solo hace falta en el rectangulo recien
+     * copiado: el resto de la textura ya tiene alfa=1 (la limpieza de y==0 pone RGBA=(0,0,0,1) y las bandas anteriores ya
+     * repusieron su alfa), asi que el resultado es identico a limpiar toda la textura en cada banda, con menos relleno. */
+    gpu_mark(GPUCAT_RTT_ALPHA);
+    if (vw > 0 && vh > 0) {
+        glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_TRUE);
+        glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+        glEnable(GL_SCISSOR_TEST);
+        glScissor(x * scale, y * scale, vw * scale, vh * scale);
+        glClear(GL_COLOR_BUFFER_BIT);
+        glDisable(GL_SCISSOR_TEST);
+        glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+    }
 
     glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
     if (scissor_enabled) {

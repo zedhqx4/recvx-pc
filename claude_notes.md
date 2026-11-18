@@ -440,3 +440,11 @@ categorias: directo (limpiar, tiras opacas, 2D), OT (flush_transparent), sombras
 atribuye a la categoria activa. Nueva linea cada 120 frames: "PROFILE gpu passes". Incluye tambien el tiempo de CPU de la escena
 (begin..end): `GL_TIME_ELAPSED` cuenta tambien los huecos en que la GPU espera a la CPU, asi que si el total de GPU ~ el CPU de la
 escena, el "GPU scene" estaba inflado por espera y no es coste real de GPU. Es la primera cosa a mirar en el log.
+
+## 0.9.152 - Copia a textura (render_texture_scale): desglose y menos relleno de alfa
+Log f5286098 (cuarto del agua, scale 4, gpu_vertex=1): por frame directo 1-7 ms, OT 0.5-1.7, sombras 0.07, **copia a textura 9-19 ms
+(3 copias de 2048x2048)**. En los frames de captura el CPU de bhMainSequence "render-texture" tambien marca ~20 ms: la CPU espera a esa GPU.
+Cambios: (1) el perfil parte la copia en preparar / limpiar / blit / alfa. (2) la limpieza de alfa (A=1, mascara de color solo A) se
+hacia sobre TODA la textura en cada una de las 3 bandas; ahora solo sobre el rectangulo recien copiado (scissor x*scale, y*scale,
+vw*scale, vh*scale). Resultado identico: y==0 ya limpia RGBA=(0,0,0,1) y las bandas anteriores ya repusieron su alfa.
+No se asume que esto explique los 6 ms por copia; el siguiente log dira que fase pesa (linea "PROFILE gpu passes").
