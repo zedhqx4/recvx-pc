@@ -30,8 +30,7 @@ typedef struct {
                                   flags: x=X y=Y z=Z, r..a = RGBA en 0..255, u=S v=T, q=Q, fog=F) y el vertex shader hace la
                                   conversion a GS (punto fijo 12.4, Z entero de 16 bits, FTOI0 de color y niebla, S/Q);
                                   4: registros crudos del empaquetador del EE (Ps2AddPrim3D): posicion en pantalla NO homogenea (w=1),
-                                  Z de la GS = (int)(sz*16)/16 desde Q, XY = (int)(X*16)/16, color 0..255, S/Q en el fragmento.
-                                  Con depth_float=1, los modos 2-4 reconstruyen Z fraccionaria desde Q. */
+                                  Z de la GS = (int)(sz*16)/16 desde Q, XY = (int)(X*16)/16, color 0..255, S/Q en el fragmento */
     int cull_backfaces;
     int ot_z_valid;            /* 1: ot_z holds the GS Z (0..65534, bigger = nearer) used to order the OT */
     float ot_z;
@@ -39,7 +38,7 @@ typedef struct {
     int fog;                   /* PRIM.FGE: apply the global fog color using the per-vertex fog factor */
     int ot_queue;              /* 1: goes through the OT even without ABE (2D: the GS ordered it by Z bucket, then by submission) */
     int immediate;             /* blended primitive that the game draws at once instead of through the OT */
-    float zbuff_a, zbuff_b;    /* screen_space 2-4: constantes de Z de la GS, sz = -a + q * -b */
+    float zbuff_a, zbuff_b;    /* screen_space 3 y 4: constantes de Z de la GS, sz = -a + q * -b (0 en los demas modos) */
 } PcNativeDrawState;
 
 int pcRendererInit(int width, int height);

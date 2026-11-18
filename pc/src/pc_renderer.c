@@ -80,8 +80,7 @@ static int active_target = TARGET_SCREEN;
 static GLuint vertex_array;
 static GLuint vertex_buffer;
 static GLuint program;
-static int depth_float_mode = 1; /* hybrid test: float32 reversed-Z; depth_float=0 restores legacy GS16 */
-static GLint u_target, u_projection, u_aspect, u_offset, u_near, u_far, u_depth_mode;
+static GLint u_target, u_projection, u_aspect, u_offset, u_near, u_far;
 static GLint u_textured, u_texture, u_fog_enabled, u_fog_color, u_alpha_test, u_alpha_ref;
 static GLint u_zbuf, u_screen_space, u_texture_size, u_texture_function, u_texture_alpha, u_texture_perspective, u_alpha_pass;
 static GLint u_debug;
@@ -449,7 +448,7 @@ static const char* vertex_shader =
     "layout(location=3) in float aFog;\n"
     "layout(location=4) in float aQ;\n"
     "uniform vec2 uTarget; uniform float uProjection; uniform vec2 uAspect; uniform vec2 uOffset;\n"
-    "uniform float uNear; uniform float uFar; uniform int uScreenSpace; uniform int uDepthMode; uniform vec2 uZbuf; uniform vec2 uTextureSize;\n"
+    "uniform float uNear; uniform float uFar; uniform int uScreenSpace; uniform vec2 uZbuf; uniform vec2 uTextureSize;\n"
     /* La GS interpola color y niebla linealmente en pantalla (sin correccion de perspectiva); solo ST lleva Q */
     "noperspective out vec4 vColor; out vec2 vTexCoord; noperspective out float vFog; out float vQ;\n"
     "void main(){\n"
@@ -459,7 +458,8 @@ static const char* vertex_shader =
     "  if(uScreenSpace==3){\n"
     "    float q=aQ; if(q>-1e-9&&q<1e-9)q=1e-9;\n"
     "    float sz=-uZbuf.x+q*-uZbuf.y;\n"
-    "    float depth; if(uDepthMode!=0) depth=clamp(sz/65536.0,0.0,1.0); else { float zc=floor(clamp(sz,0.0,65534.0)); depth=clamp(1.0-zc/65535.0,0.0,1.0); }\n"
+    "    float zc=floor(clamp(sz,0.0,65534.0));\n"
+    "    float depth=clamp(1.0-zc/65535.0,0.0,1.0);\n"
     "    vec2 p=floor(aViewPosition.xy*16.0)/16.0-vec2(1728.0,1808.0);\n"
     "    vec4 c=floor(clamp(aColor,0.0,255.0));\n"
     "    vColor=vec4(c.rgb/255.0,min(c.a/128.0,1.0));\n"
@@ -471,7 +471,8 @@ static const char* vertex_shader =
      * texels. A diferencia del 3, la posicion NO es homogenea (w=1): la GS interpola Z en pantalla y la division S/Q va en el fragmento. */
     "  if(uScreenSpace==4){\n"
     "    float sz=clamp(-uZbuf.x+aQ*-uZbuf.y,0.0,65534.0);\n"
-    "    float depth; if(uDepthMode!=0) depth=clamp(sz/65536.0,0.0,1.0); else { float gz=trunc(sz*16.0)/16.0; depth=clamp(1.0-gz/65535.0,0.0,1.0); }\n"
+    "    float gz=trunc(sz*16.0)/16.0;\n"
+    "    float depth=clamp(1.0-gz/65535.0,0.0,1.0);\n"
     "    vec2 p=trunc(aViewPosition.xy*16.0)/16.0-vec2(1728.0,1808.0);\n"
     "    vec4 c=floor(clamp(aColor,0.0,255.0));\n"
     "    vColor=vec4(clamp(c.rgb/255.0,0.0,1.0),clamp(c.a/128.0,0.0,1.0));\n"
@@ -481,16 +482,16 @@ static const char* vertex_shader =
     /* uScreenSpace==2 (modelos 3D): x,y en pixeles, z = profundidad GS sin recortar, q = 1/w. Coordenadas homogeneas
      * (x*w, y*w, z*w, w): la GPU recorta contra cercano/lejano y los lados sin generar poligonos de scissor, y UV, Z y
      * color salen como los de la GS. w>0 al frente (q>0), un vertice con q<=0 queda detras de la camara. */
-    "  if(uScreenSpace==2){ float w=1.0/aQ; float depth=aViewPosition.z; if(uDepthMode!=0){ float sz=clamp(-uZbuf.x+aQ*-uZbuf.y,0.0,65534.0); depth=clamp(sz/65536.0,0.0,1.0); } vec2 n=vec2(aViewPosition.x/uTarget.x*2.0-1.0, 1.0-aViewPosition.y/uTarget.y*2.0);\n"
-    "    gl_Position=vec4(n*w,(depth*2.0-1.0)*w,w); return; }\n"
-    "  if(uScreenSpace!=0){ float depth=(uDepthMode!=0)?(1.0-aViewPosition.z):aViewPosition.z; vec2 n=vec2(aViewPosition.x/uTarget.x*2.0-1.0, 1.0-aViewPosition.y/uTarget.y*2.0);\n"
-    "    gl_Position=vec4(n,depth*2.0-1.0,1.0); return; }\n"
+    "  if(uScreenSpace==2){ float w=1.0/aQ; vec2 n=vec2(aViewPosition.x/uTarget.x*2.0-1.0, 1.0-aViewPosition.y/uTarget.y*2.0);\n"
+    "    gl_Position=vec4(n*w,(aViewPosition.z*2.0-1.0)*w,w); return; }\n"
+    "  if(uScreenSpace!=0){ vec2 n=vec2(aViewPosition.x/uTarget.x*2.0-1.0, 1.0-aViewPosition.y/uTarget.y*2.0);\n"
+    "    gl_Position=vec4(n,aViewPosition.z*2.0-1.0,1.0); return; }\n"
     "  float z=aViewPosition.z;\n"
     "  vec2 sp=vec2(aViewPosition.x*uProjection*uAspect.x, aViewPosition.y*uProjection*uAspect.y);\n"
     "  float cx=sp.x*2.0/uTarget.x + (uOffset.x*2.0/uTarget.x-1.0)*z;\n"
     "  float cy=z*(1.0-uOffset.y*2.0/uTarget.y) - sp.y*2.0/uTarget.y;\n"
     "  float k=uFar/(uFar-uNear);\n"
-    "  float cz=2.0*(k*z-k*uNear)-z; if(uDepthMode!=0) cz=-cz;\n"
+    "  float cz=2.0*(k*z-k*uNear)-z;\n"
     "  gl_Position=vec4(cx,cy,cz,z);\n"
     "}\n";
 
@@ -520,10 +521,7 @@ static const char* fragment_shader =
     /* El Z-buffer de la GS es PSMZ16 (ZBUF_1 = PSMCT16S/Z16): el Z interpolado se guarda entero de 16 bits (sz = 0..65535). Dos
      * superficies casi coplanares dan el MISMO Z y gana la dibujada despues (ZTST=GEQUAL). Con la profundidad de 24 bits de GL
      * se peleaban (z-fighting); se reproduce la cuantizacion de la GS. */
-    "#if PC_FLOAT_DEPTH == 0\n"
-    "  gl_FragDepth=1.0-floor((1.0-gl_FragCoord.z)*65535.0+0.01)/65535.0;\n"
-    "#endif\n"
-    "}\n";
+    "  gl_FragDepth=1.0-floor((1.0-gl_FragCoord.z)*65535.0+0.01)/65535.0; }\n";
 
 static GLuint compile_shader(GLenum type, const char* source)
 {
@@ -544,31 +542,10 @@ static GLuint compile_shader(GLenum type, const char* source)
     return shader;
 }
 
-static GLuint compile_fragment_shader(int float_depth)
-{
-    const char* version_end = strchr(fragment_shader, '\n');
-    size_t prefix_size;
-    size_t source_size;
-    char* source;
-    GLuint shader;
-
-    if (!version_end) return 0;
-    prefix_size = (size_t)(version_end - fragment_shader) + 1;
-    source_size = strlen(fragment_shader) + 40;
-    source = (char*)malloc(source_size);
-    if (!source) return 0;
-    memcpy(source, fragment_shader, prefix_size);
-    snprintf(source + prefix_size, source_size - prefix_size,
-             "#define PC_FLOAT_DEPTH %d\n%s", float_depth ? 1 : 0, version_end + 1);
-    shader = compile_shader(GL_FRAGMENT_SHADER, source);
-    free(source);
-    return shader;
-}
-
-static GLuint create_program(int float_depth)
+static GLuint create_program(void)
 {
     GLuint vs = compile_shader(GL_VERTEX_SHADER, vertex_shader);
-    GLuint fs = compile_fragment_shader(float_depth);
+    GLuint fs = compile_shader(GL_FRAGMENT_SHADER, fragment_shader);
     GLuint p;
     GLint ok = 0;
     GLchar log[2048];
@@ -638,10 +615,7 @@ static int create_targets(int width, int height)
 
     glGenTextures(1, &depth_target);
     glBindTexture(GL_TEXTURE_2D, depth_target);
-    if (depth_float_mode)
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT32F, width, height, 0, GL_DEPTH_COMPONENT, GL_FLOAT, NULL);
-    else
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT24, width, height, 0, GL_DEPTH_COMPONENT, GL_UNSIGNED_INT, NULL);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT24, width, height, 0, GL_DEPTH_COMPONENT, GL_UNSIGNED_INT, NULL);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 
@@ -693,14 +667,7 @@ int pcRendererInit(int width, int height)
     offset_x = (float)width * 0.5f;
     offset_y = (float)height * 0.5f;
 
-    {
-        const char* e = getenv("RECVX_DEPTH_FLOAT");
-        depth_float_mode = e ? (*e != '0') : (pcIniGetInt("depth_float", 1) != 0);
-        pcLog("native renderer: depth path %s (%s)",
-              depth_float_mode ? "float32 reversed-Z" : "legacy GS16 quantized",
-              e ? "RECVX_DEPTH_FLOAT" : "depth_float in recvx.ini");
-    }
-    program = create_program(depth_float_mode);
+    program = create_program();
     if (!program) return 0;
 
     u_target = glGetUniformLocation(program, "uTarget");
@@ -709,7 +676,6 @@ int pcRendererInit(int width, int height)
     u_offset = glGetUniformLocation(program, "uOffset");
     u_near = glGetUniformLocation(program, "uNear");
     u_far = glGetUniformLocation(program, "uFar");
-    u_depth_mode = glGetUniformLocation(program, "uDepthMode");
     u_textured = glGetUniformLocation(program, "uTextured");
     u_texture = glGetUniformLocation(program, "uTexture");
     u_fog_enabled = glGetUniformLocation(program, "uFogEnabled");
@@ -728,7 +694,6 @@ int pcRendererInit(int width, int height)
         const char* e = getenv("RECVX_GS_INT");
         int gs_int = e ? (*e != '0') : (pcIniGetInt("gs_int", 1) != 0);   /* entorno RECVX_GS_INT o gs_int= en recvx.ini */
         glUseProgram(program);
-        glUniform1i(u_depth_mode, depth_float_mode);
         glUniform1i(glGetUniformLocation(program, "uGsInt"), gs_int);
         pcLog("native renderer: aritmetica entera de la GS (MODULATE >>7, niebla >>8): %s", gs_int ? "activa" : "desactivada (gs_int=0 / RECVX_GS_INT=0)");
     }
@@ -884,14 +849,14 @@ void pcRendererBeginFrame(void)
     glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
     glViewport(0, 0, render_width, render_height);
     glEnable(GL_DEPTH_TEST);
-    glDepthFunc(depth_float_mode ? GL_GEQUAL : GL_LEQUAL);
+    glDepthFunc(GL_LEQUAL);
     glDepthMask(GL_TRUE);
     glDisable(GL_BLEND);
     glDisable(GL_SCISSOR_TEST);   /* glClear respeta el scissor: un recorte de un draw anterior dejaria restos del frame previo */
     glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
     if (debug_magenta) glClearColor(1.0f, 0.0f, 1.0f, 1.0f); /* RECVX_CLEAR_DEBUG=1: magenta = blit works, nothing drawn */
     else glClearColor(clear_color[0], clear_color[1], clear_color[2], clear_color[3]);
-    glClearDepth(depth_float_mode ? 0.0 : 1.0);
+    glClearDepth(1.0);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
     gl_shadow_invalidate();
     gpu_timer_begin();
@@ -1000,7 +965,7 @@ void pcRendererClear(float r, float g, float b, float a, int clear_depth)
     glClearColor(r, g, b, a);
     if (clear_depth) {
         glDepthMask(GL_TRUE);   /* glClear respeta la mascara de escritura de profundidad */
-        glClearDepth(depth_float_mode ? 0.0 : 1.0);
+        glClearDepth(1.0);
         mask |= GL_DEPTH_BUFFER_BIT;
     }
     glClear(mask);

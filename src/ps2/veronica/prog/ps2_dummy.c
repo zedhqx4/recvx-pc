@@ -1857,7 +1857,7 @@ static void pcSubmitVertices(unsigned long prim, const PcNativeVertex* vertices,
     state.alpha_ref = 0.004f;
     state.linear_filter = 1;
     state.screen_space = screen_space;
-    if (screen_space >= 2 && screen_space <= 4) {   /* rutas 3D homogeneas: el shader puede reconstruir Z fraccionaria desde Q */
+    if (screen_space == 3 || screen_space == 4) {   /* vertices crudos: el vertex shader necesita las constantes de Z de la GS */
         state.zbuff_a = Ps2_zbuff_a;
         state.zbuff_b = Ps2_zbuff_b;
     }
