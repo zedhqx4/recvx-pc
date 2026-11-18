@@ -886,7 +886,7 @@ static void apply_state(const PcNativeDrawState* st)
  * cambia). Todo lo que cambie estado GL o global del renderer vacia el lote antes (batch_flush). gl_batch=0 en recvx.ini lo desactiva. */
 #define BATCH_MAX_VERTICES 65536
 static NativeGpuVertex* batch_vertices;
-static int batch_count, batch_target, batch_lock;
+static int batch_count, batch_target;
 static GLenum batch_topology;
 static PcNativeDrawState batch_state;
 
@@ -991,7 +991,7 @@ static void draw_immediate(const PcNativeVertex* vertices, int count, const PcNa
             }
         }
     }
-    if (state && !batch_lock && gl_batch_on() && (topology == GL_TRIANGLE_STRIP || topology == GL_TRIANGLES) && count < 8192) {
+    if (state && gl_batch_on() && (topology == GL_TRIANGLE_STRIP || topology == GL_TRIANGLES) && count < 8192) {
         batch_add(upload, count, state, topology);
         return;
     }
@@ -1147,10 +1147,39 @@ static int item_may_be_translucent(const NativeQueuedDraw* q)
 }
 
 /* Dibuja un item de la cola con una prueba de alfa de la GS: ALPHA_PASS_OPAQUE (alfa >= 128, escribe Z) o ALPHA_PASS_TRANSLUCENT. */
+/* Agrupacion en el vaciado del OT: dos items CONSECUTIVOS (en el orden ya ordenado) con el mismo contexto -mismo estado de dibujo,
+ * mismo estado global capturado (proyeccion, niebla, mezcla, scissor, Z), misma topologia y misma mitad de prueba de alfa- salen en un
+ * solo draw, igual que los draws inmediatos. El orden de los items no cambia nunca; en cuanto el contexto cambia el lote se vacia
+ * ANTES de tocar los globales (restore_frame_state), porque el lote se emite con los globales vigentes en ese momento. */
+static const NativeQueuedDraw* queue_prev_item;
+static int queue_prev_pass;
+
+static int queue_effective_pass(const NativeQueuedDraw* item, int pass)
+{
+    return item->state.blend ? pass : ALPHA_PASS_ALL;   /* sin ABE no hay prueba de alfa partida: se dibuja entero */
+}
+
+static int queue_same_context(const NativeQueuedDraw* a, int pass_a, const NativeQueuedDraw* b, int pass_b)
+{
+    const NativeFrameState* x = &a->frame;
+    const NativeFrameState* y = &b->frame;
+    return pass_a == pass_b && a->topology == b->topology && memcmp(&a->state, &b->state, sizeof(a->state)) == 0 &&
+           x->projection == y->projection && x->aspect_w == y->aspect_w && x->aspect_h == y->aspect_h &&
+           x->offset_x == y->offset_x && x->offset_y == y->offset_y && x->near_clip == y->near_clip && x->far_clip == y->far_clip &&
+           x->fog_enabled == y->fog_enabled && memcmp(x->fog_color, y->fog_color, sizeof(x->fog_color)) == 0 &&
+           x->blend.equation == y->blend.equation && x->blend.src == y->blend.src && x->blend.dst == y->blend.dst &&
+           x->blend.fix == y->blend.fix && x->scissor_enabled == y->scissor_enabled &&
+           memcmp(x->scissor_rect, y->scissor_rect, sizeof(x->scissor_rect)) == 0 &&
+           x->depth_test == y->depth_test && x->depth_write == y->depth_write;
+}
+
 static void draw_queued_item(NativeQueuedDraw* item, int pass)
 {
-    /* Sin ABE no hay prueba de alfa partida en dos mitades: se dibuja entero, con escritura de Z (ZMSK=0) */
-    if (!item->state.blend) pass = ALPHA_PASS_ALL;
+    pass = queue_effective_pass(item, pass);
+    if (queue_prev_item && !queue_same_context(queue_prev_item, queue_prev_pass, item, pass))
+        batch_flush();   /* el lote anterior se emite con los globales del item anterior: antes de cambiarlos */
+    queue_prev_item = item;
+    queue_prev_pass = pass;
     alpha_pass = pass;
     ot_writes_depth = (pass != ALPHA_PASS_TRANSLUCENT);
     restore_frame_state(&item->frame);
@@ -1167,7 +1196,7 @@ static void flush_transparent(int two_pass)
     if (!ready || transparent_count <= 0) return;
     NativeFrameState live;
     batch_flush();
-    batch_lock++;   /* el OT cambia el estado global entre items: sin agrupar mientras se vacia */
+    queue_prev_item = NULL;   /* el OT se agrupa por contexto (draw_queued_item); el lote se vacia al final */
     active_target = TARGET_SCREEN;   /* el OT siempre dibuja en la pantalla, nunca en la mascara de sombras */
     capture_frame_state(&live);
     qsort(transparent_queue, (size_t)transparent_count, sizeof(*transparent_queue), compare_transparent);
@@ -1224,6 +1253,8 @@ static void flush_transparent(int two_pass)
             }
         }
     }
+    batch_flush();   /* ultimo lote del OT, con los globales del ultimo item */
+    queue_prev_item = NULL;
     alpha_pass = ALPHA_PASS_ALL;
     ot_writes_depth = 0;
     for (i = 0; i < transparent_count; i++) {
@@ -1233,7 +1264,6 @@ static void flush_transparent(int two_pass)
     restore_frame_state(&live);
     transparent_count = 0;
     active_target = saved_target;
-    batch_lock--;
 }
 
 void pcRendererFlushTransparent(void) { batch_flush(); flush_transparent(0); }

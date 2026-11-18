@@ -424,3 +424,11 @@ La CPU conserva solo el kick (ADC de 6 bits, copiado de pcPs2Prim3DCore) y la Z 
 Consumidores auditados: item_may_be_translucent (convierte alfa en modos 3 y 4), pcSubmitVertices (zbuff y texture_perspective para 4),
 queue_transparent (solo lee z si !screen_space), pcAssemblePrepared (solo copia; sprites excluidos), logs. Perfil: "PROFILE prepared3D".
 Prueba numerica: pc/tools/test_gpu_vertex4.c, 0 diferencias en 2M casos (sin FMA). La ruta CPU sigue siendo referencia y fallback.
+
+## 0.9.150 - OT: items consecutivos con el mismo contexto salen en un solo draw
+Commit independiente. Antes, `flush_transparent` ponia `batch_lock` y emitia un draw por item de la cola. Ahora `draw_queued_item`
+compara el item con el anterior (`queue_same_context`: estado de dibujo, estado global capturado, topologia y mitad de alfa efectiva)
+y, si coincide, lo acumula en el lote de draws inmediatos. Si el contexto cambia, `batch_flush()` ANTES de `restore_frame_state`,
+porque el lote se emite con los globales vigentes (alpha_pass, ot_writes_depth, mezcla, scissor, niebla, Z). El orden del OT no
+cambia nunca. `batch_lock` desaparece (ya nadie lo usa). Se ve en el log: "GL batches" baja frente a "draws" y a `queued`.
+Reversible con `git revert` de este commit. gl_batch=0 tambien lo desactiva (cada item emite su draw).
