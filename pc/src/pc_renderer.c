@@ -149,6 +149,8 @@ static NativeDecalObjectContext native_decal_scope_stack[NATIVE_DECAL_SCOPE_DEPT
 static NativeDecalObjectContext native_decal_object_context;
 static int native_decal_scope_depth;
 static int native_decal_scope_overflow;
+static const void* native_decal_world_owner;
+static int native_decal_world_active;
 static uint64_t native_decal_marks[NATIVE_DECAL_MARK_LIMIT];
 static int native_decal_candidate_count;
 static int native_decal_mark_count;
@@ -198,8 +200,6 @@ void pcRendererDecalObjectBegin(const void* owner, const void* object, const voi
 
 void pcRendererDecalObjectEnd(void)
 {
-    if (!native_decal_debug_enabled)
-        return;
     if (native_decal_scope_overflow > 0) {
         native_decal_scope_overflow--;
         return;
@@ -212,6 +212,36 @@ void pcRendererDecalObjectEnd(void)
         native_decal_object_context.transform = NULL;
         native_decal_object_context.candidate = -1;
     }
+}
+
+/* El escenario estatico se dibuja desde rom->mdl.objP, sin pasar por bhPutModel.
+ * El owner identifica el arbol del cuarto; cada nodo CNK visible recibe su propio grupo. */
+void pcRendererDecalWorldBegin(const void* room_root)
+{
+    if (!native_decal_debug_enabled || !room_root)
+        return;
+    native_decal_world_owner = room_root;
+    native_decal_world_active = 1;
+}
+
+void pcRendererDecalWorldEnd(void)
+{
+    native_decal_world_active = 0;
+    native_decal_world_owner = NULL;
+}
+
+void pcRendererDecalWorldObjectBegin(const void* object)
+{
+    if (!native_decal_world_active || !object)
+        return;
+    pcRendererDecalObjectBegin(native_decal_world_owner, object, object);
+}
+
+void pcRendererDecalWorldObjectEnd(void)
+{
+    if (!native_decal_world_active)
+        return;
+    pcRendererDecalObjectEnd();
 }
 
 /* Cada NJS_CNK_OBJECT de bhPutModel agrupa sus draws. La clave distingue instancias
@@ -765,6 +795,8 @@ void pcRendererBeginFrame(void)
     native_decal_object_context.object = NULL;
     native_decal_object_context.transform = NULL;
     native_decal_object_context.candidate = -1;
+    native_decal_world_owner = NULL;
+    native_decal_world_active = 0;
     flush_pending_deletes();
     active_target = TARGET_SCREEN;
     glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);

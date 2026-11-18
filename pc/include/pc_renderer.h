@@ -87,6 +87,10 @@ void pcRendererCaptureBurst(int frames);   /* guarda los N frames siguientes com
 /* Debug-only native decal inspector. CNK object scopes group all component draws of one instance. */
 void pcRendererDecalObjectBegin(const void* owner, const void* object, const void* transform);
 void pcRendererDecalObjectEnd(void);
+void pcRendererDecalWorldBegin(const void* room_root);
+void pcRendererDecalWorldEnd(void);
+void pcRendererDecalWorldObjectBegin(const void* object);
+void pcRendererDecalWorldObjectEnd(void);
 void pcRendererDecalDebugToggle(void);
 void pcRendererDecalDebugCycle(int direction);
 int pcRendererDecalDebugMark(void);

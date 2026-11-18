@@ -19,6 +19,7 @@ unsigned int pcVu0StripClip(const unsigned short* idx, int n, const void* vbuf);
 void pcVu0StripPack(void* dst, const unsigned short* idx, int n, const void* vbuf, const float zb[4]);
 #include "../../../../pc/include/pc_vu.h"
 #include "../../../../pc/include/pc_platform.h"
+#include "../../../../pc/include/pc_renderer.h"
 
 /* Perfil opt-in (debug=1, profile_game=1): cuantas tiras de la ruta del EE llegan a vu1Draw* y cuantas se descartan por
  * recorte de frustum tras pasar todos sus vertices por _CVV. Una linea "PROFILE cnk strips" cada 20000 tiras. */
@@ -599,7 +600,13 @@ void    njCnkEasyDrawObject( NJS_CNK_OBJECT *model )
         } 
         else
         {
+#ifdef TARGET_PC
+            pcRendererDecalWorldObjectBegin(model);
+#endif
             lDrawResult = njCnkDrawModelLocal(model->model);
+#ifdef TARGET_PC
+            pcRendererDecalWorldObjectEnd();
+#endif
         }
     
         if (!(ulFlags & 0x10)) 
@@ -657,7 +664,13 @@ void    njCnkEasyMultiDrawObject( NJS_CNK_OBJECT *model )
         } 
         else
         {
+#ifdef TARGET_PC
+            pcRendererDecalWorldObjectBegin(model);
+#endif
             lDrawResult = njCnkDrawModelLocal(model->model);
+#ifdef TARGET_PC
+            pcRendererDecalWorldObjectEnd();
+#endif
         }
     
         if (!(ulFlags & 0x10)) 

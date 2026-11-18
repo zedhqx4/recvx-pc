@@ -20,6 +20,7 @@
 #include "../../../../pc/src/pc_os.h"
 #include "../../../../pc/include/pc_platform.h"
 #include "../../../../pc/include/pc_game_profile.h"
+#include "../../../../pc/include/pc_renderer.h"
 
 enum
 {
@@ -819,11 +820,17 @@ void bhAllDrawModel()
     }
     njSetMatrix(0, cam.mtx);
     if ((rom->mdl.objP != 0) && (sys->pt_flg & 0x20)) {
+#ifdef TARGET_PC
+        pcRendererDecalWorldBegin(rom->mdl.objP);
+#endif
         if (sys->gm_flg & 0x80) {
             PC_PROFILE_SCOPE_CALL(profile, PC_GAME_PROFILE_SCOPE_ROOM, GP_MODEL_ROOM, njCnkEasyDrawObject(rom->mdl.objP));
         } else {
             PC_PROFILE_SCOPE_CALL(profile, PC_GAME_PROFILE_SCOPE_ROOM, GP_MODEL_ROOM, njCnkEasyMultiDrawObject(rom->mdl.objP));
         }
+#ifdef TARGET_PC
+        pcRendererDecalWorldEnd();
+#endif
     }
     njControl3D(0x2400);
     if ((sys->en_objn != 0) && (sys->pt_flg & 2)) {
@@ -894,11 +901,17 @@ void bhAllEasyDrawModel()
     }
     njSetMatrix(0, cam.mtx);
     if ((rom->mdl.objP != 0) && (sys->pt_flg & 0x20)) {
+#ifdef TARGET_PC
+        pcRendererDecalWorldBegin(rom->mdl.objP);
+#endif
         if (sys->gm_flg & 0x80) {
             njCnkEasyDrawObject(rom->mdl.objP);
         } else {
             njCnkEasyMultiDrawObject(rom->mdl.objP); 
         }
+#ifdef TARGET_PC
+        pcRendererDecalWorldEnd();
+#endif
     }
     bhDrawObjItm();
     njControl3D(0x10000);
@@ -920,11 +933,17 @@ void bhEtcMirrorDrawModel()
     }
     njSetMatrix(0, cam.mtx);
     if ((rom->mdl.objP != 0) && (sys->pt_flg & 0x20)) {
+#ifdef TARGET_PC
+        pcRendererDecalWorldBegin(rom->mdl.objP);
+#endif
         if (sys->gm_flg & 0x80) {
             njCnkEasyDrawObject(rom->mdl.objP);
         } else {
             njCnkEasyMultiDrawObject(rom->mdl.objP); 
         }
+#ifdef TARGET_PC
+        pcRendererDecalWorldEnd();
+#endif
     }
     bhSetHideObject(0);
     njControl3D(0x100);
