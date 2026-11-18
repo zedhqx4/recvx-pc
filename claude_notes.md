@@ -385,3 +385,7 @@ Revision de 7ba674d (base 0.9.135): StoreRenderTex ya no hace glReadPixels de 51
 - Correcto en lo revisado: orden de franjas validado (y == filas capturadas), cambio de tamano reinicia la entrada, 16 entradas maximas, fallback no mezcla franjas.
 - Integracion con esta rama: pcRendererCopyScreenRectToTexture hace batch_flush() + gl_shadow_invalidate() (cambia FBO/viewport/scissor/colormask fuera de apply_state); pcRendererFlushTransparent{,I} vacian el lote aunque el OT este vacio.
 - A vigilar: render_texture_scale=2 amplia con filtro lineal desde 640x480 (doble filtrado, algo mas suave que la copia 1:1 de la GS); scale=1 es lo exacto con render 640x480. Mismo comportamiento que en la rama probada por el usuario.
+
+## 0.9.145: medicion de 0.9.144 y arreglo del contador de lotes
+Log 8d44cc06 (0.9.144, render_texture_scale=4, GPU-only capture activa): 91 ventanas de 60 frames, promedio 19.3 ms (mediana 20.7, la peor ventana 28.5 ms), 0 ventanas por encima de 33 ms. Envio de tiras opacas: 0.34 us/vertice (antes 1.5 en 0.9.141 con 1.6/0.63 segun escena) => ~4x menos. plist 74.6 us/chunk.
+- Contador "GL batches" del log era acumulado (no se reiniciaba por frame): ahora se reinicia junto con los demas de stat_*.

@@ -425,7 +425,7 @@ void pcRendererBeginFrame(void)
         pcLog("native renderer: ALPHA registers set in the last frame: %s", line);
     }
     alpha_histogram_used = 0;
-    stat_immediate = stat_queued = stat_vertices = stat_screen_space = 0;
+    stat_immediate = stat_queued = stat_vertices = stat_screen_space = stat_batches = 0;
     flush_pending_deletes();
     active_target = TARGET_SCREEN;
     glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
