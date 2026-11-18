@@ -9,6 +9,7 @@
 #include "../../include/ps2/veronica/prog/ps2_loadtim2.h"
 #include "pc_renderer.h"
 #include "pc_platform.h"
+#include "../include/pc_game_profile.h"
 
 #define PC_TEX_CACHE_MAX 4096
 
@@ -522,7 +523,35 @@ static void debug_dump_texture(const TIM2_PICTUREHEADER_EX* ext, const TIM2_PICT
  * Cada rechazo solo hace pcLog(); buscar "native texture:" en recvx.log. Si aparece para casi todo, esta es la causa.
  * CLAUDE-NOTE[N11]: pcRendererConfigureTexture() cambia filtro/wrap de la textura COMPARTIDA en cada carga, asi que el
  * sampler depende de quien la cargo ultima. */
+static int native_texture_load_impl(NJS_TEXMEMLIST* addr);
+
+/* Perfil (profile_game=1): CPU de pcNativeTextureLoad por frame, repartido en hash de contenido, decodificacion+subida y enlace. */
+static double tex_ms_total, tex_ms_hash, tex_ms_new, tex_ms_bind;
+static unsigned tex_calls, tex_calls_new, tex_logged_frame;
+
 int pcNativeTextureLoad(NJS_TEXMEMLIST* addr)
+{
+    int result;
+    double t0;
+    if (!pcGameProfileEnabled()) return native_texture_load_impl(addr);
+    t0 = pcGameProfileNowMs();
+    result = native_texture_load_impl(addr);
+    tex_ms_total += pcGameProfileNowMs() - t0;
+    tex_calls++;
+    {
+        unsigned int frame = pcRendererFrameNumber();
+        if (frame % 120 == 0 && frame != tex_logged_frame) {
+            tex_logged_frame = frame;
+            pcLog("PROFILE texture bind (CPU, ms acumulados en 120 frames /120): total %.2f | hash %.2f | decodificar+subir %.2f (%u nuevas) | enlazar+sampler %.2f | %.1f binds/frame",
+                  tex_ms_total / 120.0, tex_ms_hash / 120.0, tex_ms_new / 120.0, tex_calls_new, tex_ms_bind / 120.0, (double)tex_calls / 120.0);
+            tex_ms_total = tex_ms_hash = tex_ms_new = tex_ms_bind = 0.0;
+            tex_calls = tex_calls_new = 0;
+        }
+    }
+    return result;
+}
+
+static int native_texture_load_impl(NJS_TEXMEMLIST* addr)
 {
     TIM2_PICTUREHEADER_EX* ext;
     TIM2_PICTUREHEADER* ph;
@@ -536,6 +565,7 @@ int pcNativeTextureLoad(NJS_TEXMEMLIST* addr)
     unsigned int texture;
     int linear = 1, wrap_u = 1, wrap_v = 1;
     int clut_in_vram = 0;
+    double bind_t0 = 0.0;
 
     if (addr == NULL || addr->texinfo.texsurface.pSurface == NULL) {
         pcRendererBindTexture(0);
@@ -603,8 +633,12 @@ int pcNativeTextureLoad(NJS_TEXMEMLIST* addr)
         texture = bind_memo.texture;
         goto bind;
     }
-    ih = hash_bytes(image, image_size);
-    ch = hash_bytes(clut, clut_size);
+    {
+        double th0 = pcGameProfileEnabled() ? pcGameProfileNowMs() : 0.0;
+        ih = hash_bytes(image, image_size);
+        ch = hash_bytes(clut, clut_size);
+        if (th0 != 0.0) tex_ms_hash += pcGameProfileNowMs() - th0;
+    }
 
     entry = find_entry(gindex, bank);
     if (entry && entry->image_hash == ih && entry->clut_hash == ch &&
@@ -613,6 +647,7 @@ int pcNativeTextureLoad(NJS_TEXMEMLIST* addr)
         entry->pict_format == ph->PictFormat) {
         texture = entry->texture;
     } else {
+        double tn0 = pcGameProfileEnabled() ? pcGameProfileNowMs() : 0.0;
         pixels = (size_t)ph->ImageWidth * ph->ImageHeight;
         if (pixels > (size_t)2048 * 2048 || pixels > SIZE_MAX / 4u) {
             pcRendererBindTexture(0);
@@ -665,6 +700,7 @@ int pcNativeTextureLoad(NJS_TEXMEMLIST* addr)
         entry->clut_type = ph->ClutType;
         entry->pict_format = ph->PictFormat;
         entry->texture = texture;
+        if (tn0 != 0.0) { tex_ms_new += pcGameProfileNowMs() - tn0; tex_calls_new++; }
     }
 
     bind_memo.surface = ext;
@@ -675,6 +711,7 @@ int pcNativeTextureLoad(NJS_TEXMEMLIST* addr)
     bind_memo.valid = 1;
 
 bind:
+    bind_t0 = pcGameProfileEnabled() ? pcGameProfileNowMs() : 0.0;
     /* ClampFlag carries GS WMS/WMT in its low nibbles. */
     if (ext->ClampFlag != 0) {
         wrap_u = (int)(ext->ClampFlag & 3u);
@@ -685,5 +722,6 @@ bind:
     /* TEX0 lo escribe Ps2BindTextureState, no la cabecera TIM2 (su GsTex0.TFX/TCC es basura: se vio TFX=4): siempre MODULATE, y
      * TCC=1 para las texturas paletizadas / PictFormat 5..8 y TCC=0 para las RGBA32 (el alfa sale solo del vertice). */
     pcRendererSetTextureCombine(0 /* SCE_GS_MODULATE */, ph->ImageType == TIM2_RGB32 ? 0 : 1);
+    if (bind_t0 != 0.0) tex_ms_bind += pcGameProfileNowMs() - bind_t0;
     return 1;
 }

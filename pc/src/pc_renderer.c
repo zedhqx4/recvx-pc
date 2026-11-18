@@ -451,6 +451,8 @@ static unsigned char gpuq_ts_cat[GPUQ_RING][GPUQ_TS_MAX];
 static int gpuq_ts_n[GPUQ_RING], gpu_cat_cur;
 static double gpuq_cpu0[GPUQ_RING], gpuq_cpu_span[GPUQ_RING];
 static double gpu_cat_ms[GPUCAT_COUNT], gpu_cat_ivl[GPUCAT_COUNT], gpu_cpu_span_sum, gpu_blit_cpu_ms;
+static double emit_cpu_ms;      /* CPU dentro de emit_draw, mas abajo */
+static unsigned emit_cpu_calls;
 static double gpu_sum_ms, gpu_max_ms, gpu_sum_verts, gpu_sum_draws, gpu_sum_batches;
 static unsigned gpu_frames;
 
@@ -539,13 +541,13 @@ static void gpu_timer_end(void)
         pcLog("PROFILE gpu scene: %.3f ms avg / %.3f ms max over %u frames | per frame: %.0f vertices, %.0f draws, %.0f GL batches | %.1f ns/vertex",
               gpu_sum_ms / gpu_frames, gpu_max_ms, gpu_frames, gpu_sum_verts / gpu_frames, gpu_sum_draws / gpu_frames,
               gpu_sum_batches / gpu_frames, gpu_sum_verts > 0.0 ? gpu_sum_ms * 1.0e6 / gpu_sum_verts : 0.0);
-        pcLog("PROFILE gpu passes (ms/frame de GPU): directo %.2f (%.1f tramos) | OT %.2f (%.1f) | sombras %.2f (%.1f) | copia a textura: preparar %.2f, limpiar %.2f, blit %.2f, alfa %.2f (%.1f copias) | CPU dentro de glBlitFramebuffer %.2f | CPU de la escena (begin..end) %.2f",
+        pcLog("PROFILE gpu passes (ms/frame de GPU): directo %.2f (%.1f tramos) | OT %.2f (%.1f) | sombras %.2f (%.1f) | copia a textura: preparar %.2f, limpiar %.2f, blit %.2f, alfa %.2f (%.1f copias) | CPU dentro de glBlitFramebuffer %.2f | CPU en draws GL %.2f ms (%.0f draws/frame) | CPU de la escena (begin..end) %.2f",
               gpu_cat_ms[GPUCAT_DIRECT] / gpu_frames, gpu_cat_ivl[GPUCAT_DIRECT] / gpu_frames,
               gpu_cat_ms[GPUCAT_OT] / gpu_frames, gpu_cat_ivl[GPUCAT_OT] / gpu_frames,
               gpu_cat_ms[GPUCAT_SHADOW] / gpu_frames, gpu_cat_ivl[GPUCAT_SHADOW] / gpu_frames,
               gpu_cat_ms[GPUCAT_RTT] / gpu_frames, gpu_cat_ms[GPUCAT_RTT_CLEAR] / gpu_frames, gpu_cat_ms[GPUCAT_RTT_BLIT] / gpu_frames,
-              gpu_cat_ms[GPUCAT_RTT_ALPHA] / gpu_frames, gpu_cat_ivl[GPUCAT_RTT_ALPHA] / gpu_frames, gpu_blit_cpu_ms / gpu_frames, gpu_cpu_span_sum / gpu_frames);
-        memset(gpu_cat_ms, 0, sizeof(gpu_cat_ms)); memset(gpu_cat_ivl, 0, sizeof(gpu_cat_ivl)); gpu_cpu_span_sum = 0.0; gpu_blit_cpu_ms = 0.0;
+              gpu_cat_ms[GPUCAT_RTT_ALPHA] / gpu_frames, gpu_cat_ivl[GPUCAT_RTT_ALPHA] / gpu_frames, gpu_blit_cpu_ms / gpu_frames, emit_cpu_ms / gpu_frames, (double)emit_cpu_calls / gpu_frames, gpu_cpu_span_sum / gpu_frames);
+        memset(gpu_cat_ms, 0, sizeof(gpu_cat_ms)); memset(gpu_cat_ivl, 0, sizeof(gpu_cat_ivl)); gpu_cpu_span_sum = 0.0; gpu_blit_cpu_ms = 0.0; emit_cpu_ms = 0.0; emit_cpu_calls = 0;
         gpu_sum_ms = gpu_max_ms = gpu_sum_verts = gpu_sum_draws = gpu_sum_batches = 0.0;
         gpu_frames = 0;
     }
@@ -950,7 +952,7 @@ static int gl_batch_on(void)
     return on;
 }
 
-static void emit_draw(const NativeGpuVertex* upload, int count, const PcNativeDrawState* state, GLenum topology)
+static void emit_draw_impl(const NativeGpuVertex* upload, int count, const PcNativeDrawState* state, GLenum topology)
 {
     apply_state(state);
     glBindVertexArray(vertex_array);
@@ -964,6 +966,21 @@ static void emit_draw(const NativeGpuVertex* upload, int count, const PcNativeDr
     glDrawArrays(topology, (GLint)stream_cursor, count);
     stream_cursor += (unsigned)count;
     glBindVertexArray(0);
+}
+
+/* Tiempo de CPU dentro de los draws GL (apply_state + subida + glDrawArrays), solo con profile_game=1. Sirve para repartir el coste
+ * de CPU entre "preparar la geometria" y "enviarla al driver", que de otro modo se mezclan con quien provoca el vaciado del lote
+ * (p. ej. el cambio de textura del chunk CtTid). */
+static void emit_draw(const NativeGpuVertex* upload, int count, const PcNativeDrawState* state, GLenum topology)
+{
+    if (gpu_profile_on()) {
+        double t0 = pcGameProfileNowMs();
+        emit_draw_impl(upload, count, state, topology);
+        emit_cpu_ms += pcGameProfileNowMs() - t0;
+        emit_cpu_calls++;
+    } else {
+        emit_draw_impl(upload, count, state, topology);
+    }
 }
 
 static void batch_flush(void)

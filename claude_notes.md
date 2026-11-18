@@ -472,3 +472,13 @@ blit sino en otra cosa (p.ej. reloj de la GPU en frames ligeros) y la ruta se de
 Log 4b6f76c2 (0.9.154, scale 4, rtt_blit_draw=1): blit 8-18 ms -> 0.2 ms por frame de captura; GPU de escena (~4300 vertices) 18-20 -> 7.2 ms.
 Usuario: F8 sin diferencias visibles. `rtt_blit_draw=0` vuelve a glBlitFramebuffer (referencia). El CPU de la seccion render-texture
 (~21 ms, redibujo de la escena) no cambia: el siguiente cuello es CPU. Los picos de 144 ms GPU / 38 ms CPU eran el volcado de la rafaga F8.
+
+## 0.9.156 - Perfil de CPU: draws GL y enlace de texturas (solo medicion)
+Log 4b6f76c2 (cuarto del agua): en los frames de captura bhMainSequence "render-texture" = ~22 ms de CPU = bhAllDrawModel (room 11.8 ms,
+objetos 6.7, jugador 1.75). Dentro de room, "PROFILE CNK type": tipo 8 (njCnkCtTid = cambio de textura, 42 llamadas/frame) = 10 ms
+(0.24 ms por llamada) y tipo 66 (tiras) solo 1.3-1.7 ms. El chunk de textura solo llama a njSetTextureNumSys -> Ps2TexLoad ->
+pcNativeTextureLoad (los contadores "PROFILE TEX" de Ps2TexLoad estan en la rama #else de PC y siempre salen 0). Candidatos:
+(a) hash_bytes de imagen+CLUT en cada enlace (bind_memo solo recuerda UNA superficie por frame), (b) vaciado del lote GL pendiente
+al cambiar de textura (CPU del driver), (c) pcRendererConfigureTexture (glTexParameteri en cada carga), (d) decodificar+subir.
+Nuevos contadores (solo con profile_game=1): "PROFILE texture bind" (total / hash / decodificar+subir / enlazar+sampler, binds/frame) y,
+en "PROFILE gpu passes", "CPU en draws GL X ms (N draws/frame)". No cambia lo que se dibuja.
