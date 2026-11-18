@@ -1602,6 +1602,78 @@ void pcRendererCopyScreenToRenderTexture(int sx0, int sy0, int sx1, int sy1, int
 
 /* Copia una franja de un TIM2 renderizado a una unica textura GL persistente.
  * width/height son dimensiones lógicas; el almacenamiento físico usa render_texture_scale. */
+/* ---- Copia a textura por draw (rtt_blit_draw=1) ----------------------------------------------------------------------------
+ * Ruta paralela a glBlitFramebuffer, activable por INI. La copia por blit costaba 3-6 ms de GPU por banda aunque la textura destino
+ * fuera de 1024^2 o de 2048^2 y sin esperas de CPU (log 5eb925c7), asi que no era trabajo por pixel. Aqui se dibuja un triangulo
+ * que cubre el rectangulo destino y el fragmento muestrea la pantalla con el MISMO mapeo que el blit: centro de cada pixel destino
+ * -> coordenada de origen = origen + (px+0.5)*(ancho_origen/ancho_destino), con el eje Y invertido, filtro LINEAR y borde fijado. */
+static GLuint rtt_program, rtt_vao;
+static GLint rtt_u_map, rtt_u_org, rtt_u_size;
+
+static int rtt_blit_draw_on(void)
+{
+    static int on = -1;
+    if (on < 0) {
+        on = pcIniGetInt("rtt_blit_draw", 0) != 0;
+        if (on) pcLog("native renderer: rtt_blit_draw=1: copia a textura por draw en lugar de glBlitFramebuffer");
+    }
+    return on;
+}
+
+static int rtt_draw_prepare(void)
+{
+    static const char* vs_src =
+        "#version 330 core\n"
+        "void main(){ vec2 p=vec2(float((gl_VertexID<<1)&2),float(gl_VertexID&2)); gl_Position=vec4(p*2.0-1.0,0.0,1.0); }\n";
+    static const char* fs_src =
+        "#version 330 core\nuniform sampler2D uSrc; uniform vec4 uMap; uniform vec2 uOrg; uniform vec2 uSize; out vec4 o;\n"
+        "void main(){ vec2 l=gl_FragCoord.xy-uOrg; vec2 s=vec2(uMap.x+l.x*uMap.z, uMap.y-l.y*uMap.w); o=texture(uSrc,s/uSize); }\n";
+    if (!rtt_program) {
+        GLuint vs = compile_shader(GL_VERTEX_SHADER, vs_src), fs = compile_shader(GL_FRAGMENT_SHADER, fs_src);
+        GLint ok = 0;
+        if (!vs || !fs) return 0;
+        rtt_program = glCreateProgram();
+        glAttachShader(rtt_program, vs);
+        glAttachShader(rtt_program, fs);
+        glLinkProgram(rtt_program);
+        glGetProgramiv(rtt_program, GL_LINK_STATUS, &ok);
+        glDeleteShader(vs);
+        glDeleteShader(fs);
+        if (!ok) { glDeleteProgram(rtt_program); rtt_program = 0; pcLog("native renderer: rtt_blit_draw: link failed, se usa el blit"); return 0; }
+        glUseProgram(rtt_program);
+        glUniform1i(glGetUniformLocation(rtt_program, "uSrc"), 0);
+        rtt_u_map = glGetUniformLocation(rtt_program, "uMap");
+        rtt_u_org = glGetUniformLocation(rtt_program, "uOrg");
+        rtt_u_size = glGetUniformLocation(rtt_program, "uSize");
+        glGenVertexArrays(1, &rtt_vao);
+    }
+    return rtt_program != 0;
+}
+
+/* Rectangulo destino (dx,dy,dw,dh) de la textura que esta en el FBO de dibujo; origen: esquina (sx0,sy0) con sy0 > sy1 (mismo
+ * convenio invertido que el blit), tamano sw x sh en pixeles de la pantalla. Devuelve 0 si no pudo (se usa el blit). */
+static int rtt_draw_copy(int dx, int dy, int dw, int dh, int sx0, int sy0, int sx1, int sy1)
+{
+    if (!rtt_draw_prepare() || dw <= 0 || dh <= 0) return 0;
+    glViewport(dx, dy, dw, dh);
+    glDisable(GL_SCISSOR_TEST);
+    glDisable(GL_DEPTH_TEST);
+    glDisable(GL_BLEND);
+    glDisable(GL_CULL_FACE);
+    glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+    glUseProgram(rtt_program);
+    glUniform4f(rtt_u_map, (float)sx0, (float)sy0, (float)(sx1 - sx0) / (float)dw, (float)(sy0 - sy1) / (float)dh);
+    glUniform2f(rtt_u_org, (float)dx, (float)dy);
+    glUniform2f(rtt_u_size, (float)render_width, (float)render_height);
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, color_target);
+    glBindVertexArray(rtt_vao);
+    glDrawArrays(GL_TRIANGLES, 0, 3);
+    glBindVertexArray(0);
+    gl_shadow_invalidate();
+    return 1;
+}
+
 static int copy_rect_to_texture_impl(unsigned int* texture, int x, int y, int w, int h,
                                       int image_width, int image_height)
 {
@@ -1684,6 +1756,10 @@ static int copy_rect_to_texture_impl(unsigned int* texture, int x, int y, int w,
     gpu_mark(GPUCAT_RTT_BLIT);
     if (vw > 0 && vh > 0) {
         double cpu_t0 = gpu_profile_on() ? pcGameProfileNowMs() : 0.0;
+        if (!(rtt_blit_draw_on() &&
+              rtt_draw_copy(x * scale, y * scale, vw * scale, vh * scale,
+                            (GLint)(x * kx), render_height - (GLint)(y * ky),
+                            (GLint)((x + vw) * kx), render_height - (GLint)((y + vh) * ky))))
         glBlitFramebuffer((GLint)(x * kx), render_height - (GLint)(y * ky),
                           (GLint)((x + vw) * kx), render_height - (GLint)((y + vh) * ky),
                           x * scale, y * scale, (x + vw) * scale, (y + vh) * scale,

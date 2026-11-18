@@ -458,3 +458,12 @@ o el driver la prepara). Cambio: al empezar una captura (y==0) se re-especifica 
 Tambien se mide el CPU dentro de glBlitFramebuffer ("CPU dentro de glBlitFramebuffer" en PROFILE gpu passes): si es ~ el tiempo de
 blit, la CPU espera dentro de la llamada (sincronizacion); si es ~0, el tiempo es de GPU. Si el orphaning no lo arregla, el
 siguiente paso es doble buffer (ping-pong) de la textura destino por render target.
+
+## 0.9.154 - rtt_blit_draw=1: copia a textura por draw (ruta paralela, opt-in)
+Log 5eb925c7 (0.9.153, scale 4): el orphaning NO bajo el blit (6-18 ms por frame de captura) y "CPU dentro de glBlitFramebuffer" = 0.00,
+asi que no es una espera de CPU ni de relleno (el coste era igual a escala 2 y 4). Hipotesis que queda: el blit escalado/invertido con
+LINEAR de glBlitFramebuffer toma una via lenta del driver (NVIDIA GTX 1050 Ti). Para comprobarlo sin tocar la ruta de referencia:
+INI `rtt_blit_draw=1` dibuja un triangulo sobre el rectangulo destino y el fragmento muestrea color_target con el mismo mapeo
+(centro de pixel destino -> origen + (px+0.5)*(ancho_origen/ancho_destino), Y invertido, LINEAR, borde fijado). Por defecto 0 (blit).
+Se compara con F8 (misma escena, 0 vs 1) y con "blit X ms" de PROFILE gpu passes. Si no cambia el tiempo, el coste no esta en el
+blit sino en otra cosa (p.ej. reloj de la GPU en frames ligeros) y la ruta se descarta. El orphaning de 0.9.153 queda (inofensivo).
