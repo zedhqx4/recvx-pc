@@ -25,6 +25,11 @@
 #define GL_LINK_STATUS 0x8B82
 #define GL_INFO_LOG_LENGTH 0x8B84
 #endif
+#ifndef GL_TIME_ELAPSED
+#define GL_TIME_ELAPSED 0x88BF            /* ARB_timer_query, parte del nucleo de GL 3.3 */
+#define GL_QUERY_RESULT 0x8866
+#define GL_QUERY_RESULT_AVAILABLE 0x8867
+#endif
 #ifndef GL_DEPTH_COMPONENT24
 #define GL_DEPTH_COMPONENT24 0x81A6
 #endif
@@ -120,7 +125,13 @@ typedef ptrdiff_t GLintptr;
     X(void, glReadPixels, (GLint x, GLint y, GLsizei w, GLsizei h, GLenum fmt, GLenum type, void* data)) \
     X(void, glPixelStorei, (GLenum p, GLint v)) \
     X(GLenum, glGetError, (void)) \
-    X(void, glGetIntegerv, (GLenum pname, GLint* data))
+    X(void, glGetIntegerv, (GLenum pname, GLint* data)) \
+    X(void, glGenQueries, (GLsizei n, GLuint* ids)) \
+    X(void, glDeleteQueries, (GLsizei n, const GLuint* ids)) \
+    X(void, glBeginQuery, (GLenum target, GLuint id)) \
+    X(void, glEndQuery, (GLenum target)) \
+    X(void, glGetQueryObjectiv, (GLuint id, GLenum pname, GLint* params)) \
+    X(void, glGetQueryObjectui64v, (GLuint id, GLenum pname, uint64_t* params))
 
 #define PC_GL_DECLARE(ret, name, args) typedef ret (APIENTRY* PFN_pc_##name) args; extern PFN_pc_##name pc_##name;
 PC_GL_FUNCS(PC_GL_DECLARE)
@@ -188,5 +199,11 @@ PC_GL_FUNCS(PC_GL_DECLARE)
 #define glPixelStorei pc_glPixelStorei
 #define glGetError pc_glGetError
 #define glGetIntegerv pc_glGetIntegerv
+#define glGenQueries pc_glGenQueries
+#define glDeleteQueries pc_glDeleteQueries
+#define glBeginQuery pc_glBeginQuery
+#define glEndQuery pc_glEndQuery
+#define glGetQueryObjectiv pc_glGetQueryObjectiv
+#define glGetQueryObjectui64v pc_glGetQueryObjectui64v
 
 int pcGlLoad(void);

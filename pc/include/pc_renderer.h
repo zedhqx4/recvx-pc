@@ -25,7 +25,10 @@ typedef struct {
     int alpha_test;
     float alpha_ref;
     int linear_filter;
-    int screen_space;          /* 0: espacio de vista; 1: pixeles (z = profundidad); 2: pixeles homogeneos, w = 1/q (recorte en GPU) */
+    int screen_space;          /* 0: espacio de vista; 1: pixeles (z = profundidad); 2: pixeles homogeneos, w = 1/q (recorte en GPU);
+                                  3: igual que 2 pero los vertices llegan CRUDOS (registro de 12 floats de la VU1 sin el campo de
+                                  flags: x=X y=Y z=Z, r..a = RGBA en 0..255, u=S v=T, q=Q, fog=F) y el vertex shader hace la
+                                  conversion a GS (punto fijo 12.4, Z entero de 16 bits, FTOI0 de color y niebla, S/Q) */
     int cull_backfaces;
     int ot_z_valid;            /* 1: ot_z holds the GS Z (0..65534, bigger = nearer) used to order the OT */
     float ot_z;
@@ -33,6 +36,7 @@ typedef struct {
     int fog;                   /* PRIM.FGE: apply the global fog color using the per-vertex fog factor */
     int ot_queue;              /* 1: goes through the OT even without ABE (2D: the GS ordered it by Z bucket, then by submission) */
     int immediate;             /* blended primitive that the game draws at once instead of through the OT */
+    float zbuff_a, zbuff_b;    /* screen_space 3: constantes de Z de la GS, sz = -a + q * -b (0 en los demas modos) */
 } PcNativeDrawState;
 
 int pcRendererInit(int width, int height);

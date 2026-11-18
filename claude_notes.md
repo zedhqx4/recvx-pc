@@ -389,3 +389,14 @@ Revision de 7ba674d (base 0.9.135): StoreRenderTex ya no hace glReadPixels de 51
 ## 0.9.145: medicion de 0.9.144 y arreglo del contador de lotes
 Log 8d44cc06 (0.9.144, render_texture_scale=4, GPU-only capture activa): 91 ventanas de 60 frames, promedio 19.3 ms (mediana 20.7, la peor ventana 28.5 ms), 0 ventanas por encima de 33 ms. Envio de tiras opacas: 0.34 us/vertice (antes 1.5 en 0.9.141 con 1.6/0.63 segun escena) => ~4x menos. plist 74.6 us/chunk.
 - Contador "GL batches" del log era acumulado (no se reiniciaba por frame): ahora se reinicia junto con los demas de stat_*.
+
+## 0.9.146: ruta GPU paralela para la conversion de vertices 3D (gpu_vertex) + mediciones separadas
+Objetivo del usuario: datos del juego -> geometria nativa -> GPU, sin conversiones/emulacion PS2 innecesarias; NO sustituir la ruta actual: ruta paralela activable por INI para comparar con F8; medir por separado CPU por vertice, envio y GPU.
+- Opcion: `gpu_vertex=0|1` en recvx.ini (o RECVX_GPU_VERTEX). Defecto 0 = ruta CPU de siempre, intacta. Reiniciar el juego para alternar; F8 en cada modo y comparar.
+- Ruta GPU (`screen_space=3`): pcSubmitStrip3D copia el registro crudo de la VU1 (S,T,Q,R,G,B,A,X,Y,Z,F; 11 floats = mismo PcNativeVertex) y calcula en CPU solo lo que es logica de ensamblado: el filtro de recorte ADC (kick) y, SOLO en tiras con mezcla (para ordenar el OT), la Z entera. El vertex shader hace con las mismas operaciones y orden que la CPU: XY punto fijo 12.4 (floor(x*16)/16 - 1728/1808), Z de 16 bits (sz=-a+q*-b, clamp 0..65534, floor, 1-zc/65535), FTOI0 de color/niebla (floor(clamp(x,0,255))/255, alfa /128 con tope 1), S/Q*tam en texels, w=1/q. Constantes de Z de la GS (Ps2_zbuff_a/b) viajan en PcNativeDrawState (entran en la clave de agrupacion de draws).
+- Verificacion (pc/tools/test_gpu_vertex.c, 10M vertices, 5 camaras, incl. Q~0, colores fuera de rango): GLSL transcrito vs CPU = 0 diferencias. Variante "GPU" (multiplicar-sumar fusionado + division como reciproco), tras la cuantizacion del fragment shader: 0 diferencias de Z de 16 bits, color y niebla; U/V hasta 1 ulp. LIMITE: es una transcripcion y una simulacion de libertades de la GPU, no ejecuta el driver; la confirmacion real es F8 en ambos modos.
+- Mediciones (debug=1 + profile_game=1), tres lineas separadas:
+  1. `PROFILE strips3D [CPU|GPU]`: CPU por vertice ("convert": conversion o copia + recorte ADC) y envio por vertice (ensamblado + cola/lote + GL).
+  2. `PROFILE gpu scene`: tiempo de GPU de la escena con GL_TIME_ELAPSED en anillo de 6 consultas (lectura sin bloquear), junto a vertices/draws/lotes por frame y ns/vertice.
+  3. `PROFILE vu1Draw ...` y `PROFILE CNK ...` (ya existentes).
+- Que NO hace todavia (siguiente): colores de vu1Draw*/iluminacion siguen en CPU (la VU1 emulada en C), el filtro ADC sigue en CPU, el OT de transparencias sigue ordenando en CPU, y las tiras 2D/sprites (pcSubmitPrepared3D) no pasan por la ruta cruda.

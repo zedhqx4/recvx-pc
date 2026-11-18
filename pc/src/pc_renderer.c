@@ -10,6 +10,7 @@
 #include "pc_gl.h"
 #include "pc_renderer.h"
 #include "pc_platform.h"
+#include "pc_game_profile.h"
 
 typedef struct {
     float x, y, z;
@@ -80,7 +81,7 @@ static GLuint vertex_buffer;
 static GLuint program;
 static GLint u_target, u_projection, u_aspect, u_offset, u_near, u_far;
 static GLint u_textured, u_texture, u_fog_enabled, u_fog_color, u_alpha_test, u_alpha_ref;
-static GLint u_screen_space, u_texture_size, u_texture_function, u_texture_alpha, u_texture_perspective, u_alpha_pass;
+static GLint u_zbuf, u_screen_space, u_texture_size, u_texture_function, u_texture_alpha, u_texture_perspective, u_alpha_pass;
 static int output_width = 640;
 static int output_height = 480;
 static int render_width = 640;
@@ -134,10 +135,24 @@ static const char* vertex_shader =
     "layout(location=3) in float aFog;\n"
     "layout(location=4) in float aQ;\n"
     "uniform vec2 uTarget; uniform float uProjection; uniform vec2 uAspect; uniform vec2 uOffset;\n"
-    "uniform float uNear; uniform float uFar; uniform int uScreenSpace;\n"
+    "uniform float uNear; uniform float uFar; uniform int uScreenSpace; uniform vec2 uZbuf; uniform vec2 uTextureSize;\n"
     /* La GS interpola color y niebla linealmente en pantalla (sin correccion de perspectiva); solo ST lleva Q */
     "noperspective out vec4 vColor; out vec2 vTexCoord; noperspective out float vFog; out float vQ;\n"
     "void main(){\n"
+    /* uScreenSpace==3: vertices CRUDOS de la VU1. Mismas operaciones, en el mismo orden, que pcSubmitStrip3D en la CPU
+     * (modo gpu_vertex=0): XYZ2 es punto fijo 12.4 (FTOI4 trunca a 1/16 de pixel), el Z de la GS es entero de 16 bits afin
+     * en Q (FTOI0 trunca), color y niebla se saturan a 0..255 y se truncan (FTOI0), y S/Q se pasa a texels. */
+    "  if(uScreenSpace==3){\n"
+    "    float q=aQ; if(q>-1e-9&&q<1e-9)q=1e-9;\n"
+    "    float sz=-uZbuf.x+q*-uZbuf.y;\n"
+    "    float zc=floor(clamp(sz,0.0,65534.0));\n"
+    "    float depth=clamp(1.0-zc/65535.0,0.0,1.0);\n"
+    "    vec2 p=floor(aViewPosition.xy*16.0)/16.0-vec2(1728.0,1808.0);\n"
+    "    vec4 c=floor(clamp(aColor,0.0,255.0));\n"
+    "    vColor=vec4(c.rgb/255.0,min(c.a/128.0,1.0));\n"
+    "    vTexCoord=aTexCoord/q*uTextureSize; vFog=floor(clamp(aFog,0.0,255.0))/255.0; vQ=q;\n"
+    "    float w=1.0/q; vec2 n=vec2(p.x/uTarget.x*2.0-1.0, 1.0-p.y/uTarget.y*2.0);\n"
+    "    gl_Position=vec4(n*w,(depth*2.0-1.0)*w,w); return; }\n"
     "  vColor=aColor; vTexCoord=aTexCoord; vFog=aFog; vQ=aQ;\n"
     /* uScreenSpace==2 (modelos 3D): x,y en pixeles, z = profundidad GS sin recortar, q = 1/w. Coordenadas homogeneas
      * (x*w, y*w, z*w, w): la GPU recorta contra cercano/lejano y los lados sin generar poligonos de scissor, y UV, Z y
@@ -343,6 +358,7 @@ int pcRendererInit(int width, int height)
     u_alpha_test = glGetUniformLocation(program, "uAlphaTest");
     u_alpha_ref = glGetUniformLocation(program, "uAlphaRef");
     u_screen_space = glGetUniformLocation(program, "uScreenSpace");
+    u_zbuf = glGetUniformLocation(program, "uZbuf");
     u_texture_size = glGetUniformLocation(program, "uTextureSize");
     u_texture_function = glGetUniformLocation(program, "uTextureFunction");
     u_texture_alpha = glGetUniformLocation(program, "uTextureAlpha");
@@ -403,6 +419,73 @@ void pcRendererShutdown(void)
 /* CLAUDE-NOTE[N1]: para distinguir "no se dibuja nada" de "se dibuja negro", poner temporalmente clear_color a magenta
  * (1,0,1,1) aqui. Si la pantalla sale magenta el blit funciona y el problema esta en lo que se dibuja o en quien limpia
  * despues (ver N2). Tambien conviene contar draws por frame y hacer glGetError()/glReadPixels() en debug=1. */
+/* ---- Tiempo de GPU de la escena (solo con debug=1 + profile_game=1) -------------------------------------------------------
+ * GL_TIME_ELAPSED alrededor de todo lo que se dibuja en el frame (limpiar, tiras, OT, sombras; sin el presentado ni el desenfoque).
+ * Los resultados se leen sin bloquear, unos frames despues (anillo de consultas), para no meter una parada de GPU que falsee la
+ * medicion. Se reporta junto a vertices y draws del frame para separar tres costes: CPU por vertice (PROFILE strips3D), envio
+ * (draws/lotes GL) y GPU (aqui). */
+#define GPUQ_RING 6
+static GLuint gpuq_id[GPUQ_RING];
+static int gpuq_state[GPUQ_RING];           /* 0 libre, 1 en curso, 2 cerrada, esperando resultado */
+static unsigned gpuq_verts[GPUQ_RING], gpuq_draws[GPUQ_RING], gpuq_batches[GPUQ_RING];
+static int gpuq_head = -1, gpu_prof = -1;
+static double gpu_sum_ms, gpu_max_ms, gpu_sum_verts, gpu_sum_draws, gpu_sum_batches;
+static unsigned gpu_frames;
+
+static int gpu_profile_on(void)
+{
+    if (gpu_prof < 0) gpu_prof = pcGameProfileEnabled() != 0;
+    return gpu_prof;
+}
+
+static void gpu_timer_begin(void)
+{
+    int i, slot = -1;
+    if (!gpu_profile_on()) return;
+    if (gpuq_head >= 0 && gpuq_state[gpuq_head] == 1) return;   /* otro BeginFrame sin presentado: ya hay una consulta abierta */
+    if (!gpuq_id[0]) glGenQueries(GPUQ_RING, gpuq_id);
+    for (i = 0; i < GPUQ_RING; i++) if (gpuq_state[i] == 0) { slot = i; break; }
+    if (slot < 0) { gpuq_head = -1; return; }    /* anillo lleno: este frame no se mide */
+    glBeginQuery(GL_TIME_ELAPSED, gpuq_id[slot]);
+    gpuq_state[slot] = 1;
+    gpuq_head = slot;
+}
+
+static void gpu_timer_end(void)
+{
+    int i;
+    if (!gpu_profile_on()) return;
+    if (gpuq_head >= 0 && gpuq_state[gpuq_head] == 1) {
+        glEndQuery(GL_TIME_ELAPSED);
+        gpuq_state[gpuq_head] = 2;
+        gpuq_verts[gpuq_head] = stat_vertices; gpuq_draws[gpuq_head] = stat_immediate; gpuq_batches[gpuq_head] = stat_batches;
+        gpuq_head = -1;
+    }
+    for (i = 0; i < GPUQ_RING; i++) {
+        GLint ready_flag = 0;
+        if (gpuq_state[i] != 2) continue;
+        glGetQueryObjectiv(gpuq_id[i], GL_QUERY_RESULT_AVAILABLE, &ready_flag);
+        if (!ready_flag) continue;
+        {
+            uint64_t ns = 0;
+            double ms;
+            glGetQueryObjectui64v(gpuq_id[i], GL_QUERY_RESULT, &ns);
+            ms = (double)ns / 1.0e6;
+            gpu_sum_ms += ms; if (ms > gpu_max_ms) gpu_max_ms = ms;
+            gpu_sum_verts += gpuq_verts[i]; gpu_sum_draws += gpuq_draws[i]; gpu_sum_batches += gpuq_batches[i];
+            gpu_frames++;
+        }
+        gpuq_state[i] = 0;
+    }
+    if (gpu_frames >= 120) {
+        pcLog("PROFILE gpu scene: %.3f ms avg / %.3f ms max over %u frames | per frame: %.0f vertices, %.0f draws, %.0f GL batches | %.1f ns/vertex",
+              gpu_sum_ms / gpu_frames, gpu_max_ms, gpu_frames, gpu_sum_verts / gpu_frames, gpu_sum_draws / gpu_frames,
+              gpu_sum_batches / gpu_frames, gpu_sum_verts > 0.0 ? gpu_sum_ms * 1.0e6 / gpu_sum_verts : 0.0);
+        gpu_sum_ms = gpu_max_ms = gpu_sum_verts = gpu_sum_draws = gpu_sum_batches = 0.0;
+        gpu_frames = 0;
+    }
+}
+
 void pcRendererBeginFrame(void)
 {
     batch_flush();
@@ -441,6 +524,7 @@ void pcRendererBeginFrame(void)
     glClearDepth(1.0);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
     gl_shadow_invalidate();
+    gpu_timer_begin();
 }
 
 /* CLAUDE-FIX[N8/N10]: la GS usaba UN solo espacio Z (near 1, far 65535, ver CalcPs2ZbuffAB) para 3D y 2D. Aqui cada draw
@@ -632,7 +716,7 @@ void pcRendererSetGsAlpha2(uint64_t reg) { batch_flush(); gs_alpha_decode(reg, &
  * profundidad tambien en transparentes y test de profundidad en 2D. */
 /* Ultimos valores subidos al programa (ver apply_state). */
 typedef struct {
-    float target[2], projection, aspect[2], offset[2], fog_color[3], alpha_ref, texture_size[2];
+    float target[2], projection, aspect[2], offset[2], fog_color[3], alpha_ref, texture_size[2], zbuf[2];
     int textured, fog_enabled, alpha_test, screen_space, texture_function, texture_alpha, texture_perspective, alpha_pass;
 } UniformCache;
 static UniformCache uniform_cache;
@@ -741,13 +825,14 @@ static void apply_state(const PcNativeDrawState* st)
         memcpy(n.fog_color, global_fog_color, sizeof(n.fog_color));
         n.alpha_test = st->alpha_test != 0;
         n.alpha_ref = st->alpha_ref;
-        n.screen_space = st->screen_space;   /* 0 espacio de vista, 1 pantalla, 2 pantalla homogenea (w = 1/q) */
+        n.screen_space = st->screen_space;   /* 0 espacio de vista, 1 pantalla, 2 pantalla homogenea (w = 1/q), 3 homogenea con vertices crudos */
         n.texture_size[0] = st->texture_width > 0.0f ? st->texture_width : 1.0f;
         n.texture_size[1] = st->texture_height > 0.0f ? st->texture_height : 1.0f;
         n.texture_function = st->texture_function;
         n.texture_alpha = st->texture_alpha != 0;
         n.texture_perspective = st->texture_perspective != 0;
         n.alpha_pass = alpha_pass;
+        n.zbuf[0] = st->zbuff_a; n.zbuf[1] = st->zbuff_b;
 #define UNIFORM_CHANGED(f) (!uniform_cache_valid || memcmp(&uniform_cache.f, &n.f, sizeof(n.f)) != 0)
         if (UNIFORM_CHANGED(target)) glUniform2f(u_target, n.target[0], n.target[1]);
         if (UNIFORM_CHANGED(projection)) glUniform1f(u_projection, n.projection);
@@ -765,6 +850,7 @@ static void apply_state(const PcNativeDrawState* st)
         if (UNIFORM_CHANGED(alpha_ref)) glUniform1f(u_alpha_ref, n.alpha_ref);
         if (UNIFORM_CHANGED(screen_space)) glUniform1i(u_screen_space, n.screen_space);
         if (UNIFORM_CHANGED(texture_size)) glUniform2f(u_texture_size, n.texture_size[0], n.texture_size[1]);
+        if (UNIFORM_CHANGED(zbuf)) glUniform2f(u_zbuf, n.zbuf[0], n.zbuf[1]);
         if (UNIFORM_CHANGED(texture_function)) glUniform1i(u_texture_function, n.texture_function);
         if (UNIFORM_CHANGED(texture_alpha)) glUniform1i(u_texture_alpha, n.texture_alpha);
         if (UNIFORM_CHANGED(texture_perspective)) glUniform1i(u_texture_perspective, n.texture_perspective);
@@ -1947,6 +2033,8 @@ void pcRendererPresent(void)
     if (window) SDL_GetWindowSizeInPixels(window, &ww, &wh);
     if (ww <= 0 || wh <= 0) return;
 
+    batch_flush();
+    gpu_timer_end();   /* fin de la medicion de la escena: lo diferido y lo agrupado ya se enviaron */
     present_source = blur_apply();
     glBindFramebuffer(GL_READ_FRAMEBUFFER, present_source);
     glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);

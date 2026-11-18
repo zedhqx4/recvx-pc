@@ -1857,6 +1857,10 @@ static void pcSubmitVertices(unsigned long prim, const PcNativeVertex* vertices,
     state.alpha_ref = 0.004f;
     state.linear_filter = 1;
     state.screen_space = screen_space;
+    if (screen_space == 3) {                 /* vertices crudos: el vertex shader necesita las constantes de Z de la GS */
+        state.zbuff_a = Ps2_zbuff_a;
+        state.zbuff_b = Ps2_zbuff_b;
+    }
     state.fog = !mode->shadow_mask && (prim & PC_GIF_PRIM_FGE) != 0;
     /* espacio 1: el fragmento divide S/Q a mano; espacio 2 (homogeneo): la GPU ya interpola UV con correccion de perspectiva */
     state.texture_perspective = screen_space == 1 && (prim & PC_GIF_PRIM_FST) == 0;
@@ -1978,6 +1982,39 @@ done:
  * scissor: los vertices pasan como floats en pantalla homogenea (x*w, y*w, z*w, w con w = 1/Q) y la GPU recorta contra los
  * planos cercano/lejano y los lados. Lo que el juego decide se conserva: el kick por cara trasera (ulKick, tiras Single), las
  * politicas de OT y la profundidad de la GS (afin en Q, cuantizada a 16 bits en el fragmento). */
+/* gpu_vertex (recvx.ini) o RECVX_GPU_VERTEX: 0 = la CPU convierte cada vertice a lo que ve la GS (punto fijo 12.4, Z de 16 bits,
+ * FTOI0 de color/niebla, S/Q en texels) y sube vertices ya convertidos; 1 = la CPU solo copia el registro crudo de la VU1 y esa
+ * misma conversion, con las mismas operaciones, la hace el vertex shader (screen_space 3 del renderer). Ruta paralela: la
+ * CPU sigue disponible para comparar con F8; el resultado debe coincidir (ver pc/tools/test_gpu_vertex.c y notas 0.9.146). */
+static int pcGpuVertexEnabled(void)
+{
+    static int on = -1;
+    if (on < 0) {
+        const char* e = getenv("RECVX_GPU_VERTEX");
+        on = e ? (e[0] != '0') : (pcIniGetInt("gpu_vertex", 0) != 0);
+        pcLog("tiras 3D: conversion de vertices en %s (gpu_vertex=1 en recvx.ini o RECVX_GPU_VERTEX=1 la mueve al vertex shader)",
+              on ? "GPU (vertex shader)" : "CPU");
+    }
+    return on;
+}
+
+/* Perfil (debug=1 + profile_game=1): costes por separado de las tiras 3D. "convert" = CPU por vertice (bucle de conversion o de
+ * copia + recorte ADC); "submit" = ensamblado + cola/lote + llamadas a GL hasta volver. El tiempo de GPU sale en
+ * "PROFILE gpu scene" (pc_renderer.c). */
+static struct { double convert, submit; unsigned int strips, verts; } pcs3d_acc;
+static void pcStrips3DRecord(int gpu, double convert_ms, double submit_ms, unsigned int verts)
+{
+    pcs3d_acc.convert += convert_ms;
+    pcs3d_acc.submit += submit_ms;
+    pcs3d_acc.verts += verts;
+    if (++pcs3d_acc.strips >= 4000) {
+        pcLog("PROFILE strips3D [%s]: %u strips %u verts | CPU por vertice (convert) %.3f us | envio (ensamblado+cola/lote+GL) %.3f us",
+              gpu ? "GPU" : "CPU", pcs3d_acc.strips, pcs3d_acc.verts,
+              pcs3d_acc.convert * 1000.0 / pcs3d_acc.verts, pcs3d_acc.submit * 1000.0 / pcs3d_acc.verts);
+        memset(&pcs3d_acc, 0, sizeof(pcs3d_acc));
+    }
+}
+
 static void pcSubmitStrip3D(unsigned long prim, const void* data, unsigned int count, const PcPrim3D* mode)
 {
     const float* rec = (const float*)data;
@@ -1987,6 +2024,10 @@ static void pcSubmitStrip3D(unsigned long prim, const void* data, unsigned int c
     unsigned int i, texture = pcRendererCurrentTexture();
     float tex_width = 1.0f, tex_height = 1.0f, zsum = 0.0f;
     unsigned int clip_hist = 0;
+    const int gpu = pcGpuVertexEnabled();
+    const int need_z = !gpu || (prim & PC_GIF_PRIM_ABE) != 0;   /* en GPU, la Z entera solo hace falta en CPU para ordenar el OT */
+    const int profile = pcGameProfileEnabled();
+    double t_start = profile ? pcGameProfileNowMs() : 0.0, t_conv = 0.0;
 
     if (rec == NULL || count < 3 || count > 16384)
         return;
@@ -2040,6 +2081,25 @@ static void pcSubmitStrip3D(unsigned long prim, const void* data, unsigned int c
                 (void)n_total;
             }
         }
+        if (gpu) {
+            /* Ruta GPU: el registro (S,T,Q, flags, R,G,B,A, X,Y,Z, F) pasa tal cual al vertex shader. PcNativeVertex lleva
+             * u,v,q = S,T,Q; r,g,b,a = RGBA crudo; x,y,z = X,Y,Z; fog = F. Sin conversion por vertice en la CPU. */
+            memcpy(&vertices[i].u, &rec[0], 3 * sizeof(float));
+            memcpy(&vertices[i].r, &rec[4], 4 * sizeof(float));
+            memcpy(&vertices[i].x, &rec[8], 3 * sizeof(float));
+            vertices[i].fog = rec[11];
+            if (need_z) {                               /* solo tiras con mezcla (OT): su orden necesita la Z entera de la GS */
+                if (q > -1e-9f && q < 1e-9f)
+                    q = 1e-9f;
+                sz = -Ps2_zbuff_a + q * -Ps2_zbuff_b;
+                zc = sz < 0.0f ? 0.0f : sz > 65534.0f ? 65534.0f : sz;
+                zc = floorf(zc);
+                gs_z[i] = zc;
+                zsum += zc;
+            } else gs_z[i] = 0.0f;
+            kick[i] = (flags & 0x8000u) != 0;
+            continue;
+        }
         if (q > -1e-9f && q < 1e-9f)
             q = 1e-9f;                                  /* w = 1/q finita */
 
@@ -2066,8 +2126,11 @@ static void pcSubmitStrip3D(unsigned long prim, const void* data, unsigned int c
         vertices[i].fog = pcFtoi0Sat(rec[11]) / 255.0f;
         kick[i] = (flags & 0x8000u) != 0;
     }
+    if (profile) t_conv = pcGameProfileNowMs();
 
-    pcSubmitVertices(prim, vertices, kick, gs_z, count, mode, zsum / (float)count, tex_width, tex_height, texture, 2);
+    pcSubmitVertices(prim, vertices, kick, gs_z, count, mode, need_z ? zsum / (float)count : 0.0f, tex_width, tex_height, texture,
+                     gpu ? 3 : 2);
+    if (profile) pcStrips3DRecord(gpu, t_conv - t_start, pcGameProfileNowMs() - t_conv, count);
 
 done:
     return;
