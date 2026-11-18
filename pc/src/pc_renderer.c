@@ -1974,7 +1974,7 @@ void pcRendererShadowCompose(float x0, float y0, float x1, float y1, int shade)
         st.screen_space = 1;                             /* depth_test = 0: ZTST ALWAYS, ZMSK = 1 */
         gs_alpha_decode(0x80000000A1ULL, &gs_blend);     /* (Cd - Cs) * FIX/128 */
         active_target = TARGET_SCREEN;
-        draw_immediate(v, 6, &st, GL_TRIANGLES, -1);
+        draw_immediate(v, 6, &st, GL_TRIANGLES, -1, -1);
         batch_flush();
         gs_blend = saved_blend;
         active_target = saved_target;
