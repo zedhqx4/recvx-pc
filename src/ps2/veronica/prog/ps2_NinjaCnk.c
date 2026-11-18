@@ -50,8 +50,19 @@ static void pcCnkCount(unsigned int verts, int culled)
 static unsigned char pc_decal_correction_scopes[PC_DECAL_CORRECTION_SCOPE_DEPTH];
 static int pc_decal_correction_scope_depth;
 static int pc_decal_correction_scope_overflow;
-static const void* pc_decal_correction_logged_objects[64];
-static int pc_decal_correction_logged_count;
+static const void* pc_decal_correction_attempted_objects[64];
+static int pc_decal_correction_attempted_count;
+
+static int pcDecalCorrectionShouldLog(const void* object)
+{
+    int i;
+    for (i = 0; i < pc_decal_correction_attempted_count; i++)
+        if (pc_decal_correction_attempted_objects[i] == object)
+            return 0;
+    if (pc_decal_correction_attempted_count < 64)
+        pc_decal_correction_attempted_objects[pc_decal_correction_attempted_count++] = object;
+    return 1;
+}
 
 static int pcDecalCorrectionTryApply(const void* object)
 {
@@ -71,26 +82,34 @@ static int pcDecalCorrectionTryApply(const void* object)
     NJS_POINT3 best_normal;
     NJS_VECTOR view_offset;
     float best_distance = PC_DECAL_NEAR_DISTANCE;
+    float closest_distance = 1.0e30f;
+    NJS_POINT3 closest_normal = { 0.0f, 0.0f, 0.0f };
+    int closest_axis = -1;
+    int axis_hits = 0;
     int found = 0;
+    int log_attempt = pcDecalCorrectionShouldLog(object);
     int i;
-    int logged = 0;
 
-    if (!cam.mtx)
+    if (!cam.mtx) {
+        if (log_attempt) pcLog("native decal correction: object=%p skipped (camera matrix is NULL)", (void*)object);
         return 0;
+    }
 
     /* Current matrix is camera * object. Convert its origin back to world space
        so the collision query uses the same coordinates as bhCollisionCheckLine2. */
     njGetMatrix(&view_model);
     njSetMatrix(&inverse_camera, cam.mtx);
-    if (!njInvertMatrix(&inverse_camera))
+    if (!njInvertMatrix(&inverse_camera)) {
+        if (log_attempt) pcLog("native decal correction: object=%p skipped (camera matrix inversion failed)", (void*)object);
         return 0;
+    }
 
     local_origin.x = local_origin.y = local_origin.z = 0.0f;
     njCalcPoint(&view_model, &local_origin, &view_origin);
     njCalcPoint(&inverse_camera, &view_origin, &world_origin);
 
-    /* Search six cardinal directions. A plane within 0.10 units intersects at
-       least one of these 0.20-unit probes, regardless of its orientation. */
+    /* Search six cardinal directions. Keep the nearest hit even when it falls
+       outside the correction threshold, so the diagnostic explains the miss. */
     for (i = 0; i < 6; i++) {
         float distance;
         float signed_distance;
@@ -103,6 +122,7 @@ static int pcDecalCorrectionTryApply(const void* object)
         if (bhCollisionCheckLine2(&probe_start, &probe_end, 0x4400, -1) == NULL)
             continue;
 
+        axis_hits++;
         bhGetHitCollisionNormal(&hit_normal);
         if (njUnitVector(&hit_normal) <= 0.00001f)
             continue;
@@ -113,6 +133,11 @@ static int pcDecalCorrectionTryApply(const void* object)
             (world_origin.z - probe_end.z) * hit_normal.z;
         distance = (signed_distance < 0.0f) ? -signed_distance : signed_distance;
 
+        if (distance < closest_distance) {
+            closest_distance = distance;
+            closest_normal = hit_normal;
+            closest_axis = i;
+        }
         if (distance < best_distance) {
             best_distance = distance;
             best_normal = hit_normal;
@@ -120,8 +145,19 @@ static int pcDecalCorrectionTryApply(const void* object)
         }
     }
 
-    if (!found)
+    if (!found) {
+        if (log_attempt) {
+            if (closest_axis >= 0)
+                pcLog("native decal correction: object=%p no apply; origin=(%.3f,%.3f,%.3f) axis_hits=%d closest=%.4f axis=%d normal=(%.3f,%.3f,%.3f) threshold=%.2f",
+                      (void*)object, world_origin.x, world_origin.y, world_origin.z, axis_hits,
+                      closest_distance, closest_axis, closest_normal.x, closest_normal.y, closest_normal.z,
+                      PC_DECAL_NEAR_DISTANCE);
+            else
+                pcLog("native decal correction: object=%p no collision hit; origin=(%.3f,%.3f,%.3f) axis_hits=0 flags=0x4400",
+                      (void*)object, world_origin.x, world_origin.y, world_origin.z);
+        }
         return 0;
+    }
 
     /* The hit normal is world-space. Convert the displacement vector to view
        space and adjust only this object's temporary render-matrix translation. */
@@ -132,18 +168,10 @@ static int pcDecalCorrectionTryApply(const void* object)
     ((float*)&view_model)[14] += view_offset.z * PC_DECAL_ORIGIN_OFFSET;
     njSetMatrix(NULL, &view_model);
 
-    for (i = 0; i < pc_decal_correction_logged_count; i++) {
-        if (pc_decal_correction_logged_objects[i] == object) {
-            logged = 1;
-            break;
-        }
-    }
-    if (!logged && pc_decal_correction_logged_count < 64) {
-        pc_decal_correction_logged_objects[pc_decal_correction_logged_count++] = object;
-        pcLog("native decal correction: object=%p origin=(%.3f,%.3f,%.3f) surface_distance=%.4f normal=(%.3f,%.3f,%.3f) offset=%.2f",
-              (void*)object, world_origin.x, world_origin.y, world_origin.z, best_distance,
+    if (log_attempt)
+        pcLog("native decal correction: object=%p APPLIED origin=(%.3f,%.3f,%.3f) surface_distance=%.4f axis_hits=%d normal=(%.3f,%.3f,%.3f) offset=%.2f",
+              (void*)object, world_origin.x, world_origin.y, world_origin.z, best_distance, axis_hits,
               best_normal.x, best_normal.y, best_normal.z, PC_DECAL_ORIGIN_OFFSET);
-    }
     return 1;
 }
 

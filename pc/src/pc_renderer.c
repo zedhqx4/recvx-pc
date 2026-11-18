@@ -194,11 +194,35 @@ int pcRendererDecalObjectIsMarked(const void* owner, const void* object, const v
     return native_decal_key_is_marked(native_decal_object_key(owner, object, transform));
 }
 
+static uint64_t native_decal_world_query_logged[128];
+static int native_decal_world_query_logged_count;
+
 int pcRendererDecalWorldObjectIsMarked(const void* object)
 {
+    uint64_t key;
+    int marked;
+    int i;
+
     if (!native_decal_world_active || !native_decal_world_owner || !object)
         return 0;
-    return pcRendererDecalObjectIsMarked(native_decal_world_owner, object, object);
+
+    key = native_decal_object_key(native_decal_world_owner, object, object);
+    marked = native_decal_key_is_marked(key);
+
+    if (native_decal_mark_count > 0) {
+        for (i = 0; i < native_decal_world_query_logged_count; i++)
+            if (native_decal_world_query_logged[i] == key)
+                break;
+        if (i == native_decal_world_query_logged_count &&
+            native_decal_world_query_logged_count < 128) {
+            native_decal_world_query_logged[native_decal_world_query_logged_count++] = key;
+            pcLog("native decal correction: world lookup owner=%p object=%p key=%016llx marked=%d",
+                  (void*)native_decal_world_owner, (void*)object,
+                  (unsigned long long)key, marked);
+        }
+    }
+
+    return marked;
 }
 
 void pcRendererDecalObjectBegin(const void* owner, const void* object, const void* transform)
