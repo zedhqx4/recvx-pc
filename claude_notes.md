@@ -413,3 +413,14 @@ Tras el fallo del alfa (0.9.147) se audito todo lo que lee PcNativeVertex despue
 queue_transparent, item_may_be_translucent, logs), pcAssemblePrepared, pc_movie.c. Hallazgo: los sprites (topologia 6) copian
 Z/color/niebla del 2o vertice pero la Q del 1o en dos esquinas; con vertices crudos la Z sale de la Q en el shader, asi que el
 resultado cambiaba. Las tiras de topologia 6 se envian por la conversion CPU aunque gpu_vertex=1. El resto es equivalente.
+
+## 0.9.149 - gpu_vertex tambien para el empaquetador del EE (Ps2AddPrim3D / Ps2AddPrim3DMod)
+Commit independiente (revertible solo): `pcSubmitPrepared3DGpu` + `screen_space 4`. Con gpu_vertex=1 la CPU ya no ejecuta
+pcPs2Prim3DCore ni la conversion por vertice de pcSubmitPrepared3D; copia el registro de 12 floats y el vertex shader hace lo
+mismo que la ruta CPU: XY=(int)(X*16)/16 (trunca hacia cero, NO floor como el modo 3), Z=(int)(sz*16)/16 (con fracciones de 1/16,
+distinto del Z entero del modo 3), color/niebla FTOI0, S,T*tam. Posicion NO homogenea (w=1) y S/Q en el fragmento, como el modo 1.
+La CPU conserva solo el kick (ADC de 6 bits, copiado de pcPs2Prim3DCore) y la Z media del OT (solo con ABE). Color entero
+(floating_color=0): la CPU pasa (bits&0xFF) como float 0..255. Sprites (topologia 6) siguen por la ruta CPU.
+Consumidores auditados: item_may_be_translucent (convierte alfa en modos 3 y 4), pcSubmitVertices (zbuff y texture_perspective para 4),
+queue_transparent (solo lee z si !screen_space), pcAssemblePrepared (solo copia; sprites excluidos), logs. Perfil: "PROFILE prepared3D".
+Prueba numerica: pc/tools/test_gpu_vertex4.c, 0 diferencias en 2M casos (sin FMA). La ruta CPU sigue siendo referencia y fallback.

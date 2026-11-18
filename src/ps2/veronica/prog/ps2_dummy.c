@@ -1857,13 +1857,13 @@ static void pcSubmitVertices(unsigned long prim, const PcNativeVertex* vertices,
     state.alpha_ref = 0.004f;
     state.linear_filter = 1;
     state.screen_space = screen_space;
-    if (screen_space == 3) {                 /* vertices crudos: el vertex shader necesita las constantes de Z de la GS */
+    if (screen_space == 3 || screen_space == 4) {   /* vertices crudos: el vertex shader necesita las constantes de Z de la GS */
         state.zbuff_a = Ps2_zbuff_a;
         state.zbuff_b = Ps2_zbuff_b;
     }
     state.fog = !mode->shadow_mask && (prim & PC_GIF_PRIM_FGE) != 0;
     /* espacio 1: el fragmento divide S/Q a mano; espacio 2 (homogeneo): la GPU ya interpola UV con correccion de perspectiva */
-    state.texture_perspective = screen_space == 1 && (prim & PC_GIF_PRIM_FST) == 0;
+    state.texture_perspective = (screen_space == 1 || screen_space == 4) && (prim & PC_GIF_PRIM_FST) == 0;
     state.cull_backfaces = 0;
     if (blend && !state.immediate) {
         state.ot_z_valid = 1;
@@ -1911,6 +1911,9 @@ done:
     return;
 }
 
+static int pcGpuVertexEnabled(void);
+static void pcSubmitPrepared3DGpu(unsigned long prim, const void* data, unsigned int count, const PcPrim3D* mode);
+
 static void pcSubmitPrepared3D(unsigned long prim, const void* data, unsigned int count, const PcPrim3D* mode)
 {
     const float* source = (const float*)data;
@@ -1927,6 +1930,12 @@ static void pcSubmitPrepared3D(unsigned long prim, const void* data, unsigned in
         return;
     if (textured && texture == 0)
         return;
+    /* gpu_vertex=1: conversion en el vertex shader. Los sprites (topologia 6) siguen aqui: copian Z/color/niebla del segundo
+     * vertice y la Q del primero, y con vertices crudos la Z sale de la Q. */
+    if (pcGpuVertexEnabled() && ((prim >> 47) & 7u) != 6u) {
+        pcSubmitPrepared3DGpu(prim, data, count, mode);
+        return;
+    }
 
     packed = (uint32_t*)pcScratch(1, ((size_t)count * 12u + 4u) * sizeof(*packed));
     vertices = (PcNativeVertex*)pcScratch(2, (size_t)count * sizeof(*vertices));
@@ -2001,18 +2010,94 @@ static int pcGpuVertexEnabled(void)
 /* Perfil (debug=1 + profile_game=1): costes por separado de las tiras 3D. "convert" = CPU por vertice (bucle de conversion o de
  * copia + recorte ADC); "submit" = ensamblado + cola/lote + llamadas a GL hasta volver. El tiempo de GPU sale en
  * "PROFILE gpu scene" (pc_renderer.c). */
-static struct { double convert, submit; unsigned int strips, verts; } pcs3d_acc;
-static void pcStrips3DRecord(int gpu, double convert_ms, double submit_ms, unsigned int verts)
+static struct { double convert, submit; unsigned int strips, verts; } pcs3d_acc[2];
+static void pcStrips3DRecord(int kind, int gpu, double convert_ms, double submit_ms, unsigned int verts)
 {
-    pcs3d_acc.convert += convert_ms;
-    pcs3d_acc.submit += submit_ms;
-    pcs3d_acc.verts += verts;
-    if (++pcs3d_acc.strips >= 4000) {
-        pcLog("PROFILE strips3D [%s]: %u strips %u verts | CPU por vertice (convert) %.3f us | envio (ensamblado+cola/lote+GL) %.3f us",
-              gpu ? "GPU" : "CPU", pcs3d_acc.strips, pcs3d_acc.verts,
-              pcs3d_acc.convert * 1000.0 / pcs3d_acc.verts, pcs3d_acc.submit * 1000.0 / pcs3d_acc.verts);
-        memset(&pcs3d_acc, 0, sizeof(pcs3d_acc));
+    /* kind 0 = tiras de los modelos (vu1Draw*), 1 = empaquetador del EE (Ps2AddPrim3D / Ps2AddPrim3DMod) */
+    pcs3d_acc[kind].convert += convert_ms;
+    pcs3d_acc[kind].submit += submit_ms;
+    pcs3d_acc[kind].verts += verts;
+    if (++pcs3d_acc[kind].strips >= 4000) {
+        pcLog("PROFILE %s [%s]: %u strips %u verts | CPU por vertice (convert) %.3f us | envio (ensamblado+cola/lote+GL) %.3f us",
+              kind ? "prepared3D" : "strips3D", gpu ? "GPU" : "CPU", pcs3d_acc[kind].strips, pcs3d_acc[kind].verts,
+              pcs3d_acc[kind].convert * 1000.0 / pcs3d_acc[kind].verts, pcs3d_acc[kind].submit * 1000.0 / pcs3d_acc[kind].verts);
+        memset(&pcs3d_acc[kind], 0, sizeof(pcs3d_acc[kind]));
     }
+}
+
+/* Ruta GPU del empaquetador del EE (Ps2AddPrim3D / Ps2AddPrim3DMod), screen_space 4. La CPU ya no ejecuta pcPs2Prim3DCore ni la
+ * conversion por vertice: copia el registro de 12 floats (S,T,Q,flags,R,G,B,A,X,Y,Z,F) y el vertex shader hace lo mismo que la
+ * ruta CPU de pcSubmitPrepared3D: XY = (int)(X*16)/16 (FTOI4 trunca hacia cero), Z de la GS = (int)(sz*16)/16 con sz = -a - b*Q
+ * entre 0 y 65534, color y niebla FTOI0 saturados, S,T en texels. En la CPU quedan solo lo que decide el CPU de verdad: el kick
+ * (filtro de recorte ADC de 6 bits) y, solo con ABE, la Z media del OT. El color entero (floating_color=0) se pasa como float
+ * 0..255 (mascara 0xFF) para no depender de que la GPU conserve patrones de bits denormales. */
+static void pcSubmitPrepared3DGpu(unsigned long prim, const void* data, unsigned int count, const PcPrim3D* mode)
+{
+    const float* s = (const float*)data;
+    PcNativeVertex* vertices;
+    unsigned char* kick;
+    float* gs_z;
+    unsigned int i, clip_hist = 0, texture = pcRendererCurrentTexture();
+    float tex_width = 1.0f, tex_height = 1.0f, zsum = 0.0f;
+    const int blend = (prim & PC_GIF_PRIM_ABE) != 0;
+    const int profile = pcGameProfileEnabled();
+    double t_start = profile ? pcGameProfileNowMs() : 0.0, t_conv = 0.0;
+
+    if (s == NULL || count < 1 || count > 16384)
+        return;
+    if ((prim & PC_GIF_PRIM_TME) && texture == 0)
+        return;
+
+    vertices = (PcNativeVertex*)pcScratch(2, (size_t)count * sizeof(*vertices));
+    kick = (unsigned char*)pcScratch(3, count);
+    gs_z = (float*)pcScratch(4, (size_t)count * sizeof(*gs_z));
+    if (vertices == NULL || kick == NULL || gs_z == NULL)
+        return;
+    pcRendererCurrentTextureSize(&tex_width, &tex_height);
+
+    for (i = 0; i < count; i++, s += 12) {
+        uint32_t flags;
+        unsigned int f = 0;
+        const float cx = s[8] - 2048.0f, cy = s[9] - 2048.0f, cz = (s[10] + -2048.0625f) + s[10] * 0.062501907f;
+
+        memcpy(&flags, &s[3], sizeof(flags));
+        /* mismo filtro de recorte que pcPs2Prim3DCore: x,y contra la ventana de 4096 alrededor de 2048, z contra el rango */
+        if (cx > 2047.0f) f |= 0x01;
+        if (cx < -2047.0f) f |= 0x02;
+        if (cy > 2047.0f) f |= 0x04;
+        if (cy < -2047.0f) f |= 0x08;
+        if (cz > 2047.0f) f |= 0x10;
+        if (cz < -2047.0f) f |= 0x20;
+        clip_hist = ((clip_hist << 6) | f) & 0xFFFFFFu;
+        if (clip_hist & 0x3FFFFu)
+            flags |= 0x8000u;
+        kick[i] = (flags & 0x8000u) != 0;
+
+        memcpy(&vertices[i].u, &s[0], 3 * sizeof(float));
+        if (mode->floating_color) {
+            memcpy(&vertices[i].r, &s[4], 4 * sizeof(float));
+        } else {
+            uint32_t rgba[4];
+            memcpy(rgba, &s[4], sizeof(rgba));
+            vertices[i].r = (float)(rgba[0] & 0xFFu);
+            vertices[i].g = (float)(rgba[1] & 0xFFu);
+            vertices[i].b = (float)(rgba[2] & 0xFFu);
+            vertices[i].a = (float)(rgba[3] & 0xFFu);
+        }
+        memcpy(&vertices[i].x, &s[8], 3 * sizeof(float));
+        vertices[i].fog = s[11];
+
+        if (blend) {                                   /* la Z entera solo la usa el OT de las primitivas con mezcla */
+            float sz = -Ps2_zbuff_a + s[2] * -Ps2_zbuff_b;
+            sz = sz < 0.0f ? 0.0f : sz > 65534.0f ? 65534.0f : sz;
+            zsum += sz;
+            gs_z[i] = (float)(int32_t)(sz * 16.0f) / 16.0f;
+        } else gs_z[i] = 0.0f;
+    }
+    if (profile) t_conv = pcGameProfileNowMs();
+
+    pcSubmitVertices(prim, vertices, kick, gs_z, count, mode, blend ? zsum / (float)count : 0.0f, tex_width, tex_height, texture, 4);
+    if (profile) pcStrips3DRecord(1, 1, t_conv - t_start, pcGameProfileNowMs() - t_conv, count);
 }
 
 static void pcSubmitStrip3D(unsigned long prim, const void* data, unsigned int count, const PcPrim3D* mode)
@@ -2132,7 +2217,7 @@ static void pcSubmitStrip3D(unsigned long prim, const void* data, unsigned int c
 
     pcSubmitVertices(prim, vertices, kick, gs_z, count, mode, need_z ? zsum / (float)count : 0.0f, tex_width, tex_height, texture,
                      gpu ? 3 : 2);
-    if (profile) pcStrips3DRecord(gpu, t_conv - t_start, pcGameProfileNowMs() - t_conv, count);
+    if (profile) pcStrips3DRecord(0, gpu, t_conv - t_start, pcGameProfileNowMs() - t_conv, count);
 
 done:
     return;

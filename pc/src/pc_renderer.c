@@ -153,6 +153,18 @@ static const char* vertex_shader =
     "    vTexCoord=aTexCoord/q*uTextureSize; vFog=floor(clamp(aFog,0.0,255.0))/255.0; vQ=q;\n"
     "    float w=1.0/q; vec2 n=vec2(p.x/uTarget.x*2.0-1.0, 1.0-p.y/uTarget.y*2.0);\n"
     "    gl_Position=vec4(n*w,(depth*2.0-1.0)*w,w); return; }\n"
+    /* uScreenSpace==4: registros crudos del empaquetador del EE (pcSubmitPrepared3D). Misma conversion que su ruta CPU: XY = (int)(X*16)/16
+     * (FTOI4 trunca hacia cero), Z de la GS = (int)(sz*16)/16 con sz = -a - b*Q entre 0 y 65534, color y niebla FTOI0 saturados, S,T en
+     * texels. A diferencia del 3, la posicion NO es homogenea (w=1): la GS interpola Z en pantalla y la division S/Q va en el fragmento. */
+    "  if(uScreenSpace==4){\n"
+    "    float sz=clamp(-uZbuf.x+aQ*-uZbuf.y,0.0,65534.0);\n"
+    "    float gz=trunc(sz*16.0)/16.0;\n"
+    "    float depth=clamp(1.0-gz/65535.0,0.0,1.0);\n"
+    "    vec2 p=trunc(aViewPosition.xy*16.0)/16.0-vec2(1728.0,1808.0);\n"
+    "    vec4 c=floor(clamp(aColor,0.0,255.0));\n"
+    "    vColor=vec4(clamp(c.rgb/255.0,0.0,1.0),clamp(c.a/128.0,0.0,1.0));\n"
+    "    vTexCoord=aTexCoord*uTextureSize; vFog=floor(clamp(aFog,0.0,255.0))/255.0; vQ=aQ;\n"
+    "    gl_Position=vec4(p.x/uTarget.x*2.0-1.0, 1.0-p.y/uTarget.y*2.0, depth*2.0-1.0, 1.0); return; }\n"
     "  vColor=aColor; vTexCoord=aTexCoord; vFog=aFog; vQ=aQ;\n"
     /* uScreenSpace==2 (modelos 3D): x,y en pixeles, z = profundidad GS sin recortar, q = 1/w. Coordenadas homogeneas
      * (x*w, y*w, z*w, w): la GPU recorta contra cercano/lejano y los lados sin generar poligonos de scissor, y UV, Z y
@@ -1125,7 +1137,7 @@ static int item_may_be_translucent(const NativeQueuedDraw* q)
         float a = q->vertices[i].a;
         /* Vertices crudos (screen_space 3): A es el registro de la GS (0..255, 128 = opaco). El vertex shader lo convierte con
          * min(floor(clamp(A,0,255))/128, 1); aqui se aplica la misma conversion para decidir con el mismo valor que ve la GPU. */
-        if (q->state.screen_space == 3) {
+        if (q->state.screen_space == 3 || q->state.screen_space == 4) {
             a = floorf(a < 0.0f ? 0.0f : a > 255.0f ? 255.0f : a) / 128.0f;
             if (a > 1.0f) a = 1.0f;
         }
