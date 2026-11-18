@@ -156,6 +156,10 @@ typedef struct {
 typedef struct {
     NativeFaceIdentity identity;
     float x[3], y[3], depth[3];
+    /* Raw PcNativeVertex inputs, before the screen-space/depth conversion. */
+    float raw_x[3], raw_y[3], raw_z[3], raw_q[3];
+    float raw_gs_z[3];
+    float zbuff_a, zbuff_b;
     unsigned int texture;
     int topology, screen_space;
     unsigned long long sequence;
@@ -485,8 +489,23 @@ static void native_face_collect_draw(const PcNativeVertex* vertices, int count,
         int k;
         if(!native_face_get_triangle(vertices,count,topology,face,tri)) continue;
         memset(&pick,0,sizeof(pick));
-        for(k=0;k<3;k++)
+        pick.zbuff_a=state->zbuff_a;
+        pick.zbuff_b=state->zbuff_b;
+        for(k=0;k<3;k++) {
+            float raw_sz=0.0f;
+            pick.raw_x[k]=tri[k].x;
+            pick.raw_y[k]=tri[k].y;
+            pick.raw_z[k]=tri[k].z;
+            pick.raw_q[k]=tri[k].q;
+            if(state->screen_space==3 || state->screen_space==4)
+                raw_sz=-state->zbuff_a+tri[k].q*-state->zbuff_b;
+            else if(state->screen_space==2)
+                raw_sz=tri[k].z;
+            else
+                raw_sz=tri[k].z;
+            pick.raw_gs_z[k]=raw_sz;
             if(!native_face_project_vertex(&tri[k],state,&pick.x[k],&pick.y[k],&pick.depth[k])) break;
+        }
         if(k!=3) continue;
         area=(pick.x[1]-pick.x[0])*(pick.y[2]-pick.y[0])-
              (pick.y[1]-pick.y[0])*(pick.x[2]-pick.x[0]);
@@ -584,14 +603,20 @@ int pcRendererDecalDebugMark(void)
         }
         native_face_marks[native_face_mark_count++]=native_face_selected;
         pcLog("native face marked: owner=%p object=%p transform=%p draw=%u face=%u texture=%u topology=0x%x screen=%d "
-              "xy=(%.2f,%.2f)(%.2f,%.2f)(%.2f,%.2f) depth=(%.7f,%.7f,%.7f)",
+              "zbuf=(%.9g,%.9g) "
+              "v0 raw=(%.9g,%.9g,%.9g,%.9g) gsZraw=%.9g xy=(%.3f,%.3f) depth=%.9g "
+              "v1 raw=(%.9g,%.9g,%.9g,%.9g) gsZraw=%.9g xy=(%.3f,%.3f) depth=%.9g "
+              "v2 raw=(%.9g,%.9g,%.9g,%.9g) gsZraw=%.9g xy=(%.3f,%.3f) depth=%.9g",
               (void*)native_face_selected.owner,(void*)native_face_selected.object,(void*)native_face_selected.transform,
               native_face_selected.draw_index,native_face_selected.face_index,native_face_selected_info.texture,
               native_face_selected_info.topology,native_face_selected_info.screen_space,
-              native_face_selected_info.x[0],native_face_selected_info.y[0],
-              native_face_selected_info.x[1],native_face_selected_info.y[1],
-              native_face_selected_info.x[2],native_face_selected_info.y[2],
-              native_face_selected_info.depth[0],native_face_selected_info.depth[1],native_face_selected_info.depth[2]);
+              native_face_selected_info.zbuff_a,native_face_selected_info.zbuff_b,
+              native_face_selected_info.raw_x[0],native_face_selected_info.raw_y[0],native_face_selected_info.raw_z[0],native_face_selected_info.raw_q[0],
+              native_face_selected_info.raw_gs_z[0],native_face_selected_info.x[0],native_face_selected_info.y[0],native_face_selected_info.depth[0],
+              native_face_selected_info.raw_x[1],native_face_selected_info.raw_y[1],native_face_selected_info.raw_z[1],native_face_selected_info.raw_q[1],
+              native_face_selected_info.raw_gs_z[1],native_face_selected_info.x[1],native_face_selected_info.y[1],native_face_selected_info.depth[1],
+              native_face_selected_info.raw_x[2],native_face_selected_info.raw_y[2],native_face_selected_info.raw_z[2],native_face_selected_info.raw_q[2],
+              native_face_selected_info.raw_gs_z[2],native_face_selected_info.x[2],native_face_selected_info.y[2],native_face_selected_info.depth[2]);
         return 1;
     }
     if(native_decal_selected<0||native_decal_selected>=native_decal_candidate_count) {
