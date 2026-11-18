@@ -441,6 +441,16 @@ static GLuint gpuq_id[GPUQ_RING];
 static int gpuq_state[GPUQ_RING];           /* 0 libre, 1 en curso, 2 cerrada, esperando resultado */
 static unsigned gpuq_verts[GPUQ_RING], gpuq_draws[GPUQ_RING], gpuq_batches[GPUQ_RING];
 static int gpuq_head = -1, gpu_prof = -1;
+/* Desglose por pasada: marcas GL_TIMESTAMP entre categorias. El intervalo entre dos marcas se atribuye a la categoria que estaba
+ * activa al cerrarlo. TIME_ELAPSED solo da el total; ademas cuenta los huecos en que la GPU espera a la CPU, por eso se mide
+ * tambien el tiempo de CPU que tarda la escena (begin..end) para compararlo con el de GPU. */
+enum { GPUCAT_DIRECT, GPUCAT_OT, GPUCAT_SHADOW, GPUCAT_RTT, GPUCAT_COUNT };
+#define GPUQ_TS_MAX 96
+static GLuint gpuq_ts[GPUQ_RING][GPUQ_TS_MAX];
+static unsigned char gpuq_ts_cat[GPUQ_RING][GPUQ_TS_MAX];
+static int gpuq_ts_n[GPUQ_RING], gpu_cat_cur;
+static double gpuq_cpu0[GPUQ_RING], gpuq_cpu_span[GPUQ_RING];
+static double gpu_cat_ms[GPUCAT_COUNT], gpu_cat_ivl[GPUCAT_COUNT], gpu_cpu_span_sum;
 static double gpu_sum_ms, gpu_max_ms, gpu_sum_verts, gpu_sum_draws, gpu_sum_batches;
 static unsigned gpu_frames;
 
@@ -458,9 +468,29 @@ static void gpu_timer_begin(void)
     if (!gpuq_id[0]) glGenQueries(GPUQ_RING, gpuq_id);
     for (i = 0; i < GPUQ_RING; i++) if (gpuq_state[i] == 0) { slot = i; break; }
     if (slot < 0) { gpuq_head = -1; return; }    /* anillo lleno: este frame no se mide */
+    if (!gpuq_ts[0][0]) glGenQueries(GPUQ_RING * GPUQ_TS_MAX, &gpuq_ts[0][0]);
     glBeginQuery(GL_TIME_ELAPSED, gpuq_id[slot]);
+    glQueryCounter(gpuq_ts[slot][0], GL_TIMESTAMP);
+    gpuq_ts_n[slot] = 1;
+    gpu_cat_cur = GPUCAT_DIRECT;
+    gpuq_cpu0[slot] = pcGameProfileNowMs();
     gpuq_state[slot] = 1;
     gpuq_head = slot;
+}
+
+/* Cierra el intervalo de la categoria activa y activa 'next'. Vacia el lote antes: lo que se acumulo hasta aqui debe quedar
+ * por delante de la marca en la cola de la GPU. */
+static void gpu_mark(int next)
+{
+    if (!gpu_profile_on()) return;
+    if (gpuq_head >= 0 && gpuq_state[gpuq_head] == 1 && gpuq_ts_n[gpuq_head] < GPUQ_TS_MAX) {
+        int n = gpuq_ts_n[gpuq_head];
+        batch_flush();
+        glQueryCounter(gpuq_ts[gpuq_head][n], GL_TIMESTAMP);
+        gpuq_ts_cat[gpuq_head][n] = (unsigned char)gpu_cat_cur;
+        gpuq_ts_n[gpuq_head] = n + 1;
+    }
+    gpu_cat_cur = next;
 }
 
 static void gpu_timer_end(void)
@@ -468,6 +498,8 @@ static void gpu_timer_end(void)
     int i;
     if (!gpu_profile_on()) return;
     if (gpuq_head >= 0 && gpuq_state[gpuq_head] == 1) {
+        gpu_mark(GPUCAT_DIRECT);   /* cierra el ultimo intervalo */
+        gpuq_cpu_span[gpuq_head] = pcGameProfileNowMs() - gpuq_cpu0[gpuq_head];
         glEndQuery(GL_TIME_ELAPSED);
         gpuq_state[gpuq_head] = 2;
         gpuq_verts[gpuq_head] = stat_vertices; gpuq_draws[gpuq_head] = stat_immediate; gpuq_batches[gpuq_head] = stat_batches;
@@ -483,6 +515,20 @@ static void gpu_timer_end(void)
             double ms;
             glGetQueryObjectui64v(gpuq_id[i], GL_QUERY_RESULT, &ns);
             ms = (double)ns / 1.0e6;
+            {
+                int k;
+                uint64_t prev = 0;
+                for (k = 0; k < gpuq_ts_n[i]; k++) {
+                    uint64_t t = 0;
+                    glGetQueryObjectui64v(gpuq_ts[i][k], GL_QUERY_RESULT, &t);
+                    if (k > 0) {
+                        gpu_cat_ms[gpuq_ts_cat[i][k]] += (double)(t - prev) / 1.0e6;
+                        gpu_cat_ivl[gpuq_ts_cat[i][k]] += 1.0;
+                    }
+                    prev = t;
+                }
+                gpu_cpu_span_sum += gpuq_cpu_span[i];
+            }
             gpu_sum_ms += ms; if (ms > gpu_max_ms) gpu_max_ms = ms;
             gpu_sum_verts += gpuq_verts[i]; gpu_sum_draws += gpuq_draws[i]; gpu_sum_batches += gpuq_batches[i];
             gpu_frames++;
@@ -493,6 +539,12 @@ static void gpu_timer_end(void)
         pcLog("PROFILE gpu scene: %.3f ms avg / %.3f ms max over %u frames | per frame: %.0f vertices, %.0f draws, %.0f GL batches | %.1f ns/vertex",
               gpu_sum_ms / gpu_frames, gpu_max_ms, gpu_frames, gpu_sum_verts / gpu_frames, gpu_sum_draws / gpu_frames,
               gpu_sum_batches / gpu_frames, gpu_sum_verts > 0.0 ? gpu_sum_ms * 1.0e6 / gpu_sum_verts : 0.0);
+        pcLog("PROFILE gpu passes (ms/frame de GPU): directo %.2f (%.1f tramos) | OT %.2f (%.1f) | sombras %.2f (%.1f) | copia a textura %.2f (%.1f) | CPU de la escena (begin..end) %.2f",
+              gpu_cat_ms[GPUCAT_DIRECT] / gpu_frames, gpu_cat_ivl[GPUCAT_DIRECT] / gpu_frames,
+              gpu_cat_ms[GPUCAT_OT] / gpu_frames, gpu_cat_ivl[GPUCAT_OT] / gpu_frames,
+              gpu_cat_ms[GPUCAT_SHADOW] / gpu_frames, gpu_cat_ivl[GPUCAT_SHADOW] / gpu_frames,
+              gpu_cat_ms[GPUCAT_RTT] / gpu_frames, gpu_cat_ivl[GPUCAT_RTT] / gpu_frames, gpu_cpu_span_sum / gpu_frames);
+        memset(gpu_cat_ms, 0, sizeof(gpu_cat_ms)); memset(gpu_cat_ivl, 0, sizeof(gpu_cat_ivl)); gpu_cpu_span_sum = 0.0;
         gpu_sum_ms = gpu_max_ms = gpu_sum_verts = gpu_sum_draws = gpu_sum_batches = 0.0;
         gpu_frames = 0;
     }
@@ -1196,6 +1248,7 @@ static void flush_transparent(int two_pass)
     if (!ready || transparent_count <= 0) return;
     NativeFrameState live;
     batch_flush();
+    gpu_mark(GPUCAT_OT);
     queue_prev_item = NULL;   /* el OT se agrupa por contexto (draw_queued_item); el lote se vacia al final */
     active_target = TARGET_SCREEN;   /* el OT siempre dibuja en la pantalla, nunca en la mascara de sombras */
     capture_frame_state(&live);
@@ -1264,6 +1317,7 @@ static void flush_transparent(int two_pass)
     restore_frame_state(&live);
     transparent_count = 0;
     active_target = saved_target;
+    gpu_mark(GPUCAT_DIRECT);
 }
 
 void pcRendererFlushTransparent(void) { batch_flush(); flush_transparent(0); }
@@ -1274,6 +1328,7 @@ void pcRendererFlushTransparentI(void) { batch_flush(); flush_transparent(1); }
 void pcRendererShadowBegin(void)
 {
     batch_flush();
+    gpu_mark(GPUCAT_SHADOW);
     gl_shadow_invalidate();
     if (!ready) return;
     active_target = TARGET_MASK;
@@ -1294,11 +1349,12 @@ void pcRendererShadowEnd(void)
     active_target = TARGET_SCREEN;
     glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
     gl_shadow_invalidate();
+    gpu_mark(GPUCAT_DIRECT);
 }
 
 /* Ps2ShadowDraw: sprite con la mascara como textura (MODULATE con RGB = shade, TCC=1, alfa de 1 bit expandido por TEXA), prueba
  * de alfa GREATER 0, sin Z, mezcla ALPHA_2 = (Cd - Cs); despues el rectangulo de la mascara se limpia a 0. */
-void pcRendererShadowCompose(float x0, float y0, float x1, float y1, int shade)
+static void shadow_compose_impl(float x0, float y0, float x1, float y1, int shade)
 {
     batch_flush();
     PcNativeVertex v[6];
@@ -1363,6 +1419,14 @@ void pcRendererShadowCompose(float x0, float y0, float x1, float y1, int shade)
         glBindFramebuffer(GL_FRAMEBUFFER, saved_target == TARGET_MASK ? mask_framebuffer : framebuffer);
     }
     gl_shadow_invalidate();
+}
+
+void pcRendererShadowCompose(float x0, float y0, float x1, float y1, int shade)
+{
+    batch_flush();
+    gpu_mark(GPUCAT_SHADOW);
+    shadow_compose_impl(x0, y0, x1, y1, shade);
+    gpu_mark(GPUCAT_DIRECT);
 }
 
 static void remember_texture(GLuint id, int width, int height, int translucent)
@@ -1498,7 +1562,7 @@ static int ensure_render_texture(void)
 }
 
 /* Copia el FBO de escena a una textura GPU. El factor escala solo el almacenamiento físico. */
-void pcRendererCopyScreenToRenderTexture(int sx0, int sy0, int sx1, int sy1, int dx0, int dy0, int dx1, int dy1)
+static void copy_to_render_texture_impl(int sx0, int sy0, int sx1, int sy1, int dx0, int dy0, int dx1, int dy1)
 {
     float kx, ky;
     int scale;
@@ -1527,9 +1591,17 @@ void pcRendererCopyScreenToRenderTexture(int sx0, int sy0, int sx1, int sy1, int
     gl_shadow_invalidate();
 }
 
+void pcRendererCopyScreenToRenderTexture(int sx0, int sy0, int sx1, int sy1, int dx0, int dy0, int dx1, int dy1)
+{
+    batch_flush();
+    gpu_mark(GPUCAT_RTT);
+    copy_to_render_texture_impl(sx0, sy0, sx1, sy1, dx0, dy0, dx1, dy1);
+    gpu_mark(GPUCAT_DIRECT);
+}
+
 /* Copia una franja de un TIM2 renderizado a una unica textura GL persistente.
  * width/height son dimensiones lógicas; el almacenamiento físico usa render_texture_scale. */
-int pcRendererCopyScreenRectToTexture(unsigned int* texture, int x, int y, int w, int h,
+static int copy_rect_to_texture_impl(unsigned int* texture, int x, int y, int w, int h,
                                       int image_width, int image_height)
 {
     float kx, ky;
@@ -1622,6 +1694,16 @@ int pcRendererCopyScreenRectToTexture(unsigned int* texture, int x, int y, int w
     glViewport(0, 0, render_width, render_height);
     remember_texture(id, image_width, image_height, 0);
     return 1;
+}
+
+int pcRendererCopyScreenRectToTexture(unsigned int* texture, int x, int y, int w, int h, int image_width, int image_height)
+{
+    int result;
+    batch_flush();
+    gpu_mark(GPUCAT_RTT);
+    result = copy_rect_to_texture_impl(texture, x, y, w, h, image_width, image_height);
+    gpu_mark(GPUCAT_DIRECT);
+    return result;
 }
 
 /* Lee el rectangulo (x,y,w,h) de la pantalla de juego (pixeles de 640x480 de la GS, y hacia abajo) a RGBA8, fila 0 arriba.

@@ -432,3 +432,11 @@ y, si coincide, lo acumula en el lote de draws inmediatos. Si el contexto cambia
 porque el lote se emite con los globales vigentes (alpha_pass, ot_writes_depth, mezcla, scissor, niebla, Z). El orden del OT no
 cambia nunca. `batch_lock` desaparece (ya nadie lo usa). Se ve en el log: "GL batches" baja frente a "draws" y a `queued`.
 Reversible con `git revert` de este commit. gl_batch=0 tambien lo desactiva (cada item emite su draw).
+
+## 0.9.151 - Perfil de GPU por pasada (solo con debug=1 + profile_game=1)
+Commit independiente, solo medicion: no cambia lo que se dibuja. Marcas `glQueryCounter(GL_TIMESTAMP)` (nucleo de GL 3.3) entre
+categorias: directo (limpiar, tiras opacas, 2D), OT (flush_transparent), sombras (ShadowBegin..End y Compose) y copia a textura
+(CopyScreenToRenderTexture / CopyScreenRectToTexture). `gpu_mark()` vacia el lote antes de marcar. El intervalo entre dos marcas se
+atribuye a la categoria activa. Nueva linea cada 120 frames: "PROFILE gpu passes". Incluye tambien el tiempo de CPU de la escena
+(begin..end): `GL_TIME_ELAPSED` cuenta tambien los huecos en que la GPU espera a la CPU, asi que si el total de GPU ~ el CPU de la
+escena, el "GPU scene" estaba inflado por espera y no es coste real de GPU. Es la primera cosa a mirar en el log.

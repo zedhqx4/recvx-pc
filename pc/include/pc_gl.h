@@ -26,6 +26,7 @@
 #define GL_INFO_LOG_LENGTH 0x8B84
 #endif
 #ifndef GL_TIME_ELAPSED
+#define GL_TIMESTAMP 0x8E28               /* glQueryCounter (nucleo de GL 3.3) */
 #define GL_TIME_ELAPSED 0x88BF            /* ARB_timer_query, parte del nucleo de GL 3.3 */
 #define GL_QUERY_RESULT 0x8866
 #define GL_QUERY_RESULT_AVAILABLE 0x8867
@@ -131,7 +132,8 @@ typedef ptrdiff_t GLintptr;
     X(void, glBeginQuery, (GLenum target, GLuint id)) \
     X(void, glEndQuery, (GLenum target)) \
     X(void, glGetQueryObjectiv, (GLuint id, GLenum pname, GLint* params)) \
-    X(void, glGetQueryObjectui64v, (GLuint id, GLenum pname, uint64_t* params))
+    X(void, glGetQueryObjectui64v, (GLuint id, GLenum pname, uint64_t* params)) \
+    X(void, glQueryCounter, (GLuint id, GLenum target))
 
 #define PC_GL_DECLARE(ret, name, args) typedef ret (APIENTRY* PFN_pc_##name) args; extern PFN_pc_##name pc_##name;
 PC_GL_FUNCS(PC_GL_DECLARE)
@@ -205,5 +207,6 @@ PC_GL_FUNCS(PC_GL_DECLARE)
 #define glEndQuery pc_glEndQuery
 #define glGetQueryObjectiv pc_glGetQueryObjectiv
 #define glGetQueryObjectui64v pc_glGetQueryObjectui64v
+#define glQueryCounter pc_glQueryCounter
 
 int pcGlLoad(void);
