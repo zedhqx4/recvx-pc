@@ -178,6 +178,29 @@ static uint64_t native_decal_object_key(const void* owner, const void* object, c
     return hash ? hash : UINT64_C(1);
 }
 
+static int native_decal_key_is_marked(uint64_t key)
+{
+    int i;
+    for (i = 0; i < native_decal_mark_count; i++)
+        if (native_decal_marks[i] == key)
+            return 1;
+    return 0;
+}
+
+int pcRendererDecalObjectIsMarked(const void* owner, const void* object, const void* transform)
+{
+    if (!owner || !object || !transform)
+        return 0;
+    return native_decal_key_is_marked(native_decal_object_key(owner, object, transform));
+}
+
+int pcRendererDecalWorldObjectIsMarked(const void* object)
+{
+    if (!native_decal_world_active || !native_decal_world_owner || !object)
+        return 0;
+    return pcRendererDecalObjectIsMarked(native_decal_world_owner, object, object);
+}
+
 void pcRendererDecalObjectBegin(const void* owner, const void* object, const void* transform)
 {
     if (!native_decal_debug_enabled)
@@ -218,7 +241,7 @@ void pcRendererDecalObjectEnd(void)
  * El owner identifica el arbol del cuarto; cada nodo CNK visible recibe su propio grupo. */
 void pcRendererDecalWorldBegin(const void* room_root)
 {
-    if (!native_decal_debug_enabled || !room_root)
+    if (!room_root)
         return;
     native_decal_world_owner = room_root;
     native_decal_world_active = 1;

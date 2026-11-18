@@ -296,3 +296,15 @@ Other operational variables for input replay, screenshots, logging, audio dumps,
 ---
 
 **Maintenance rule:** update this file when a change lands in `alpha`, and describe the behavior verified in the resulting tree. Mark experiments as experiments, and explicitly mark them reverted when that happens. Keep GPU texture-content caching, TIM2 image-upload avoidance, OpenGL state caching, GS VRAM transfer optimizations, CNK profiling and movie playback as separate topics unless the implementation actually couples them.
+
+
+## debug/decal-selector: collision-normal origin correction probe
+
+**Status:** Experimental implementation; in-game validation pending.
+
+- Added a marked-object-only correction path to the native renderer. It is opt-in through the existing decal inspector mark (`/`), so unrelated room geometry is not moved.
+- At the CNK object's composed model-view matrix, recover its world-space origin by applying the inverse camera matrix.
+- Probe the original room collision geometry with Capcom's `bhCollisionCheckLine2()` / `bhGetHitCollisionNormal()` path in six cardinal directions (`0x4400`, `flr_no=-1`), with a 0.20-unit probe reach.
+- If the closest returned collision plane is within 0.10 world units of the object origin, translate only that object's temporary render matrix by 0.10 units along the normalized collision normal. Restore the previous matrix after that object's draw; no CNK vertices, source transforms, or shader depth are changed.
+- This uses the original collision mesh as the nearby-surface query, not arbitrary rendered triangles. Objects without a corresponding collision surface are intentionally not corrected.
+- Windows CI and in-game visual validation are required before considering this a permanent fix.

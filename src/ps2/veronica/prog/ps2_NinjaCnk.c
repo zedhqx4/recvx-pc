@@ -20,6 +20,8 @@ void pcVu0StripPack(void* dst, const unsigned short* idx, int n, const void* vbu
 #include "../../../../pc/include/pc_vu.h"
 #include "../../../../pc/include/pc_platform.h"
 #include "../../../../pc/include/pc_renderer.h"
+#include "../../../ps2/veronica/prog/main.h"
+#include "../../../ps2/veronica/prog/hitchkl.h"
 
 /* Perfil opt-in (debug=1, profile_game=1): cuantas tiras de la ruta del EE llegan a vu1Draw* y cuantas se descartan por
  * recorte de frustum tras pasar todos sus vertices por _CVV. Una linea "PROFILE cnk strips" cada 20000 tiras. */
@@ -37,6 +39,151 @@ static void pcCnkCount(unsigned int verts, int culled)
     }
 }
 #define PC_CNK_COUNT(verts, culled) do { if (pcGameProfileEnabled()) pcCnkCount((verts), (culled)); } while (0)
+#endif
+
+#ifdef TARGET_PC
+#define PC_DECAL_PROBE_LENGTH 0.20f
+#define PC_DECAL_NEAR_DISTANCE 0.10f
+#define PC_DECAL_ORIGIN_OFFSET 0.10f
+#define PC_DECAL_CORRECTION_SCOPE_DEPTH 16
+
+static unsigned char pc_decal_correction_scopes[PC_DECAL_CORRECTION_SCOPE_DEPTH];
+static int pc_decal_correction_scope_depth;
+static int pc_decal_correction_scope_overflow;
+static const void* pc_decal_correction_logged_objects[64];
+static int pc_decal_correction_logged_count;
+
+static int pcDecalCorrectionTryApply(const void* object)
+{
+    static const float directions[6][3] = {
+        { 1.0f, 0.0f, 0.0f }, { -1.0f, 0.0f, 0.0f },
+        { 0.0f, 1.0f, 0.0f }, { 0.0f, -1.0f, 0.0f },
+        { 0.0f, 0.0f, 1.0f }, { 0.0f, 0.0f, -1.0f }
+    };
+    NJS_MATRIX view_model;
+    NJS_MATRIX inverse_camera;
+    NJS_POINT3 local_origin;
+    NJS_POINT3 view_origin;
+    NJS_POINT3 world_origin;
+    NJS_POINT3 probe_start;
+    NJS_POINT3 probe_end;
+    NJS_POINT3 hit_normal;
+    NJS_POINT3 best_normal;
+    NJS_VECTOR view_offset;
+    float best_distance = PC_DECAL_NEAR_DISTANCE;
+    int found = 0;
+    int i;
+    int logged = 0;
+
+    if (!cam.mtx)
+        return 0;
+
+    /* Current matrix is camera * object. Convert its origin back to world space
+       so the collision query uses the same coordinates as bhCollisionCheckLine2. */
+    njGetMatrix(&view_model);
+    njSetMatrix(&inverse_camera, cam.mtx);
+    if (!njInvertMatrix(&inverse_camera))
+        return 0;
+
+    local_origin.x = local_origin.y = local_origin.z = 0.0f;
+    njCalcPoint(&view_model, &local_origin, &view_origin);
+    njCalcPoint(&inverse_camera, &view_origin, &world_origin);
+
+    /* Search six cardinal directions. A plane within 0.10 units intersects at
+       least one of these 0.20-unit probes, regardless of its orientation. */
+    for (i = 0; i < 6; i++) {
+        float distance;
+        float signed_distance;
+
+        probe_start = world_origin;
+        probe_end.x = world_origin.x + directions[i][0] * PC_DECAL_PROBE_LENGTH;
+        probe_end.y = world_origin.y + directions[i][1] * PC_DECAL_PROBE_LENGTH;
+        probe_end.z = world_origin.z + directions[i][2] * PC_DECAL_PROBE_LENGTH;
+
+        if (bhCollisionCheckLine2(&probe_start, &probe_end, 0x4400, -1) == NULL)
+            continue;
+
+        bhGetHitCollisionNormal(&hit_normal);
+        if (njUnitVector(&hit_normal) <= 0.00001f)
+            continue;
+
+        signed_distance =
+            (world_origin.x - probe_end.x) * hit_normal.x +
+            (world_origin.y - probe_end.y) * hit_normal.y +
+            (world_origin.z - probe_end.z) * hit_normal.z;
+        distance = (signed_distance < 0.0f) ? -signed_distance : signed_distance;
+
+        if (distance < best_distance) {
+            best_distance = distance;
+            best_normal = hit_normal;
+            found = 1;
+        }
+    }
+
+    if (!found)
+        return 0;
+
+    /* The hit normal is world-space. Convert the displacement vector to view
+       space and adjust only this object's temporary render-matrix translation. */
+    njCalcVector(cam.mtx, &best_normal, &view_offset);
+    njPushMatrixEx();
+    ((float*)&view_model)[12] += view_offset.x * PC_DECAL_ORIGIN_OFFSET;
+    ((float*)&view_model)[13] += view_offset.y * PC_DECAL_ORIGIN_OFFSET;
+    ((float*)&view_model)[14] += view_offset.z * PC_DECAL_ORIGIN_OFFSET;
+    njSetMatrix(NULL, &view_model);
+
+    for (i = 0; i < pc_decal_correction_logged_count; i++) {
+        if (pc_decal_correction_logged_objects[i] == object) {
+            logged = 1;
+            break;
+        }
+    }
+    if (!logged && pc_decal_correction_logged_count < 64) {
+        pc_decal_correction_logged_objects[pc_decal_correction_logged_count++] = object;
+        pcLog("native decal correction: object=%p origin=(%.3f,%.3f,%.3f) surface_distance=%.4f normal=(%.3f,%.3f,%.3f) offset=%.2f",
+              (void*)object, world_origin.x, world_origin.y, world_origin.z, best_distance,
+              best_normal.x, best_normal.y, best_normal.z, PC_DECAL_ORIGIN_OFFSET);
+    }
+    return 1;
+}
+
+static void pcDecalCorrectionBeginMarked(int marked, const void* object)
+{
+    int pushed = 0;
+    if (pc_decal_correction_scope_overflow > 0) {
+        pc_decal_correction_scope_overflow++;
+        return;
+    }
+    if (pc_decal_correction_scope_depth >= PC_DECAL_CORRECTION_SCOPE_DEPTH) {
+        pc_decal_correction_scope_overflow = 1;
+        pcLog("native decal correction: scope nesting exceeded %d", PC_DECAL_CORRECTION_SCOPE_DEPTH);
+        return;
+    }
+    if (marked)
+        pushed = pcDecalCorrectionTryApply(object);
+    pc_decal_correction_scopes[pc_decal_correction_scope_depth++] = (unsigned char)pushed;
+}
+
+void pcDecalCorrectionBegin(const void* owner, const void* object, const void* transform)
+{
+    pcDecalCorrectionBeginMarked(pcRendererDecalObjectIsMarked(owner, object, transform), object);
+}
+
+void pcDecalCorrectionBeginWorld(const void* object)
+{
+    pcDecalCorrectionBeginMarked(pcRendererDecalWorldObjectIsMarked(object), object);
+}
+
+void pcDecalCorrectionEnd(void)
+{
+    if (pc_decal_correction_scope_overflow > 0) {
+        pc_decal_correction_scope_overflow--;
+        return;
+    }
+    if (pc_decal_correction_scope_depth > 0 &&
+        pc_decal_correction_scopes[--pc_decal_correction_scope_depth])
+        njPopMatrixEx();
+}
 #endif
 
 static VU1_STRIP_BUF* pNaCnkVerBufTop;
@@ -601,11 +748,13 @@ void    njCnkEasyDrawObject( NJS_CNK_OBJECT *model )
         else
         {
 #ifdef TARGET_PC
+            pcDecalCorrectionBeginWorld(model);
             pcRendererDecalWorldObjectBegin(model);
 #endif
             lDrawResult = njCnkDrawModelLocal(model->model);
 #ifdef TARGET_PC
             pcRendererDecalWorldObjectEnd();
+            pcDecalCorrectionEnd();
 #endif
         }
     
@@ -665,11 +814,13 @@ void    njCnkEasyMultiDrawObject( NJS_CNK_OBJECT *model )
         else
         {
 #ifdef TARGET_PC
+            pcDecalCorrectionBeginWorld(model);
             pcRendererDecalWorldObjectBegin(model);
 #endif
             lDrawResult = njCnkDrawModelLocal(model->model);
 #ifdef TARGET_PC
             pcRendererDecalWorldObjectEnd();
+            pcDecalCorrectionEnd();
 #endif
         }
     

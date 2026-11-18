@@ -91,6 +91,8 @@ void pcRendererDecalWorldBegin(const void* room_root);
 void pcRendererDecalWorldEnd(void);
 void pcRendererDecalWorldObjectBegin(const void* object);
 void pcRendererDecalWorldObjectEnd(void);
+int pcRendererDecalObjectIsMarked(const void* owner, const void* object, const void* transform);
+int pcRendererDecalWorldObjectIsMarked(const void* object);
 void pcRendererDecalDebugToggle(void);
 void pcRendererDecalDebugCycle(int direction);
 int pcRendererDecalDebugMark(void);

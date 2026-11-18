@@ -158,11 +158,13 @@ static void EasyMultiDrawTreeCnk(BH_PWORK* ewP, NJS_CNK_OBJECT* objP, O_WORK* ow
         if ((objP->model != NULL) && (!(objP->evalflags & 0x8)))
         {
 #ifdef TARGET_PC
+            pcDecalCorrectionBegin(ewP, objP, owP);
             pcRendererDecalObjectBegin(ewP, objP, owP);
 #endif
             njCnkEasyMultiDrawModel(objP->model);
 #ifdef TARGET_PC
             pcRendererDecalObjectEnd();
+            pcDecalCorrectionEnd();
 #endif
         }
         
@@ -189,11 +191,13 @@ static void SimpleMultiDrawTreeCnk(BH_PWORK* ewP, NJS_CNK_OBJECT* objP, O_WORK* 
         if ((objP->model != NULL) && (!(objP->evalflags & 0x8)))
         {
 #ifdef TARGET_PC
+            pcDecalCorrectionBegin(ewP, objP, owP);
             pcRendererDecalObjectBegin(ewP, objP, owP);
 #endif
             njCnkSimpleMultiDrawModel(objP->model);
 #ifdef TARGET_PC
             pcRendererDecalObjectEnd();
+            pcDecalCorrectionEnd();
 #endif
         }
         
@@ -220,11 +224,13 @@ static void EasyDrawTreeCnk(BH_PWORK* ewP, NJS_CNK_OBJECT* objP, O_WORK* owP, in
         if ((objP->model != NULL) && (!(objP->evalflags & 0x8)))
         {
 #ifdef TARGET_PC
+            pcDecalCorrectionBegin(ewP, objP, owP);
             pcRendererDecalObjectBegin(ewP, objP, owP);
 #endif
             njCnkEasyDrawModel(objP->model);
 #ifdef TARGET_PC
             pcRendererDecalObjectEnd();
+            pcDecalCorrectionEnd();
 #endif
         }
         
@@ -251,11 +257,13 @@ static void SimpleDrawTreeCnk(BH_PWORK* ewP, NJS_CNK_OBJECT* objP, O_WORK* owP, 
         if ((objP->model != NULL) && (!(objP->evalflags & 0x8)))
         {
 #ifdef TARGET_PC
+            pcDecalCorrectionBegin(ewP, objP, owP);
             pcRendererDecalObjectBegin(ewP, objP, owP);
 #endif
             njCnkSimpleDrawModel(objP->model);
 #ifdef TARGET_PC
             pcRendererDecalObjectEnd();
+            pcDecalCorrectionEnd();
 #endif
         }
         

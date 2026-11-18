@@ -138,8 +138,15 @@ The static-room identity uses the room's CNK tree and each object-node address; 
 models use the owning game object, CNK entry and per-object transform slot. Repeated lighting
 or mirror passes reuse the same selection group. Transparent draws retain their object
 association when queued. Up to 4096 object instances are collected per frame; screen-space
-UI, lines, points and shadow-mask geometry are excluded. The tool does not change geometry
-or depth.
+UI, lines, points and shadow-mask geometry are excluded.
+
+Press `/` to mark the selected CNK object as an experimental correction target. The native
+renderer checks that object's world origin against the room collision mesh using six short
+axis probes. If a collision plane is within 0.10 world units, only that object's render
+transform is translated by 0.10 units along the collision normal. The source CNK data and
+game transform are not modified; the temporary adjustment is restored after the draw.
+Objects without a nearby collision surface are left unchanged. This is a diagnostic
+experiment, not a general-purpose decal fix.
 
 ## Tools
 

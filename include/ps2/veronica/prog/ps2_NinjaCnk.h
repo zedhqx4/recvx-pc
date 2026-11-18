@@ -68,6 +68,13 @@ CHUNK_HEAD* njCnkDefaultLong(CHUNK_HEAD* pCnk);
 CHUNK_HEAD* njCnkDefaultShort(CHUNK_HEAD* pCnk);
 void njCnkEasyMultiDrawObjectI(NJS_CNK_OBJECT* pObject);
 
+#ifdef TARGET_PC
+/* Experimental, marked-object-only origin correction against the room collision mesh. */
+void pcDecalCorrectionBegin(const void* owner, const void* object, const void* transform);
+void pcDecalCorrectionBeginWorld(const void* object);
+void pcDecalCorrectionEnd(void);
+#endif
+
 extern int lCnkModClipFace;
 extern float fNaCnkConstantA;
 extern float fNaCnkConstantR;
