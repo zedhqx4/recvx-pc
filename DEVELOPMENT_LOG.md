@@ -254,6 +254,7 @@ These notes are included to keep reverted tests and related-but-different caches
 | `render=WxH` | Selects the internal backing resolution, preserving 640×480 game coordinates |
 | `scale=N` | Selects presentation scale, 1–8 |
 | `vsync=0|1` | Disables/enables VSync |
+| `depth_float=0|1` | Native renderer depth A/B: `1` enables 32-bit float reversed-Z; `0` restores the legacy GS16 quantized path (`RECVX_DEPTH_FLOAT` overrides) |
 
 Other operational variables for input replay, screenshots, logging, audio dumps, data paths and room warping are documented in `pc/README.md`.
 
@@ -308,3 +309,14 @@ Other operational variables for input replay, screenshots, logging, audio dumps,
 - If the closest returned collision plane is within 0.10 world units of the object origin, translate only that object's temporary render matrix by 0.10 units along the normalized collision normal. Restore the previous matrix after that object's draw; no CNK vertices, source transforms, or shader depth are changed.
 - This uses the original collision mesh as the nearby-surface query, not arbitrary rendered triangles. Objects without a corresponding collision surface are intentionally not corrected.
 - Windows CI and in-game visual validation are required before considering this a permanent fix.
+
+
+## debug/decal-selector: hybrid floating-point depth experiment
+
+**Status:** Experimental implementation; build and in-game validation pending.
+
+- Added a depth-only A/B path to the native OpenGL renderer. Default is `depth_float=1`; set `depth_float=0` in `recvx.ini` to restore the previous depth behavior. `RECVX_DEPTH_FLOAT=0|1` overrides the ini value.
+- The new path uses a `GL_DEPTH_COMPONENT32F` attachment, reversed-Z projection, `GL_GEQUAL`, and a depth clear of `0.0`. It removes the fragment-stage GS16 depth quantization only in this mode.
+- For homogeneous 3D inputs (screen-space modes 2-4), fractional GS Z is reconstructed from the original Q and `Ps2_zbuff_a/b` values and interpolated by the GPU (`Z / 65536`), instead of the CPU/VU integer or 1/16 truncation. No vertex positions, texture/color/fog values, geometry submission, transparency queues/order, render targets, or shadow-composition logic are changed.
+- The old `GL_DEPTH_COMPONENT24` + `GL_LEQUAL` + GS16 quantization path remains available for A/B comparison. This is not a port of Aikatore's renderer or GS pipeline.
+- No decal/object transform or polygon-offset changes are included.
