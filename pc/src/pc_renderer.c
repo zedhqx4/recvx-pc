@@ -1121,8 +1121,16 @@ static int texture_is_translucent(GLuint id);
 static int item_may_be_translucent(const NativeQueuedDraw* q)
 {
     int i;
-    for (i = 0; i < q->count; i++)
-        if (q->vertices[i].a < 0.9961f) return 1;
+    for (i = 0; i < q->count; i++) {
+        float a = q->vertices[i].a;
+        /* Vertices crudos (screen_space 3): A es el registro de la GS (0..255, 128 = opaco). El vertex shader lo convierte con
+         * min(floor(clamp(A,0,255))/128, 1); aqui se aplica la misma conversion para decidir con el mismo valor que ve la GPU. */
+        if (q->state.screen_space == 3) {
+            a = floorf(a < 0.0f ? 0.0f : a > 255.0f ? 255.0f : a) / 128.0f;
+            if (a > 1.0f) a = 1.0f;
+        }
+        if (a < 0.9961f) return 1;
+    }
     return q->state.textured && q->state.texture_alpha && texture_is_translucent(q->state.texture);
 }
 

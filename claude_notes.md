@@ -400,3 +400,10 @@ Objetivo del usuario: datos del juego -> geometria nativa -> GPU, sin conversion
   2. `PROFILE gpu scene`: tiempo de GPU de la escena con GL_TIME_ELAPSED en anillo de 6 consultas (lectura sin bloquear), junto a vertices/draws/lotes por frame y ns/vertice.
   3. `PROFILE vu1Draw ...` y `PROFILE CNK ...` (ya existentes).
 - Que NO hace todavia (siguiente): colores de vu1Draw*/iluminacion siguen en CPU (la VU1 emulada en C), el filtro ADC sigue en CPU, el OT de transparencias sigue ordenando en CPU, y las tiras 2D/sprites (pcSubmitPrepared3D) no pasan por la ruta cruda.
+
+## 0.9.147 - gpu_vertex: la cola de transparencias leia el alfa crudo
+`item_may_be_translucent()` (pc_renderer.c) decidia si un item del OT tiene fragmentos con alfa < 1 leyendo `vertices[i].a < 0.9961`.
+Con `gpu_vertex=1` (screen_space 3) `a` es el registro crudo de la GS (0..128+), asi que 63.75 contaba como opaco: los paneles
+translucidos (tex 45, alfa 0.49) se dibujaban en la pasada opaca (con escritura de Z) y salian lechosos. Ahora se aplica la misma
+conversion que el vertex shader (floor/clamp/128) antes de comparar. Leccion: ningun codigo del renderer puede leer r,g,b,a,x,y,z,u,v
+de un vertice en modo 3 sin convertirlo; auditado, solo existia esta lectura con efecto (el resto es log).
