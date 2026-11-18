@@ -118,6 +118,22 @@ Environment variables for testing:
 | `RECVX_SNDLOG=1` | log sound sequence starts, rejected sequences, sequence uploads and reverb changes |
 | `RECVX_MCLOG=1` | log save-folder (memory card) calls |
 
+## Native decal inspector (debug branch)
+
+On the `debug/decal-selector` branch, set `debug=1` in `recvx.ini` and use the numeric keypad:
+
+| Key | Action |
+|---|---|
+| `*` | Toggle the inspector |
+| `+` / `-` | Select the next / previous 3D triangle draw |
+| `/` | Write the selected draw's renderer state and bounds to `recvx.log` |
+
+The selected draw is outlined in magenta. The inspector collects up to 4096 individual
+3D triangle draws per frame; screen-space UI, lines, points, and shadow-mask geometry are
+excluded. It records the state and vertex bounds seen by the native renderer, not a stable
+game-side object or CNK material pointer. Selection follows draw submission order, so keep
+the same room/camera while cycling candidates. The tool does not change geometry or depth.
+
 ## Tools
 
 ```bash

@@ -84,6 +84,11 @@ void pcRendererCopyScreenToRenderTexture(int sx0, int sy0, int sx1, int sy1, int
 void pcRendererBindRenderTexture(void);
 uint64_t pcRendererFrameNumber(void);
 void pcRendererCaptureBurst(int frames);   /* guarda los N frames siguientes como recvx_burst_K.bmp (F8) */
+/* Debug-only native decal inspector. Candidates are individual 3D triangle draws. */
+void pcRendererDecalDebugToggle(void);
+void pcRendererDecalDebugCycle(int direction);
+int pcRendererDecalDebugMark(void);
+void pcRendererDecalDebugStatus(int* enabled, int* selected, int* count, int* marked);
 int pcRendererReadScreenRect(int x, int y, int w, int h, unsigned char* rgba);
 /* Copy a screen rectangle directly into a persistent GPU texture; no CPU readback. */
 int pcRendererCopyScreenRectToTexture(unsigned int* texture, int x, int y, int w, int h, int image_width, int image_height);

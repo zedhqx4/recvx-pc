@@ -54,6 +54,7 @@ typedef struct {
     float sort_depth;
     GLenum topology;
     unsigned long long sequence;
+    int decal_candidate;
 } NativeQueuedDraw;
 
 /* translucent: la textura tiene algun texel con alfa < 128 (escala GS), incluido 0: el filtro bilineal mezcla esos texels con los
@@ -82,6 +83,7 @@ static GLuint program;
 static GLint u_target, u_projection, u_aspect, u_offset, u_near, u_far;
 static GLint u_textured, u_texture, u_fog_enabled, u_fog_color, u_alpha_test, u_alpha_ref;
 static GLint u_zbuf, u_screen_space, u_texture_size, u_texture_function, u_texture_alpha, u_texture_perspective, u_alpha_pass;
+static GLint u_debug;
 static int output_width = 640;
 static int output_height = 480;
 static int render_width = 640;
@@ -120,6 +122,167 @@ uint64_t pcRendererFrameNumber(void) { return (uint64_t)frame_number; }
 static void flush_pending_deletes(void);
 static unsigned stat_immediate, stat_queued, stat_vertices, stat_screen_space;
 static int debug_magenta = -1;
+
+/* Debug selector for native 3D decal-like geometry. Each submitted triangle draw is a candidate,
+ * not just a texture signature: distinct surfaces sharing a material can be selected separately. */
+#define NATIVE_DECAL_CANDIDATE_LIMIT 4096
+#define NATIVE_DECAL_MARK_LIMIT 64
+typedef struct {
+    uint64_t key;
+    unsigned int texture;
+    int topology, count, screen_space, blend, depth_write, textured, texture_function;
+    float min_x, min_y, min_z, max_x, max_y, max_z;
+} NativeDecalCandidate;
+static NativeDecalCandidate native_decal_candidates[NATIVE_DECAL_CANDIDATE_LIMIT];
+static uint64_t native_decal_marks[NATIVE_DECAL_MARK_LIMIT];
+static int native_decal_candidate_count;
+static int native_decal_mark_count;
+static int native_decal_selected = -1;
+static int native_decal_debug_enabled;
+
+static uint64_t native_decal_hash_add(uint64_t hash, uint32_t value)
+{
+    return (hash ^ (uint64_t)value) * UINT64_C(1099511628211);
+}
+
+static uint64_t native_decal_candidate_key(const PcNativeVertex* vertices, int count,
+                                           const PcNativeDrawState* state, GLenum topology)
+{
+    uint64_t hash = UINT64_C(1469598103934665603);
+    uint32_t bits;
+    int i;
+#define DECAL_HASH_FIELD(v) hash = native_decal_hash_add(hash, (uint32_t)(v))
+    DECAL_HASH_FIELD(state->texture);
+    DECAL_HASH_FIELD(topology);
+    DECAL_HASH_FIELD(count);
+    DECAL_HASH_FIELD(state->screen_space);
+    DECAL_HASH_FIELD(state->textured);
+    DECAL_HASH_FIELD(state->blend);
+    DECAL_HASH_FIELD(state->depth_test);
+    DECAL_HASH_FIELD(state->depth_write);
+    DECAL_HASH_FIELD(state->texture_function);
+    DECAL_HASH_FIELD(state->texture_alpha);
+    for (i = 0; i < count; i++) {
+        memcpy(&bits, &vertices[i].x, sizeof(bits)); DECAL_HASH_FIELD(bits);
+        memcpy(&bits, &vertices[i].y, sizeof(bits)); DECAL_HASH_FIELD(bits);
+        memcpy(&bits, &vertices[i].z, sizeof(bits)); DECAL_HASH_FIELD(bits);
+        memcpy(&bits, &vertices[i].u, sizeof(bits)); DECAL_HASH_FIELD(bits);
+        memcpy(&bits, &vertices[i].v, sizeof(bits)); DECAL_HASH_FIELD(bits);
+    }
+#undef DECAL_HASH_FIELD
+    return hash ? hash : UINT64_C(1);
+}
+
+/* Keep the registry per submitted draw so overlapping objects with the same texture/state
+ * remain independently selectable. 2D screen UI, lines, points and shadow-mask draws are excluded. */
+static int native_decal_register_candidate(const PcNativeVertex* vertices, int count,
+                                           const PcNativeDrawState* state, GLenum topology)
+{
+    NativeDecalCandidate* c;
+    int i;
+    if (!native_decal_debug_enabled || active_target != TARGET_SCREEN || !vertices || !state ||
+        count < 3 || !state->depth_test || state->screen_space == 1 ||
+        (topology != GL_TRIANGLES && topology != GL_TRIANGLE_STRIP))
+        return -1;
+    if (native_decal_candidate_count >= NATIVE_DECAL_CANDIDATE_LIMIT)
+        return -1;
+
+    c = &native_decal_candidates[native_decal_candidate_count];
+    memset(c, 0, sizeof(*c));
+    c->key = native_decal_candidate_key(vertices, count, state, topology);
+    c->texture = state->texture;
+    c->topology = (int)topology;
+    c->count = count;
+    c->screen_space = state->screen_space;
+    c->blend = state->blend;
+    c->depth_write = state->depth_write;
+    c->textured = state->textured;
+    c->texture_function = state->texture_function;
+    c->min_x = c->max_x = vertices[0].x;
+    c->min_y = c->max_y = vertices[0].y;
+    c->min_z = c->max_z = vertices[0].z;
+    for (i = 1; i < count; i++) {
+        if (vertices[i].x < c->min_x) c->min_x = vertices[i].x;
+        if (vertices[i].x > c->max_x) c->max_x = vertices[i].x;
+        if (vertices[i].y < c->min_y) c->min_y = vertices[i].y;
+        if (vertices[i].y > c->max_y) c->max_y = vertices[i].y;
+        if (vertices[i].z < c->min_z) c->min_z = vertices[i].z;
+        if (vertices[i].z > c->max_z) c->max_z = vertices[i].z;
+    }
+    if (native_decal_selected < 0)
+        native_decal_selected = 0;
+    return native_decal_candidate_count++;
+}
+
+void pcRendererDecalDebugToggle(void)
+{
+    native_decal_debug_enabled = !native_decal_debug_enabled;
+    native_decal_selected = native_decal_debug_enabled ? 0 : -1;
+    pcLog("native decal inspector: %s (candidates are individual 3D triangle draws)",
+          native_decal_debug_enabled ? "enabled" : "disabled");
+}
+
+void pcRendererDecalDebugCycle(int direction)
+{
+    if (!native_decal_debug_enabled) {
+        pcLog("native decal inspector: press Numpad * to enable");
+        return;
+    }
+    if (native_decal_candidate_count <= 0) {
+        pcLog("native decal inspector: no candidates collected yet");
+        return;
+    }
+    if (native_decal_selected < 0 || native_decal_selected >= native_decal_candidate_count)
+        native_decal_selected = (direction >= 0) ? 0 : native_decal_candidate_count - 1;
+    else {
+        native_decal_selected += (direction >= 0) ? 1 : -1;
+        if (native_decal_selected >= native_decal_candidate_count) native_decal_selected = 0;
+        if (native_decal_selected < 0) native_decal_selected = native_decal_candidate_count - 1;
+    }
+    pcLog("native decal inspector: candidate %d/%d",
+          native_decal_selected + 1, native_decal_candidate_count);
+}
+
+int pcRendererDecalDebugMark(void)
+{
+    NativeDecalCandidate* c;
+    int i;
+    if (!native_decal_debug_enabled || native_decal_selected < 0 ||
+        native_decal_selected >= native_decal_candidate_count) {
+        pcLog("native decal inspector: no selected candidate to mark");
+        return 0;
+    }
+    c = &native_decal_candidates[native_decal_selected];
+    for (i = 0; i < native_decal_mark_count; i++) {
+        if (native_decal_marks[i] == c->key) {
+            pcLog("native decal inspector: selected draw was already marked (candidate %d/%d)",
+                  native_decal_selected + 1, native_decal_candidate_count);
+            return 2;
+        }
+    }
+    if (native_decal_mark_count >= NATIVE_DECAL_MARK_LIMIT) {
+        pcLog("native decal inspector: mark table full (%d)", NATIVE_DECAL_MARK_LIMIT);
+        return 0;
+    }
+    native_decal_marks[native_decal_mark_count++] = c->key;
+    pcLog("native decal marked #%d/%d: key=%016llx tex=%u topology=0x%x verts=%d screen=%d "
+          "textured=%d blend=%d depth=1/%d fn=%d bounds=(%.2f,%.2f,%.4f)-(%.2f,%.2f,%.4f)",
+          native_decal_selected + 1, native_decal_candidate_count,
+          (unsigned long long)c->key, c->texture, c->topology, c->count, c->screen_space,
+          c->textured, c->blend, c->depth_write, c->texture_function,
+          c->min_x, c->min_y, c->min_z, c->max_x, c->max_y, c->max_z);
+    return 1;
+}
+
+void pcRendererDecalDebugStatus(int* enabled, int* selected, int* count, int* marked)
+{
+    if (enabled) *enabled = native_decal_debug_enabled;
+    if (count) *count = native_decal_candidate_count;
+    if (selected) *selected = (native_decal_selected >= 0 &&
+                               native_decal_selected < native_decal_candidate_count)
+                                  ? native_decal_selected + 1 : 0;
+    if (marked) *marked = native_decal_mark_count;
+}
 
 /* CLAUDE-NOTE[N5][CORREGIDO]: vertex shader con problemas de clipping.
  *  - max(z, 0.00001) MUEVE los vertices con z<=0 en vez de recortarlos: un triangulo que cruza el plano de la
@@ -186,9 +349,9 @@ static const char* fragment_shader =
     "#version 330 core\n"
     "noperspective in vec4 vColor; in vec2 vTexCoord; noperspective in float vFog; in float vQ;\n"
     "uniform sampler2D uTexture; uniform int uTextured; uniform int uFogEnabled;\n"
-    "uniform vec3 uFogColor; uniform int uAlphaTest; uniform float uAlphaRef; uniform vec2 uTextureSize; uniform int uTextureFunction, uTextureAlpha, uTexturePerspective, uScreenSpace, uAlphaPass, uGsInt;\n"
+    "uniform vec3 uFogColor; uniform int uAlphaTest; uniform float uAlphaRef; uniform vec2 uTextureSize; uniform int uTextureFunction, uTextureAlpha, uTexturePerspective, uScreenSpace, uAlphaPass, uGsInt, uDebug;\n"
     "out vec4 oColor;\n"
-    "void main(){ vec4 c=vColor; if(uTextured!=0){ vec2 uv=vTexCoord; if(uScreenSpace!=0 && uTexturePerspective!=0)uv/=max(vQ,0.000001); vec4 t=texture(uTexture,uv/uTextureSize);\n"
+    "void main(){ if(uDebug!=0){ oColor=vec4(1.0,0.0,1.0,1.0); return; } vec4 c=vColor; if(uTextured!=0){ vec2 uv=vTexCoord; if(uScreenSpace!=0 && uTexturePerspective!=0)uv/=max(vQ,0.000001); vec4 t=texture(uTexture,uv/uTextureSize);\n"
     /* MODULATE de la GS en enteros: Cs = min((Ct*Cv) >> 7, 255), con Ct y Cv de 8 bits */
     "    if(uTextureFunction==0){ c.rgb=(uGsInt!=0)?min(floor(floor(t.rgb*255.0+0.001)*floor(c.rgb*255.0+0.001)/128.0),vec3(255.0))/255.0:t.rgb*c.rgb*1.9921875; if(uTextureAlpha!=0)c.a=t.a*c.a; }\n"
     "    else if(uTextureFunction==1){ c.rgb=t.rgb; if(uTextureAlpha!=0)c.a=t.a; }\n"
@@ -376,6 +539,7 @@ int pcRendererInit(int width, int height)
     u_texture_alpha = glGetUniformLocation(program, "uTextureAlpha");
     u_texture_perspective = glGetUniformLocation(program, "uTexturePerspective");
     u_alpha_pass = glGetUniformLocation(program, "uAlphaPass");
+    u_debug = glGetUniformLocation(program, "uDebug");
     {   /* RECVX_GS_INT=0 vuelve a la mezcla en coma flotante (comparar A/B con la aritmetica entera de la GS, por defecto activa) */
         const char* e = getenv("RECVX_GS_INT");
         int gs_int = e ? (*e != '0') : (pcIniGetInt("gs_int", 1) != 0);   /* entorno RECVX_GS_INT o gs_int= en recvx.ini */
@@ -521,6 +685,7 @@ void pcRendererBeginFrame(void)
     }
     alpha_histogram_used = 0;
     stat_immediate = stat_queued = stat_vertices = stat_screen_space = stat_batches = 0;
+    native_decal_candidate_count = 0;
     flush_pending_deletes();
     active_target = TARGET_SCREEN;
     glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
@@ -913,6 +1078,39 @@ static void emit_draw(const NativeGpuVertex* upload, int count, const PcNativeDr
     glBindVertexArray(0);
 }
 
+/* Selected geometry overlay: magenta wireframe, visible regardless of the scene Z buffer. */
+static void emit_decal_outline(const NativeGpuVertex* upload, int count,
+                               const PcNativeDrawState* state, GLenum topology)
+{
+    GLint color_mask[4] = { GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE };
+    apply_state(state);
+    glGetIntegerv(GL_COLOR_WRITEMASK, color_mask);
+    glUniform1i(u_debug, 1);
+    glDisable(GL_DEPTH_TEST);
+    glDepthMask(GL_FALSE);
+    glDisable(GL_BLEND);
+    glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+    glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
+
+    glBindVertexArray(vertex_array);
+    glBindBuffer(GL_ARRAY_BUFFER, vertex_buffer);
+    if (stream_cursor + (unsigned)count > STREAM_VERTICES) {
+        glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)(STREAM_VERTICES * sizeof(NativeGpuVertex)), NULL, GL_STREAM_DRAW);
+        stream_cursor = 0;
+    }
+    glBufferSubData(GL_ARRAY_BUFFER, (GLintptr)((size_t)stream_cursor * sizeof(NativeGpuVertex)),
+                    (GLsizeiptr)((size_t)count * sizeof(NativeGpuVertex)), upload);
+    glDrawArrays(topology, (GLint)stream_cursor, count);
+    stream_cursor += (unsigned)count;
+    glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+    glUniform1i(u_debug, 0);
+    glColorMask((GLboolean)color_mask[0], (GLboolean)color_mask[1],
+                (GLboolean)color_mask[2], (GLboolean)color_mask[3]);
+    glBindVertexArray(0);
+    gl_shadow_invalidate();
+    apply_state(state);
+}
+
 static void batch_flush(void)
 {
     int saved_target;
@@ -955,7 +1153,8 @@ static void batch_add(const NativeGpuVertex* v, int count, const PcNativeDrawSta
     batch_count += count;
 }
 
-static void draw_immediate(const PcNativeVertex* vertices, int count, const PcNativeDrawState* state, GLenum topology)
+static void draw_immediate(const PcNativeVertex* vertices, int count, const PcNativeDrawState* state,
+                           GLenum topology, int decal_candidate)
 {
     NativeGpuVertex* upload;
     int i;
@@ -991,6 +1190,13 @@ static void draw_immediate(const PcNativeVertex* vertices, int count, const PcNa
             }
         }
     }
+    if (decal_candidate >= 0 && native_decal_debug_enabled &&
+        decal_candidate == native_decal_selected) {
+        batch_flush();
+        emit_draw(upload, count, state, topology);
+        emit_decal_outline(upload, count, state, topology);
+        return;
+    }
     if (state && gl_batch_on() && (topology == GL_TRIANGLE_STRIP || topology == GL_TRIANGLES) && count < 8192) {
         batch_add(upload, count, state, topology);
         return;
@@ -1023,7 +1229,8 @@ static void restore_frame_state(const NativeFrameState* f)
     depth_override_test = f->depth_test; depth_override_write = f->depth_write;
 }
 
-static void queue_transparent(const PcNativeVertex* vertices, int count, const PcNativeDrawState* state, GLenum topology)
+static void queue_transparent(const PcNativeVertex* vertices, int count, const PcNativeDrawState* state,
+                              GLenum topology, int decal_candidate)
 {
     NativeQueuedDraw* item;
     float depth = 0.0f;
@@ -1047,6 +1254,7 @@ static void queue_transparent(const PcNativeVertex* vertices, int count, const P
     capture_frame_state(&item->frame);
     item->topology = topology;
     item->sequence = transparent_sequence++;
+    item->decal_candidate = decal_candidate;
     /* Clave del OT original (Ps2AddOT): bucket = (int)sz >> 4 (0..4095), sz = Z de la GS del ULTIMO vertice, mayor = mas cerca.
      * Se pinta de bucket menor (lejos) a mayor (cerca); dentro de un bucket, por orden de envio. */
     {
@@ -1079,8 +1287,11 @@ static int compare_transparent(const void* a, const void* b)
 
 static void draw(const PcNativeVertex* v, int n, const PcNativeDrawState* state, GLenum topology)
 {
-    if (state && ((state->blend && !state->immediate) || state->ot_queue) && active_target == TARGET_SCREEN) queue_transparent(v, n, state, topology);
-    else draw_immediate(v, n, state, topology);
+    int decal_candidate = native_decal_register_candidate(v, n, state, topology);
+    if (state && ((state->blend && !state->immediate) || state->ot_queue) && active_target == TARGET_SCREEN)
+        queue_transparent(v, n, state, topology, decal_candidate);
+    else
+        draw_immediate(v, n, state, topology, decal_candidate);
 }
 
 void pcRendererDrawTriangleStrip(const PcNativeVertex* v, int n, const PcNativeDrawState* s)
@@ -1185,7 +1396,7 @@ static void draw_queued_item(NativeQueuedDraw* item, int pass)
     restore_frame_state(&item->frame);
     depth_override_test = 1;   /* ZTE=1 GEQUAL */
     depth_override_write = ot_writes_depth ? 1 : 0;   /* ZMSK = 0 / 1 */
-    draw_immediate(item->vertices, item->count, &item->state, item->topology);
+    draw_immediate(item->vertices, item->count, &item->state, item->topology, item->decal_candidate);
 }
 
 static void flush_transparent(int two_pass)
@@ -1336,7 +1547,7 @@ void pcRendererShadowCompose(float x0, float y0, float x1, float y1, int shade)
         st.screen_space = 1;                             /* depth_test = 0: ZTST ALWAYS, ZMSK = 1 */
         gs_alpha_decode(0x80000000A1ULL, &gs_blend);     /* (Cd - Cs) * FIX/128 */
         active_target = TARGET_SCREEN;
-        draw_immediate(v, 6, &st, GL_TRIANGLES);
+        draw_immediate(v, 6, &st, GL_TRIANGLES, -1);
         batch_flush();
         gs_blend = saved_blend;
         active_target = saved_target;

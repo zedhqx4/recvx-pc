@@ -902,6 +902,44 @@ static int pc_debug_mode_enabled(void)
     return enabled;
 }
 
+/* Debug decal inspector controls: Numpad *, +, - and /. */
+static int decal_debug_handle_event(const SDL_Event* ev)
+{
+    SDL_Scancode key;
+    int enabled = 0, selected = 0, count = 0, marked = 0;
+    char notice[128];
+    if (!ev || (ev->type != SDL_EVENT_KEY_DOWN && ev->type != SDL_EVENT_KEY_UP))
+        return 0;
+    key = ev->key.scancode;
+    if (key != SDL_SCANCODE_KP_MULTIPLY && key != SDL_SCANCODE_KP_PLUS &&
+        key != SDL_SCANCODE_KP_MINUS && key != SDL_SCANCODE_KP_DIVIDE)
+        return 0;
+    if (!pc_debug_mode_enabled())
+        return 1; /* reserve diagnostics; never leak them into game input */
+    if (ev->type != SDL_EVENT_KEY_DOWN || ev->key.repeat)
+        return 1;
+
+    if (key == SDL_SCANCODE_KP_MULTIPLY)
+        pcRendererDecalDebugToggle();
+    else if (key == SDL_SCANCODE_KP_PLUS)
+        pcRendererDecalDebugCycle(1);
+    else if (key == SDL_SCANCODE_KP_MINUS)
+        pcRendererDecalDebugCycle(-1);
+    else
+        pcRendererDecalDebugMark();
+
+    pcRendererDecalDebugStatus(&enabled, &selected, &count, &marked);
+    if (!enabled)
+        snprintf(notice, sizeof(notice), "DECAL INSPECTOR OFF");
+    else if (count <= 0)
+        snprintf(notice, sizeof(notice), "DECAL INSPECTOR: COLLECTING");
+    else
+        snprintf(notice, sizeof(notice), "DECAL %d/%d%s", selected, count,
+                 (key == SDL_SCANCODE_KP_DIVIDE) ? " MARKED/LOGGED" : "");
+    title_notice_show(notice);
+    return 1;
+}
+
 static int ui_uv_tuning;
 static int ui_uv_crop_selected_edge;
 static int ui_uv_crop_rot90_cw;
@@ -1067,6 +1105,12 @@ int pcVideoPumpEvents(void)
 
         /* Live UV crop tuner; changes take effect on the next UI draw and are saved to recvx.ini. */
         if (ui_uv_crop_handle_event(&ev))
+        {
+            continue;
+        }
+
+        /* Native decal inspector. */
+        if (decal_debug_handle_event(&ev))
         {
             continue;
         }
