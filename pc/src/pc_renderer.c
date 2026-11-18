@@ -142,7 +142,34 @@ typedef struct {
     const void* object;
     const void* transform;
     int candidate;
+    unsigned int draw_serial;
 } NativeDecalObjectContext;
+
+typedef struct {
+    const void* owner;
+    const void* object;
+    const void* transform;
+    unsigned int draw_index, face_index;
+    int valid;
+} NativeFaceIdentity;
+
+typedef struct {
+    NativeFaceIdentity identity;
+    float x[3], y[3], depth[3];
+    unsigned int texture;
+    int topology, screen_space;
+    unsigned long long sequence;
+} NativeFacePick;
+
+#define NATIVE_FACE_PICK_LIMIT 131072
+static NativeFacePick* native_face_picks;
+static unsigned int native_face_pick_count, native_face_pick_capacity;
+static unsigned long long native_face_pick_sequence;
+static int native_face_pick_overflow_logged;
+static NativeFaceIdentity native_face_selected;
+static NativeFacePick native_face_selected_info;
+static NativeFaceIdentity native_face_marks[NATIVE_DECAL_MARK_LIMIT];
+static int native_face_mark_count;
 #define NATIVE_DECAL_SCOPE_DEPTH 32
 static NativeDecalCandidate native_decal_candidates[NATIVE_DECAL_CANDIDATE_LIMIT];
 static NativeDecalObjectContext native_decal_scope_stack[NATIVE_DECAL_SCOPE_DEPTH];
@@ -243,6 +270,7 @@ void pcRendererDecalObjectBegin(const void* owner, const void* object, const voi
     native_decal_object_context.object = object;
     native_decal_object_context.transform = transform;
     native_decal_object_context.candidate = -1;
+    native_decal_object_context.draw_serial = 0;
 }
 
 void pcRendererDecalObjectEnd(void)
@@ -258,6 +286,7 @@ void pcRendererDecalObjectEnd(void)
         native_decal_object_context.object = NULL;
         native_decal_object_context.transform = NULL;
         native_decal_object_context.candidate = -1;
+        native_decal_object_context.draw_serial = 0;
     }
 }
 
@@ -362,32 +391,173 @@ static int native_decal_register_object_draw(const PcNativeVertex* vertices, int
     return candidate;
 }
 
+
+static int native_face_identity_equal(const NativeFaceIdentity* a, const NativeFaceIdentity* b)
+{
+    return a && b && a->valid && b->valid &&
+           a->owner == b->owner && a->object == b->object && a->transform == b->transform &&
+           a->draw_index == b->draw_index && a->face_index == b->face_index;
+}
+
+/* Match the vertex shader's output coordinates and pre-fragment depth in logical game pixels. */
+static int native_face_project_vertex(const PcNativeVertex* v, const PcNativeDrawState* st,
+                                      float* out_x, float* out_y, float* out_depth)
+{
+    float x, y, depth;
+    if (!v || !st || !out_x || !out_y || !out_depth) return 0;
+    switch (st->screen_space) {
+    case 0: {
+        float z=v->z, k, cx, cy, cz;
+        if (z <= 0.00001f) return 0;
+        k=65535.0f/65534.0f;
+        cx=(v->x*projection_value*aspect_w)*2.0f/(float)output_width+
+           (offset_x*2.0f/(float)output_width-1.0f)*z;
+        cy=z*(1.0f-offset_y*2.0f/(float)output_height)-
+           (v->y*projection_value*aspect_h)*2.0f/(float)output_height;
+        cz=2.0f*(k*z-k)-z;
+        x=(cx/z+1.0f)*0.5f*(float)output_width;
+        y=(1.0f-cy/z)*0.5f*(float)output_height;
+        depth=(cz/z+1.0f)*0.5f;
+        break;
+    }
+    case 2:
+        if (v->q <= 0.0f) return 0;
+        x=v->x; y=v->y; depth=v->z;
+        break;
+    case 3: {
+        float q=v->q, sz, zc;
+        if (q <= 0.0f) return 0;
+        if (q > -1.0e-9f && q < 1.0e-9f) q=1.0e-9f;
+        sz=-st->zbuff_a+q*-st->zbuff_b;
+        zc=floorf(fminf(fmaxf(sz,0.0f),65534.0f));
+        x=floorf(v->x*16.0f)/16.0f-1728.0f;
+        y=floorf(v->y*16.0f)/16.0f-1808.0f;
+        depth=1.0f-zc/65535.0f;
+        break;
+    }
+    case 4: {
+        float sz=-st->zbuff_a+v->q*-st->zbuff_b;
+        float gz=truncf(fminf(fmaxf(sz,0.0f),65534.0f)*16.0f)/16.0f;
+        x=truncf(v->x*16.0f)/16.0f-1728.0f;
+        y=truncf(v->y*16.0f)/16.0f-1808.0f;
+        depth=1.0f-gz/65535.0f;
+        break;
+    }
+    default: return 0;
+    }
+    if (!isfinite(x)||!isfinite(y)||!isfinite(depth)) return 0;
+    *out_x=x; *out_y=y; *out_depth=depth;
+    return 1;
+}
+
+static int native_face_get_triangle(const PcNativeVertex* vertices, int count, GLenum topology,
+                                    unsigned int face, PcNativeVertex out[3])
+{
+    unsigned int base;
+    if (!vertices||!out) return 0;
+    if (topology==GL_TRIANGLES) {
+        base=face*3u;
+        if (base+2u>=(unsigned int)count) return 0;
+        out[0]=vertices[base]; out[1]=vertices[base+1u]; out[2]=vertices[base+2u];
+        return 1;
+    }
+    if (topology==GL_TRIANGLE_STRIP) {
+        base=face+2u;
+        if (base>=(unsigned int)count) return 0;
+        out[0]=vertices[base-2u]; out[1]=vertices[base-1u]; out[2]=vertices[base];
+        return 1;
+    }
+    return 0;
+}
+
+static void native_face_collect_draw(const PcNativeVertex* vertices, int count,
+                                     const PcNativeDrawState* state, GLenum topology, int draw_index)
+{
+    unsigned int faces, face;
+    if (!native_decal_debug_enabled||active_target!=TARGET_SCREEN||!native_decal_object_context.object||
+        !vertices||!state||count<3||!state->depth_test||state->screen_space==1||
+        (topology!=GL_TRIANGLES&&topology!=GL_TRIANGLE_STRIP)) return;
+    faces=topology==GL_TRIANGLES?(unsigned int)count/3u:(unsigned int)count-2u;
+    for(face=0;face<faces;face++) {
+        PcNativeVertex tri[3];
+        NativeFacePick pick;
+        float area;
+        int k;
+        if(!native_face_get_triangle(vertices,count,topology,face,tri)) continue;
+        memset(&pick,0,sizeof(pick));
+        for(k=0;k<3;k++)
+            if(!native_face_project_vertex(&tri[k],state,&pick.x[k],&pick.y[k],&pick.depth[k])) break;
+        if(k!=3) continue;
+        area=(pick.x[1]-pick.x[0])*(pick.y[2]-pick.y[0])-
+             (pick.y[1]-pick.y[0])*(pick.x[2]-pick.x[0]);
+        if(fabsf(area)<0.0001f) continue;
+        if(native_face_pick_count>=NATIVE_FACE_PICK_LIMIT) {
+            if(!native_face_pick_overflow_logged) {
+                pcLog("native face picker: frame hit-test limit reached (%u triangles)",NATIVE_FACE_PICK_LIMIT);
+                native_face_pick_overflow_logged=1;
+            }
+            return;
+        }
+        if(native_face_pick_count==native_face_pick_capacity) {
+            unsigned int capacity=native_face_pick_capacity?native_face_pick_capacity*2u:4096u;
+            NativeFacePick* grown;
+            if(capacity>NATIVE_FACE_PICK_LIMIT) capacity=NATIVE_FACE_PICK_LIMIT;
+            grown=(NativeFacePick*)realloc(native_face_picks,(size_t)capacity*sizeof(*grown));
+            if(!grown) {
+                if(!native_face_pick_overflow_logged) {
+                    pcLog("native face picker: cannot grow triangle hit-test buffer");
+                    native_face_pick_overflow_logged=1;
+                }
+                return;
+            }
+            native_face_picks=grown; native_face_pick_capacity=capacity;
+        }
+        pick.identity.owner=native_decal_object_context.owner;
+        pick.identity.object=native_decal_object_context.object;
+        pick.identity.transform=native_decal_object_context.transform;
+        pick.identity.draw_index=(unsigned int)draw_index;
+        pick.identity.face_index=face;
+        pick.identity.valid=1;
+        pick.texture=state->texture;
+        pick.topology=(int)topology;
+        pick.screen_space=state->screen_space;
+        pick.sequence=++native_face_pick_sequence;
+        native_face_picks[native_face_pick_count++]=pick;
+        if(native_face_identity_equal(&pick.identity,&native_face_selected))
+            native_face_selected_info=pick;
+    }
+}
+
 void pcRendererDecalDebugToggle(void)
 {
     native_decal_debug_enabled = !native_decal_debug_enabled;
     native_decal_selected = native_decal_debug_enabled ? 0 : -1;
-    pcLog("native decal inspector: %s (candidates are CNK object instances)",
+    memset(&native_face_selected,0,sizeof(native_face_selected));
+    memset(&native_face_selected_info,0,sizeof(native_face_selected_info));
+    native_face_mark_count=0;
+    pcLog("native geometry inspector: %s (click a visible face to select it)",
           native_decal_debug_enabled ? "enabled" : "disabled");
 }
 
 void pcRendererDecalDebugCycle(int direction)
 {
     if (!native_decal_debug_enabled) {
-        pcLog("native decal inspector: press Numpad * to enable");
+        pcLog("native geometry inspector: press Numpad * to enable");
         return;
     }
     if (native_decal_candidate_count <= 0) {
-        pcLog("native decal inspector: no candidates collected yet");
+        pcLog("native geometry inspector: no candidates collected yet");
         return;
     }
     if (native_decal_selected < 0 || native_decal_selected >= native_decal_candidate_count)
         native_decal_selected = (direction >= 0) ? 0 : native_decal_candidate_count - 1;
     else {
+        memset(&native_face_selected,0,sizeof(native_face_selected));
         native_decal_selected += (direction >= 0) ? 1 : -1;
         if (native_decal_selected >= native_decal_candidate_count) native_decal_selected = 0;
         if (native_decal_selected < 0) native_decal_selected = native_decal_candidate_count - 1;
     }
-    pcLog("native decal inspector: object %d/%d (draws=%u)",
+    pcLog("native geometry inspector: object %d/%d (draws=%u)",
           native_decal_selected + 1, native_decal_candidate_count,
           native_decal_candidates[native_decal_selected].draw_count);
 }
@@ -396,31 +566,56 @@ int pcRendererDecalDebugMark(void)
 {
     NativeDecalCandidate* c;
     int i;
-    if (!native_decal_debug_enabled || native_decal_selected < 0 ||
-        native_decal_selected >= native_decal_candidate_count) {
-        pcLog("native decal inspector: no selected object to mark");
+    if(!native_decal_debug_enabled) {
+        pcLog("native geometry inspector: press Numpad * to enable");
         return 0;
     }
-    c = &native_decal_candidates[native_decal_selected];
-    for (i = 0; i < native_decal_mark_count; i++) {
-        if (native_decal_marks[i] == c->key) {
-            pcLog("native decal inspector: selected object was already marked (object %d/%d)",
-                  native_decal_selected + 1, native_decal_candidate_count);
-            return 2;
+    if(native_face_selected.valid) {
+        for(i=0;i<native_face_mark_count;i++) {
+            if(native_face_identity_equal(&native_face_marks[i],&native_face_selected)) {
+                pcLog("native face picker: selected face already marked (draw=%u face=%u)",
+                      native_face_selected.draw_index,native_face_selected.face_index);
+                return 2;
+            }
         }
+        if(native_face_mark_count>=NATIVE_DECAL_MARK_LIMIT) {
+            pcLog("native face picker: face mark table full (%d)",NATIVE_DECAL_MARK_LIMIT);
+            return 0;
+        }
+        native_face_marks[native_face_mark_count++]=native_face_selected;
+        pcLog("native face marked: owner=%p object=%p transform=%p draw=%u face=%u texture=%u topology=0x%x screen=%d "
+              "xy=(%.2f,%.2f)(%.2f,%.2f)(%.2f,%.2f) depth=(%.7f,%.7f,%.7f)",
+              (void*)native_face_selected.owner,(void*)native_face_selected.object,(void*)native_face_selected.transform,
+              native_face_selected.draw_index,native_face_selected.face_index,native_face_selected_info.texture,
+              native_face_selected_info.topology,native_face_selected_info.screen_space,
+              native_face_selected_info.x[0],native_face_selected_info.y[0],
+              native_face_selected_info.x[1],native_face_selected_info.y[1],
+              native_face_selected_info.x[2],native_face_selected_info.y[2],
+              native_face_selected_info.depth[0],native_face_selected_info.depth[1],native_face_selected_info.depth[2]);
+        return 1;
     }
-    if (native_decal_mark_count >= NATIVE_DECAL_MARK_LIMIT) {
-        pcLog("native decal inspector: mark table full (%d)", NATIVE_DECAL_MARK_LIMIT);
+    if(native_decal_selected<0||native_decal_selected>=native_decal_candidate_count) {
+        pcLog("native geometry inspector: click a face first (or select an object with Numpad +/-)");
         return 0;
     }
-    native_decal_marks[native_decal_mark_count++] = c->key;
-    pcLog("native decal object marked #%d/%d: key=%016llx owner=%p object=%p transform=%p "
+    c=&native_decal_candidates[native_decal_selected];
+    for(i=0;i<native_decal_mark_count;i++) if(native_decal_marks[i]==c->key) {
+        pcLog("native geometry inspector: selected object already marked (object %d/%d)",
+              native_decal_selected+1,native_decal_candidate_count);
+        return 2;
+    }
+    if(native_decal_mark_count>=NATIVE_DECAL_MARK_LIMIT) {
+        pcLog("native geometry inspector: object mark table full (%d)",NATIVE_DECAL_MARK_LIMIT);
+        return 0;
+    }
+    native_decal_marks[native_decal_mark_count++]=c->key;
+    pcLog("native geometry object marked #%d/%d: key=%016llx owner=%p object=%p transform=%p "
           "draws=%u vertices=%u first_tex=%u first_topology=0x%x blend=%d depth=1/%d fn=%d "
           "bounds=(%.2f,%.2f,%.4f)-(%.2f,%.2f,%.4f)",
-          native_decal_selected + 1, native_decal_candidate_count,
-          (unsigned long long)c->key, (void*)c->owner, (void*)c->object, (void*)c->transform,
-          c->draw_count, c->vertex_count, c->texture, c->topology, c->blend, c->depth_write,
-          c->texture_function, c->min_x, c->min_y, c->min_z, c->max_x, c->max_y, c->max_z);
+          native_decal_selected+1,native_decal_candidate_count,(unsigned long long)c->key,
+          (void*)c->owner,(void*)c->object,(void*)c->transform,c->draw_count,c->vertex_count,
+          c->texture,c->topology,c->blend,c->depth_write,c->texture_function,
+          c->min_x,c->min_y,c->min_z,c->max_x,c->max_y,c->max_z);
     return 1;
 }
 
@@ -431,7 +626,7 @@ void pcRendererDecalDebugStatus(int* enabled, int* selected, int* count, int* ma
     if (selected) *selected = (native_decal_selected >= 0 &&
                                native_decal_selected < native_decal_candidate_count)
                                   ? native_decal_selected + 1 : 0;
-    if (marked) *marked = native_decal_mark_count;
+    if (marked) *marked = native_decal_mark_count + native_face_mark_count;
 }
 
 /* CLAUDE-NOTE[N5][CORREGIDO]: vertex shader con problemas de clipping.
@@ -836,12 +1031,16 @@ void pcRendererBeginFrame(void)
     alpha_histogram_used = 0;
     stat_immediate = stat_queued = stat_vertices = stat_screen_space = stat_batches = 0;
     native_decal_candidate_count = 0;
+    native_face_pick_count = 0;
+    native_face_pick_sequence = 0;
+    native_face_pick_overflow_logged = 0;
     native_decal_scope_depth = 0;
     native_decal_scope_overflow = 0;
     native_decal_object_context.owner = NULL;
     native_decal_object_context.object = NULL;
     native_decal_object_context.transform = NULL;
     native_decal_object_context.candidate = -1;
+    native_decal_object_context.draw_serial = 0;
     native_decal_world_owner = NULL;
     native_decal_world_active = 0;
     flush_pending_deletes();
@@ -1312,7 +1511,7 @@ static void batch_add(const NativeGpuVertex* v, int count, const PcNativeDrawSta
 }
 
 static void draw_immediate(const PcNativeVertex* vertices, int count, const PcNativeDrawState* state,
-                           GLenum topology, int decal_object)
+                           GLenum topology, int decal_object, int face_draw_serial)
 {
     NativeGpuVertex* upload;
     int i;
@@ -1348,11 +1547,24 @@ static void draw_immediate(const PcNativeVertex* vertices, int count, const PcNa
             }
         }
     }
-    if (decal_object >= 0 && native_decal_debug_enabled &&
+    if (face_draw_serial >= 0 && native_face_selected.valid &&
+        native_face_selected.owner == native_decal_object_context.owner &&
+        native_face_selected.object == native_decal_object_context.object &&
+        native_face_selected.transform == native_decal_object_context.transform &&
+        native_face_selected.draw_index == (unsigned int)face_draw_serial) {
+        PcNativeVertex face_vertices[3];
+        if (native_face_get_triangle(vertices,count,topology,native_face_selected.face_index,face_vertices)) {
+            batch_flush();
+            emit_draw(upload,count,state,topology);
+            emit_decal_outline((const NativeGpuVertex*)face_vertices,3,state,GL_TRIANGLES);
+            return;
+        }
+    }
+    if (decal_object >= 0 && native_decal_debug_enabled && !native_face_selected.valid &&
         decal_object == native_decal_selected) {
         batch_flush();
-        emit_draw(upload, count, state, topology);
-        emit_decal_outline(upload, count, state, topology);
+        emit_draw(upload,count,state,topology);
+        emit_decal_outline(upload,count,state,topology);
         return;
     }
     if (state && gl_batch_on() && (topology == GL_TRIANGLE_STRIP || topology == GL_TRIANGLES) && count < 8192) {
@@ -1361,6 +1573,58 @@ static void draw_immediate(const PcNativeVertex* vertices, int count, const PcNa
     }
     batch_flush();
     emit_draw(upload, count, state, topology);
+}
+
+
+int pcRendererFaceDebugPick(float x,float y)
+{
+    int rx,ry,i,best=-1;
+    float scene_depth=1.0f;
+    unsigned long long best_sequence=0;
+    const float tolerance=0.45f/65535.0f+0.0000002f;
+    if(!ready||!native_decal_debug_enabled||x<0.0f||y<0.0f||
+       x>=(float)output_width||y>=(float)output_height) return 0;
+    batch_flush();
+    rx=(int)(x*(float)render_width/(float)output_width);
+    ry=render_height-1-(int)(y*(float)render_height/(float)output_height);
+    if(rx<0||ry<0||rx>=render_width||ry>=render_height) return 0;
+    glBindFramebuffer(GL_READ_FRAMEBUFFER,framebuffer);
+    glReadPixels(rx,ry,1,1,GL_DEPTH_COMPONENT,GL_FLOAT,&scene_depth);
+    if(!isfinite(scene_depth)||scene_depth>=1.0f) goto miss;
+    for(i=0;i<(int)native_face_pick_count;i++) {
+        const NativeFacePick* p=&native_face_picks[i];
+        float x0=p->x[0],y0=p->y[0],x1=p->x[1],y1=p->y[1],x2=p->x[2],y2=p->y[2];
+        float denom=(y1-y2)*(x0-x2)+(x2-x1)*(y0-y2);
+        float a,b,c,depth;
+        if(fabsf(denom)<0.000001f) continue;
+        a=((y1-y2)*(x-x2)+(x2-x1)*(y-y2))/denom;
+        b=((y2-y0)*(x-x2)+(x0-x2)*(y-y2))/denom;
+        c=1.0f-a-b;
+        if(a< -0.0005f||b< -0.0005f||c< -0.0005f) continue;
+        depth=a*p->depth[0]+b*p->depth[1]+c*p->depth[2];
+        depth=1.0f-floorf((1.0f-depth)*65535.0f+0.01f)/65535.0f;
+        if(fabsf(depth-scene_depth)>tolerance) continue;
+        if(best<0||p->sequence>best_sequence) {best=i;best_sequence=p->sequence;}
+    }
+    if(best>=0) {
+        native_face_selected=native_face_picks[best].identity;
+        native_face_selected_info=native_face_picks[best];
+        native_decal_selected=native_decal_find_object(native_face_selected.owner,native_face_selected.object,
+                                                         native_face_selected.transform);
+        pcLog("native face selected: owner=%p object=%p transform=%p draw=%u face=%u texture=%u topology=0x%x "
+              "screen=%d click=(%.2f,%.2f) depth=%.7f candidates=%u",
+              (void*)native_face_selected.owner,(void*)native_face_selected.object,(void*)native_face_selected.transform,
+              native_face_selected.draw_index,native_face_selected.face_index,native_face_selected_info.texture,
+              native_face_selected_info.topology,native_face_selected_info.screen_space,x,y,scene_depth,native_face_pick_count);
+        return 1;
+    }
+miss:
+    memset(&native_face_selected,0,sizeof(native_face_selected));
+    memset(&native_face_selected_info,0,sizeof(native_face_selected_info));
+    native_decal_selected=-1;
+    pcLog("native face picker: no visible world face at (%.2f,%.2f), depth=%.7f triangles=%u",
+          x,y,scene_depth,native_face_pick_count);
+    return 0;
 }
 
 /* CLAUDE-NOTE[N8]: toda primitiva con blend se difiere hasta el flush, incluido el 2D (fades, paneles, UI translucida), por
@@ -1445,11 +1709,16 @@ static int compare_transparent(const void* a, const void* b)
 
 static void draw(const PcNativeVertex* v, int n, const PcNativeDrawState* state, GLenum topology)
 {
-    int decal_object = native_decal_register_object_draw(v, n, state, topology);
-    if (state && ((state->blend && !state->immediate) || state->ot_queue) && active_target == TARGET_SCREEN)
-        queue_transparent(v, n, state, topology, decal_object);
+    int face_draw_serial=-1;
+    int decal_object;
+    if(native_decal_debug_enabled&&native_decal_object_context.object)
+        face_draw_serial=(int)native_decal_object_context.draw_serial++;
+    native_face_collect_draw(v,n,state,topology,face_draw_serial);
+    decal_object=native_decal_register_object_draw(v,n,state,topology);
+    if(state&&((state->blend&&!state->immediate)||state->ot_queue)&&active_target==TARGET_SCREEN)
+        queue_transparent(v,n,state,topology,decal_object);
     else
-        draw_immediate(v, n, state, topology, decal_object);
+        draw_immediate(v,n,state,topology,decal_object,face_draw_serial);
 }
 
 void pcRendererDrawTriangleStrip(const PcNativeVertex* v, int n, const PcNativeDrawState* s)
@@ -1554,7 +1823,7 @@ static void draw_queued_item(NativeQueuedDraw* item, int pass)
     restore_frame_state(&item->frame);
     depth_override_test = 1;   /* ZTE=1 GEQUAL */
     depth_override_write = ot_writes_depth ? 1 : 0;   /* ZMSK = 0 / 1 */
-    draw_immediate(item->vertices, item->count, &item->state, item->topology, item->decal_object);
+    draw_immediate(item->vertices, item->count, &item->state, item->topology, item->decal_object, -1);
 }
 
 static void flush_transparent(int two_pass)

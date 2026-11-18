@@ -95,6 +95,7 @@ int pcRendererDecalObjectIsMarked(const void* owner, const void* object, const v
 int pcRendererDecalWorldObjectIsMarked(const void* object);
 void pcRendererDecalDebugToggle(void);
 void pcRendererDecalDebugCycle(int direction);
+int pcRendererFaceDebugPick(float x,float y); /* logical 640x480 coordinates; selects visible triangle under cursor */
 int pcRendererDecalDebugMark(void);
 void pcRendererDecalDebugStatus(int* enabled, int* selected, int* count, int* marked);
 int pcRendererReadScreenRect(int x, int y, int w, int h, unsigned char* rgba);

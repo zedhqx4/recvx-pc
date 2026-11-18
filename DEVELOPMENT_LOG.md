@@ -308,3 +308,10 @@ Other operational variables for input replay, screenshots, logging, audio dumps,
 - If the closest returned collision plane is within 0.10 world units of the object origin, translate only that object's temporary render matrix by 0.10 units along the normalized collision normal. Restore the previous matrix after that object's draw; no CNK vertices, source transforms, or shader depth are changed.
 - This uses the original collision mesh as the nearby-surface query, not arbitrary rendered triangles. Objects without a corresponding collision surface are intentionally not corrected.
 - Windows CI and in-game visual validation are required before considering this a permanent fix.
+
+
+## Native face picker (mouse selection)
+- While the native geometry inspector is enabled (`debug=1`, Numpad `*`), left-clicking the game image tests submitted triangles against the current framebuffer depth. The depth comparison follows the renderer's GS16 fragment-depth quantization; equal-depth hits are resolved by later submission order (LEQUAL behavior).
+- A selected face is identified within its CNK object scope by `owner/object/transform + draw index + triangle index`. Numpad `/` logs that face identity and its screen-space triangle/depth. This is diagnostic selection only: it does not move vertices, alter transforms, or add an object-level correction mark.
+- The picker handles native world paths `screen_space=0,2,3,4`; game UI (`screen_space=1`) is excluded. Deferred transparent draws are not outlined yet; the target under investigation is opaque and depth-writing.
+- If the Blender asset has been enlarged by 10 for UE4, source-space offsets are one tenth of the displayed Blender values. The GS depth-code separation still depends on camera-space depth and `Ps2_zbuff_a/b`.

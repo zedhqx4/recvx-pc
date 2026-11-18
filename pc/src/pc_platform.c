@@ -902,7 +902,7 @@ static int pc_debug_mode_enabled(void)
     return enabled;
 }
 
-/* Debug decal object inspector controls: Numpad *, +, - and /. */
+/* Native geometry inspector: Numpad * toggles; mouse selects a face; Numpad / logs it. */
 static int decal_debug_handle_event(const SDL_Event* ev)
 {
     SDL_Scancode key;
@@ -930,9 +930,9 @@ static int decal_debug_handle_event(const SDL_Event* ev)
 
     pcRendererDecalDebugStatus(&enabled, &selected, &count, &marked);
     if (!enabled)
-        snprintf(notice, sizeof(notice), "DECAL OBJECT INSPECTOR OFF");
+        snprintf(notice, sizeof(notice), "GEOMETRY INSPECTOR OFF");
     else if (count <= 0)
-        snprintf(notice, sizeof(notice), "DECAL OBJECTS: COLLECTING");
+        snprintf(notice, sizeof(notice), "GEOMETRY: COLLECTING");
     else
         snprintf(notice, sizeof(notice), "OBJECT %d/%d%s", selected, count,
                  (key == SDL_SCANCODE_KP_DIVIDE) ? " MARKED/LOGGED" : "");
@@ -963,6 +963,45 @@ static void ui_uv_crop_show_status(const char* state)
     pcLog("UI UV crop profile=%s %s: left=%d right=%d top=%d bottom=%d; selected=%s (1/16 texel units)",
           profile, state, left, right, top, bottom, ui_uv_crop_edge_names[ui_uv_crop_selected_edge]);
     title_notice_show(notice);
+}
+
+
+static int face_debug_handle_mouse_event(const SDL_Event* ev)
+{
+    int enabled=0,selected=0,count=0,marked=0;
+    int logical_w=0,logical_h=0,pixel_w=0,pixel_h=0;
+    int output_w=0,output_h=0,view_w,view_h,view_x,view_y;
+    float px,py,aspect,frame_x,frame_y;
+    char notice[128];
+    if(!ev||ev->type!=SDL_EVENT_MOUSE_BUTTON_DOWN||ev->button.button!=SDL_BUTTON_LEFT) return 0;
+    if(!pc_debug_mode_enabled()) return 0;
+    pcRendererDecalDebugStatus(&enabled,&selected,&count,&marked);
+    if(!enabled) return 0;
+    if(!window) return 1;
+    SDL_GetWindowSize(window,&logical_w,&logical_h);
+    SDL_GetWindowSizeInPixels(window,&pixel_w,&pixel_h);
+    pcRendererGetOutputSize(&output_w,&output_h);
+    if(logical_w<=0||logical_h<=0||pixel_w<=0||pixel_h<=0||output_w<=0||output_h<=0) return 1;
+    px=ev->button.x*(float)pixel_w/(float)logical_w;
+    py=ev->button.y*(float)pixel_h/(float)logical_h;
+    aspect=pcVideoAspect();
+    view_w=pixel_w;
+    view_h=(int)((float)pixel_w/aspect+0.5f);
+    if(view_h>pixel_h) {view_h=pixel_h;view_w=(int)((float)pixel_h*aspect+0.5f);}
+    view_x=(pixel_w-view_w)/2;
+    view_y=(pixel_h-view_h)/2;
+    if(px<(float)view_x||py<(float)view_y||px>=(float)(view_x+view_w)||py>=(float)(view_y+view_h)) {
+        title_notice_show("CLICK INSIDE GAME IMAGE");
+        return 1;
+    }
+    frame_x=(px-(float)view_x)*(float)output_w/(float)view_w;
+    frame_y=(py-(float)view_y)*(float)output_h/(float)view_h;
+    if(pcRendererFaceDebugPick(frame_x,frame_y))
+        snprintf(notice,sizeof(notice),"FACE SELECTED - NUMPAD / TO LOG");
+    else
+        snprintf(notice,sizeof(notice),"NO VISIBLE FACE HERE");
+    title_notice_show(notice);
+    return 1;
 }
 
 /* True means the key event was consumed and must not reach the game. */
@@ -1109,7 +1148,11 @@ int pcVideoPumpEvents(void)
             continue;
         }
 
-        /* Native decal inspector. */
+        /* Native geometry inspector: click a visible face while debug=1 and Numpad * is enabled. */
+        if (face_debug_handle_mouse_event(&ev))
+        {
+            continue;
+        }
         if (decal_debug_handle_event(&ev))
         {
             continue;
