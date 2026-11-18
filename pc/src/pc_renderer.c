@@ -1605,6 +1605,7 @@ int pcRendererFaceDebugPick(float x,float y)
 {
     int rx,ry,i,best=-1;
     float scene_depth=1.0f;
+    float best_depth=1.0f,best_a=0.0f,best_b=0.0f,best_c=0.0f;
     unsigned long long best_sequence=0;
     const float tolerance=0.45f/65535.0f+0.0000002f;
     if(!ready||!native_decal_debug_enabled||x<0.0f||y<0.0f||
@@ -1629,7 +1630,10 @@ int pcRendererFaceDebugPick(float x,float y)
         depth=a*p->depth[0]+b*p->depth[1]+c*p->depth[2];
         depth=1.0f-floorf((1.0f-depth)*65535.0f+0.01f)/65535.0f;
         if(fabsf(depth-scene_depth)>tolerance) continue;
-        if(best<0||p->sequence>best_sequence) {best=i;best_sequence=p->sequence;}
+        if(best<0||p->sequence>best_sequence) {
+            best=i;best_sequence=p->sequence;
+            best_depth=depth;best_a=a;best_b=b;best_c=c;
+        }
     }
     if(best>=0) {
         native_face_selected=native_face_picks[best].identity;
@@ -1637,10 +1641,15 @@ int pcRendererFaceDebugPick(float x,float y)
         native_decal_selected=native_decal_find_object(native_face_selected.owner,native_face_selected.object,
                                                          native_face_selected.transform);
         pcLog("native face selected: owner=%p object=%p transform=%p draw=%u face=%u texture=%u topology=0x%x "
-              "screen=%d click=(%.2f,%.2f) depth=%.7f candidates=%u",
+              "screen=%d click=(%.2f,%.2f) readZ=%.9g readZ16=%d triZ=%.9g triZ16=%d deltaZ16=%d "
+              "bary=(%.6f,%.6f,%.6f) pixel=(%d,%d) candidates=%u",
               (void*)native_face_selected.owner,(void*)native_face_selected.object,(void*)native_face_selected.transform,
               native_face_selected.draw_index,native_face_selected.face_index,native_face_selected_info.texture,
-              native_face_selected_info.topology,native_face_selected_info.screen_space,x,y,scene_depth,native_face_pick_count);
+              native_face_selected_info.topology,native_face_selected_info.screen_space,x,y,
+              scene_depth,(int)floorf((1.0f-scene_depth)*65535.0f+0.01f),
+              best_depth,(int)floorf((1.0f-best_depth)*65535.0f+0.01f),
+              (int)floorf((1.0f-best_depth)*65535.0f+0.01f)-(int)floorf((1.0f-scene_depth)*65535.0f+0.01f),
+              best_a,best_b,best_c,rx,ry,native_face_pick_count);
         return 1;
     }
 miss:
