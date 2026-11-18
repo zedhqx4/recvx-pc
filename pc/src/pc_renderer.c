@@ -450,7 +450,7 @@ static GLuint gpuq_ts[GPUQ_RING][GPUQ_TS_MAX];
 static unsigned char gpuq_ts_cat[GPUQ_RING][GPUQ_TS_MAX];
 static int gpuq_ts_n[GPUQ_RING], gpu_cat_cur;
 static double gpuq_cpu0[GPUQ_RING], gpuq_cpu_span[GPUQ_RING];
-static double gpu_cat_ms[GPUCAT_COUNT], gpu_cat_ivl[GPUCAT_COUNT], gpu_cpu_span_sum;
+static double gpu_cat_ms[GPUCAT_COUNT], gpu_cat_ivl[GPUCAT_COUNT], gpu_cpu_span_sum, gpu_blit_cpu_ms;
 static double gpu_sum_ms, gpu_max_ms, gpu_sum_verts, gpu_sum_draws, gpu_sum_batches;
 static unsigned gpu_frames;
 
@@ -539,13 +539,13 @@ static void gpu_timer_end(void)
         pcLog("PROFILE gpu scene: %.3f ms avg / %.3f ms max over %u frames | per frame: %.0f vertices, %.0f draws, %.0f GL batches | %.1f ns/vertex",
               gpu_sum_ms / gpu_frames, gpu_max_ms, gpu_frames, gpu_sum_verts / gpu_frames, gpu_sum_draws / gpu_frames,
               gpu_sum_batches / gpu_frames, gpu_sum_verts > 0.0 ? gpu_sum_ms * 1.0e6 / gpu_sum_verts : 0.0);
-        pcLog("PROFILE gpu passes (ms/frame de GPU): directo %.2f (%.1f tramos) | OT %.2f (%.1f) | sombras %.2f (%.1f) | copia a textura: preparar %.2f, limpiar %.2f, blit %.2f, alfa %.2f (%.1f copias) | CPU de la escena (begin..end) %.2f",
+        pcLog("PROFILE gpu passes (ms/frame de GPU): directo %.2f (%.1f tramos) | OT %.2f (%.1f) | sombras %.2f (%.1f) | copia a textura: preparar %.2f, limpiar %.2f, blit %.2f, alfa %.2f (%.1f copias) | CPU dentro de glBlitFramebuffer %.2f | CPU de la escena (begin..end) %.2f",
               gpu_cat_ms[GPUCAT_DIRECT] / gpu_frames, gpu_cat_ivl[GPUCAT_DIRECT] / gpu_frames,
               gpu_cat_ms[GPUCAT_OT] / gpu_frames, gpu_cat_ivl[GPUCAT_OT] / gpu_frames,
               gpu_cat_ms[GPUCAT_SHADOW] / gpu_frames, gpu_cat_ivl[GPUCAT_SHADOW] / gpu_frames,
               gpu_cat_ms[GPUCAT_RTT] / gpu_frames, gpu_cat_ms[GPUCAT_RTT_CLEAR] / gpu_frames, gpu_cat_ms[GPUCAT_RTT_BLIT] / gpu_frames,
-              gpu_cat_ms[GPUCAT_RTT_ALPHA] / gpu_frames, gpu_cat_ivl[GPUCAT_RTT_ALPHA] / gpu_frames, gpu_cpu_span_sum / gpu_frames);
-        memset(gpu_cat_ms, 0, sizeof(gpu_cat_ms)); memset(gpu_cat_ivl, 0, sizeof(gpu_cat_ivl)); gpu_cpu_span_sum = 0.0;
+              gpu_cat_ms[GPUCAT_RTT_ALPHA] / gpu_frames, gpu_cat_ivl[GPUCAT_RTT_ALPHA] / gpu_frames, gpu_blit_cpu_ms / gpu_frames, gpu_cpu_span_sum / gpu_frames);
+        memset(gpu_cat_ms, 0, sizeof(gpu_cat_ms)); memset(gpu_cat_ivl, 0, sizeof(gpu_cat_ivl)); gpu_cpu_span_sum = 0.0; gpu_blit_cpu_ms = 0.0;
         gpu_sum_ms = gpu_max_ms = gpu_sum_verts = gpu_sum_draws = gpu_sum_batches = 0.0;
         gpu_frames = 0;
     }
@@ -1646,6 +1646,12 @@ static int copy_rect_to_texture_impl(unsigned int* texture, int x, int y, int w,
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+    } else if (y == 0) {
+        /* Inicio de una captura nueva: el contenido anterior ya no sirve (la limpieza de y==0 rellena TODA la textura). Se vuelve a
+         * especificar con datos NULL ("orphaning"), de modo que el driver pueda dar almacenamiento nuevo si el viejo sigue en uso por
+         * los draws del frame anterior, en vez de esperar a que la GPU termine de leerlo. El resultado es identico. */
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, image_width * scale, image_height * scale,
+                     0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
     }
 
     if (!render_copy_fbo) glGenFramebuffers(1, &render_copy_fbo);
@@ -1677,10 +1683,12 @@ static int copy_rect_to_texture_impl(unsigned int* texture, int x, int y, int w,
     }
     gpu_mark(GPUCAT_RTT_BLIT);
     if (vw > 0 && vh > 0) {
+        double cpu_t0 = gpu_profile_on() ? pcGameProfileNowMs() : 0.0;
         glBlitFramebuffer((GLint)(x * kx), render_height - (GLint)(y * ky),
                           (GLint)((x + vw) * kx), render_height - (GLint)((y + vh) * ky),
                           x * scale, y * scale, (x + vw) * scale, (y + vh) * scale,
                           GL_COLOR_BUFFER_BIT, GL_LINEAR);
+        if (gpu_profile_on()) gpu_blit_cpu_ms += pcGameProfileNowMs() - cpu_t0;
     }
 
     /* En el buffer PS2 cada texel RGB32 se entrega con A=0x80, equivalente a GL alpha=1. Solo hace falta en el rectangulo recien

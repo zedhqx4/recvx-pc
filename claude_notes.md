@@ -448,3 +448,13 @@ Cambios: (1) el perfil parte la copia en preparar / limpiar / blit / alfa. (2) l
 hacia sobre TODA la textura en cada una de las 3 bandas; ahora solo sobre el rectangulo recien copiado (scissor x*scale, y*scale,
 vw*scale, vh*scale). Resultado identico: y==0 ya limpia RGBA=(0,0,0,1) y las bandas anteriores ya repusieron su alfa.
 No se asume que esto explique los 6 ms por copia; el siguiente log dira que fase pesa (linea "PROFILE gpu passes").
+
+## 0.9.153 - Copia a textura: el coste no es de relleno, es de espera (orphaning al inicio de captura)
+Logs de114157f9 (scale 4) y 0104dfe3 (scale 2), cuarto del agua: por frame de captura el "blit" cuesta 8-17 ms para 3 copias y es IGUAL con
+escala 2 (1024x1024) que con 4 (2048x2048); preparar/limpiar/alfa suman < 0.3 ms. Un blit de 640x480 a 1024^2 no puede costar 3-6 ms
+de GPU: el coste no depende de los pixeles, asi que es una espera (la textura destino sigue en uso por los draws del frame anterior,
+o el driver la prepara). Cambio: al empezar una captura (y==0) se re-especifica la textura con glTexImage2D(NULL) del mismo tamano
+("orphaning"): el contenido viejo ya no sirve porque la limpieza de y==0 rellena toda la textura, asi que el resultado es identico.
+Tambien se mide el CPU dentro de glBlitFramebuffer ("CPU dentro de glBlitFramebuffer" en PROFILE gpu passes): si es ~ el tiempo de
+blit, la CPU espera dentro de la llamada (sincronizacion); si es ~0, el tiempo es de GPU. Si el orphaning no lo arregla, el
+siguiente paso es doble buffer (ping-pong) de la textura destino por render target.
