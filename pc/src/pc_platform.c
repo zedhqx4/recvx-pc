@@ -1065,6 +1065,41 @@ int pcVideoPumpEvents(void)
             SDL_ShowCursor(SDL_ENABLE);
         }
 
+        /* UI graphics picker: left-click the broken on-screen element; right-click clears the mark. */
+        if ((ev.type == SDL_EVENT_MOUSE_BUTTON_DOWN) && pcRendererUiDebugEnabled() &&
+            ((ev.button.button == SDL_BUTTON_LEFT) || (ev.button.button == SDL_BUTTON_RIGHT)))
+        {
+            if (ev.button.button == SDL_BUTTON_RIGHT) {
+                pcRendererUiDebugClearMark();
+            } else if (window != NULL) {
+                int ww = 0, wh = 0, out_w = 0, out_h = 0;
+                int vw, vh, vx, vy;
+                float aspect = pcVideoAspect();
+                SDL_GetWindowSize(window, &ww, &wh);
+                if (ww > 0 && wh > 0 && aspect > 0.0f &&
+                    pcRendererGetOutputSize(&out_w, &out_h) && out_w > 0 && out_h > 0) {
+                    float mx = ev.button.x, my = ev.button.y;
+                    vw = ww;
+                    vh = (int)((float)ww / aspect + 0.5f);
+                    if (vh > wh) {
+                        vh = wh;
+                        vw = (int)((float)wh * aspect + 0.5f);
+                    }
+                    vx = (ww - vw) / 2;
+                    vy = (wh - vh) / 2;
+                    if (vw > 0 && vh > 0 && mx >= (float)vx && my >= (float)vy &&
+                        mx < (float)(vx + vw) && my < (float)(vy + vh)) {
+                        int px = (int)((mx - (float)vx) * (float)out_w / (float)vw);
+                        int py = (int)((my - (float)vy) * (float)out_h / (float)vh);
+                        pcRendererUiDebugMark(px, py);
+                    } else {
+                        pcLog("UI2D picker: click was outside the game image; no mark placed");
+                    }
+                }
+            }
+            continue;
+        }
+
         /* Live UV crop tuner; changes take effect on the next UI draw and are saved to recvx.ini. */
         if (ui_uv_crop_handle_event(&ev))
         {

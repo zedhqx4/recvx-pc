@@ -128,6 +128,8 @@ static int ui_debug_enabled = -1;
 static uint64_t ui_debug_last_signature;
 static uint64_t ui_debug_last_log_frame;
 static int ui_debug_have_signature;
+static int ui_debug_mark_active;
+static int ui_debug_mark_x, ui_debug_mark_y;
 static PcNativeVertex ui_debug_outline_vertices[PC_UI_DEBUG_MAX_ITEMS * 8];
 static PcNativeVertex ui_debug_digit_vertices[PC_UI_DEBUG_MAX_ITEMS * 56];
 
@@ -152,6 +154,30 @@ void pcRendererUiDebugAdd(const PcUiDebugPrimitive* primitive)
         return;
     }
     ui_debug_items[ui_debug_count++] = *primitive;
+}
+
+void pcRendererUiDebugMark(int x, int y)
+{
+    if (!pcRendererUiDebugEnabled())
+        return;
+    if (x < 0 || y < 0 || x >= output_width || y >= output_height) {
+        pcRendererUiDebugClearMark();
+        return;
+    }
+    ui_debug_mark_x = x;
+    ui_debug_mark_y = y;
+    ui_debug_mark_active = 1;
+    ui_debug_have_signature = 0;
+    pcLog("UI2D picker: marked screen coordinate (%d,%d); next frame will report overlapping 2D candidates",
+          x, y);
+}
+
+void pcRendererUiDebugClearMark(void)
+{
+    if (ui_debug_mark_active)
+        pcLog("UI2D picker: mark cleared");
+    ui_debug_mark_active = 0;
+    ui_debug_have_signature = 0;
 }
 
 static uint64_t ui_debug_hash_add(uint64_t hash, uint64_t value)
@@ -224,24 +250,26 @@ static void ui_debug_present(void)
         {0.95f, 0.95f, 0.95f}, {1.00f, 0.55f, 0.08f}
     };
     PcNativeDrawState state;
-    unsigned int i, outline_count = 0, digit_count = 0, on_screen = 0;
+    unsigned int i, candidates = 0, outline_count = 0, digit_count = 0;
     uint64_t signature = UINT64_C(14695981039346656037);
     int should_log;
 
-    if (!pcRendererUiDebugEnabled() || ui_debug_count == 0)
+    /* The inspector stays invisible until the user marks a problem point with the mouse. */
+    if (!pcRendererUiDebugEnabled() || !ui_debug_mark_active)
         return;
 
-    for (i = 0; i < ui_debug_count; i++) {
-        const PcUiDebugPrimitive* p = &ui_debug_items[i];
-        if (p->x1 > 0.0f && p->y1 > 0.0f &&
-            p->x0 < (float)output_width && p->y0 < (float)output_height &&
-            p->x1 > p->x0 && p->y1 > p->y0)
-            on_screen++;
-    }
-
+    signature = ui_debug_hash_add(signature, (uint64_t)(unsigned int)ui_debug_mark_x);
+    signature = ui_debug_hash_add(signature, (uint64_t)(unsigned int)ui_debug_mark_y);
     signature = ui_debug_hash_add(signature, ui_debug_count);
     for (i = 0; i < ui_debug_count; i++) {
         const PcUiDebugPrimitive* p = &ui_debug_items[i];
+        int contains_mark =
+            (float)ui_debug_mark_x >= p->x0 && (float)ui_debug_mark_x <= p->x1 &&
+            (float)ui_debug_mark_y >= p->y0 && (float)ui_debug_mark_y <= p->y1 &&
+            p->x1 > p->x0 && p->y1 > p->y0;
+        if (!contains_mark)
+            continue;
+        candidates++;
         signature = ui_debug_hash_add(signature, (uint64_t)(uintptr_t)p->source_vertices);
         signature = ui_debug_hash_add(signature, (uint64_t)(uintptr_t)p->caller_address);
         signature = ui_debug_hash_add(signature, (uint64_t)(uintptr_t)p->texture_list);
@@ -254,18 +282,21 @@ static void ui_debug_present(void)
         signature = ui_debug_hash_add(signature, p->source_vertex_count);
         signature = ui_debug_hash_add(signature, p->topology);
     }
+
     should_log = !ui_debug_have_signature || signature != ui_debug_last_signature ||
                  (frame_number - ui_debug_last_log_frame) >= 120;
     if (should_log) {
-        pcLog("UI2D snapshot frame=%llu primitives=%u onscreen-bounds=%u overflow=%u; IDs are submission order for this frame",
-              (unsigned long long)frame_number, ui_debug_count, on_screen, ui_debug_overflow);
+        pcLog("UI2D PICK frame=%llu point=(%d,%d) bbox_candidates=%u total_submitted=%u overflow=%u; candidate IDs are submission order for this frame",
+              (unsigned long long)frame_number, ui_debug_mark_x, ui_debug_mark_y,
+              candidates, ui_debug_count, ui_debug_overflow);
         for (i = 0; i < ui_debug_count; i++) {
             const PcUiDebugPrimitive* p = &ui_debug_items[i];
-            const char* place = (p->x1 > 0.0f && p->y1 > 0.0f &&
-                                 p->x0 < (float)output_width && p->y0 < (float)output_height)
-                              ? "ONSCREEN_SUBMITTED" : "OFFSCREEN_SUBMITTED";
-            pcLog("UI2D id=%03u %s src=%p caller=%p texlist=%p tim2=%p gltex=%u bank=%u gindex=%u fmt=%u size=%ux%u prim=%016llx topo=%u srcv=%u drawv=%u TME=%d FST=%d ABE=%d rect=(%.1f,%.1f)-(%.1f,%.1f) depth=%.6f uv=(%.2f,%.2f)-(%.2f,%.2f)",
-                  i + 1, place, (void*)p->source_vertices, (void*)p->caller_address,
+            if ((float)ui_debug_mark_x < p->x0 || (float)ui_debug_mark_x > p->x1 ||
+                (float)ui_debug_mark_y < p->y0 || (float)ui_debug_mark_y > p->y1 ||
+                p->x1 <= p->x0 || p->y1 <= p->y0)
+                continue;
+            pcLog("UI2D PICK id=%03u BBOX_CANDIDATE src=%p caller=%p texlist=%p tim2=%p gltex=%u bank=%u gindex=%u fmt=%u size=%ux%u prim=%016llx topo=%u srcv=%u drawv=%u TME=%d FST=%d ABE=%d rect=(%.1f,%.1f)-(%.1f,%.1f) depth=%.6f uv=(%.2f,%.2f)-(%.2f,%.2f)",
+                  i + 1, (void*)p->source_vertices, (void*)p->caller_address,
                   (void*)p->texture_list, (void*)p->texture_source, p->gl_texture,
                   p->bank, p->gindex, p->pict_format, p->tim2_width, p->tim2_height,
                   (unsigned long long)p->prim, p->topology,
@@ -274,6 +305,8 @@ static void ui_debug_present(void)
                   p->x0, p->y0, p->x1, p->y1, p->depth,
                   p->u0, p->v0, p->u1, p->v1);
         }
+        if (candidates == 0)
+            pcLog("UI2D PICK: no submitted 2D primitive bounds contain the marked point");
         ui_debug_last_signature = signature;
         ui_debug_last_log_frame = frame_number;
         ui_debug_have_signature = 1;
@@ -288,6 +321,7 @@ static void ui_debug_present(void)
     state.alpha_test = 0;
     state.cull_backfaces = 0;
 
+    /* Only outline the few primitives whose screen-space bounds contain the marked point. */
     for (i = 0; i < ui_debug_count; i++) {
         const PcUiDebugPrimitive* p = &ui_debug_items[i];
         float x0 = p->x0, y0 = p->y0, x1 = p->x1, y1 = p->y1;
@@ -296,10 +330,10 @@ static void ui_debug_present(void)
         char digits[8];
         unsigned int digit_len, k;
         float label_x, label_y;
-        int in_view = (x1 > 0.0f && y1 > 0.0f &&
-                       x0 < (float)output_width && y0 < (float)output_height);
 
-        if (!in_view || x1 <= x0 || y1 <= y0)
+        if ((float)ui_debug_mark_x < x0 || (float)ui_debug_mark_x > x1 ||
+            (float)ui_debug_mark_y < y0 || (float)ui_debug_mark_y > y1 ||
+            x1 <= x0 || y1 <= y0)
             continue;
 
         if (x0 < 0.0f) x0 = 0.0f;
@@ -330,6 +364,16 @@ static void ui_debug_present(void)
             ui_debug_add_digit(ui_debug_digit_vertices, &digit_count,
                                (unsigned int)(digits[k] - '0'), label_x + (float)(k * 8u), label_y);
     }
+
+    /* Crosshair marks the exact point selected by the user, even when no UI candidate matches. */
+    ui_debug_add_line(ui_debug_outline_vertices, &outline_count, PC_UI_DEBUG_MAX_ITEMS * 8,
+                      (float)ui_debug_mark_x - 7.0f, (float)ui_debug_mark_y,
+                      (float)ui_debug_mark_x + 7.0f, (float)ui_debug_mark_y,
+                      1.0f, 0.1f, 0.1f);
+    ui_debug_add_line(ui_debug_outline_vertices, &outline_count, PC_UI_DEBUG_MAX_ITEMS * 8,
+                      (float)ui_debug_mark_x, (float)ui_debug_mark_y - 7.0f,
+                      (float)ui_debug_mark_x, (float)ui_debug_mark_y + 7.0f,
+                      1.0f, 0.1f, 0.1f);
 
     if (outline_count)
         pcRendererDrawLines(ui_debug_outline_vertices, (int)outline_count, &state);

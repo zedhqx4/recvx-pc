@@ -59,6 +59,8 @@ typedef struct {
 
 int pcRendererUiDebugEnabled(void);
 void pcRendererUiDebugAdd(const PcUiDebugPrimitive* primitive);
+void pcRendererUiDebugMark(int x, int y);
+void pcRendererUiDebugClearMark(void);
 
 int pcRendererInit(int width, int height);
 void pcRendererShutdown(void);
