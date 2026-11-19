@@ -344,11 +344,10 @@ def generate(vsm, dst_rel, state, func, mask, extra_decl=""):
 
 
 def main():
-    which = sys.argv[1:] or ["vu0", "vu1"]
+    # La VU1 emulada (vsm/ps2_vu1.vsm -> vu1_micro.c) se retiro: el renderer nativo no pasa por GIF/VIF.
+    which = sys.argv[1:] or ["vu0"]
     if "vu0" in which:
         generate("vsm/ps2_vu0.vsm", "pc/src/vu/vu0_micro.c", "pcVu0", "pcVu0Micro", 255)
-    if "vu1" in which:
-        generate("vsm/ps2_vu1.vsm", "pc/src/vu/vu1_micro.c", "pcVu1", "pcVu1Micro", 1023)
 
 
 if __name__ == "__main__":

@@ -15,8 +15,6 @@
 #include <stdlib.h>
 void pcVu0CalcPointN(const float* in, void* out, int n);
 int pcVu0CalcPointBatchEnabled(void);
-unsigned int pcVu0StripClip(const unsigned short* idx, int n, const void* vbuf);
-void pcVu0StripPack(void* dst, const unsigned short* idx, int n, const void* vbuf, const float zb[4]);
 #include "../../../../pc/include/pc_vu.h"
 #include "../../../../pc/include/pc_platform.h"
 
@@ -2117,8 +2115,6 @@ CHUNK_HEAD* njCnkCoP3(CHUNK_HEAD* pCnk)
 #ifdef TARGET_PC
 extern void pcLog(const char* fmt, ...);
 extern int pcRendererBurstDiag(void);
-extern int pcVu1Enabled(void);
-extern void pcVif1Dma(const void* tag);
 #endif
 
 CHUNK_HEAD* njCnkCs(CHUNK_HEAD* pCnk)
@@ -2390,12 +2386,8 @@ CHUNK_HEAD* njCnkCsUvh(CHUNK_HEAD* pCnk)
     
     usStrip = *uspCnk++ & 0x3FFF;
     
-#ifdef TARGET_PC
-    /* PC: VU1 emulada (microcodigo generado de vsm/ps2_vu1.vsm); RECVX_VU1=0 usa la ruta del EE de abajo */
-    if (pcVu1Enabled() && ((ulDrawGeneralPurposeWater != 0) || ((pVu1Func != vu1DrawTriangleStripTransDouble) && (pVu1Func != vu1DrawTriangleStripTransDoubleI))))
-#else
+#ifndef TARGET_PC   /* PC: la ruta de la VU1 (DMA al VIF1 + microcodigo) ya no existe; solo la del EE de abajo */
     if ((ulDrawGeneralPurposeWater != 0) || ((pVu1Func != vu1DrawTriangleStripTransDouble) && (pVu1Func != vu1DrawTriangleStripTransDoubleI))) 
-#endif
     {
         TIM2_PICTUREHEADER_EX* timp;                                                 
         unsigned int coflag;  
@@ -2464,12 +2456,8 @@ CHUNK_HEAD* njCnkCsUvh(CHUNK_HEAD* pCnk)
         ulpP[32] = SCE_GIF_SET_TAG(0, 1, SCE_GIF_REGLIST, NULL, 0, 3) | ulType2;
         ulpP[33] = GIF_REGLIST(SCE_GS_ST, SCE_GS_RGBAQ, SCE_GS_XYZF2);
         
-#ifdef TARGET_PC
-        pcVif1Dma((void*)0x70003E80);   /* constantes: BASE/OFFSET + UNPACK a la memoria de la VU1 */
-#else
         sceDmaSend((sceDmaChan*)D1_CHCR, (void*)0xF0003E80);
         sceDmaSync((sceDmaChan*)D1_CHCR, 0, 0);
-#endif
         
         for (; usStrip; usStrip--)  
         {
@@ -2509,9 +2497,6 @@ CHUNK_HEAD* njCnkCsUvh(CHUNK_HEAD* pCnk)
                 ulpP[4] = (SCE_GIF_SET_TAG(0, SCE_GS_TRUE, SCE_GS_TRUE, 0, SCE_GIF_PACKED, 3) | ulType) | usMax;
                 ulpP[5] = GIF_REGLIST(SCE_GS_ST, SCE_GS_RGBAQ, SCE_GS_XYZF2);
 
-#ifdef TARGET_PC
-                coflag = pcVu0StripClip(uspCnk, (int)usMax, pNaCnkVerBufTop);
-#else
                 asm volatile
                 ("
                 .set noreorder
@@ -2576,7 +2561,6 @@ CHUNK_HEAD* njCnkCsUvh(CHUNK_HEAD* pCnk)
                 .set reorder
                 " : "r"(coflag) : "r"(uspCnk), "r"(usMax), "m"(pNaCnkVerBufTop) : "memory"
                 );
-#endif
                     
                 if (coflag != 0)
                 {
@@ -2588,16 +2572,6 @@ CHUNK_HEAD* njCnkCsUvh(CHUNK_HEAD* pCnk)
                 {
                     float zbuff[4] = { -Ps2_zbuff_b, 0.0009775171f, -Ps2_zbuff_a, 65534.0f }; 
                     
-#ifdef TARGET_PC
-                    {
-                        PcGpr g_op0 = { 0 };
-                        PcGpr g_zero = { 0 };
-                        uint64_t lo_ = 0; int fcc_ = 0;
-                        g_op0.d[0] = A2C_SX32((uint32_t)(uintptr_t)(zbuff));
-                        memcpy(&pcVu0.vf[8], A2C_PTR(((uint32_t)(g_op0.w[0] + (0)))), 16);
-                        (void)g_zero; (void)lo_; (void)fcc_;
-                    }
-#else
                     asm volatile
                     ("
                     .set noreorder
@@ -2605,14 +2579,7 @@ CHUNK_HEAD* njCnkCsUvh(CHUNK_HEAD* pCnk)
                     .set reorder
                     " : : "r"(zbuff) : "v1", "memory"
                     );  
-#endif
    
-#ifdef TARGET_PC
-                    /* Nativo: lo que hacia el bucle del EE/VU0 (UV 12.4 -> float, Z de la GS fijado a 0..65534)
-                     * sin pasar por el archivo de registros de la VU0. */
-                    pcVu0StripPack(pS, uspCnk, (int)usMax, pNaCnkVerBufTop, zbuff);
-                    *(uint32_t*)((char*)pS + offsetof(VU1_STRIP_BUF, fPad1)) = (uint32_t)usColorCalc;
-#else
                     asm volatile
                     ("
                     .set noreorder
@@ -2688,7 +2655,6 @@ CHUNK_HEAD* njCnkCsUvh(CHUNK_HEAD* pCnk)
                     .set reorder
                     " : : "r"(pS), "r"(uspCnk), "m"(pNaCnkVerBufTop), "r"(usMax), "r"(usColorCalc) : "t0", "t1", "t2", "memory"
                     );
-#endif
                 
                     uspCnk += usMax * 3;
                     
@@ -2697,11 +2663,7 @@ CHUNK_HEAD* njCnkCsUvh(CHUNK_HEAD* pCnk)
                     p[0] = 0;
                     p[1] = vu1func_tag;
                     
-#ifdef TARGET_PC
-                    pcVif1Dma((void*)ulpP);   /* tira: UNPACK + MSCAL; el XGKICK de la VU1 dibuja */
-#else
                     sceDmaSend((sceDmaChan*)D1_CHCR, (void*)((unsigned int)ulpP | 0x80000000));
-#endif
                     
                     Ps2_chunk_buff_flip ^= 1;
                 }
@@ -2723,6 +2685,7 @@ CHUNK_HEAD* njCnkCsUvh(CHUNK_HEAD* pCnk)
         SyncPath();
     }
     else
+#endif
     {
         for (; usStrip; usStrip--)
         {
@@ -2864,12 +2827,8 @@ CHUNK_HEAD* njCnkCsUvn(CHUNK_HEAD* pCnk)
     
     usStrip = *uspCnk++ & 0x3FFF;
     
-#ifdef TARGET_PC
-    /* PC: VU1 emulada (microcodigo generado de vsm/ps2_vu1.vsm); RECVX_VU1=0 usa la ruta del EE de abajo */
-    if (pcVu1Enabled() && ((ulDrawGeneralPurposeWater != 0) || ((pVu1Func != vu1DrawTriangleStripTransDouble) && (pVu1Func != vu1DrawTriangleStripTransDoubleI))))
-#else
+#ifndef TARGET_PC   /* PC: la ruta de la VU1 (DMA al VIF1 + microcodigo) ya no existe; solo la del EE de abajo */
     if ((ulDrawGeneralPurposeWater != 0) || ((pVu1Func != vu1DrawTriangleStripTransDouble) && (pVu1Func != vu1DrawTriangleStripTransDoubleI))) 
-#endif
     {
         TIM2_PICTUREHEADER_EX* timp;                                                 
         unsigned int coflag;  
@@ -2938,12 +2897,8 @@ CHUNK_HEAD* njCnkCsUvn(CHUNK_HEAD* pCnk)
         ulpP[32] = SCE_GIF_SET_TAG(0, 1, SCE_GIF_REGLIST, NULL, 0, 3) | ulType2;
         ulpP[33] = GIF_REGLIST(SCE_GS_ST, SCE_GS_RGBAQ, SCE_GS_XYZF2);
         
-#ifdef TARGET_PC
-        pcVif1Dma((void*)0x70003E80);   /* constantes: BASE/OFFSET + UNPACK a la memoria de la VU1 */
-#else
         sceDmaSend((sceDmaChan*)D1_CHCR, (void*)0xF0003E80);
         sceDmaSync((sceDmaChan*)D1_CHCR, 0, 0);
-#endif
         
         for (; usStrip; usStrip--)  
         {
@@ -2983,9 +2938,6 @@ CHUNK_HEAD* njCnkCsUvn(CHUNK_HEAD* pCnk)
                 ulpP[4] = (SCE_GIF_SET_TAG(0, SCE_GS_TRUE, SCE_GS_TRUE, 0, SCE_GIF_PACKED, 3) | ulType) | usMax;
                 ulpP[5] = GIF_REGLIST(SCE_GS_ST, SCE_GS_RGBAQ, SCE_GS_XYZF2);
 
-#ifdef TARGET_PC
-                coflag = pcVu0StripClip(uspCnk, (int)usMax, pNaCnkVerBufTop);
-#else
                 asm volatile
                 ("
                 .set noreorder
@@ -3050,7 +3002,6 @@ CHUNK_HEAD* njCnkCsUvn(CHUNK_HEAD* pCnk)
                 .set reorder
                 " : "r"(coflag) : "r"(uspCnk), "r"(usMax), "m"(pNaCnkVerBufTop) : "memory"
                 );
-#endif
                     
                 if (coflag != 0)
                 {
@@ -3062,16 +3013,6 @@ CHUNK_HEAD* njCnkCsUvn(CHUNK_HEAD* pCnk)
                 {
                     float zbuff[4] = { -Ps2_zbuff_b, 0.003921569f, -Ps2_zbuff_a, 65534.0f }; 
                     
-#ifdef TARGET_PC
-                    {
-                        PcGpr g_op0 = { 0 };
-                        PcGpr g_zero = { 0 };
-                        uint64_t lo_ = 0; int fcc_ = 0;
-                        g_op0.d[0] = A2C_SX32((uint32_t)(uintptr_t)(zbuff));
-                        memcpy(&pcVu0.vf[8], A2C_PTR(((uint32_t)(g_op0.w[0] + (0)))), 16);
-                        (void)g_zero; (void)lo_; (void)fcc_;
-                    }
-#else
                     asm volatile
                     ("
                     .set noreorder
@@ -3079,14 +3020,7 @@ CHUNK_HEAD* njCnkCsUvn(CHUNK_HEAD* pCnk)
                     .set reorder
                     " : : "r"(zbuff) : "v1", "memory"
                     );  
-#endif
    
-#ifdef TARGET_PC
-                    /* Nativo: lo que hacia el bucle del EE/VU0 (UV 12.4 -> float, Z de la GS fijado a 0..65534)
-                     * sin pasar por el archivo de registros de la VU0. */
-                    pcVu0StripPack(pS, uspCnk, (int)usMax, pNaCnkVerBufTop, zbuff);
-                    *(uint32_t*)((char*)pS + offsetof(VU1_STRIP_BUF, fPad1)) = (uint32_t)usColorCalc;
-#else
                     asm volatile
                     ("
                     .set noreorder
@@ -3162,7 +3096,6 @@ CHUNK_HEAD* njCnkCsUvn(CHUNK_HEAD* pCnk)
                     .set reorder
                     " : : "r"(pS), "r"(uspCnk), "m"(pNaCnkVerBufTop), "r"(usMax), "r"(usColorCalc) : "t0", "t1", "t2", "memory"
                     );
-#endif
                 
                     uspCnk += usMax * 3;
                     
@@ -3171,11 +3104,7 @@ CHUNK_HEAD* njCnkCsUvn(CHUNK_HEAD* pCnk)
                     p[0] = 0;
                     p[1] = vu1func_tag;
                     
-#ifdef TARGET_PC
-                    pcVif1Dma((void*)ulpP);   /* tira: UNPACK + MSCAL; el XGKICK de la VU1 dibuja */
-#else
                     sceDmaSend((sceDmaChan*)D1_CHCR, (void*)((unsigned int)ulpP | 0x80000000));
-#endif
                     
                     Ps2_chunk_buff_flip ^= 1;
                 }
@@ -3197,6 +3126,7 @@ CHUNK_HEAD* njCnkCsUvn(CHUNK_HEAD* pCnk)
         SyncPath();
     }
     else
+#endif
     {
         for (; usStrip; usStrip--)
         {

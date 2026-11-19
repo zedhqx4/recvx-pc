@@ -1828,7 +1828,7 @@ static float pcFtoi0Sat(float x)
 }
 
 /* Cola final: vertices ya en pantalla (+ kick y Z de la GS por vertice) -> renderer nativo.
- * La comparten el empaquetador del EE (pcSubmitPrepared3D) y la salida de la VU1 (pcVu1GifPacket). */
+ * La usan el empaquetador del EE (pcSubmitPrepared3D) y pcSubmitStrip3D. */
 static void pcSubmitVertices(unsigned long prim, const PcNativeVertex* vertices, const unsigned char* kick, const float* gs_z,
                              unsigned int count, const PcPrim3D* mode, float average_z, float tex_width, float tex_height,
                              unsigned int texture, int screen_space)
@@ -2221,120 +2221,6 @@ static void pcSubmitStrip3D(unsigned long prim, const void* data, unsigned int c
 
 done:
     return;
-}
-
-/* ---- Salida de la VU1 (XGKICK): paquetes GIF PACKED con ST / RGBAQ / XYZF2 por vertice ----
- * Es lo que la GS recibia directamente: el microcodigo ya hizo proyeccion, recorte, color e iluminacion. En el original esos
- * primitivos (tiras Opaque/TransSingle de njCnkCsUvh) iban sin pasar por el OT: la GS los dibujaba en el momento. */
-static void pcVu1GifPacket(const unsigned int* q, unsigned int max_qwords)
-{
-    unsigned int pos = 0, guard = 0;
-
-    while (pos < max_qwords && guard++ < 16) {
-        const unsigned int nloop = q[pos * 4] & 0x7FFFu, eop = (q[pos * 4] >> 15) & 1u;
-        const unsigned int hi = q[pos * 4 + 1];
-        const unsigned int flg = (hi >> 26) & 3u;
-        unsigned int nreg = (hi >> 28) & 0xFu;
-        const uint64_t prim = ((uint64_t)((hi >> 15) & 0x7FFu)) << 47;
-        const int pre = (hi >> 14) & 1;
-        unsigned int regs[16], r, i;
-        PcNativeVertex* vertices;
-        unsigned char* kick;
-        float* gs_z;
-        float tex_width = 1.0f, tex_height = 1.0f, zsum = 0.0f;
-        unsigned int texture = pcRendererCurrentTexture();
-        PcPrim3D mode = { 0, 0, PC_OT_IMMEDIATE, 0.0f };
-        const unsigned int* d;
-        PcNativeVertex cur;
-        unsigned int nv = 0;
-        float sq = 1.0f, ss = 0.0f, st = 0.0f;
-
-        if (nreg == 0) nreg = 16;
-        for (r = 0; r < nreg; r++)
-            regs[r] = ((q[pos * 4 + 2 + (r >> 3)]) >> ((r & 7) * 4)) & 0xFu;
-        pos++;
-
-        if (flg != 0 || !pre || nloop == 0 || nloop > 16384 || pos + (size_t)nloop * nreg > max_qwords)
-            return;   /* el microcodigo del juego solo manda PACKED con PRIM */
-
-        vertices = (PcNativeVertex*)malloc((size_t)nloop * sizeof(*vertices));
-        kick = (unsigned char*)malloc(nloop);
-        gs_z = (float*)malloc((size_t)nloop * sizeof(*gs_z));
-        if (vertices && kick && gs_z) {
-            memset(&cur, 0, sizeof(cur));
-            pcRendererCurrentTextureSize(&tex_width, &tex_height);
-            d = q + pos * 4;
-            for (i = 0; i < nloop; i++, d += nreg * 4) {
-                for (r = 0; r < nreg; r++) {
-                    const unsigned int* w = d + r * 4;
-                    float fl[3];
-                    switch (regs[r]) {
-                    case 2:   /* ST: S, T y Q (palabra 2) */
-                        memcpy(fl, w, sizeof(fl));
-                        ss = fl[0]; st = fl[1]; sq = fl[2];
-                        break;
-                    case 1:   /* RGBAQ: un byte por palabra, A en 0..128 */
-                        cur.r = fminf((float)(w[0] & 0xFFu) / 255.0f, 1.0f);
-                        cur.g = fminf((float)(w[1] & 0xFFu) / 255.0f, 1.0f);
-                        cur.b = fminf((float)(w[2] & 0xFFu) / 255.0f, 1.0f);
-                        cur.a = fminf((float)(w[3] & 0xFFu) / 128.0f, 1.0f);
-                        break;
-                    case 4:   /* XYZF2: X, Y en 12.4, Z, F (bits 4..11) y ADC (bit 15) */
-                    case 5:   /* XYZ2 */
-                        cur.x = (float)(int32_t)w[0] / 16.0f - 1728.0f;
-                        cur.y = (float)(int32_t)w[1] / 16.0f - 1808.0f;
-                        gs_z[nv] = (float)(int32_t)w[2] / 16.0f;
-                        cur.z = pcRendererDepthFromGsZ(gs_z[nv]);
-                        cur.fog = regs[r] == 4 ? fminf((float)((w[3] >> 4) & 0xFFu) / 255.0f, 1.0f) : 1.0f;
-                        cur.u = ss * tex_width;
-                        cur.v = st * tex_height;
-                        cur.q = sq;
-                        vertices[nv] = cur;
-                        kick[nv] = (w[3] & 0x8000u) != 0;
-                        zsum += gs_z[nv];
-                        nv++;
-                        break;
-                    default:
-                        break;
-                    }
-                }
-            }
-            {
-                static unsigned int packets, drawn;
-                packets++;
-                if (nv == nloop && !((prim & PC_GIF_PRIM_TME) && texture == 0)) drawn++;
-                if (packets <= 12 || packets % 2000 == 0)
-                    pcLog("VU1: paquete #%u (dibujados %u) nloop=%u nreg=%u prim=0x%x tex=%u v0=(%.1f,%.1f,z=%.1f gsz) kick0=%d",
-                          packets, drawn, nloop, nreg, (unsigned)(prim >> 47), texture,
-                          nv ? vertices[0].x : 0.0f, nv ? vertices[0].y : 0.0f, nv ? gs_z[0] : 0.0f, nv ? kick[0] : 0);
-            }
-            if (nv == nloop && !((prim & PC_GIF_PRIM_TME) && texture == 0))
-                pcSubmitVertices(prim, vertices, kick, gs_z, nv, &mode, zsum / (float)nv, tex_width, tex_height, texture, 1);
-        }
-        free(vertices);
-        free(kick);
-        free(gs_z);
-        pos += nloop * nreg;
-        if (eop)
-            break;
-    }
-}
-
-/* Interruptor: RECVX_VU1=1 = tiras de njCnkCsUvh por el microcodigo de la VU1; por defecto, la ruta del EE */
-int pcVu1Enabled(void)
-{
-    static int enabled = -1;
-    if (enabled < 0) {
-        const char* e = getenv("RECVX_VU1");
-        /* La VU1 emulada da el mismo resultado que la ruta del EE (verificado con F8 en 0.9.120/121) pero cuesta CPU:
-         * queda como herramienta de verificacion, RECVX_VU1=1 la activa. */
-        /* variable de entorno RECVX_VU1 o, si no existe, vu1=1 en recvx.ini */
-        enabled = e ? (e[0] == '1') : (pcIniGetInt("vu1", 0) != 0);
-        pcLog("VU1: emulacion %s (vu1=1 en recvx.ini o RECVX_VU1=1 la activa)", enabled ? "ACTIVA" : "desactivada");
-        pcVu1GifSink = pcVu1GifPacket;
-        pcVif1Reset();
-    }
-    return enabled;
 }
 #endif
 
