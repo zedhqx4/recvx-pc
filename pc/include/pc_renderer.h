@@ -55,6 +55,9 @@ typedef struct {
     int textured, fst, blend;
     float x0, y0, x1, y1, depth;
     float u0, v0, u1, v1;
+    int has_quad;
+    float source_x0, source_y0, source_x1, source_y1;
+    float corner_x[4], corner_y[4]; /* TL, TR, BR, BL after native 2D conversion */
 } PcUiDebugPrimitive;
 
 int pcRendererUiDebugEnabled(void);
