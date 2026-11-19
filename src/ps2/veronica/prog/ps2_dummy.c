@@ -5,6 +5,16 @@
 #include <stdint.h>
 #include "../../../../pc/include/pc_vu.h"
 #include "../../../../pc/include/pc_game_profile.h"
+#ifdef _MSC_VER
+#include <intrin.h>
+#pragma intrinsic(_ReturnAddress)
+#define PC_UI_DEBUG_RETURN_ADDRESS() ((const void*)_ReturnAddress())
+#elif defined(__GNUC__)
+#define PC_UI_DEBUG_RETURN_ADDRESS() ((const void*)__builtin_return_address(0))
+#else
+#define PC_UI_DEBUG_RETURN_ADDRESS() ((const void*)0)
+#endif
+static const void* pc_ui_debug_caller_override;
 extern int Send_Tim2_dataExClutOnly(void* tim2_top_adr, unsigned long send_image_adr, unsigned long send_clut_adr);
 #endif
 #include "../../../ps2/veronica/prog/ps2_dummy.h"
@@ -1255,6 +1265,9 @@ void Ps2AddPrim(unsigned long prim, void* dp, unsigned int num, unsigned int cli
 #ifdef TARGET_PC
     float wide_2d = 1.0f;
     static unsigned int wide_buf[64 * 12];
+    const void* ui_debug_source_vertices = dp;
+    const void* ui_debug_caller_address = pc_ui_debug_caller_override
+        ? pc_ui_debug_caller_override : PC_UI_DEBUG_RETURN_ADDRESS();
 #endif
 
 #ifdef TARGET_PC
@@ -1419,6 +1432,7 @@ void Ps2AddPrim(unsigned long prim, void* dp, unsigned int num, unsigned int cli
         PcNativeVertex sprite[6];
         PcNativeDrawState state;
         unsigned int topology = (unsigned int)((prim >> 47) & 7u);
+        unsigned int source_topology = topology;
         unsigned int i;
         int textured = (prim & 0x8000000000000ULL) != 0;
         int transparent = (prim & 0x20000000000000ULL) != 0;
@@ -1547,6 +1561,69 @@ void Ps2AddPrim(unsigned long prim, void* dp, unsigned int num, unsigned int cli
             state.ot_z = 65537.0f / zv + 1.0f;
             /* el 2D opaco tambien pasaba por el OT: fondo y rejilla del mapa comparten Z16 y solo los separa el orden */
             state.ot_queue = 1;
+        }
+
+        if (pcRendererUiDebugEnabled()) {
+            PcUiDebugPrimitive debug_item;
+            const void* texture_source = Ps2_now_tex
+                ? Ps2_now_tex->texinfo.texsurface.pSurface : NULL;
+            unsigned int gindex = 0, pict_format = 0, tim2_width = 0, tim2_height = 0;
+            float bx0 = 1.0e30f, by0 = 1.0e30f, bx1 = -1.0e30f, by1 = -1.0e30f;
+            float bz = 1.0e30f, bu0 = 1.0e30f, bv0 = 1.0e30f;
+            float bu1 = -1.0e30f, bv1 = -1.0e30f;
+            unsigned int k;
+
+            if (texture_source != NULL) {
+                TIM2_PICTUREHEADER_EX* ext = (TIM2_PICTUREHEADER_EX*)texture_source;
+                if (memcmp(ext->FileId, "TIM2", 4) == 0 && ext->FormatId <= 1) {
+                    TIM2_PICTUREHEADER* ph = (TIM2_PICTUREHEADER*)((unsigned char*)ext + (ext->FormatId ? 128 : 16));
+                    if (ph->ImageWidth > 0 && ph->ImageWidth <= 2048 &&
+                        ph->ImageHeight > 0 && ph->ImageHeight <= 2048) {
+                        gindex = ext->Gindex;
+                        pict_format = ph->PictFormat;
+                        tim2_width = ph->ImageWidth;
+                        tim2_height = ph->ImageHeight;
+                    }
+                }
+            }
+
+            for (k = 0; k < (unsigned int)count; k++) {
+                const PcNativeVertex* v = &vertices[k];
+                if (v->x < bx0) bx0 = v->x;
+                if (v->x > bx1) bx1 = v->x;
+                if (v->y < by0) by0 = v->y;
+                if (v->y > by1) by1 = v->y;
+                if (v->z < bz) bz = v->z;
+                if (v->u < bu0) bu0 = v->u;
+                if (v->u > bu1) bu1 = v->u;
+                if (v->v < bv0) bv0 = v->v;
+                if (v->v > bv1) bv1 = v->v;
+            }
+
+            memset(&debug_item, 0, sizeof(debug_item));
+            debug_item.source_vertices = ui_debug_source_vertices;
+            debug_item.caller_address = ui_debug_caller_address;
+            debug_item.texture_list = Ps2_now_tex;
+            debug_item.texture_source = texture_source;
+            debug_item.prim = (uint64_t)prim;
+            debug_item.gl_texture = state.texture;
+            debug_item.gindex = gindex;
+            debug_item.bank = Ps2_now_bank;
+            debug_item.pict_format = pict_format;
+            debug_item.tim2_width = tim2_width ? tim2_width : (unsigned int)texture_width;
+            debug_item.tim2_height = tim2_height ? tim2_height : (unsigned int)texture_height;
+            debug_item.source_vertex_count = num;
+            debug_item.render_vertex_count = (unsigned int)count;
+            debug_item.topology = source_topology;
+            debug_item.textured = textured;
+            debug_item.fst = use_uv;
+            debug_item.blend = transparent;
+            debug_item.x0 = bx0; debug_item.y0 = by0;
+            debug_item.x1 = bx1; debug_item.y1 = by1;
+            debug_item.depth = bz;
+            debug_item.u0 = bu0; debug_item.v0 = bv0;
+            debug_item.u1 = bu1; debug_item.v1 = bv1;
+            pcRendererUiDebugAdd(&debug_item);
         }
 
         switch (topology) {
@@ -1717,7 +1794,14 @@ void Ps2AddPrim(unsigned long prim, void* dp, unsigned int num, unsigned int cli
 /* CLAUDE-NOTE[N8]: ver nota en Ps2AddPrim sobre el orden de pintado perdido. */
 void Ps2AddPrim2D(unsigned long prim, void* dp, unsigned int num)
 {
+#ifdef TARGET_PC
+    const void* previous_caller = pc_ui_debug_caller_override;
+    pc_ui_debug_caller_override = PC_UI_DEBUG_RETURN_ADDRESS();
     Ps2AddPrim(prim, dp, num, 0);
+    pc_ui_debug_caller_override = previous_caller;
+#else
+    Ps2AddPrim(prim, dp, num, 0);
+#endif
 }
 
 #ifdef TARGET_PC

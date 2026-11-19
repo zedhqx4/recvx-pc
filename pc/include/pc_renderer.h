@@ -39,7 +39,26 @@ typedef struct {
     int ot_queue;              /* 1: goes through the OT even without ABE (2D: the GS ordered it by Z bucket, then by submission) */
     int immediate;             /* blended primitive that the game draws at once instead of through the OT */
     float zbuff_a, zbuff_b;    /* screen_space 3 y 4: constantes de Z de la GS, sz = -a + q * -b (0 en los demas modos) */
-} PcNativeDrawState;
+ } PcNativeDrawState;
+
+/* One submitted screen-space UI primitive. Addresses are diagnostic only and are never dereferenced
+ * by the renderer. Bounds/UVs are the values that reached the native renderer. */
+typedef struct {
+    const void* source_vertices;
+    const void* caller_address;
+    const void* texture_list;
+    const void* texture_source;
+    uint64_t prim;
+    unsigned int gl_texture;
+    unsigned int gindex, bank, pict_format, tim2_width, tim2_height;
+    unsigned int source_vertex_count, render_vertex_count, topology;
+    int textured, fst, blend;
+    float x0, y0, x1, y1, depth;
+    float u0, v0, u1, v1;
+} PcUiDebugPrimitive;
+
+int pcRendererUiDebugEnabled(void);
+void pcRendererUiDebugAdd(const PcUiDebugPrimitive* primitive);
 
 int pcRendererInit(int width, int height);
 void pcRendererShutdown(void);

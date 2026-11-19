@@ -121,6 +121,215 @@ static void flush_pending_deletes(void);
 static unsigned stat_immediate, stat_queued, stat_vertices, stat_screen_space;
 static int debug_magenta = -1;
 
+#define PC_UI_DEBUG_MAX_ITEMS 512
+static PcUiDebugPrimitive ui_debug_items[PC_UI_DEBUG_MAX_ITEMS];
+static unsigned int ui_debug_count, ui_debug_overflow;
+static int ui_debug_enabled = -1;
+static uint64_t ui_debug_last_signature;
+static uint64_t ui_debug_last_log_frame;
+static int ui_debug_have_signature;
+static PcNativeVertex ui_debug_outline_vertices[PC_UI_DEBUG_MAX_ITEMS * 8];
+static PcNativeVertex ui_debug_digit_vertices[PC_UI_DEBUG_MAX_ITEMS * 56];
+
+int pcRendererUiDebugEnabled(void)
+{
+    if (ui_debug_enabled < 0) {
+        const char* env = getenv("RECVX_UI_GRAPHICS_DEBUG");
+        ui_debug_enabled = env ? ((*env != 0 && *env != '0') ? 1 : 0)
+                               : (pcIniGetInt("ui_graphics_debug", 0) != 0);
+        pcLog("UI graphics debugger: %s (ui_graphics_debug=1 / RECVX_UI_GRAPHICS_DEBUG=1)",
+              ui_debug_enabled ? "enabled" : "disabled");
+    }
+    return ui_debug_enabled;
+}
+
+void pcRendererUiDebugAdd(const PcUiDebugPrimitive* primitive)
+{
+    if (!pcRendererUiDebugEnabled() || primitive == NULL)
+        return;
+    if (ui_debug_count >= PC_UI_DEBUG_MAX_ITEMS) {
+        ui_debug_overflow++;
+        return;
+    }
+    ui_debug_items[ui_debug_count++] = *primitive;
+}
+
+static uint64_t ui_debug_hash_add(uint64_t hash, uint64_t value)
+{
+    return (hash ^ value) * UINT64_C(1099511628211);
+}
+
+static void ui_debug_vertex(PcNativeVertex* v, float x, float y,
+                            float r, float g, float b, float a)
+{
+    memset(v, 0, sizeof(*v));
+    v->x = x;
+    v->y = y;
+    v->z = 0.0f;
+    v->r = r; v->g = g; v->b = b; v->a = a;
+    v->q = 1.0f;
+    v->fog = 1.0f;
+}
+
+static void ui_debug_add_line(PcNativeVertex* out, unsigned int* count,
+                              float x0, float y0, float x1, float y1,
+                              float r, float g, float b)
+{
+    if (*count + 2 > PC_UI_DEBUG_MAX_ITEMS * 56)
+        return;
+    ui_debug_vertex(&out[(*count)++], x0, y0, r, g, b, 1.0f);
+    ui_debug_vertex(&out[(*count)++], x1, y1, r, g, b, 1.0f);
+}
+
+static unsigned int ui_debug_digit_segments(unsigned int digit)
+{
+    /* Seven-segment masks: a,b,c,d,e,f,g = bits 0..6. */
+    static const unsigned char masks[10] = {
+        0x3F, 0x06, 0x5B, 0x4F, 0x66,
+        0x6D, 0x7D, 0x07, 0x7F, 0x6F
+    };
+    return digit < 10 ? masks[digit] : 0;
+}
+
+static void ui_debug_add_digit(PcNativeVertex* out, unsigned int* count,
+                               unsigned int digit, float x, float y)
+{
+    static const float segment[7][4] = {
+        {1.0f, 0.0f, 5.0f, 0.0f},  /* a */
+        {6.0f, 1.0f, 6.0f, 4.0f},  /* b */
+        {6.0f, 5.0f, 6.0f, 8.0f},  /* c */
+        {1.0f, 9.0f, 5.0f, 9.0f},  /* d */
+        {0.0f, 5.0f, 0.0f, 8.0f},  /* e */
+        {0.0f, 1.0f, 0.0f, 4.0f},  /* f */
+        {1.0f, 4.5f, 5.0f, 4.5f}   /* g */
+    };
+    unsigned int mask = ui_debug_digit_segments(digit);
+    unsigned int i;
+    for (i = 0; i < 7; i++) {
+        if (mask & (1u << i)) {
+            ui_debug_add_line(out, count,
+                              x + segment[i][0], y + segment[i][1],
+                              x + segment[i][2], y + segment[i][3],
+                              1.0f, 1.0f, 1.0f);
+        }
+    }
+}
+
+static void ui_debug_present(void)
+{
+    static const float palette[8][3] = {
+        {0.10f, 0.95f, 1.00f}, {1.00f, 0.82f, 0.08f},
+        {0.25f, 1.00f, 0.30f}, {1.00f, 0.25f, 0.85f},
+        {1.00f, 0.35f, 0.18f}, {0.30f, 0.60f, 1.00f},
+        {0.95f, 0.95f, 0.95f}, {1.00f, 0.55f, 0.08f}
+    };
+    PcNativeDrawState state;
+    unsigned int i, outline_count = 0, digit_count = 0, on_screen = 0;
+    uint64_t signature = UINT64_C(14695981039346656037);
+    int should_log;
+
+    if (!pcRendererUiDebugEnabled() || ui_debug_count == 0)
+        return;
+
+    signature = ui_debug_hash_add(signature, ui_debug_count);
+    for (i = 0; i < ui_debug_count; i++) {
+        const PcUiDebugPrimitive* p = &ui_debug_items[i];
+        signature = ui_debug_hash_add(signature, (uint64_t)(uintptr_t)p->source_vertices);
+        signature = ui_debug_hash_add(signature, (uint64_t)(uintptr_t)p->caller_address);
+        signature = ui_debug_hash_add(signature, (uint64_t)(uintptr_t)p->texture_list);
+        signature = ui_debug_hash_add(signature, (uint64_t)(uintptr_t)p->texture_source);
+        signature = ui_debug_hash_add(signature, p->prim);
+        signature = ui_debug_hash_add(signature, p->gl_texture);
+        signature = ui_debug_hash_add(signature, p->gindex);
+        signature = ui_debug_hash_add(signature, p->bank);
+        signature = ui_debug_hash_add(signature, p->pict_format);
+        signature = ui_debug_hash_add(signature, p->source_vertex_count);
+        signature = ui_debug_hash_add(signature, p->topology);
+    }
+    should_log = !ui_debug_have_signature || signature != ui_debug_last_signature ||
+                 (frame_number - ui_debug_last_log_frame) >= 120;
+    if (should_log) {
+        pcLog("UI2D snapshot frame=%llu primitives=%u onscreen-bounds=%u overflow=%u; IDs are draw order for this frame",
+              (unsigned long long)frame_number, ui_debug_count, on_screen, ui_debug_overflow);
+        for (i = 0; i < ui_debug_count; i++) {
+            const PcUiDebugPrimitive* p = &ui_debug_items[i];
+            const char* place = (p->x1 > 0.0f && p->y1 > 0.0f &&
+                                 p->x0 < (float)output_width && p->y0 < (float)output_height)
+                              ? "ONSCREEN_SUBMITTED" : "OFFSCREEN_SUBMITTED";
+            pcLog("UI2D id=%03u %s src=%p caller=%p texlist=%p tim2=%p gltex=%u bank=%u gindex=%u fmt=%u size=%ux%u prim=%016llx topo=%u srcv=%u drawv=%u TME=%d FST=%d ABE=%d rect=(%.1f,%.1f)-(%.1f,%.1f) depth=%.6f uv=(%.2f,%.2f)-(%.2f,%.2f)",
+                  i + 1, place, (void*)p->source_vertices, (void*)p->caller_address,
+                  (void*)p->texture_list, (void*)p->texture_source, p->gl_texture,
+                  p->bank, p->gindex, p->pict_format, p->tim2_width, p->tim2_height,
+                  (unsigned long long)p->prim, p->topology,
+                  p->source_vertex_count, p->render_vertex_count,
+                  p->textured, p->fst, p->blend,
+                  p->x0, p->y0, p->x1, p->y1, p->depth,
+                  p->u0, p->v0, p->u1, p->v1);
+        }
+        ui_debug_last_signature = signature;
+        ui_debug_last_log_frame = frame_number;
+        ui_debug_have_signature = 1;
+    }
+
+    memset(&state, 0, sizeof(state));
+    state.screen_space = 1;
+    state.depth_test = 0;
+    state.depth_write = 0;
+    state.textured = 0;
+    state.blend = 0;
+    state.alpha_test = 0;
+    state.cull_backfaces = 0;
+
+    for (i = 0; i < ui_debug_count; i++) {
+        const PcUiDebugPrimitive* p = &ui_debug_items[i];
+        float x0 = p->x0, y0 = p->y0, x1 = p->x1, y1 = p->y1;
+        const float* color = palette[i & 7u];
+        unsigned int id = i + 1;
+        char digits[8];
+        unsigned int digit_len, k;
+        float label_x, label_y;
+        int in_view = (x1 > 0.0f && y1 > 0.0f &&
+                       x0 < (float)output_width && y0 < (float)output_height);
+
+        if (!in_view || x1 <= x0 || y1 <= y0)
+            continue;
+        on_screen++;
+
+        if (x0 < 0.0f) x0 = 0.0f;
+        if (y0 < 0.0f) y0 = 0.0f;
+        if (x1 > (float)output_width) x1 = (float)output_width;
+        if (y1 > (float)output_height) y1 = (float)output_height;
+
+        ui_debug_add_line(ui_debug_outline_vertices, &outline_count,
+                          x0, y0, x1, y0, color[0], color[1], color[2]);
+        ui_debug_add_line(ui_debug_outline_vertices, &outline_count,
+                          x1, y0, x1, y1, color[0], color[1], color[2]);
+        ui_debug_add_line(ui_debug_outline_vertices, &outline_count,
+                          x1, y1, x0, y1, color[0], color[1], color[2]);
+        ui_debug_add_line(ui_debug_outline_vertices, &outline_count,
+                          x0, y1, x0, y0, color[0], color[1], color[2]);
+
+        snprintf(digits, sizeof(digits), "%u", id);
+        digit_len = (unsigned int)strlen(digits);
+        label_x = x0 + 1.0f;
+        label_y = (y0 >= 12.0f) ? y0 - 11.0f : y0 + 1.0f;
+        if (label_x + (float)(digit_len * 8u) > (float)output_width)
+            label_x = (float)output_width - (float)(digit_len * 8u) - 1.0f;
+        if (label_x < 0.0f) label_x = 0.0f;
+        if (label_y + 10.0f > (float)output_height)
+            label_y = (float)output_height - 10.0f;
+        if (label_y < 0.0f) label_y = 0.0f;
+        for (k = 0; k < digit_len; k++)
+            ui_debug_add_digit(ui_debug_digit_vertices, &digit_count,
+                               (unsigned int)(digits[k] - '0'), label_x + (float)(k * 8u), label_y);
+    }
+
+    if (outline_count)
+        pcRendererDrawLines(ui_debug_outline_vertices, (int)outline_count, &state);
+    if (digit_count)
+        pcRendererDrawLines(ui_debug_digit_vertices, (int)digit_count, &state);
+}
+
 /* CLAUDE-NOTE[N5][CORREGIDO]: vertex shader con problemas de clipping.
  *  - max(z, 0.00001) MUEVE los vertices con z<=0 en vez de recortarlos: un triangulo que cruza el plano de la
  *    camara cambia de forma. El recorte original (ScissorTriangle de la VU1) tampoco se ejecuta en la ruta nativa.
@@ -560,6 +769,8 @@ void pcRendererBeginFrame(void)
     stream_cursor = 0;
     if (!ready) return;
     frame_number++;
+    ui_debug_count = 0;
+    ui_debug_overflow = 0;
     if (debug_magenta < 0) { const char* e = getenv("RECVX_CLEAR_DEBUG"); debug_magenta = (e && *e && *e != '0'); }
     if (frame_number % 120 == 0) {
         /* A frame with 0 draws means the problem is before the renderer; >0 means it is in the renderer. */
@@ -2264,6 +2475,9 @@ void pcRendererPresent(void)
         depth_override_test = saved_depth_test;
         depth_override_write = saved_depth_write;
     }
+
+    /* The debug overlay is drawn after all submitted 2D UI, so its IDs and bounds remain visible. */
+    ui_debug_present();
 
     SDL_Window* window;
     int ww = 0, wh = 0;
