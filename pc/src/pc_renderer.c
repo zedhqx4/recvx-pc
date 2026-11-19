@@ -171,11 +171,11 @@ static void ui_debug_vertex(PcNativeVertex* v, float x, float y,
     v->fog = 1.0f;
 }
 
-static void ui_debug_add_line(PcNativeVertex* out, unsigned int* count, unsigned int capacity,
+static void ui_debug_add_line(PcNativeVertex* out, unsigned int* count,
                               float x0, float y0, float x1, float y1,
                               float r, float g, float b)
 {
-    if (*count + 2 > capacity)
+    if (*count + 2 > PC_UI_DEBUG_MAX_ITEMS * 56)
         return;
     ui_debug_vertex(&out[(*count)++], x0, y0, r, g, b, 1.0f);
     ui_debug_vertex(&out[(*count)++], x1, y1, r, g, b, 1.0f);
@@ -207,7 +207,7 @@ static void ui_debug_add_digit(PcNativeVertex* out, unsigned int* count,
     unsigned int i;
     for (i = 0; i < 7; i++) {
         if (mask & (1u << i)) {
-            ui_debug_add_line(out, count, PC_UI_DEBUG_MAX_ITEMS * 56,
+            ui_debug_add_line(out, count,
                               x + segment[i][0], y + segment[i][1],
                               x + segment[i][2], y + segment[i][3],
                               1.0f, 1.0f, 1.0f);
@@ -230,13 +230,6 @@ static void ui_debug_present(void)
 
     if (!pcRendererUiDebugEnabled() || ui_debug_count == 0)
         return;
-
-    for (i = 0; i < ui_debug_count; i++) {
-        const PcUiDebugPrimitive* p = &ui_debug_items[i];
-        if (p->x1 > 0.0f && p->y1 > 0.0f &&
-            p->x0 < (float)output_width && p->y0 < (float)output_height)
-            on_screen++;
-    }
 
     signature = ui_debug_hash_add(signature, ui_debug_count);
     for (i = 0; i < ui_debug_count; i++) {
@@ -300,18 +293,20 @@ static void ui_debug_present(void)
 
         if (!in_view || x1 <= x0 || y1 <= y0)
             continue;
+        on_screen++;
+
         if (x0 < 0.0f) x0 = 0.0f;
         if (y0 < 0.0f) y0 = 0.0f;
         if (x1 > (float)output_width) x1 = (float)output_width;
         if (y1 > (float)output_height) y1 = (float)output_height;
 
-        ui_debug_add_line(ui_debug_outline_vertices, &outline_count, PC_UI_DEBUG_MAX_ITEMS * 8,
+        ui_debug_add_line(ui_debug_outline_vertices, &outline_count,
                           x0, y0, x1, y0, color[0], color[1], color[2]);
-        ui_debug_add_line(ui_debug_outline_vertices, &outline_count, PC_UI_DEBUG_MAX_ITEMS * 8,
+        ui_debug_add_line(ui_debug_outline_vertices, &outline_count,
                           x1, y0, x1, y1, color[0], color[1], color[2]);
-        ui_debug_add_line(ui_debug_outline_vertices, &outline_count, PC_UI_DEBUG_MAX_ITEMS * 8,
+        ui_debug_add_line(ui_debug_outline_vertices, &outline_count,
                           x1, y1, x0, y1, color[0], color[1], color[2]);
-        ui_debug_add_line(ui_debug_outline_vertices, &outline_count, PC_UI_DEBUG_MAX_ITEMS * 8,
+        ui_debug_add_line(ui_debug_outline_vertices, &outline_count,
                           x0, y1, x0, y0, color[0], color[1], color[2]);
 
         snprintf(digits, sizeof(digits), "%u", id);

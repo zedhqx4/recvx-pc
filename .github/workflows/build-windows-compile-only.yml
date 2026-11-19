@@ -7,6 +7,7 @@ on:
       - OpenGl-3.3
       - render-nativo
       - optimizacion-rtt-135
+      - debug/uv-all-graphics
     paths:
       - 'pc/src/**'
       - 'pc/include/**'

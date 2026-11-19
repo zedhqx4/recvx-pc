@@ -39,7 +39,7 @@ typedef struct {
     int ot_queue;              /* 1: goes through the OT even without ABE (2D: the GS ordered it by Z bucket, then by submission) */
     int immediate;             /* blended primitive that the game draws at once instead of through the OT */
     float zbuff_a, zbuff_b;    /* screen_space 3 y 4: constantes de Z de la GS, sz = -a + q * -b (0 en los demas modos) */
-} PcNativeDrawState;
+ } PcNativeDrawState;
 
 /* One submitted screen-space UI primitive. Addresses are diagnostic only and are never dereferenced
  * by the renderer. Bounds/UVs are the values that reached the native renderer. */
