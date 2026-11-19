@@ -9,7 +9,8 @@
  *
  * Entradas: c = color del vertice (fIr,fIg,fIb,fA); amb/dif/spe = vu1Ambient/vu1Diffuse/vu1Specula (rgb);
  * ratio = fVu1AlphaRatio. Salida: out = (r,g,b,a) para VU1_PRIM_BUF.fR..fA.
- * Equivalencia comprobada con pc/tools/test_vu1_color.c contra las funciones transpiladas.
+ * Equivalencia comprobada bit a bit contra las funciones transpiladas (4.4M comparaciones; arnes en milestone/0.9.160:
+ * pc/tools/test_vu1_color.py).
  */
 #ifndef PC_VU1_COLOR_H
 #define PC_VU1_COLOR_H

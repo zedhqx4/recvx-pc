@@ -2,4 +2,4 @@
 #pragma once
 
 #define RECVX_VERSION_NUM 0, 9, 108, 0
-#define RECVX_VERSION_STR "0.9.161"
+#define RECVX_VERSION_STR "0.9.162"
