@@ -82,7 +82,7 @@ float fVu1AlphaRatio = 128.0f;
 
 #ifdef TARGET_PC
 /* Color por vertice sin la unidad vectorial: pc/include/pc_vu1_color.h reproduce las 11 vu1GetVertexColor* como C escalar.
- * INI vu1_color_native (RECVX_VU1_COLOR_NATIVE): 0 = funciones transpiladas (referencia, por defecto), 1 = C escalar,
+ * INI vu1_color_native (RECVX_VU1_COLOR_NATIVE): 0 = funciones transpiladas (referencia), 1 = C escalar (por defecto desde 0.9.161),
  * 2 = ejecuta ambas y compara (devuelve la de referencia y lo anota en recvx.log). */
 #include "pc_vu1_color.h"
 
@@ -140,7 +140,7 @@ static int pcvc_mode(void)
     static int mode = -1;
     if (mode < 0) {
         const char* e = getenv("RECVX_VU1_COLOR_NATIVE");
-        mode = e ? atoi(e) : pcIniGetInt("vu1_color_native", 0);
+        mode = e ? atoi(e) : pcIniGetInt("vu1_color_native", 1);
         if (mode < 0 || mode > 2) mode = 0;
         pcLog("vu1 color: vu1_color_native=%d (%s)", mode, mode == 0 ? "funciones transpiladas" : mode == 1 ? "C escalar sin VU0" : "C escalar y transpilada, comparadas");
     }
