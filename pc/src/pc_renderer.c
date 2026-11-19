@@ -185,6 +185,13 @@ static uint64_t ui_debug_hash_add(uint64_t hash, uint64_t value)
     return (hash ^ value) * UINT64_C(1099511628211);
 }
 
+static uint64_t ui_debug_float_bits(float value)
+{
+    uint32_t bits;
+    memcpy(&bits, &value, sizeof(bits));
+    return (uint64_t)bits;
+}
+
 static void ui_debug_vertex(PcNativeVertex* v, float x, float y,
                             float r, float g, float b, float a)
 {
@@ -254,6 +261,7 @@ static void ui_debug_present(void)
     uint64_t signature = UINT64_C(14695981039346656037);
     int should_log;
     const float pick_margin = 2.0f; /* include adjacent sprites when the mark is in a 1-pixel seam */
+    const float seam_search = 4.0f; /* report edges within four screen pixels */
 
     /* The inspector stays invisible until the user marks a problem point with the mouse. */
     if (!pcRendererUiDebugEnabled() || !ui_debug_mark_active)
@@ -282,6 +290,17 @@ static void ui_debug_present(void)
         signature = ui_debug_hash_add(signature, p->pict_format);
         signature = ui_debug_hash_add(signature, p->source_vertex_count);
         signature = ui_debug_hash_add(signature, p->topology);
+        signature = ui_debug_hash_add(signature, ui_debug_float_bits(p->x0));
+        signature = ui_debug_hash_add(signature, ui_debug_float_bits(p->y0));
+        signature = ui_debug_hash_add(signature, ui_debug_float_bits(p->x1));
+        signature = ui_debug_hash_add(signature, ui_debug_float_bits(p->y1));
+        if (p->has_quad) {
+            unsigned int q;
+            for (q = 0; q < 4; q++) {
+                signature = ui_debug_hash_add(signature, ui_debug_float_bits(p->corner_x[q]));
+                signature = ui_debug_hash_add(signature, ui_debug_float_bits(p->corner_y[q]));
+            }
+        }
     }
 
     should_log = !ui_debug_have_signature || signature != ui_debug_last_signature ||
@@ -314,6 +333,52 @@ static void ui_debug_present(void)
         }
         if (candidates == 0)
             pcLog("UI2D PICK: no submitted 2D primitive is within 2 screen pixels of the marked point");
+
+        /* Compare the converted axis-aligned quad edges around the marked seam. */
+        {
+            unsigned int a, b, seam_count = 0;
+            for (a = 0; a < ui_debug_count; a++) {
+                const PcUiDebugPrimitive* pa = &ui_debug_items[a];
+                if (!pa->has_quad ||
+                    (float)ui_debug_mark_x < pa->x0 - pick_margin || (float)ui_debug_mark_x > pa->x1 + pick_margin ||
+                    (float)ui_debug_mark_y < pa->y0 - pick_margin || (float)ui_debug_mark_y > pa->y1 + pick_margin)
+                    continue;
+                for (b = a + 1; b < ui_debug_count; b++) {
+                    const PcUiDebugPrimitive* pb = &ui_debug_items[b];
+                    float overlap, delta;
+                    if (!pb->has_quad ||
+                        (float)ui_debug_mark_x < pb->x0 - pick_margin || (float)ui_debug_mark_x > pb->x1 + pick_margin ||
+                        (float)ui_debug_mark_y < pb->y0 - pick_margin || (float)ui_debug_mark_y > pb->y1 + pick_margin)
+                        continue;
+
+                    /* A right edge against B left edge. */
+                    overlap = fminf(pa->corner_y[2], pb->corner_y[3]) - fmaxf(pa->corner_y[1], pb->corner_y[0]);
+                    delta = pb->corner_x[0] - pa->corner_x[1];
+                    if (overlap > 0.0f && fabsf(delta) <= seam_search) {
+                        pcLog("UI2D SEAM vertical A=%03u.right B=%03u.left delta=%+.3f px overlapY=%.3f A.gindex=%u B.gindex=%u", a+1,b+1,delta,overlap,pa->gindex,pb->gindex); seam_count++;
+                    }
+                    /* A left edge against B right edge. */
+                    overlap = fminf(pa->corner_y[3], pb->corner_y[2]) - fmaxf(pa->corner_y[0], pb->corner_y[1]);
+                    delta = pa->corner_x[0] - pb->corner_x[1];
+                    if (overlap > 0.0f && fabsf(delta) <= seam_search) {
+                        pcLog("UI2D SEAM vertical A=%03u.left B=%03u.right delta=%+.3f px overlapY=%.3f A.gindex=%u B.gindex=%u", a+1,b+1,delta,overlap,pa->gindex,pb->gindex); seam_count++;
+                    }
+                    /* A bottom edge against B top edge. */
+                    overlap = fminf(pa->corner_x[2], pb->corner_x[1]) - fmaxf(pa->corner_x[3], pb->corner_x[0]);
+                    delta = pb->corner_y[0] - pa->corner_y[3];
+                    if (overlap > 0.0f && fabsf(delta) <= seam_search) {
+                        pcLog("UI2D SEAM horizontal A=%03u.bottom B=%03u.top delta=%+.3f px overlapX=%.3f A.gindex=%u B.gindex=%u", a+1,b+1,delta,overlap,pa->gindex,pb->gindex); seam_count++;
+                    }
+                    /* A top edge against B bottom edge. */
+                    overlap = fminf(pa->corner_x[1], pb->corner_x[2]) - fmaxf(pa->corner_x[0], pb->corner_x[3]);
+                    delta = pa->corner_y[0] - pb->corner_y[3];
+                    if (overlap > 0.0f && fabsf(delta) <= seam_search) {
+                        pcLog("UI2D SEAM horizontal A=%03u.top B=%03u.bottom delta=%+.3f px overlapX=%.3f A.gindex=%u B.gindex=%u", a+1,b+1,delta,overlap,pa->gindex,pb->gindex); seam_count++;
+                    }
+                }
+            }
+            pcLog("UI2D SEAM SUMMARY candidates=%u edge_pairs=%u threshold=%.1fpx", candidates, seam_count, seam_search);
+        }
         ui_debug_last_signature = signature;
         ui_debug_last_log_frame = frame_number;
         ui_debug_have_signature = 1;
