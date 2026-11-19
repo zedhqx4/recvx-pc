@@ -257,7 +257,7 @@ static void ui_debug_present(void)
     should_log = !ui_debug_have_signature || signature != ui_debug_last_signature ||
                  (frame_number - ui_debug_last_log_frame) >= 120;
     if (should_log) {
-        pcLog("UI2D snapshot frame=%llu primitives=%u onscreen-bounds=%u overflow=%u; IDs are draw order for this frame",
+        pcLog("UI2D snapshot frame=%llu primitives=%u onscreen-bounds=%u overflow=%u; IDs are submission order for this frame",
               (unsigned long long)frame_number, ui_debug_count, on_screen, ui_debug_overflow);
         for (i = 0; i < ui_debug_count; i++) {
             const PcUiDebugPrimitive* p = &ui_debug_items[i];
