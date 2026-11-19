@@ -482,3 +482,14 @@ pcNativeTextureLoad (los contadores "PROFILE TEX" de Ps2TexLoad estan en la rama
 al cambiar de textura (CPU del driver), (c) pcRendererConfigureTexture (glTexParameteri en cada carga), (d) decodificar+subir.
 Nuevos contadores (solo con profile_game=1): "PROFILE texture bind" (total / hash / decodificar+subir / enlazar+sampler, binds/frame) y,
 en "PROFILE gpu passes", "CPU en draws GL X ms (N draws/frame)". No cambia lo que se dibuja.
+
+## 0.9.157 - Enlace de texturas: hash de contenido mas rapido + memo por frame opcional
+Log d419d0ed (cuarto del agua, 0.9.156): "PROFILE texture bind" total 8.8-14.0 ms/frame, de los cuales **hash 8.7-13.8 ms** (99%),
+decodificar+subir 0.00, enlazar+sampler 0.07-0.17, ~100-137 enlaces/frame; "CPU en draws GL" solo 0.21-0.37 ms (125-155 draws/frame).
+O sea: el coste de CPU de los chunks de textura (CtTid) era hash_bytes de imagen+CLUT en cada enlace (bind_memo recordaba una sola superficie).
+1) `hash_bytes` ahora usa 4 acumuladores de 32 bits independientes (estilo xxHash32), pensado para el build x86 de 32 bits
+   (el FNV de 64 bits se expande en imul encadenadas). Mismo criterio exacto (contenido completo), solo cambia la funcion;
+   el hash no se guarda en disco. pc/tools/test_texture_hash.c: 0 fallos en cambios de 1 byte, bloques intercambiados, +x/-x, desplazados.
+   En x86-64 (host de pruebas) 1.5x mas rapido; el beneficio esperado en 32 bits es mayor, sin medir.
+2) `tex_frame_memo=1` (INI, por defecto 0): bind_memo pasa de 1 a 64 entradas por frame (misma suposicion ya documentada: sin recargas
+   ni subidas de CLUT entre medias). Ruta paralela, se compara con F8. Con 0 el comportamiento es el de siempre.

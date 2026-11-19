@@ -211,18 +211,29 @@ static size_t addr4(unsigned int bw, unsigned int x, unsigned int y)
 
 /* Detecta cambios de contenido de la imagen/CLUT en cada enlace de textura (el juego reusa los mismos buffers): un FNV byte a byte
  * costaba ~0.3 ms por MB y con cientos de enlaces por frame llevaba el menu a 2 fps; por palabras de 64 bits es ~8 veces mas rapido. */
+#define HASH_ROTL32(x, r) (((x) << (r)) | ((x) >> (32 - (r))))
 static uint64_t hash_bytes(const unsigned char* p, size_t n)
 {
-    uint64_t h = UINT64_C(14695981039346656037);
+    /* 4 acumuladores de 32 bits independientes (estilo xxHash32): el build es x86 de 32 bits, donde el multiplicar de 64 bits del FNV
+     * anterior se expande en varias imul encadenadas y la latencia manda (~0.1 ms por enlace de textura en un FX-8350). Aqui las
+     * cuatro cadenas avanzan en paralelo con imul de 32 bits. Es solo deteccion de cambios de contenido dentro del proceso
+     * (el hash no se guarda en disco); el resultado de 64 bits son dos plegados distintos de los 4 acumuladores. */
+    const uint32_t P1 = 0x9E3779B1u, P2 = 0x85EBCA77u, P3 = 0xC2B2AE3Du, P4 = 0x27D4EB2Fu, P5 = 0x165667B1u;
+    uint32_t v0 = P1 + P2, v1 = P2, v2 = 0u, v3 = 0u - P1, a, b, w;
     size_t i = 0;
-    for (; i + 8 <= n; i += 8) {
-        uint64_t w;
-        memcpy(&w, p + i, sizeof(w));
-        h = (h ^ w) * UINT64_C(1099511628211);
-        h ^= h >> 29;
+    for (; i + 16 <= n; i += 16) {
+        memcpy(&w, p + i, 4);      v0 = HASH_ROTL32(v0 + w * P2, 13) * P1;
+        memcpy(&w, p + i + 4, 4);  v1 = HASH_ROTL32(v1 + w * P2, 13) * P1;
+        memcpy(&w, p + i + 8, 4);  v2 = HASH_ROTL32(v2 + w * P2, 13) * P1;
+        memcpy(&w, p + i + 12, 4); v3 = HASH_ROTL32(v3 + w * P2, 13) * P1;
     }
-    for (; i < n; i++) h = (h ^ p[i]) * UINT64_C(1099511628211);
-    return h ^ (uint64_t)n;
+    for (; i + 4 <= n; i += 4) { memcpy(&w, p + i, 4); v0 = HASH_ROTL32(v0 + w * P3, 17) * P4; }
+    for (; i < n; i++) v1 = HASH_ROTL32(v1 + p[i] * P5, 11) * P1;
+    a = HASH_ROTL32(v0, 1) + HASH_ROTL32(v1, 7) + HASH_ROTL32(v2, 12) + HASH_ROTL32(v3, 18) + (uint32_t)n;
+    b = (v0 ^ HASH_ROTL32(v1, 9)) * P3 + (v2 ^ HASH_ROTL32(v3, 11)) * P4 + (uint32_t)(n >> 7);
+    a ^= a >> 15; a *= P2; a ^= a >> 13; a *= P3; a ^= a >> 16;
+    b ^= b >> 15; b *= P3; b ^= b >> 13; b *= P2; b ^= b >> 16;
+    return ((uint64_t)b << 32) | a;
 }
 
 /* CLUT residente en la VRAM de la GS (CBP 0x3FF0, 1024 entradas RGBA con alfa 0..0x80). njSetPaletteData la sube desde palbuf; las
@@ -244,17 +255,34 @@ void pcTextureUploadVramClut(const unsigned int* entries)
 /* Enlace repetido de la misma textura dentro de un frame (el menu dibuja cientos de quads con una textura de 512x512): la GS no
  * vuelve a leer nada, solo cambia TEX0; aqui se evita volver a hashear la imagen. Solo se salta la comprobacion si no hubo
  * recargas de texturas (pcTextureInvalidateSources), subidas de CLUT ni cambio de frame entre medias. */
+#define BIND_MEMO_N 64
 static struct {
     const void* surface;
     unsigned int bank;
     unsigned long long frame, clut_generation;
     unsigned int texture;
     int valid;
-} bind_memo;
+} bind_memo[BIND_MEMO_N];
+
+/* tex_frame_memo=0 (por defecto): una sola entrada, como siempre. tex_frame_memo=1: hasta 64 superficies distintas por frame, con
+ * el mismo criterio documentado arriba (misma superficie y banco, mismo frame, sin recargas ni subidas de CLUT entre medias).
+ * Con una entrada solo se omite el hash cuando se repite el MISMO enlace de forma consecutiva; con varias tambien cuando se
+ * intercala otra textura (el modelo de la sala cambia de textura ~100 veces por frame). Ruta paralela: se compara con F8. */
+static int bind_memo_slot(const void* surface, unsigned int bank)
+{
+    static int multi = -1;
+    if (multi < 0) {
+        multi = pcIniGetInt("tex_frame_memo", 0) != 0;
+        pcLog("native texture: tex_frame_memo=%d (%s)", multi, multi ? "hasta 64 superficies por frame" : "una entrada");
+    }
+    if (!multi) return 0;
+    return (int)((((uintptr_t)surface >> 4) ^ (bank * 2654435761u)) % BIND_MEMO_N);
+}
 
 void pcTextureInvalidateSources(void)
 {
-    bind_memo.valid = 0;
+    unsigned int k;
+    for (k = 0; k < BIND_MEMO_N; k++) bind_memo[k].valid = 0;
 }
 
 
@@ -566,6 +594,7 @@ static int native_texture_load_impl(NJS_TEXMEMLIST* addr)
     int linear = 1, wrap_u = 1, wrap_v = 1;
     int clut_in_vram = 0;
     double bind_t0 = 0.0;
+    int memo_slot = 0;
 
     if (addr == NULL || addr->texinfo.texsurface.pSurface == NULL) {
         pcRendererBindTexture(0);
@@ -628,9 +657,10 @@ static int native_texture_load_impl(NJS_TEXMEMLIST* addr)
         clut_size = (size_t)(ph->ImageType == TIM2_IDTEX4 ? 16u : 256u) * 4u;
         clut_in_vram = 1;
     }
-    if (bind_memo.valid && bind_memo.surface == (const void*)ext && bind_memo.bank == bank &&
-        bind_memo.frame == pcRendererFrameNumber() && bind_memo.clut_generation == vram_clut_generation) {
-        texture = bind_memo.texture;
+    memo_slot = bind_memo_slot(ext, bank);
+    if (bind_memo[memo_slot].valid && bind_memo[memo_slot].surface == (const void*)ext && bind_memo[memo_slot].bank == bank &&
+        bind_memo[memo_slot].frame == pcRendererFrameNumber() && bind_memo[memo_slot].clut_generation == vram_clut_generation) {
+        texture = bind_memo[memo_slot].texture;
         goto bind;
     }
     {
@@ -703,12 +733,12 @@ static int native_texture_load_impl(NJS_TEXMEMLIST* addr)
         if (tn0 != 0.0) { tex_ms_new += pcGameProfileNowMs() - tn0; tex_calls_new++; }
     }
 
-    bind_memo.surface = ext;
-    bind_memo.bank = bank;
-    bind_memo.frame = pcRendererFrameNumber();
-    bind_memo.clut_generation = vram_clut_generation;
-    bind_memo.texture = texture;
-    bind_memo.valid = 1;
+    bind_memo[memo_slot].surface = ext;
+    bind_memo[memo_slot].bank = bank;
+    bind_memo[memo_slot].frame = pcRendererFrameNumber();
+    bind_memo[memo_slot].clut_generation = vram_clut_generation;
+    bind_memo[memo_slot].texture = texture;
+    bind_memo[memo_slot].valid = 1;
 
 bind:
     bind_t0 = pcGameProfileEnabled() ? pcGameProfileNowMs() : 0.0;
