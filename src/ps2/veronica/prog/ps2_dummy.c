@@ -6,7 +6,8 @@
 #include "../../../../pc/include/pc_vu.h"
 #include "../../../../pc/include/pc_game_profile.h"
 #ifdef _MSC_VER
-#include <intrin.h>
+/* Declare the compiler intrinsic directly: intrin.h conflicts with the port's 32-bit type macros. */
+void* _ReturnAddress(void);
 #pragma intrinsic(_ReturnAddress)
 #define PC_UI_DEBUG_RETURN_ADDRESS() ((const void*)_ReturnAddress())
 #elif defined(__GNUC__)
