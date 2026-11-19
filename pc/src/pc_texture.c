@@ -255,34 +255,43 @@ void pcTextureUploadVramClut(const unsigned int* entries)
 /* Enlace repetido de la misma textura dentro de un frame (el menu dibuja cientos de quads con una textura de 512x512): la GS no
  * vuelve a leer nada, solo cambia TEX0; aqui se evita volver a hashear la imagen. Solo se salta la comprobacion si no hubo
  * recargas de texturas (pcTextureInvalidateSources), subidas de CLUT ni cambio de frame entre medias. */
-#define BIND_MEMO_N 64
 static struct {
     const void* surface;
     unsigned int bank;
     unsigned long long frame, clut_generation;
     unsigned int texture;
     int valid;
-} bind_memo[BIND_MEMO_N];
+} bind_memo;
 
-/* tex_frame_memo=0 (por defecto): una sola entrada, como siempre. tex_frame_memo=1: hasta 64 superficies distintas por frame, con
- * el mismo criterio documentado arriba (misma superficie y banco, mismo frame, sin recargas ni subidas de CLUT entre medias).
- * Con una entrada solo se omite el hash cuando se repite el MISMO enlace de forma consecutiva; con varias tambien cuando se
- * intercala otra textura (el modelo de la sala cambia de textura ~100 veces por frame). Ruta paralela: se compara con F8. */
-static int bind_memo_slot(const void* surface, unsigned int bank)
+/* tex_frame_memo=1 (INI, por defecto 0): memoria del hash de la IMAGEN por frame, hasta 64 imagenes distintas. El hash del CLUT
+ * (como mucho 1 KB) se recalcula SIEMPRE, asi un cambio de paleta se detecta exactamente igual que sin el memo; lo unico que se
+ * omite es volver a recorrer la imagen (64 KB-1 MB) cada vez que el modelo de la sala cambia de textura (~100 veces por frame).
+ * Misma suposicion documentada arriba para bind_memo: la imagen no cambia dentro de un frame sin una recarga de texturas
+ * (pcTextureInvalidateSources). Una sola ruta paralela: con 0 el comportamiento es el de siempre. */
+#define IMAGE_HASH_MEMO_N 64
+static struct {
+    const unsigned char* image;
+    size_t size;
+    unsigned long long frame;
+    uint64_t hash;
+    int valid;
+} image_hash_memo[IMAGE_HASH_MEMO_N];
+
+static int image_hash_memo_on(void)
 {
-    static int multi = -1;
-    if (multi < 0) {
-        multi = pcIniGetInt("tex_frame_memo", 0) != 0;
-        pcLog("native texture: tex_frame_memo=%d (%s)", multi, multi ? "hasta 64 superficies por frame" : "una entrada");
+    static int on = -1;
+    if (on < 0) {
+        on = pcIniGetInt("tex_frame_memo", 0) != 0;
+        pcLog("native texture: tex_frame_memo=%d (%s)", on, on ? "hash de imagen memorizado por frame" : "sin memoria de hash por frame");
     }
-    if (!multi) return 0;
-    return (int)((((uintptr_t)surface >> 4) ^ (bank * 2654435761u)) % BIND_MEMO_N);
+    return on;
 }
 
 void pcTextureInvalidateSources(void)
 {
     unsigned int k;
-    for (k = 0; k < BIND_MEMO_N; k++) bind_memo[k].valid = 0;
+    bind_memo.valid = 0;
+    for (k = 0; k < IMAGE_HASH_MEMO_N; k++) image_hash_memo[k].valid = 0;
 }
 
 
@@ -594,7 +603,6 @@ static int native_texture_load_impl(NJS_TEXMEMLIST* addr)
     int linear = 1, wrap_u = 1, wrap_v = 1;
     int clut_in_vram = 0;
     double bind_t0 = 0.0;
-    int memo_slot = 0;
 
     if (addr == NULL || addr->texinfo.texsurface.pSurface == NULL) {
         pcRendererBindTexture(0);
@@ -657,15 +665,29 @@ static int native_texture_load_impl(NJS_TEXMEMLIST* addr)
         clut_size = (size_t)(ph->ImageType == TIM2_IDTEX4 ? 16u : 256u) * 4u;
         clut_in_vram = 1;
     }
-    memo_slot = bind_memo_slot(ext, bank);
-    if (bind_memo[memo_slot].valid && bind_memo[memo_slot].surface == (const void*)ext && bind_memo[memo_slot].bank == bank &&
-        bind_memo[memo_slot].frame == pcRendererFrameNumber() && bind_memo[memo_slot].clut_generation == vram_clut_generation) {
-        texture = bind_memo[memo_slot].texture;
+    if (bind_memo.valid && bind_memo.surface == (const void*)ext && bind_memo.bank == bank &&
+        bind_memo.frame == pcRendererFrameNumber() && bind_memo.clut_generation == vram_clut_generation) {
+        texture = bind_memo.texture;
         goto bind;
     }
     {
         double th0 = pcGameProfileEnabled() ? pcGameProfileNowMs() : 0.0;
-        ih = hash_bytes(image, image_size);
+        if (image_hash_memo_on()) {
+            unsigned int slot = (unsigned int)(((uintptr_t)image >> 4) % IMAGE_HASH_MEMO_N);
+            if (image_hash_memo[slot].valid && image_hash_memo[slot].image == image && image_hash_memo[slot].size == image_size &&
+                image_hash_memo[slot].frame == pcRendererFrameNumber()) {
+                ih = image_hash_memo[slot].hash;
+            } else {
+                ih = hash_bytes(image, image_size);
+                image_hash_memo[slot].image = image;
+                image_hash_memo[slot].size = image_size;
+                image_hash_memo[slot].frame = pcRendererFrameNumber();
+                image_hash_memo[slot].hash = ih;
+                image_hash_memo[slot].valid = 1;
+            }
+        } else {
+            ih = hash_bytes(image, image_size);
+        }
         ch = hash_bytes(clut, clut_size);
         if (th0 != 0.0) tex_ms_hash += pcGameProfileNowMs() - th0;
     }
@@ -733,12 +755,12 @@ static int native_texture_load_impl(NJS_TEXMEMLIST* addr)
         if (tn0 != 0.0) { tex_ms_new += pcGameProfileNowMs() - tn0; tex_calls_new++; }
     }
 
-    bind_memo[memo_slot].surface = ext;
-    bind_memo[memo_slot].bank = bank;
-    bind_memo[memo_slot].frame = pcRendererFrameNumber();
-    bind_memo[memo_slot].clut_generation = vram_clut_generation;
-    bind_memo[memo_slot].texture = texture;
-    bind_memo[memo_slot].valid = 1;
+    bind_memo.surface = ext;
+    bind_memo.bank = bank;
+    bind_memo.frame = pcRendererFrameNumber();
+    bind_memo.clut_generation = vram_clut_generation;
+    bind_memo.texture = texture;
+    bind_memo.valid = 1;
 
 bind:
     bind_t0 = pcGameProfileEnabled() ? pcGameProfileNowMs() : 0.0;

@@ -493,3 +493,11 @@ O sea: el coste de CPU de los chunks de textura (CtTid) era hash_bytes de imagen
    En x86-64 (host de pruebas) 1.5x mas rapido; el beneficio esperado en 32 bits es mayor, sin medir.
 2) `tex_frame_memo=1` (INI, por defecto 0): bind_memo pasa de 1 a 64 entradas por frame (misma suposicion ya documentada: sin recargas
    ni subidas de CLUT entre medias). Ruta paralela, se compara con F8. Con 0 el comportamiento es el de siempre.
+
+## 0.9.158 - tex_frame_memo: memorizar el hash de la IMAGEN, no el enlace completo
+Logs b0e7bf80 (tex_frame_memo=0) y ffdc6f1f (tex_frame_memo=1), cuarto del agua, 0.9.157. Hash de contenido (ventanas con ~110-137 enlaces/frame):
+0.9.156 8.7-13.8 ms -> 0.9.157 con memo=0 **6.0 ms** (hash de 4 acumuladores de 32 bits, ~2x); render-texture de CPU 21.9 -> 12.1-12.7 ms.
+El memo de 64 entradas de 0.9.157 apenas ayudo (5.45 ms con 110 enlaces): la clave incluia vram_clut_generation, que cambia con cada
+subida de paleta (el juego sube la paleta de cada textura paletizada), asi que casi nunca acertaba.
+Ahora `tex_frame_memo=1` memoriza solo el hash de la imagen por (puntero, tamano, frame), hasta 64 imagenes; el hash del CLUT (<=1 KB) se
+recalcula siempre, de modo que los cambios de paleta se detectan exactamente igual. bind_memo vuelve a una sola entrada (como siempre).
