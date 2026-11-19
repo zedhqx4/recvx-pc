@@ -253,6 +253,7 @@ static void ui_debug_present(void)
     unsigned int i, candidates = 0, outline_count = 0, digit_count = 0;
     uint64_t signature = UINT64_C(14695981039346656037);
     int should_log;
+    const float pick_margin = 2.0f; /* include adjacent sprites when the mark is in a 1-pixel seam */
 
     /* The inspector stays invisible until the user marks a problem point with the mouse. */
     if (!pcRendererUiDebugEnabled() || !ui_debug_mark_active)
@@ -264,8 +265,8 @@ static void ui_debug_present(void)
     for (i = 0; i < ui_debug_count; i++) {
         const PcUiDebugPrimitive* p = &ui_debug_items[i];
         int contains_mark =
-            (float)ui_debug_mark_x >= p->x0 && (float)ui_debug_mark_x <= p->x1 &&
-            (float)ui_debug_mark_y >= p->y0 && (float)ui_debug_mark_y <= p->y1 &&
+            (float)ui_debug_mark_x >= p->x0 - pick_margin && (float)ui_debug_mark_x <= p->x1 + pick_margin &&
+            (float)ui_debug_mark_y >= p->y0 - pick_margin && (float)ui_debug_mark_y <= p->y1 + pick_margin &&
             p->x1 > p->x0 && p->y1 > p->y0;
         if (!contains_mark)
             continue;
@@ -291,11 +292,11 @@ static void ui_debug_present(void)
               candidates, ui_debug_count, ui_debug_overflow);
         for (i = 0; i < ui_debug_count; i++) {
             const PcUiDebugPrimitive* p = &ui_debug_items[i];
-            if ((float)ui_debug_mark_x < p->x0 || (float)ui_debug_mark_x > p->x1 ||
-                (float)ui_debug_mark_y < p->y0 || (float)ui_debug_mark_y > p->y1 ||
+            if ((float)ui_debug_mark_x < p->x0 - pick_margin || (float)ui_debug_mark_x > p->x1 + pick_margin ||
+                (float)ui_debug_mark_y < p->y0 - pick_margin || (float)ui_debug_mark_y > p->y1 + pick_margin ||
                 p->x1 <= p->x0 || p->y1 <= p->y0)
                 continue;
-            pcLog("UI2D PICK id=%03u BBOX_CANDIDATE src=%p caller=%p texlist=%p tim2=%p gltex=%u bank=%u gindex=%u fmt=%u size=%ux%u prim=%016llx topo=%u srcv=%u drawv=%u TME=%d FST=%d ABE=%d rect=(%.1f,%.1f)-(%.1f,%.1f) depth=%.6f uv=(%.2f,%.2f)-(%.2f,%.2f)",
+            pcLog("UI2D PICK id=%03u NEAR_OR_OVERLAP src=%p caller=%p texlist=%p tim2=%p gltex=%u bank=%u gindex=%u fmt=%u size=%ux%u prim=%016llx topo=%u srcv=%u drawv=%u TME=%d FST=%d ABE=%d rect=(%.3f,%.3f)-(%.3f,%.3f) depth=%.6f uv=(%.2f,%.2f)-(%.2f,%.2f)",
                   i + 1, (void*)p->source_vertices, (void*)p->caller_address,
                   (void*)p->texture_list, (void*)p->texture_source, p->gl_texture,
                   p->bank, p->gindex, p->pict_format, p->tim2_width, p->tim2_height,
@@ -304,6 +305,12 @@ static void ui_debug_present(void)
                   p->textured, p->fst, p->blend,
                   p->x0, p->y0, p->x1, p->y1, p->depth,
                   p->u0, p->v0, p->u1, p->v1);
+            if (p->has_quad) {
+                pcLog("UI2D QUAD id=%03u source=(%.3f,%.3f)-(%.3f,%.3f) native TL=(%.3f,%.3f) TR=(%.3f,%.3f) BR=(%.3f,%.3f) BL=(%.3f,%.3f)",
+                      i + 1, p->source_x0, p->source_y0, p->source_x1, p->source_y1,
+                      p->corner_x[0], p->corner_y[0], p->corner_x[1], p->corner_y[1],
+                      p->corner_x[2], p->corner_y[2], p->corner_x[3], p->corner_y[3]);
+            }
         }
         if (candidates == 0)
             pcLog("UI2D PICK: no submitted 2D primitive bounds contain the marked point");
@@ -321,7 +328,7 @@ static void ui_debug_present(void)
     state.alpha_test = 0;
     state.cull_backfaces = 0;
 
-    /* Only outline the few primitives whose screen-space bounds contain the marked point. */
+    /* Outline primitives that overlap or lie within two screen pixels of the marked point. */
     for (i = 0; i < ui_debug_count; i++) {
         const PcUiDebugPrimitive* p = &ui_debug_items[i];
         float x0 = p->x0, y0 = p->y0, x1 = p->x1, y1 = p->y1;
@@ -331,8 +338,8 @@ static void ui_debug_present(void)
         unsigned int digit_len, k;
         float label_x, label_y;
 
-        if ((float)ui_debug_mark_x < x0 || (float)ui_debug_mark_x > x1 ||
-            (float)ui_debug_mark_y < y0 || (float)ui_debug_mark_y > y1 ||
+        if ((float)ui_debug_mark_x < x0 - pick_margin || (float)ui_debug_mark_x > x1 + pick_margin ||
+            (float)ui_debug_mark_y < y0 - pick_margin || (float)ui_debug_mark_y > y1 + pick_margin ||
             x1 <= x0 || y1 <= y0)
             continue;
 
