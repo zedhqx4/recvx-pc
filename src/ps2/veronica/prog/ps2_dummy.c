@@ -1266,11 +1266,14 @@ void Ps2AddPrim(unsigned long prim, void* dp, unsigned int num, unsigned int cli
     float wide_2d = 1.0f;
     static unsigned int wide_buf[64 * 12];
     const void* ui_debug_source_vertices = dp;
-    const void* ui_debug_caller_address = pc_ui_debug_caller_override
-        ? pc_ui_debug_caller_override : PC_UI_DEBUG_RETURN_ADDRESS();
+    const void* ui_debug_caller_address = NULL;
 #endif
 
 #ifdef TARGET_PC
+    if ((clip_3d_on == 0) && pcRendererUiDebugEnabled()) {
+        ui_debug_caller_address = pc_ui_debug_caller_override
+            ? pc_ui_debug_caller_override : PC_UI_DEBUG_RETURN_ADDRESS();
+    }
     pcPrimLog(NULL, prim, num);
 #endif
     clip_flag = 0; 
@@ -1795,10 +1798,14 @@ void Ps2AddPrim(unsigned long prim, void* dp, unsigned int num, unsigned int cli
 void Ps2AddPrim2D(unsigned long prim, void* dp, unsigned int num)
 {
 #ifdef TARGET_PC
-    const void* previous_caller = pc_ui_debug_caller_override;
-    pc_ui_debug_caller_override = PC_UI_DEBUG_RETURN_ADDRESS();
-    Ps2AddPrim(prim, dp, num, 0);
-    pc_ui_debug_caller_override = previous_caller;
+    if (pcRendererUiDebugEnabled()) {
+        const void* previous_caller = pc_ui_debug_caller_override;
+        pc_ui_debug_caller_override = PC_UI_DEBUG_RETURN_ADDRESS();
+        Ps2AddPrim(prim, dp, num, 0);
+        pc_ui_debug_caller_override = previous_caller;
+    } else {
+        Ps2AddPrim(prim, dp, num, 0);
+    }
 #else
     Ps2AddPrim(prim, dp, num, 0);
 #endif
