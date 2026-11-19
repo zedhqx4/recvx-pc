@@ -34,6 +34,70 @@ typedef struct {
 
 static PcRenderTargetEntry render_targets[PC_RENDER_TARGET_MAX];
 
+/* Diagnostic-only sampler A/B for one TIM2 texture. Defaults remain linear for every asset. */
+static void apply_ui_uv_test_filter(unsigned int gindex, unsigned int bank, int* linear)
+{
+    static int initialized;
+    static int enabled;
+    static int target_any_bank = 1;
+    static int target_linear;
+    static int logged;
+    static unsigned int target_gindex, target_bank;
+
+    if (!initialized) {
+        const char* gindex_text = getenv("RECVX_UI_UV_TEST_GINDEX");
+        const char* bank_text = getenv("RECVX_UI_UV_TEST_BANK");
+        const char* filter_text = getenv("RECVX_UI_UV_TEST_FILTER");
+        char* end = NULL;
+        unsigned long parsed;
+
+        initialized = 1;
+        if (gindex_text == NULL || *gindex_text == 0 ||
+            filter_text == NULL || *filter_text == 0)
+            return;
+
+        parsed = strtoul(gindex_text, &end, 0);
+        if (end == gindex_text || *end != 0 || parsed > UINT32_MAX) {
+            pcLog("UI UV diagnostic: invalid RECVX_UI_UV_TEST_GINDEX; expected decimal or 0x-prefixed Gindex");
+            return;
+        }
+        target_gindex = (unsigned int)parsed;
+
+        if (bank_text != NULL && *bank_text != 0) {
+            end = NULL;
+            parsed = strtoul(bank_text, &end, 0);
+            if (end == bank_text || *end != 0 || parsed > UINT32_MAX) {
+                pcLog("UI UV diagnostic: invalid RECVX_UI_UV_TEST_BANK; expected decimal or 0x-prefixed bank");
+                return;
+            }
+            target_bank = (unsigned int)parsed;
+            target_any_bank = 0;
+        }
+
+        if (strcmp(filter_text, "nearest") == 0)
+            target_linear = 0;
+        else if (strcmp(filter_text, "linear") == 0)
+            target_linear = 1;
+        else {
+            pcLog("UI UV diagnostic: invalid RECVX_UI_UV_TEST_FILTER='%s'; use nearest or linear", filter_text);
+            return;
+        }
+        enabled = 1;
+    }
+
+    if (!enabled || gindex != target_gindex ||
+        (!target_any_bank && bank != target_bank))
+        return;
+
+    *linear = target_linear;
+    if (!logged) {
+        pcLog("UI UV diagnostic: Gindex=%u bank=%s filter=%s (only this TIM2 texture; unset RECVX_UI_UV_TEST_* to restore defaults)",
+              gindex, target_any_bank ? "any" : "selected",
+              target_linear ? "linear" : "nearest");
+        logged = 1;
+    }
+}
+
 static PcRenderTargetEntry* find_render_target(const unsigned char* image)
 {
     int i;
@@ -623,6 +687,10 @@ static int native_texture_load_impl(NJS_TEXMEMLIST* addr)
     /* PictFormat 5..8 are the game's non-VQ textures. They used to be rejected outright (114k rejections per
      * 4600 frames in gameplay: characters/objects drew flat). Try to decode them as plain indexed/RGB TIM2. */
 
+    gindex = ext->Gindex;
+    bank = addr->bank;
+    apply_ui_uv_test_filter(gindex, bank, &linear);
+
     ph = (TIM2_PICTUREHEADER*)((unsigned char*)ext + ((ext->FormatId != 0) ? 128 : 16));
     if (ph->HeaderSize < sizeof(TIM2_PICTUREHEADER) ||
         ph->ImageSize == 0 ||
@@ -656,8 +724,6 @@ static int native_texture_load_impl(NJS_TEXMEMLIST* addr)
     }
     image_size = ph->ImageSize;
     clut_size = ph->ClutSize;
-    gindex = ext->Gindex;
-    bank = addr->bank;
     if (ext->PictFormat >= 5 && ext->PictFormat <= 8 && (ph->ImageType == TIM2_IDTEX4 || ph->ImageType == TIM2_IDTEX8)) {
         /* Paleta de la VRAM (ver vram_clut): juego de 256 entradas (bank & 0x30) y, con 4 bits, paleta de 16 (bank & 0xF). */
         unsigned int first = ((bank >> 4) & 3u) * 256u + (ph->ImageType == TIM2_IDTEX4 ? (bank & 0xFu) * 16u : 0u);
