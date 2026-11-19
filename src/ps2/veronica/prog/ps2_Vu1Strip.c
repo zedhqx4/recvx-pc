@@ -80,6 +80,83 @@ VU1_COLOR vu1Specula = { 1.0f, 1.0f, 1.0f, 1.0f };
 VU1_COLOR vu1Ambient = { 1.0f, 1.0f, 1.0f, 1.0f };
 float fVu1AlphaRatio = 128.0f;
 
+#ifdef TARGET_PC
+/* Color por vertice sin la unidad vectorial: pc/include/pc_vu1_color.h reproduce las 11 vu1GetVertexColor* como C escalar.
+ * INI vu1_color_native (RECVX_VU1_COLOR_NATIVE): 0 = funciones transpiladas (referencia, por defecto), 1 = C escalar,
+ * 2 = ejecuta ambas y compara (devuelve la de referencia y lo anota en recvx.log). */
+#include "pc_vu1_color.h"
+
+#define PCVC_IN(s) (&(s)->fIr)
+#define PCVC_OUT(p) (&(p)->fR)
+static void pcvcn_0(VU1_STRIP_BUF* s, VU1_PRIM_BUF* p) { pcvc_0(PCVC_IN(s), PCVC_OUT(p)); }
+static void pcvcn_1(VU1_STRIP_BUF* s, VU1_PRIM_BUF* p) { (void)s; pcvc_1(&vu1Diffuse.fR, fVu1AlphaRatio, PCVC_OUT(p)); }
+static void pcvcn_2(VU1_STRIP_BUF* s, VU1_PRIM_BUF* p) { (void)s; pcvc_2(fVu1AlphaRatio, PCVC_OUT(p)); }
+static void pcvcn_3(VU1_STRIP_BUF* s, VU1_PRIM_BUF* p) { pcvc_3(PCVC_IN(s), &vu1Diffuse.fR, fVu1AlphaRatio, PCVC_OUT(p)); }
+static void pcvcn_4(VU1_STRIP_BUF* s, VU1_PRIM_BUF* p) { pcvc_4(PCVC_IN(s), &vu1Ambient.fR, &vu1Diffuse.fR, fVu1AlphaRatio, PCVC_OUT(p)); }
+static void pcvcn_5(VU1_STRIP_BUF* s, VU1_PRIM_BUF* p) { pcvc_5(PCVC_IN(s), fVu1AlphaRatio, PCVC_OUT(p)); }
+static void pcvcn_6(VU1_STRIP_BUF* s, VU1_PRIM_BUF* p) { pcvc_6(PCVC_IN(s), &vu1Ambient.fR, &vu1Diffuse.fR, &vu1Specula.fR, fVu1AlphaRatio, PCVC_OUT(p)); }
+static void pcvcn_7(VU1_STRIP_BUF* s, VU1_PRIM_BUF* p) { pcvc_7(PCVC_IN(s), &vu1Diffuse.fR, &vu1Specula.fR, fVu1AlphaRatio, PCVC_OUT(p)); }
+static void pcvcn_8(VU1_STRIP_BUF* s, VU1_PRIM_BUF* p) { pcvc_8(PCVC_IN(s), &vu1Ambient.fR, &vu1Diffuse.fR, &vu1Specula.fR, fVu1AlphaRatio, PCVC_OUT(p)); }
+static void pcvcn_9(VU1_STRIP_BUF* s, VU1_PRIM_BUF* p) { pcvc_9(PCVC_IN(s), &vu1Ambient.fR, &vu1Diffuse.fR, &vu1Specula.fR, fVu1AlphaRatio, PCVC_OUT(p)); }
+static void pcvcn_10(VU1_STRIP_BUF* s, VU1_PRIM_BUF* p) { pcvc_10(PCVC_IN(s), &vu1Ambient.fR, &vu1Diffuse.fR, &vu1Specula.fR, fVu1AlphaRatio, PCVC_OUT(p)); }
+
+static void (*const pcvc_native_tbl[11])(VU1_STRIP_BUF*, VU1_PRIM_BUF*) = {
+    pcvcn_0, pcvcn_1, pcvcn_2, pcvcn_3, pcvcn_4, pcvcn_5, pcvcn_6, pcvcn_7, pcvcn_8, pcvcn_9, pcvcn_10
+};
+
+static unsigned int pcvc_verify_calls, pcvc_verify_bad;
+static void pcvc_verify(int k, VU1_STRIP_BUF* s, VU1_PRIM_BUF* p)
+{
+    VU1_PRIM_BUF n = *p;
+    float* a;
+    float* b;
+    int i, same = 1;
+    pColorCalcFuncTbl[k](s, p);
+    pcvc_native_tbl[k](s, &n);
+    a = PCVC_OUT(p);
+    b = PCVC_OUT(&n);
+    for (i = 0; i < 4; i++) {
+        if (memcmp(&a[i], &b[i], 4) != 0 && !(a[i] == 0.0f && b[i] == 0.0f)) same = 0;   /* +0 y -0 se consideran iguales */
+    }
+    pcvc_verify_calls++;
+    if (!same) {
+        pcvc_verify_bad++;
+        if (pcvc_verify_bad <= 16) {
+            pcLog("vu1_color verify: DIFERENCIA modo %d c=(%g %g %g %g) ref=(%g %g %g %g) nativa=(%g %g %g %g)", k,
+                  s->fIr, s->fIg, s->fIb, s->fA, a[0], a[1], a[2], a[3], b[0], b[1], b[2], b[3]);
+        }
+    }
+    if ((pcvc_verify_calls & 0x3FFFFF) == 0) pcLog("vu1_color verify: %u vertices comparados, %u diferencias", pcvc_verify_calls, pcvc_verify_bad);
+}
+#define PCVC_VERIFY_FN(k) static void pcvcv_##k(VU1_STRIP_BUF* s, VU1_PRIM_BUF* p) { pcvc_verify(k, s, p); }
+PCVC_VERIFY_FN(0) PCVC_VERIFY_FN(1) PCVC_VERIFY_FN(2) PCVC_VERIFY_FN(3) PCVC_VERIFY_FN(4) PCVC_VERIFY_FN(5)
+PCVC_VERIFY_FN(6) PCVC_VERIFY_FN(7) PCVC_VERIFY_FN(8) PCVC_VERIFY_FN(9) PCVC_VERIFY_FN(10)
+static void (*const pcvc_verify_tbl[11])(VU1_STRIP_BUF*, VU1_PRIM_BUF*) = {
+    pcvcv_0, pcvcv_1, pcvcv_2, pcvcv_3, pcvcv_4, pcvcv_5, pcvcv_6, pcvcv_7, pcvcv_8, pcvcv_9, pcvcv_10
+};
+
+static int pcvc_mode(void)
+{
+    static int mode = -1;
+    if (mode < 0) {
+        const char* e = getenv("RECVX_VU1_COLOR_NATIVE");
+        mode = e ? atoi(e) : pcIniGetInt("vu1_color_native", 0);
+        if (mode < 0 || mode > 2) mode = 0;
+        pcLog("vu1 color: vu1_color_native=%d (%s)", mode, mode == 0 ? "funciones transpiladas" : mode == 1 ? "C escalar sin VU0" : "C escalar y transpilada, comparadas");
+    }
+    return mode;
+}
+
+static void (*pcColorCalcFunc(unsigned int k))(VU1_STRIP_BUF*, VU1_PRIM_BUF*)
+{
+    int mode = pcvc_mode();
+    if (k > 10 || mode == 0) return pColorCalcFuncTbl[k];   /* k>10 no existe en la tabla: como siempre */
+    return mode == 1 ? pcvc_native_tbl[k] : pcvc_verify_tbl[k];
+}
+#else
+#define pcColorCalcFunc(k) pColorCalcFuncTbl[(k)]
+#endif
+
 extern void VU0_CLIP_VIEW_VOLUME_ALL() __attribute__((section(".vutext")));
 extern void VU0_CALC_COLOR() __attribute__((section(".vutext")));
 extern void VU0_INIT_CALC_COLOR() __attribute__((section(".vutext")));
@@ -1567,7 +1644,7 @@ void vu1DrawTriangleStripOpaqueSingle(unsigned long ulType, VU1_STRIP_BUF* pStri
     
     pP = (VU1_PRIM_BUF*)Ps2_DRAW_TMP;
     
-    pFunc = pColorCalcFuncTbl[(usMode & 0xFFFF) & 0xF];
+    pFunc = pcColorCalcFunc((usMode & 0xFFFF) & 0xF);
     
     pFunc(pS0, pP);
     
@@ -1684,7 +1761,7 @@ void vu1DrawTriangleStripOpaqueDouble(unsigned long ulType, VU1_STRIP_BUF* pS, u
     
     pP = (VU1_PRIM_BUF*)Ps2_DRAW_TMP;
     
-    pFunc = pColorCalcFuncTbl[(usMode & 0xFFFF) & 0xF];
+    pFunc = pcColorCalcFunc((usMode & 0xFFFF) & 0xF);
     
     pFunc(pS, pP);
     
@@ -1804,7 +1881,7 @@ void vu1DrawTriangleStripTransSingle(unsigned long ulType, VU1_STRIP_BUF* pStrip
     
     pP = (VU1_PRIM_BUF*)Ps2_DRAW_TMP;
     
-    pFunc = pColorCalcFuncTbl[(usMode & 0xFFFF) & 0xF];
+    pFunc = pcColorCalcFunc((usMode & 0xFFFF) & 0xF);
     
     pFunc(pS0, pP);
     
@@ -3262,7 +3339,7 @@ void vu1DrawTriangleStripTransDoubleI(unsigned long ulType, VU1_STRIP_BUF* pS, u
     
     pP = (VU1_PRIM_BUF*)Ps2_DRAW_TMP; 
     
-    pFunc = pColorCalcFuncTbl[usMode & 0xF]; 
+    pFunc = pcColorCalcFunc(usMode & 0xF); 
     
     for (usStripCnt = 0; usStripCnt < usStripMax; usStripCnt++, pS++, pP++) 
     {
@@ -3544,7 +3621,7 @@ void vu1DrawTriangleStripTransDouble1P(unsigned long ulType, VU1_STRIP_BUF* pS, 
 
     sam = 0;
     
-    pFunc = pColorCalcFuncTbl[usMode & 0xF]; 
+    pFunc = pcColorCalcFunc(usMode & 0xF); 
     
     for (usStripCnt = 0; usStripCnt < usStripMax; usStripCnt++)
     {
