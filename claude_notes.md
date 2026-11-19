@@ -523,3 +523,9 @@ recalcula siempre, de modo que los cambios de paleta se detectan exactamente igu
 - **D. GIF/VIF:** en la ruta por defecto no existen (el empaquetador del EE va directo a `pcSubmitVertices`); solo viven dentro de B.
 - **E. Interruptores de rutas paralelas** (colapsables cuando se validen): `gpu_vertex`, `vu1_color_native`, `vu0_native`, `gs_int`, `gl_shadow`, `gl_batch`, `rtt_gpu_copy`, `rtt_blit_draw`, `tex_frame_memo`, `vu_trunc`.
 - Orden propuesto (un commit cada uno): 1) borrar A (tras decidir HD), 2) borrar B, 3) nativizar C micro a micro con arnes, 4) colapsar E.
+
+## Paso 1 de retirada: emulador de GS borrado (sin cambio de binario, version sigue 0.9.159)
+- Milestone creado antes: rama `milestone/0.9.159` en `f26ac7dd` (el tag `milestone-0.9.159` no se pudo subir: 403, solo local).
+- Decision del usuario: texturas HD de PCSX2 (`hd_textures=`) NO se portan ("demasiado trabajo por algo innecesario"); solo las fuentes en HD se podran meter despues. La opcion queda en el INI y en recvx-config (campo "HD texture pack") para eso; README lo dice. `pc/third_party/xxhash.h` queda sin uso (por si las fuentes HD lo quieren).
+- Borrado: `pc/src/gs/` (gs.c, gs_gl.c, gs_mem.c, gs_replace.c, gs_internal.h, gl_funcs.h), `pc_gs_selftest.c`, `pc/tests/gs_mem_blockpath_test.c`, `.github/workflows/test-gs-block-transfer.yml`, `pc/include/pc_gs.h`, `pc/include/pc_texture_cache.h`. `pc/tools/common.py:pc_sources()` ya no filtra el selftest. Conjunto compilado identico (29 fuentes de pc/src). READMEs y handoff de rando actualizados.
+- Queda codigo MUERTO que aun nombra la API borrada: en `ps2_dummy.c` la rama `#else` de `Ps2TexLoad` (subida de texturas estilo PS2 + "asset cache": `pcGs*`, `pc_ps2_texture_bind_cache`, `PcPs2TextureBindCache`, `Ps2EnsureTextureImage` con argumentos PC). No se compila en PC; es un paso aparte (cortar con cuidado: parte esta entrelazada con funciones compiladas como `Ps2PcTextureSourceCacheReset`).

@@ -138,7 +138,7 @@ Optional, next to `recvx.exe`, one `key=value` per line (the settings app writes
 | `data=` | extracted game data folder (default: `data` next to the exe; a relative path is relative to the exe) |
 | `iso=` | disc image to run from instead of extracted data |
 | `saves=` | save folder (default: `saves` next to the exe; a relative path is relative to the exe, and missing folders are created) |
-| `hd_textures=` | folder of a PCSX2 texture replacement pack (`.dds` files) |
+| `hd_textures=` | not supported by the native renderer at the moment (the PCSX2 pack lookup depended on the removed GS emulator); kept in the INI for the planned HD fonts |
 | `debug_save=1` | debug: the "Save anywhere" key (F5) opens the typewriter's save screen anywhere in normal play, without an ink ribbon |
 | `scale=` | internal resolution multiplier, 1 to 8 (default 3: 1920x1440 at 4:3) |
 | `aspect=` | display aspect, e.g. `16:9` or `21:9` (default `4:3`) |
@@ -227,7 +227,7 @@ The upstream decompiled sources are kept as they are; every PC change is wrapped
 
 | Part | Files |
 |---|---|
-| GS emulation on OpenGL (render targets, CLUTs, texture cache, HD replacement) | `pc/src/gs/` |
+| Native OpenGL 3.3 renderer (replaces the GS emulation) | `pc_renderer.c`, `pc_texture.c` |
 | VU0 microcode translated to C | `pc/src/vu/` |
 | EE kernel (threads as fibers, semaphores, VBLANK) | `pc_kernel.c` |
 | Disc access (extracted folder or ISO, mod folder) | `pc_cdvd.c` |

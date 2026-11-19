@@ -109,8 +109,8 @@ relying on it.
 - Textures are **TIM2** (PS2): `ps2_loadtim2.c`, `ps2_NaTextureFunction.c`, `ps2_pxlconv.c`.
   Room texture groups are what the room's texture list (`hed04`) points to; check their exact
   layout in room.c (`texhed`, lines 160-320).
-- recvx-pc can swap in HD textures by hash (`hd_textures=`, `pc/src/gs/gs_replace.c`); new
-  textures will simply not be in that pack, which is fine.
+- HD texture packs (`hd_textures=`, PCSX2 format) are not supported by the native renderer at the moment; new
+  textures use the game's own TIM2 data.
 
 Your first deliverable is a **parser and writer** for this in `Cvx.Formats` (MLB, the object
 tree, chunk models, the SKIN block, TIM2 texture entries) that **round-trips** the owner's

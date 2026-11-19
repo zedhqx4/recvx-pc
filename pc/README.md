@@ -39,7 +39,7 @@ scrolling and skinning (`njplus.c`), water surface (`objitm.c`) and the LZ decom
 
 | File | Replaces |
 |---|---|
-| `gs/` | Graphics Synthesizer on OpenGL 3.3: GIF/DMA parsing, GS memory, render targets, CLUT buffer, texture cache, PCSX2-format HD texture replacement (`gs_replace.c`) |
+| `pc_renderer.c`, `pc_texture.c` | Native OpenGL 3.3 renderer: draws what the game submits (replaces the Graphics Synthesizer emulation) |
 | `vu/` | VU0 microcode translated to C |
 | `pc_kernel.c` | EE kernel: threads (as fibers, same priority rules), semaphores, alarms, VBLANK interrupts |
 | `pc_cdvd.c` | libcdvd: reads sectors from the extracted data folder (`files.idx`) or the ISO |
