@@ -501,3 +501,8 @@ El memo de 64 entradas de 0.9.157 apenas ayudo (5.45 ms con 110 enlaces): la cla
 subida de paleta (el juego sube la paleta de cada textura paletizada), asi que casi nunca acertaba.
 Ahora `tex_frame_memo=1` memoriza solo el hash de la imagen por (puntero, tamano, frame), hasta 64 imagenes; el hash del CLUT (<=1 KB) se
 recalcula siempre, de modo que los cambios de paleta se detectan exactamente igual. bind_memo vuelve a una sola entrada (como siempre).
+
+## Pendiente anotado (tras 0.9.158): hash de texturas en paralelo
+- Medido (sala del agua, `tex_frame_memo=1`, 0.9.158): hash 5.5 ms/frame de ~12 ms de CPU en `render-texture`; ~128 binds/frame, ~43 us/bind. El memo por frame solo ahorra ~0.5 ms (casi todas las imagenes son distintas).
+- Idea aceptada por el usuario, NO implementada: pre-hashear las imagenes del frame en hilos de trabajo (resultado identico bit a bit), opt-in por INI, comparable con F8. Descartada la via "texturas estaticas sin hash" (riesgo de congelar animadas).
+- Antes de hacerlo: medir el frame completo contra 16.7 ms; solo importa para 60 fps (Task #8).
