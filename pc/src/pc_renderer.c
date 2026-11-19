@@ -287,7 +287,7 @@ static void ui_debug_present(void)
     should_log = !ui_debug_have_signature || signature != ui_debug_last_signature ||
                  (frame_number - ui_debug_last_log_frame) >= 120;
     if (should_log) {
-        pcLog("UI2D PICK frame=%llu point=(%d,%d) bbox_candidates=%u total_submitted=%u overflow=%u; candidate IDs are submission order for this frame",
+        pcLog("UI2D PICK frame=%llu point=(%d,%d) nearby_candidates=%u total_submitted=%u overflow=%u; candidate IDs are submission order for this frame",
               (unsigned long long)frame_number, ui_debug_mark_x, ui_debug_mark_y,
               candidates, ui_debug_count, ui_debug_overflow);
         for (i = 0; i < ui_debug_count; i++) {
@@ -313,7 +313,7 @@ static void ui_debug_present(void)
             }
         }
         if (candidates == 0)
-            pcLog("UI2D PICK: no submitted 2D primitive bounds contain the marked point");
+            pcLog("UI2D PICK: no submitted 2D primitive is within 2 screen pixels of the marked point");
         ui_debug_last_signature = signature;
         ui_debug_last_log_frame = frame_number;
         ui_debug_have_signature = 1;
