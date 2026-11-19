@@ -1444,6 +1444,8 @@ void Ps2AddPrim(unsigned long prim, void* dp, unsigned int num, unsigned int cli
         int count = (int)num;
         int owned = 0;
         float texture_width = 1.0f, texture_height = 1.0f;
+        float sprite_source_x0 = 0.0f, sprite_source_y0 = 0.0f;
+        float sprite_source_x1 = 0.0f, sprite_source_y1 = 0.0f;
         float use_last_pri = ((const float*)dp)[(size_t)(count > 0 ? count - 1 : 0) * 12u + 10u];
 
         pcPrimDiag("Ps2AddPrim(2D)", prim, dp, num);
@@ -1458,6 +1460,8 @@ void Ps2AddPrim(unsigned long prim, void* dp, unsigned int num, unsigned int cli
             const float* b = a + 12;
             float x0 = a[8], y0 = a[9], x1 = b[8], y1 = b[9];
             float u0, v0, u1, v1;
+            sprite_source_x0 = x0; sprite_source_y0 = y0;
+            sprite_source_x1 = x1; sprite_source_y1 = y1;
             const float* color = b + 4;
             float cf[4];
             float pri_depth = pcRendererDepthFromViewZ(pcPriToViewZ(b[10]));
@@ -1627,6 +1631,18 @@ void Ps2AddPrim(unsigned long prim, void* dp, unsigned int num, unsigned int cli
             debug_item.depth = bz;
             debug_item.u0 = bu0; debug_item.v0 = bv0;
             debug_item.u1 = bu1; debug_item.v1 = bv1;
+            if (source_topology == 6u && count == 6) {
+                static const unsigned int quad_indices[4] = { 0, 1, 2, 5 };
+                debug_item.has_quad = 1;
+                debug_item.source_x0 = sprite_source_x0;
+                debug_item.source_y0 = sprite_source_y0;
+                debug_item.source_x1 = sprite_source_x1;
+                debug_item.source_y1 = sprite_source_y1;
+                for (k = 0; k < 4; k++) {
+                    debug_item.corner_x[k] = vertices[quad_indices[k]].x;
+                    debug_item.corner_y[k] = vertices[quad_indices[k]].y;
+                }
+            }
             pcRendererUiDebugAdd(&debug_item);
         }
 
