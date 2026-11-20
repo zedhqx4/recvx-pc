@@ -591,3 +591,14 @@ recalcula siempre, de modo que los cambios de paleta se detectan exactamente igu
 
 ## 0.9.171 - scissor_native=1 por defecto
 - Validacion del usuario con scissor_native=2: ~1.83M comprobaciones de poligono y >53K de salida, 0 diferencias. Ruta nativa por defecto. Con esto todos los micros VU0 usados por el juego (7/49/42, 237/269/394, 302/327/333/339) tienen ruta pura validada; falta 3d (borrar pcVu0, interprete y generacion).
+
+## 0.9.172 - Retiradas las rutas de micro de clip y scissor (3d, paso 2)
+- Con clip_native/scissor_native validados (0.9.169, 0.9.171) se eliminan los modos 0/2 y los verificadores: `pcClipViewVolume`, `pcClipColorVertex`, `pcScissorSetNode/ClipPlane/Emit` son la unica ruta. Respaldo: milestone/0.9.171.
+- El micro 365 (INIT_CALC_COLOR / INIT_CALC_PROCESS) ademas de llenar la tabla de modos reiniciaba el historial de clip (vf15/18/19 = vf0): ahora `pcClipResetHistory()`.
+- Ya no queda ninguna llamada a `pcVu0Micro` fuera del interprete. Siguiente: borrar `vu0_micro.c`, `vu0_native.c` y su generacion; despues, estado propio en vez de pcVu0 (depende del analisis G1 de ps2_Vu1Strip.c, delegado a GPT en coord/TASKS.md).
+
+## 0.9.173 - Borrado el interprete de micros VU0 (3d, paso 3)
+- Eliminados `vu0_micro.c` (generado), `vu0_native.c`, `pc/tools/vu_micro2c.py` y `pc/tools/test_vu0_native.c`. `pcVu0` y `pcVuTruncEnabled` pasan a `pc/src/vu/pc_vu0_state.c`. Quitados de `PcVu0`: `mem[1024]` (16 KB), `top`, `itop`; fuera `pcVu0Micro`.
+- `vsm/ps2_vu0.vsm` y `vsm_parse.py` se conservan: `asm2c.py` los usa para resolver etiquetas al traducir ensamblador (herramienta de port; ya no genera llamadas utiles a pcVu0Micro).
+- Respaldo: milestone/0.9.171 (con interprete y rutas de comparacion).
+- Queda el uso de `pcVu0` como archivo de registros en ps2_Vu1Strip.c (234 usos: ScissorTriangle/DrawScissorPolygon* viejos, _Clip_ViewVolume, _Clip_Screen, rutas vu1Draw*, setters) y ps2_NaMatrix.c (macros pcVu0CN/pcVu0Last y constantes); depende del analisis G1.

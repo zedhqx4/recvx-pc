@@ -4,7 +4,6 @@
 #include "pc_vu.h"
 #include "pc_clip.h"
 #include "pc_calcpoint.h"
-#include "pc_platform.h"
 
 static void clip_push(PcClipState* s, const float* a)
 {
@@ -60,17 +59,6 @@ void pcClipStep(PcClipState* s, const float* p, const float* m, int kind)
     pcVuRoundLeave(csr);
 }
 
-static int clip_mode(void)
-{
-    static int mode = -1;
-    if (mode < 0)
-    {
-        const char* e = getenv("RECVX_CLIP_NATIVE");
-        mode = (e != NULL) ? atoi(e) : pcIniGetInt("clip_native", 1);
-    }
-    return mode;
-}
-
 static void state_load(PcClipState* s)
 {
     memcpy(s->h15, pcVu0.vf[15].f, 16);
@@ -92,51 +80,22 @@ static void state_store(const PcClipState* s, int all)
     if (all) { pcVu0.vi[1] = s->vi1; pcVu0.vi[2] = s->vi2; }
 }
 
-static void verify(const PcClipState* nat, int kind, const float* ncolor)
-{
-    static unsigned int calls = 0, bad = 0;
-    PcClipState ref;
-    int diff = 0;
-    calls++;
-    state_load(&ref);
-    if (memcmp(ref.h15, nat->h15, 16) || memcmp(ref.h18, nat->h18, 16) || memcmp(ref.h19, nat->h19, 16)) diff |= 1;
-    if (ref.clip != nat->clip) diff |= 2;
-    if (kind == 1 && (ref.vi1 != nat->vi1 || ref.vi2 != nat->vi2)) diff |= 4;
-    if (ncolor && memcmp(pcVu0.vf[4].f, ncolor, 16)) diff |= 8;
-    if (diff)
-    {
-        if (bad < 12)
-            pcLog("clip MISMATCH (kind %d) dif=%d: micro h15 %08x %08x %08x %08x clip %06x vi1 %d vi2 %d col %08x %08x %08x %08x | nativa h15 %08x %08x %08x %08x clip %06x vi1 %d vi2 %d col %08x %08x %08x %08x",
-                  kind, diff,
-                  ((const unsigned*)ref.h15)[0], ((const unsigned*)ref.h15)[1], ((const unsigned*)ref.h15)[2], ((const unsigned*)ref.h15)[3], ref.clip, ref.vi1, ref.vi2,
-                  pcVu0.vf[4].u[0], pcVu0.vf[4].u[1], pcVu0.vf[4].u[2], pcVu0.vf[4].u[3],
-                  ((const unsigned*)nat->h15)[0], ((const unsigned*)nat->h15)[1], ((const unsigned*)nat->h15)[2], ((const unsigned*)nat->h15)[3], nat->clip, nat->vi1, nat->vi2,
-                  ncolor ? ((const unsigned*)ncolor)[0] : 0, ncolor ? ((const unsigned*)ncolor)[1] : 0, ncolor ? ((const unsigned*)ncolor)[2] : 0, ncolor ? ((const unsigned*)ncolor)[3] : 0);
-        bad++;
-    }
-    if ((calls & 0x3FFF) == 1) pcLog("clip verify: %u llamadas, %u con diferencias", calls, bad);
-}
-
 void pcClipViewVolume(const float* p4, int all)
 {
-    const int mode = clip_mode();
     PcClipState s;
 
-    if (mode != 0)
-    {
-        state_load(&s);
-        pcClipStep(&s, p4, pcViewClipMatrix(), all);   /* all: 0 = 269, 1 = 237 */
-        if (mode == 1)
-        {
-            state_store(&s, all);
-            return;
-        }
-    }
-    memcpy(&pcVu0.vf[14], p4, 16);
-    pcVu0Micro(all ? 237 : 269);
-    if (mode == 2) verify(&s, all, NULL);
+    state_load(&s);
+    pcClipStep(&s, p4, pcViewClipMatrix(), all);   /* all: 0 = 269, 1 = 237 */
+    state_store(&s, all);
 }
 
+void pcClipResetHistory(void)
+{
+    static const float zero4[4] = { 0.0f, 0.0f, 0.0f, 1.0f };   /* vf0 */
+    memcpy(pcVu0.vf[15].f, zero4, 16);
+    memcpy(pcVu0.vf[18].f, zero4, 16);
+    memcpy(pcVu0.vf[19].f, zero4, 16);
+}
 
 /* ---- color de los micros 237/394 ---- */
 static struct { float dif[3], spe[3], amb[3], alpha; int mode; } mat;
@@ -245,26 +204,15 @@ mulsum:
 
 void pcClipColorVertex(const float* p4, int kind)
 {
-    const int mode = clip_mode();
+    const unsigned int csr = pcVuRoundEnter();
     PcClipState s;
     float color[4];
 
-    if (mode != 0)
-    {
-        const unsigned int csr = pcVuRoundEnter();
-        state_load(&s);
-        pcClipStep(&s, p4 ? p4 : s.p14, pcViewClipMatrix(), kind);
-        memcpy(color, pcVu0.vf[4].f, 16);
-        color_mode(mat.mode, color, s.h18);
-        pcVuRoundLeave(csr);
-        if (mode == 1)
-        {
-            state_store(&s, kind == 1);
-            memcpy(pcVu0.vf[4].f, color, 16);
-            return;
-        }
-    }
-    if (p4) memcpy(&pcVu0.vf[14], p4, 16);
-    pcVu0Micro(kind == 1 ? 237 : 394);
-    if (mode == 2) verify(&s, kind, color);
+    state_load(&s);
+    pcClipStep(&s, p4 ? p4 : s.p14, pcViewClipMatrix(), kind);
+    memcpy(color, pcVu0.vf[4].f, 16);
+    color_mode(mat.mode, color, s.h18);
+    pcVuRoundLeave(csr);
+    state_store(&s, kind == 1);
+    memcpy(pcVu0.vf[4].f, color, 16);
 }

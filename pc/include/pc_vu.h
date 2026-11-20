@@ -1,8 +1,8 @@
 /* PC port: VU0 state and instruction helpers.
  *
- * Shared by the compiled VU0 microcode (pc/src/vu/vu0_micro.c, generated from vsm/ps2_vu0.vsm
- * by pc/tools/vu_micro2c.py) and the translated COP2 macro-mode inline assembly
- * (pc/tools/asm2c.py). Floats follow VU rules: no infinities/NaNs (results clamp to +-FLT_MAX)
+ * Used by the translated COP2 macro-mode inline assembly (pc/tools/asm2c.py) that remains in
+ * ps2_Vu1Strip.c / ps2_NaMatrix.c. The VU0 microcode interpreter was removed (0.9.173): the
+ * per-vertex work now lives in pc_calcpoint.c, pc_clip.c and pc_scissor.c. Floats follow VU rules: no infinities/NaNs (results clamp to +-FLT_MAX)
  * and denormals flush to zero.
  *
  * Flags: the microcode reads MAC and clip flags with the FMAC pipeline latency (an instruction
@@ -36,14 +36,9 @@ typedef struct {
     unsigned int cycle;
     struct { unsigned int cycle, mac, clip, status; } hist[VU_FLAG_HIST];
     unsigned int hist_pos;
-    int top, itop;              /* VU1: registros TOP/ITOP que fija el VIF1 (XTOP/XITOP los leen) */
-    VuVec mem[1024];            /* memoria de datos: VU0 usa 256 qw (4 KB), VU1 los 1024 qw (16 KB) */
 } PcVu0;
 
 extern PcVu0 pcVu0;
-
-/* run a VU0 microprogram starting at instruction index addr (vcallms addr * 8) */
-void pcVu0Micro(int addr);
 
 /* ---- modo de redondeo de la VU/EE ----
  * La FPU del EE y las FMAC de las VU truncan hacia cero (no hay redondeo al mas cercano) y vacian los
