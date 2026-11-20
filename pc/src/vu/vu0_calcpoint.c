@@ -422,34 +422,31 @@ void pcCalcPoint(const PcCalcPointCtx* c, const float* in, void* output, int n, 
 
 void pcCalcPointVerify(const void* ref, const void* nat, int n, uint32_t ref_clip, uint32_t nat_clip)
 {
-    static unsigned int calls = 0, bad = 0;
-    const uint8_t* a = (const uint8_t*)ref;
-    const uint8_t* b = (const uint8_t*)nat;
-    int i;
-    int diff = 0;
+    static unsigned int calls = 0, bad = 0, ulp1 = 0;
+    const uint32_t* a = (const uint32_t*)ref;
+    const uint32_t* b = (const uint32_t*)nat;
+    int i, w;
+    int hard = 0, soft = 0;
     calls++;
-    for (i = 0; i < n; i++, a += 64, b += 64)
+    for (i = 0; i < n; i++, a += 16, b += 16)
     {
-        /* color (+16), vista y fog (+32..+47), proyeccion (+48) */
-        if (memcmp(a + 16, b + 16, 32) != 0 || memcmp(a + 48, b + 48, 16) != 0)
+        /* color (+16), vista y fog (+32..+47), proyeccion (+48): palabras 4..15 */
+        for (w = 4; w < 16; w++)
         {
-            if (diff < 3 && bad < 12)
-            {
-                const uint32_t* ua = (const uint32_t*)a;
-                const uint32_t* ub = (const uint32_t*)b;
-                int w;
-                for (w = 4; w < 16; w++)
-                    if (ua[w] != ub[w])
-                        pcLog("calcpoint MISMATCH v%d/%d word %d (+%02x): micro %08x nativa %08x", i, n, w, w * 4, ua[w], ub[w]);
-            }
-            diff++;
+            if (a[w] == b[w]) continue;
+            /* 1 ULP del mismo signo: la matematica escalar del micro y la SIMD pueden diferir en el ultimo bit */
+            if (((a[w] ^ b[w]) & 0x80000000u) == 0 && (a[w] - b[w] == 1u || b[w] - a[w] == 1u)) { soft++; continue; }
+            if (hard < 8 && bad < 12)
+                pcLog("calcpoint MISMATCH v%d/%d word %d (+%02x): micro %08x nativa %08x", i, n, w, w * 4, a[w], b[w]);
+            hard++;
         }
     }
     if (n >= 2 && ref_clip != nat_clip)
     {
         pcLog("calcpoint MISMATCH clip: micro %03x nativa %03x (n=%d)", ref_clip, nat_clip, n);
-        diff++;
+        hard++;
     }
-    if (diff) bad++;
-    if ((calls & 0x3FFF) == 1) pcLog("calcpoint verify: %u llamadas, %u con diferencias", calls, bad);
+    if (hard) bad++;
+    if (soft) ulp1++;
+    if ((calls & 0x3FFF) == 1) pcLog("calcpoint verify: %u llamadas, %u con diferencias reales, %u solo con 1 ULP", calls, bad, ulp1);
 }
