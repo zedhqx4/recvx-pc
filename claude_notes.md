@@ -602,3 +602,7 @@ recalcula siempre, de modo que los cambios de paleta se detectan exactamente igu
 - `vsm/ps2_vu0.vsm` y `vsm_parse.py` se conservan: `asm2c.py` los usa para resolver etiquetas al traducir ensamblador (herramienta de port; ya no genera llamadas utiles a pcVu0Micro).
 - Respaldo: milestone/0.9.171 (con interprete y rutas de comparacion).
 - Queda el uso de `pcVu0` como archivo de registros en ps2_Vu1Strip.c (234 usos: ScissorTriangle/DrawScissorPolygon* viejos, _Clip_ViewVolume, _Clip_Screen, rutas vu1Draw*, setters) y ps2_NaMatrix.c (macros pcVu0CN/pcVu0Last y constantes); depende del analisis G1.
+
+## 0.9.174 - Integrado el trabajo de GPT (G1/G2)
+- G2: `Ps2TexLoad` sin rama `#else` PS2 (revisado, correcto). G1: inventario util, con un error (`_Clip_Screen` si se llama, NaDraw.c:337); corregido en coord/TASKS.md. Todo el scissor/clip viejo de ps2_Vu1Strip.c esta vivo.
+- Pendiente: reescritura del scissor de triangulos viejo y estado propio (sustituir pcVu0).
