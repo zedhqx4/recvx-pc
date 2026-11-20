@@ -13,8 +13,6 @@
 #include "../../../../pc/include/pc_game_profile.h"
 #include <emmintrin.h>
 #include <stdlib.h>
-void pcVu0CalcPointN(const float* in, void* out, int n);
-int pcVu0CalcPointBatchEnabled(void);
 #include "../../../../pc/include/pc_vu.h"
 #include "../../../../pc/include/pc_calcpoint.h"
 #include "../../../../pc/include/pc_platform.h"
@@ -1544,6 +1542,110 @@ CHUNK_HEAD* njCnkCvVn(CHUNK_HEAD* pCnk)
 }
 
 // 98.11% matching
+#ifdef TARGET_PC
+CHUNK_HEAD* njCnkCvVnPs2(CHUNK_HEAD* pCnk)
+{
+    VU1_STRIP_BUF* pBuffer;
+    unsigned int ulIndex;
+    float* fpCnk;
+    float v[11][4];
+    CNK_LIGHT* lp;
+    unsigned int tmp;
+    PcCalcPointCtx ctx;
+    uint32_t clip = 0;
+    int n, i;
+    static unsigned int mask[5] = { 0, 0x88, 0xCC, 0xEE, 0xFF };
+
+    lp = pNaCnkCrntLighting->pLightTop;
+    
+    v[0][0] = lp->fCx;
+    v[0][1] = lp[1].fCx;
+    v[0][2] = lp[2].fCx;
+    v[0][3] = lp[3].fCx;
+    
+    v[1][0] = lp->fCy;
+    v[1][1] = lp[1].fCy;
+    v[1][2] = lp[2].fCy;
+    v[1][3] = lp[3].fCy;
+    
+    v[2][0] = lp->fCz;
+    v[2][1] = lp[1].fCz;
+    v[2][2] = lp[2].fCz;
+    v[2][3] = lp[3].fCz;
+
+    tmp = lp[3].ulMode | ((lp[2].ulMode * 2) | ((lp[1].ulMode * 4) | ((lp->ulMode * 8) | ((lp[3].ulState * 16) | ((lp[2].ulState * 32) | ((lp->ulState * 128) | (lp[1].ulState * 64)))))));
+    
+    tmp &= mask[pNaCnkCrntLighting->lLightMax];
+    
+    *(int*)&v[3][0] = tmp;
+    
+    v[4][0] = lp->fNearRR;
+    v[4][1] = lp[1].fNearRR;
+    v[4][2] = lp[2].fNearRR;
+    v[4][3] = lp[3].fNearRR;
+    
+    v[5][0] = lp->fFarRR;
+    v[5][1] = lp[1].fFarRR;
+    v[5][2] = lp[2].fFarRR;
+    v[5][3] = lp[3].fFarRR;
+    
+    v[6][0] = lp->fI;
+    v[6][1] = lp[1].fI;
+    v[6][2] = lp[2].fI;
+    v[6][3] = lp[3].fI;
+    
+    v[7][0] = lp->fR;
+    v[7][1] = lp->fG;
+    v[7][2] = lp->fB;
+    v[7][3] = lp->fI;
+    
+    v[8][0] = lp[1].fR;
+    v[8][1] = lp[1].fG;
+    v[8][2] = lp[1].fB;
+    v[8][3] = lp[1].fI;
+    
+    v[9][0] = lp[2].fR;
+    v[9][1] = lp[2].fG;
+    v[9][2] = lp[2].fB;
+    v[9][3] = lp[2].fI;
+    
+    v[10][0] = lp[3].fR;
+    v[10][1] = lp[3].fG;
+    v[10][2] = lp[3].fB;
+    v[10][3] = lp[3].fI;
+
+    pCnk++;
+
+    ulIndex = pCnk->usSize;
+    fpCnk = (float*)&pCnk[1];
+    fpCnk += 14;
+    pBuffer = &pNaCnkVerBufTop[*(unsigned short*)&pCnk[0]];
+
+    njSetMatrixCN(pNaMatMatrixStuckPtr);
+
+    n = (int)ulIndex;
+    if (n != 0)
+    {
+        ctx.cn = &pcVu0.vf[28].f[0];
+        ctx.view = pcViewClipMatrix();
+        ctx.aspect[0] = fVu1AspectW;
+        ctx.aspect[1] = fVu1AspectH;
+        ctx.projection = fVu1Projection;
+        ctx.light = (const float (*)[4])v;
+        pcCalcPoint(&ctx, fpCnk, pBuffer, n, &clip);
+        for (i = 0; i < n; i++)
+        {
+            pBuffer[i].fFog = njCalcFogPowerEx(pBuffer[i].fFog);
+        }
+        if (n >= 2)
+        {
+            Vu0ClipFlag = clip;   /* con un solo vertice conserva el valor anterior, igual que el micro */
+        }
+    }
+
+    return (CHUNK_HEAD*)(fpCnk + 8 * n);
+}
+#else
 CHUNK_HEAD* njCnkCvVnPs2(CHUNK_HEAD* pCnk)
 {
     VU1_STRIP_BUF* pBuffer;                                    
@@ -1554,12 +1656,6 @@ CHUNK_HEAD* njCnkCvVnPs2(CHUNK_HEAD* pCnk)
     CNK_LIGHT* lp;                                               
     unsigned int tmp;                                            
     static unsigned int mask[5] = { 0, 0x88, 0xCC, 0xEE, 0xFF }; 
-#ifdef TARGET_PC
-    VU1_STRIP_BUF* chkNative = NULL;   /* calcpoint_native=2: salida nativa a comparar con la del micro */
-    VU1_STRIP_BUF* chkMicro = NULL;
-    int chkN = 0;
-    uint32_t chkClip = 0;
-#endif
 
     fog = 0;
 
@@ -1621,28 +1717,6 @@ CHUNK_HEAD* njCnkCvVnPs2(CHUNK_HEAD* pCnk)
     v[10][2] = lp[3].fB;
     v[10][3] = lp[3].fI;
     
-#ifdef TARGET_PC
-    {
-        PcGpr g_op0 = { 0 };
-        PcGpr g_v1 = { 0 };
-        PcGpr g_zero = { 0 };
-        uint64_t lo_ = 0; int fcc_ = 0;
-        g_op0.d[0] = A2C_SX32((uint32_t)(uintptr_t)(v));
-        g_v1.d[0] = g_op0.d[0];
-        memcpy(&pcVu0.vf[4], A2C_PTR(((uint32_t)(g_v1.w[0] + (0)))), 16);
-        memcpy(&pcVu0.vf[5], A2C_PTR(((uint32_t)(g_v1.w[0] + (0x10)))), 16);
-        memcpy(&pcVu0.vf[6], A2C_PTR(((uint32_t)(g_v1.w[0] + (0x20)))), 16);
-        memcpy(&pcVu0.vf[7], A2C_PTR(((uint32_t)(g_v1.w[0] + (0x30)))), 16);
-        memcpy(&pcVu0.vf[8], A2C_PTR(((uint32_t)(g_v1.w[0] + (0x40)))), 16);
-        memcpy(&pcVu0.vf[9], A2C_PTR(((uint32_t)(g_v1.w[0] + (0x50)))), 16);
-        memcpy(&pcVu0.vf[10], A2C_PTR(((uint32_t)(g_v1.w[0] + (0x60)))), 16);
-        memcpy(&pcVu0.vf[11], A2C_PTR(((uint32_t)(g_v1.w[0] + (0x70)))), 16);
-        memcpy(&pcVu0.vf[12], A2C_PTR(((uint32_t)(g_v1.w[0] + (0x80)))), 16);
-        memcpy(&pcVu0.vf[13], A2C_PTR(((uint32_t)(g_v1.w[0] + (0x90)))), 16);
-        memcpy(&pcVu0.vf[14], A2C_PTR(((uint32_t)(g_v1.w[0] + (0xA0)))), 16);
-        (void)g_zero; (void)lo_; (void)fcc_;
-    }
-#else
     asm volatile 
     ("
     .set noreorder
@@ -1662,13 +1736,8 @@ CHUNK_HEAD* njCnkCvVnPs2(CHUNK_HEAD* pCnk)
     .set reorder
     " : : "r"(v) : "$v1", "memory" 
     ); 
-#endif
         
-#ifdef TARGET_PC
-    /* PC: no uncached-accelerated RAM mirror */
-#else
     pCnk = (CHUNK_HEAD*)((int)pCnk | 0x30000000);
-#endif
     
     pCnk++;
     
@@ -1682,70 +1751,7 @@ CHUNK_HEAD* njCnkCvVnPs2(CHUNK_HEAD* pCnk)
     
     njSetMatrixCN(pNaMatMatrixStuckPtr);
     
-#ifdef TARGET_PC
-    /* CALCPOINT nativo (calcpoint_native=1) o comparado contra el micro (=2) */
-    if ((pcCalcPointMode() != 0) && (ulIndex != 0))
-    {
-        const int n_ = (int)ulIndex;
-        PcCalcPointCtx ctx_;
-        static VU1_STRIP_BUF* s_chk = NULL;
-        static int s_chkCap = 0;
-        VU1_STRIP_BUF* dst_ = pBuffer;
-        uint32_t clip_ = 0;
-        int i_;
 
-        ctx_.cn = &pcVu0.vf[28].f[0];
-        ctx_.view = pcViewClipMatrix();
-        ctx_.aspect[0] = fVu1AspectW;
-        ctx_.aspect[1] = fVu1AspectH;
-        ctx_.projection = fVu1Projection;
-        ctx_.light = (const float (*)[4])v;
-        if (pcCalcPointMode() == 2)
-        {
-            if (s_chkCap < n_) { free(s_chk); s_chk = (VU1_STRIP_BUF*)malloc(sizeof(VU1_STRIP_BUF) * n_); s_chkCap = n_; }
-            dst_ = s_chk;
-        }
-        pcCalcPoint(&ctx_, fpCnk, dst_, n_, &clip_);
-        for (i_ = 0; i_ < n_; i_++) dst_[i_].fFog = njCalcFogPowerEx(dst_[i_].fFog);
-        if (pcCalcPointMode() == 1)
-        {
-            if (n_ >= 2) Vu0ClipFlag = clip_;
-            return (CHUNK_HEAD*)(fpCnk + 8 * n_);
-        }
-        chkNative = s_chk; chkMicro = pBuffer; chkN = n_; chkClip = clip_;   /* modo 2: se compara al final con la ruta del micro */
-    }
-#endif
-
-#ifdef TARGET_PC
-    {
-        PcGpr g_op1 = { 0 };
-        PcGpr g_op2 = { 0 };
-        PcGpr g_t0 = { 0 };
-        PcGpr g_t1 = { 0 };
-        PcGpr g_t2 = { 0 };
-        PcGpr g_t3 = { 0 };
-        PcGpr g_zero = { 0 };
-        union { float f; uint32_t u; int32_t i; } fr_op0 = { 0 };
-        uint64_t lo_ = 0; int fcc_ = 0;
-        fr_op0.f = (float)(fog);
-        g_op1.d[0] = A2C_SX32((uint32_t)(uintptr_t)(pBuffer));
-        g_op2.d[0] = A2C_SX32((uint32_t)(uintptr_t)(fpCnk));
-        pcVu0Micro(7); /* VU0_CALCPOINT_INIT */
-        memcpy(&pcVu0.vf[4], A2C_PTR(((uint32_t)(g_op2.w[0] + (0)))), 16);
-        memcpy(&pcVu0.vf[5], A2C_PTR(((uint32_t)(g_op2.w[0] + (0x10)))), 16);
-        pcVu0Micro(49); /* VU0_CALCPOINT */
-        memcpy(&g_t0, &pcVu0.vf[7], 16);
-        memcpy(&g_t1, &pcVu0.vf[18], 16);
-        memcpy(&g_t2, &pcVu0.vf[6], 16);
-        memcpy(A2C_PTR(((uint32_t)(g_op1.w[0] + (0x10)))), &g_t0, 16);
-        memcpy(A2C_PTR(((uint32_t)(g_op1.w[0] + (0x20)))), &g_t1, 16);
-        memcpy(A2C_PTR(((uint32_t)(g_op1.w[0] + (0x30)))), &g_t2, 16);
-        memcpy(&g_t3, &pcVu0.vf[11], 16);
-        fr_op0.u = g_t3.w[0];
-        fog = fr_op0.f;
-        (void)g_zero; (void)lo_; (void)fcc_;
-    }
-#else
     asm volatile 
     ("
     .set noreorder
@@ -1770,7 +1776,6 @@ CHUNK_HEAD* njCnkCvVnPs2(CHUNK_HEAD* pCnk)
     .set reorder
     " : "=f"(fog) : "r"(pBuffer), "r"(fpCnk) : "$f20", "$s1", "$s2", "memory" 
     ); 
-#endif
         
     ulIndex--;
     
@@ -1778,40 +1783,9 @@ CHUNK_HEAD* njCnkCvVnPs2(CHUNK_HEAD* pCnk)
     
     fpCnk += 8;
     
-#ifdef TARGET_PC
-    if ((ulIndex != 0) && pcVu0CalcPointBatchEnabled())
-    {
-        pcVu0CalcPointN(fpCnk, pBuffer, (int)ulIndex);
-
-        pBuffer[-1].fFog = njCalcFogPowerEx(fog);
-        for (; ulIndex != 1; ulIndex--, pBuffer++, fpCnk += 8)
-        {
-            pBuffer->fFog = njCalcFogPowerEx(pBuffer->fFog);
-        }
-
-        fog = pBuffer->fFog;
-        Vu0ClipFlag = a2c_cfc2(11);
-
-        ulIndex--;
-        pBuffer++;
-        fpCnk += 8;
-    }
-#endif
 
     while (ulIndex != 0)
     {
-#ifdef TARGET_PC
-        {
-            PcGpr g_op0 = { 0 };
-            PcGpr g_zero = { 0 };
-            uint64_t lo_ = 0; int fcc_ = 0;
-            g_op0.d[0] = A2C_SX32((uint32_t)(uintptr_t)(fpCnk));
-            memcpy(&pcVu0.vf[4], A2C_PTR(((uint32_t)(g_op0.w[0] + (0)))), 16);
-            memcpy(&pcVu0.vf[5], A2C_PTR(((uint32_t)(g_op0.w[0] + (0x10)))), 16);
-            pcVu0Micro(49); /* VU0_CALCPOINT */
-            (void)g_zero; (void)lo_; (void)fcc_;
-        }
-#else
         asm volatile 
         ("
         .set noreorder
@@ -1823,38 +1797,9 @@ CHUNK_HEAD* njCnkCvVnPs2(CHUNK_HEAD* pCnk)
         .set reorder
         " : : "r"(fpCnk) : "$s2", "memory" 
         ); 
-#endif
             
         pBuffer[-1].fFog = njCalcFogPowerEx(fog);
         
-#ifdef TARGET_PC
-        {
-            PcGpr g_op1 = { 0 };
-            PcGpr g_op2 = { 0 };
-            PcGpr g_t0 = { 0 };
-            PcGpr g_t1 = { 0 };
-            PcGpr g_t2 = { 0 };
-            PcGpr g_t3 = { 0 };
-            PcGpr g_zero = { 0 };
-            union { float f; uint32_t u; int32_t i; } fr_op0 = { 0 };
-            uint64_t lo_ = 0; int fcc_ = 0;
-            fr_op0.f = (float)(fog);
-            g_op1.d[0] = A2C_SX32((uint32_t)(uintptr_t)(&Vu0ClipFlag));
-            g_op2.d[0] = A2C_SX32((uint32_t)(uintptr_t)(pBuffer));
-            memcpy(&g_t0, &pcVu0.vf[7], 16);
-            memcpy(&g_t1, &pcVu0.vf[18], 16);
-            memcpy(&g_t2, &pcVu0.vf[6], 16);
-            memcpy(A2C_PTR(((uint32_t)(g_op2.w[0] + (0x10)))), &g_t0, 16);
-            memcpy(A2C_PTR(((uint32_t)(g_op2.w[0] + (0x20)))), &g_t1, 16);
-            memcpy(A2C_PTR(((uint32_t)(g_op2.w[0] + (0x30)))), &g_t2, 16);
-            memcpy(&g_t3, &pcVu0.vf[11], 16);
-            fr_op0.u = g_t3.w[0];
-            g_t0.d[0] = A2C_SX32(a2c_cfc2(11));
-            *(uint32_t*)A2C_PTR(((uint32_t)(g_op1.w[0] + (0)))) = (uint32_t)g_t0.d[0];
-            fog = fr_op0.f;
-            (void)g_zero; (void)lo_; (void)fcc_;
-        }
-#else
         asm volatile 
         ("
         .set noreorder
@@ -1876,7 +1821,6 @@ CHUNK_HEAD* njCnkCvVnPs2(CHUNK_HEAD* pCnk)
         .set reorder
         " : "=f"(fog) : "r"(&Vu0ClipFlag), "r"(pBuffer) : "$f20", "$v0", "$s1", "memory" 
         ); 
-#endif
 
         ulIndex--;
         
@@ -1887,30 +1831,16 @@ CHUNK_HEAD* njCnkCvVnPs2(CHUNK_HEAD* pCnk)
     
     pBuffer[-1].fFog = njCalcFogPowerEx(fog);
     
-#ifdef TARGET_PC
-    {
-        PcGpr g_zero = { 0 };
-        uint64_t lo_ = 0; int fcc_ = 0;
-        pcVu0Micro(42); /* VU0_CALCPOINT_END */
-        (void)g_zero; (void)lo_; (void)fcc_;
-    }
-#else
     asm volatile 
     ("
     .set noreorder 
         vcallms VU0_CALCPOINT_END 
     .set reorder 
     ");
-#endif
 
-#ifdef TARGET_PC
-    if (chkNative != NULL)
-    {
-        pcCalcPointVerify(chkMicro, chkNative, chkN, Vu0ClipFlag, chkClip);
-    }
-#endif
     return (CHUNK_HEAD*)fpCnk;
 }
+#endif
 
 // 100% matching! 
 CHUNK_HEAD* njCnkCvVMod(CHUNK_HEAD* pCnk)

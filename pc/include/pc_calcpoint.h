@@ -26,10 +26,4 @@ const float* pcViewClipMatrix(void);
  * clip_and recibe el AND de los 6 bits de clip de todos los vertices. */
 void pcCalcPoint(const PcCalcPointCtx* c, const float* in, void* out, int n, uint32_t* clip_and);
 
-/* Compara la salida del micro (ref) con la nativa: color, posicion de vista, fog, proyeccion y clip. Registra diferencias. */
-void pcCalcPointVerify(const void* ref, const void* nat, int n, uint32_t ref_clip, uint32_t nat_clip);
-
-/* 0 = micro VU0 (referencia), 1 = nativa, 2 = ambas y compara (RECVX/ini: calcpoint_native) */
-int pcCalcPointMode(void);
-
 #endif

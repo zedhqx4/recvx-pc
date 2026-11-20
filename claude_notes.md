@@ -559,3 +559,8 @@ recalcula siempre, de modo que los cambios de paleta se detectan exactamente igu
 - Estado fuera de pcVu0: matriz de vista copiada en `pcViewSetClipMatrix` (NaView.c), aspecto/proyeccion de `fVu1AspectW/H`, `fVu1Projection`, CN = pcVu0CN, luces = bloque `v[11][4]`.
 - INI `calcpoint_native` (o RECVX_CALCPOINT_NATIVE): 0 = micro (default), 1 = nativa, 2 = ambas y compara (log "calcpoint MISMATCH"/"calcpoint verify").
 - Pendiente: validar con el usuario en modo 2; luego default 1 y retirar micros 7/49/42 y la ruta SoA vieja.
+
+## 0.9.166 - CALCPOINT nativo como unica ruta (etapa C)
+- Validacion con calcpoint_native=2 (milestone/0.9.165): posicion de vista, proyeccion, fog y clip sin diferencias reales; solo ULPs: proyeccion x/y 1 ULP y canal azul del color 2-3 ULP (~2e-7) en el primer/ultimo vertice del chunk, que en la referencia pasaban por el micro escalar (no reproducible en gcc: 0/20000 contra el micro real).
+- `njCnkCvVnPs2` (PC) llama solo a `pcCalcPoint`; retirados micros 7/49/42 de esa ruta, la antigua SoA, `pcVu0CalcPointN`, RECVX_VU0_BATCH y `calcpoint_native`.
+- Pendiente 3c: clip (237/269/394) y scissor (302/327/333/339); 3d: borrar pcVu0 y el interprete.
