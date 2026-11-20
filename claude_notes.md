@@ -579,3 +579,6 @@ recalcula siempre, de modo que los cambios de paleta se detectan exactamente igu
 - Harness gcc contra el micro real: 60000 casos (11 modos, kinds 1 y 2, con/sin vf14 reutilizado), 0 diferencias en vf4, vf15/18/19, vf14, clip.
 - `clip_native` (default 1) tambien gobierna estas rutas: 0 = micro, 2 = ambas y compara. La entrada/salida del color sigue viajando por pcVu0.vf[4] (espejo) hasta 3d.
 - Pendiente: quitar setters vf20-22 y micro 365 (ahora ya innecesarios salvo modo 0/2), scissor (302/327/333/339), 3d.
+
+## Validacion 0.9.169
+- clip_native=2 con el color de 237/394: 70.746.113 llamadas, 0 diferencias (vf4, historial, clip, vi1/vi2). Rutas nativas validadas con los materiales reales. milestone/0.9.169.
