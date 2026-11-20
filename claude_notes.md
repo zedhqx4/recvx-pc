@@ -569,3 +569,6 @@ recalcula siempre, de modo que los cambios de paleta se detectan exactamente igu
 - `pc/include/pc_clip.h`, `pc/src/vu/pc_clip.c`: `pcClipStep(PcClipState*, p4, view, all)` replica micros 269/237 (historial de 3 vertices vf15/18/19, historial de clip 24 bits, vi1/vi2 con las mascaras fcor). Harness gcc contra el micro real (tabla de color inicializada con micro 365): 20000 casos de 269 y 20000 de 237, 0 diferencias.
 - `_Clip_ViewVolume2` y `_Check_ClipViewAll` (ps2_Vu1Scissor2.c) pasan por `pcClipViewVolume`; INI `clip_native` (o RECVX_CLIP_NATIVE): 0 = micro (default), 1 = nativa (vuelca el resultado a vf15/18/19, clip, vi1/vi2 para el scissor que aun usa registros), 2 = ambas y compara (log "clip MISMATCH"/"clip verify").
 - El sitio de ps2_Vu1Strip.c ~2276 (micro 237 con color real) queda en micro hasta el paso 2 (394 + color).
+
+## 0.9.168 - clip_native=1 por defecto
+- Validacion del usuario con clip_native=2: 81.674.241 llamadas, 0 diferencias (byte a byte). La ruta nativa pasa a ser la de por defecto (clip_native=0 vuelve al micro, 2 compara).

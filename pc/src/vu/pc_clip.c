@@ -61,7 +61,7 @@ static int clip_mode(void)
     if (mode < 0)
     {
         const char* e = getenv("RECVX_CLIP_NATIVE");
-        mode = (e != NULL) ? atoi(e) : pcIniGetInt("clip_native", 0);
+        mode = (e != NULL) ? atoi(e) : pcIniGetInt("clip_native", 1);
     }
     return mode;
 }
