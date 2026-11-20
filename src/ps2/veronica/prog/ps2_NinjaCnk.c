@@ -16,6 +16,7 @@
 void pcVu0CalcPointN(const float* in, void* out, int n);
 int pcVu0CalcPointBatchEnabled(void);
 #include "../../../../pc/include/pc_vu.h"
+#include "../../../../pc/include/pc_calcpoint.h"
 #include "../../../../pc/include/pc_platform.h"
 
 /* Perfil opt-in (debug=1, profile_game=1): cuantas tiras de la ruta del EE llegan a vu1Draw* y cuantas se descartan por
@@ -1553,6 +1554,12 @@ CHUNK_HEAD* njCnkCvVnPs2(CHUNK_HEAD* pCnk)
     CNK_LIGHT* lp;                                               
     unsigned int tmp;                                            
     static unsigned int mask[5] = { 0, 0x88, 0xCC, 0xEE, 0xFF }; 
+#ifdef TARGET_PC
+    VU1_STRIP_BUF* chkNative = NULL;   /* calcpoint_native=2: salida nativa a comparar con la del micro */
+    VU1_STRIP_BUF* chkMicro = NULL;
+    int chkN = 0;
+    uint32_t chkClip = 0;
+#endif
 
     fog = 0;
 
@@ -1675,6 +1682,40 @@ CHUNK_HEAD* njCnkCvVnPs2(CHUNK_HEAD* pCnk)
     
     njSetMatrixCN(pNaMatMatrixStuckPtr);
     
+#ifdef TARGET_PC
+    /* CALCPOINT nativo (calcpoint_native=1) o comparado contra el micro (=2) */
+    if ((pcCalcPointMode() != 0) && (ulIndex != 0))
+    {
+        const int n_ = (int)ulIndex;
+        PcCalcPointCtx ctx_;
+        static VU1_STRIP_BUF* s_chk = NULL;
+        static int s_chkCap = 0;
+        VU1_STRIP_BUF* dst_ = pBuffer;
+        uint32_t clip_ = 0;
+        int i_;
+
+        ctx_.cn = &pcVu0.vf[28].f[0];
+        ctx_.view = pcViewClipMatrix();
+        ctx_.aspect[0] = fVu1AspectW;
+        ctx_.aspect[1] = fVu1AspectH;
+        ctx_.projection = fVu1Projection;
+        ctx_.light = (const float (*)[4])v;
+        if (pcCalcPointMode() == 2)
+        {
+            if (s_chkCap < n_) { free(s_chk); s_chk = (VU1_STRIP_BUF*)malloc(sizeof(VU1_STRIP_BUF) * n_); s_chkCap = n_; }
+            dst_ = s_chk;
+        }
+        pcCalcPoint(&ctx_, fpCnk, dst_, n_, &clip_);
+        for (i_ = 0; i_ < n_; i_++) dst_[i_].fFog = njCalcFogPowerEx(dst_[i_].fFog);
+        if (pcCalcPointMode() == 1)
+        {
+            if (n_ >= 2) Vu0ClipFlag = clip_;
+            return (CHUNK_HEAD*)(fpCnk + 8 * n_);
+        }
+        chkNative = s_chk; chkMicro = pBuffer; chkN = n_; chkClip = clip_;   /* modo 2: se compara al final con la ruta del micro */
+    }
+#endif
+
 #ifdef TARGET_PC
     {
         PcGpr g_op1 = { 0 };
@@ -1861,7 +1902,13 @@ CHUNK_HEAD* njCnkCvVnPs2(CHUNK_HEAD* pCnk)
     .set reorder 
     ");
 #endif
-    
+
+#ifdef TARGET_PC
+    if (chkNative != NULL)
+    {
+        pcCalcPointVerify(chkMicro, chkNative, chkN, Vu0ClipFlag, chkClip);
+    }
+#endif
     return (CHUNK_HEAD*)fpCnk;
 }
 

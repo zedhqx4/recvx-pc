@@ -4,6 +4,9 @@
 #include "../../../ps2/veronica/prog/ps2_NaGraphics3D.h"
 #include "../../../ps2/veronica/prog/ps2_Vu1Strip.h"
 #include "../../../ps2/veronica/prog/main.h"
+#ifdef TARGET_PC
+#include "pc_calcpoint.h"
+#endif
 
 NJS_MATRIX NaViwViewMatrix;
 float fNaViwHalfW;
@@ -280,6 +283,7 @@ void _Make_ClipMatrix(sceVu0FMATRIX sc, float scr, float near, float far)
     
 #ifdef TARGET_PC
     memcpy(&pcVu0.vf[24], mp2, 64); /* vf24-vf27 */
+    pcViewSetClipMatrix((const float*)mp2);   /* copia para pcCalcPoint */
 #else
     asm volatile 
     { 

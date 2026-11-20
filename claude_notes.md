@@ -553,3 +553,9 @@ recalcula siempre, de modo que los cambios de paleta se detectan exactamente igu
 - `pcVu0CalcPointSoA` (vu0_calcpoint.c, SSE2, 4 vertices en paralelo) ya contiene toda la matematica; se vuelve funcion pura `pcCalcPoint(const PcViewCtx*, const PcLightBlock*, const float* in, VU1_STRIP_BUF* out, int n, uint32_t* clip_hist, float* fog)`; el primer y ultimo vertice dejan de pasar por el micro (ya no hay estado VU que preservar).
 - Verificacion: modo paralelo `calcpoint_native=0/1/2` como `vu1_color_native` tuvo (2 = micro y pura, compara salida byte a byte: posicion, normal/luz, proyeccion, fog y historial de clip). Se prueba en las mismas escenas con luces puntuales (sala del agua, interiores).
 - Etapas (cada una con su commit y validacion): A) `PcViewCtx` + alimentarla en paralelo desde los puntos que hoy escriben vf24-27/17/1/16/23 y CN (sin cambiar ningun consumidor); B) `pcCalcPoint` puro + modo 2 de comparacion; C) hacerlo por defecto y retirar micro 7/49/42 y `vu0_calcpoint.c`.
+
+## 0.9.163 - CALCPOINT puro (etapas A+B)
+- `pc/include/pc_calcpoint.h` + `pcCalcPoint()` en vu0_calcpoint.c: SoA SSE2 sin registros VU0. Hallazgo: INIT pone vi11=0x3F, asi que el flag de clip es el AND de los 6 bits de todos los vertices (el historial previo no influye); no se escribe `Vu0ClipFlag` si n==1 (igual que antes).
+- Estado fuera de pcVu0: matriz de vista copiada en `pcViewSetClipMatrix` (NaView.c), aspecto/proyeccion de `fVu1AspectW/H`, `fVu1Projection`, CN = pcVu0CN, luces = bloque `v[11][4]`.
+- INI `calcpoint_native` (o RECVX_CALCPOINT_NATIVE): 0 = micro (default), 1 = nativa, 2 = ambas y compara (log "calcpoint MISMATCH"/"calcpoint verify").
+- Pendiente: validar con el usuario en modo 2; luego default 1 y retirar micros 7/49/42 y la ruta SoA vieja.
