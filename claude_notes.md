@@ -582,3 +582,9 @@ recalcula siempre, de modo que los cambios de paleta se detectan exactamente igu
 
 ## Validacion 0.9.169
 - clip_native=2 con el color de 237/394: 70.746.113 llamadas, 0 diferencias (vf4, historial, clip, vi1/vi2). Rutas nativas validadas con los materiales reales. milestone/0.9.169.
+
+## 0.9.170 - Scissor puro (3c, paso 3): micros 302/327/333/339
+- `pc/include/pc_scissor.h`, `pc/src/vu/pc_scissor.c`: poligono en dos buffers de 4 cuartetos por vertice (los de la memoria VU0 80/128), `pcScissorSetNode` (302), `pcScissorClipPlane` (Sutherland-Hodgman por plano; 327/333/339 solo cargaban/guardaban cuartetos), `pcScissorEmit` (proyeccion final de DrawScissorPolygonOpaque2).
+- Harness gcc contra los micros reales (copia literal de la rama PC de _ClipInter y del bucle de emision): 164.925 pasos de plano y 22.881 salidas, 0 diferencias, siempre que la referencia corra con truncado de la VU (como dentro de las funciones PCSP_BEGIN de vu1Draw*, que es desde donde se llama). Con redondeo al mas cercano en la referencia hay 1-14 ULP de diferencia: el codigo C de _ClipInter hereda el modo ambiente.
+- INI `scissor_native` (RECVX_SCISSOR_NATIVE): 0 = micros (default), 1 = nativo, 2 = ambos y compara (log "scissor MISMATCH"/"scissor verify"). Compara carga inicial, cada plano (vertices + cuartetos) y la salida.
+- Entradas que aun vienen de registros: vf15/18/19 (historial de clip), vf16/vf17/vf23.z (offset, aspecto, proyeccion). Se resuelven en 3d.

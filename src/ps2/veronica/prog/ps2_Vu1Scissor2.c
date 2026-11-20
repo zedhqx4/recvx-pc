@@ -2,6 +2,8 @@
 #include "../../../ps2/veronica/prog/ps2_Vu1Strip.h"
 #ifdef TARGET_PC
 #include "pc_clip.h"
+#include "pc_scissor.h"
+#include "pc_platform.h"
 #endif
 
 extern void VU0_CLIP_VIEW_VOLUME() __attribute__((section(".vutext")));
@@ -18,6 +20,15 @@ void DrawScissorPolygonOpaque2(int count, unsigned long ulType)
     VU1_PRIM_BUF* pPrim; 
 
 #ifdef TARGET_PC
+    {
+        static VU1_PRIM_BUF s_chk[16];
+        const int smode = pcScissorMode();
+        if (smode != 0)
+        {
+            pcScissorEmit((smode == 1) ? (void*)vu1ScessorBuf : (void*)s_chk, sizeof(VU1_PRIM_BUF), count,
+                          &pcVu0.vf[17].f[0], &pcVu0.vf[16].f[0], pcVu0.vf[23].f[2]);
+        }
+        if (smode != 1)
     {
         PcGpr g_op0 = { 0 };
         PcGpr g_op1 = { 0 };
@@ -48,6 +59,11 @@ void DrawScissorPolygonOpaque2(int count, unsigned long ulType)
         memcpy(A2C_PTR(((uint32_t)(g_op0.w[0] + (-0x10)))), &pcVu0.vf[9], 16);
         { int c_ = (g_t0.d[0] != 0);  if (c_) goto Vu1Scissor2_a0_l_002D3B2C; }
         (void)g_zero; (void)lo_; (void)fcc_;
+    }
+        if (smode == 2)
+        {
+            pcScissorVerifyEmit(vu1ScessorBuf, s_chk, sizeof(VU1_PRIM_BUF), count);
+        }
     }
 #else
     asm volatile
@@ -247,8 +263,17 @@ void _Set_NodeArray(VU1_STRIP_BUF* pS, VU1_PRIM_BUF* pP)
         PcGpr g_op1 = { 0 };
         PcGpr g_zero = { 0 };
         uint64_t lo_ = 0; int fcc_ = 0;
+        const int smode = pcScissorMode();
         g_op0.d[0] = A2C_SX32((uint32_t)(uintptr_t)(pS));
         g_op1.d[0] = A2C_SX32((uint32_t)(uintptr_t)(pP));
+        if (smode != 0)
+        {
+            pcScissorSetNode(pS, pP, pcVu0.vf[19].f, pcVu0.vf[18].f, pcVu0.vf[15].f);
+            if (smode == 1)
+            {
+                return;
+            }
+        }
         memcpy(&pcVu0.vf[4], A2C_PTR(((uint32_t)(g_op0.w[0] + (-0x60)))), 16);
         memcpy(&pcVu0.vf[5], A2C_PTR(((uint32_t)(g_op0.w[0] + (-0x20)))), 16);
         memcpy(&pcVu0.vf[6], A2C_PTR(((uint32_t)(g_op0.w[0] + (0x20)))), 16);
@@ -259,6 +284,10 @@ void _Set_NodeArray(VU1_STRIP_BUF* pS, VU1_PRIM_BUF* pP)
         memcpy(&pcVu0.vf[11], A2C_PTR(((uint32_t)(g_op1.w[0] + (-0x20)))), 16);
         memcpy(&pcVu0.vf[12], A2C_PTR(((uint32_t)(g_op1.w[0] + (0x10)))), 16);
         pcVu0Micro(302); /* VU0_SET_NODE_ARRAY */
+        if (smode == 2)
+        {
+            pcScissorVerifyPoly(80, 4, "set");
+        }
         (void)g_zero; (void)lo_; (void)fcc_;
     }
 #else
@@ -300,8 +329,19 @@ int _ClipInter(int mask1, int mask2, int xyzflg, float sin, int work0, int work1
         PcVu0* v = &pcVu0;
         int n = count;
         int k;
+        const int smode = pcScissorMode();
+        int nret = 0;
 
         (void)pad;
+
+        if (smode != 0)
+        {
+            nret = pcScissorClipPlane(mask1, mask2, xyzflg, sin, work0, work1, count);
+            if (smode == 1)
+            {
+                return nret;
+            }
+        }
 
         a2c_ctc2(3, (uint32_t)work0);
         a2c_ctc2(4, (uint32_t)work1);
@@ -383,6 +423,15 @@ int _ClipInter(int mask1, int mask2, int xyzflg, float sin, int work0, int work1
 
         pcVu0Micro(333); /* VU0_LOAD_SCISSOR_WORKb */
         pcVu0Micro(339); /* VU0_STORE_SCISSOR_WORK */
+
+        if (smode == 2)
+        {
+            pcScissorVerifyPoly(work1, ret + 1, "plane");
+            if (nret != ret)
+            {
+                pcLog("scissor MISMATCH: numero de vertices micro %d nativo %d", ret, nret);
+            }
+        }
     }
 #else
     asm volatile 
