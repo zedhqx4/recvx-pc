@@ -433,13 +433,14 @@ void pcCalcPointVerify(const void* ref, const void* nat, int n, uint32_t ref_cli
         /* color (+16), vista y fog (+32..+47), proyeccion (+48) */
         if (memcmp(a + 16, b + 16, 32) != 0 || memcmp(a + 48, b + 48, 16) != 0)
         {
-            if (diff < 3)
+            if (diff < 3 && bad < 12)
             {
-                const float* fa = (const float*)a;
-                const float* fb = (const float*)b;
-                pcLog("calcpoint MISMATCH v%d/%d: micro col %g %g %g %g view %g %g %g fog %g sp %g %g %g %g | nativa col %g %g %g %g view %g %g %g fog %g sp %g %g %g %g",
-                      i, n, fa[4], fa[5], fa[6], fa[7], fa[8], fa[9], fa[10], fa[11], fa[12], fa[13], fa[14], fa[15],
-                      fb[4], fb[5], fb[6], fb[7], fb[8], fb[9], fb[10], fb[11], fb[12], fb[13], fb[14], fb[15]);
+                const uint32_t* ua = (const uint32_t*)a;
+                const uint32_t* ub = (const uint32_t*)b;
+                int w;
+                for (w = 4; w < 16; w++)
+                    if (ua[w] != ub[w])
+                        pcLog("calcpoint MISMATCH v%d/%d word %d (+%02x): micro %08x nativa %08x", i, n, w, w * 4, ua[w], ub[w]);
             }
             diff++;
         }
