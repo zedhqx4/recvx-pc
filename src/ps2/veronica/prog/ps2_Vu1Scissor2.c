@@ -1,5 +1,8 @@
 #include "../../../ps2/veronica/prog/ps2_Vu1Scissor2.h"
 #include "../../../ps2/veronica/prog/ps2_Vu1Strip.h"
+#ifdef TARGET_PC
+#include "pc_clip.h"
+#endif
 
 extern void VU0_CLIP_VIEW_VOLUME() __attribute__((section(".vutext")));
 extern void VU0_CLIP_VIEW_VOLUME_ALL() __attribute__((section(".vutext")));
@@ -128,8 +131,7 @@ unsigned int _Clip_ViewVolume2(NJS_POINT4* vec)
         PcGpr g_zero = { 0 };
         uint64_t lo_ = 0; int fcc_ = 0;
         g_op0.d[0] = A2C_SX32((uint32_t)(uintptr_t)(vec));
-        memcpy(&pcVu0.vf[14], A2C_PTR(((uint32_t)(g_op0.w[0] + (offsetof(NJS_POINT4, x))))), 16);
-        pcVu0Micro(269); /* VU0_CLIP_VIEW_VOLUME */
+        pcClipViewVolume((const float*)A2C_PTR(((uint32_t)(g_op0.w[0] + (offsetof(NJS_POINT4, x))))), 0); /* VU0_CLIP_VIEW_VOLUME */
         (void)g_zero; (void)lo_; (void)fcc_;
     }
 #else
@@ -220,8 +222,7 @@ void _Check_ClipViewAll(NJS_POINT4* vec)
         PcGpr g_zero = { 0 };
         uint64_t lo_ = 0; int fcc_ = 0;
         g_op0.d[0] = A2C_SX32((uint32_t)(uintptr_t)(vec));
-        memcpy(&pcVu0.vf[14], A2C_PTR(((uint32_t)(g_op0.w[0] + (offsetof(NJS_POINT4, x))))), 16);
-        pcVu0Micro(237); /* VU0_CLIP_VIEW_VOLUME_ALL */
+        pcClipViewVolume((const float*)A2C_PTR(((uint32_t)(g_op0.w[0] + (offsetof(NJS_POINT4, x))))), 1); /* VU0_CLIP_VIEW_VOLUME_ALL */
         (void)g_zero; (void)lo_; (void)fcc_;
     }
 #else

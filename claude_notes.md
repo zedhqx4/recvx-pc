@@ -564,3 +564,8 @@ recalcula siempre, de modo que los cambios de paleta se detectan exactamente igu
 - Validacion con calcpoint_native=2 (milestone/0.9.165): posicion de vista, proyeccion, fog y clip sin diferencias reales; solo ULPs: proyeccion x/y 1 ULP y canal azul del color 2-3 ULP (~2e-7) en el primer/ultimo vertice del chunk, que en la referencia pasaban por el micro escalar (no reproducible en gcc: 0/20000 contra el micro real).
 - `njCnkCvVnPs2` (PC) llama solo a `pcCalcPoint`; retirados micros 7/49/42 de esa ruta, la antigua SoA, `pcVu0CalcPointN`, RECVX_VU0_BATCH y `calcpoint_native`.
 - Pendiente 3c: clip (237/269/394) y scissor (302/327/333/339); 3d: borrar pcVu0 y el interprete.
+
+## 0.9.167 - Clip de volumen de vista puro (3c, paso 1)
+- `pc/include/pc_clip.h`, `pc/src/vu/pc_clip.c`: `pcClipStep(PcClipState*, p4, view, all)` replica micros 269/237 (historial de 3 vertices vf15/18/19, historial de clip 24 bits, vi1/vi2 con las mascaras fcor). Harness gcc contra el micro real (tabla de color inicializada con micro 365): 20000 casos de 269 y 20000 de 237, 0 diferencias.
+- `_Clip_ViewVolume2` y `_Check_ClipViewAll` (ps2_Vu1Scissor2.c) pasan por `pcClipViewVolume`; INI `clip_native` (o RECVX_CLIP_NATIVE): 0 = micro (default), 1 = nativa (vuelca el resultado a vf15/18/19, clip, vi1/vi2 para el scissor que aun usa registros), 2 = ambas y compara (log "clip MISMATCH"/"clip verify").
+- El sitio de ps2_Vu1Strip.c ~2276 (micro 237 con color real) queda en micro hasta el paso 2 (394 + color).
