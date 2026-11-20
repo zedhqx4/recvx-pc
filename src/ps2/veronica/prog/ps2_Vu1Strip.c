@@ -16,6 +16,7 @@
 #include "pc_game_profile.h"
 #include "pc_platform.h"
 #include "pc_vu.h"
+#include "pc_clip.h"
 static struct { double total, submit; unsigned int strips, verts; } pcsp_acc[4];
 static unsigned int pcsp_count;
 static void pcStripProfRecord(int kind, double t0, double t1, double t2, unsigned int verts)
@@ -281,6 +282,9 @@ void vu1SetDiffuseMaterial(VU1_COLOR* pDiffuse)
     vu1Diffuse.fR = 128.0f * pDiffuse->fR;
     vu1Diffuse.fG = 128.0f * pDiffuse->fG;
     vu1Diffuse.fB = 128.0f * pDiffuse->fB;
+#ifdef TARGET_PC
+    pcColorSetDiffuse(&pDiffuse->fR);
+#endif
     
 #ifdef TARGET_PC
     {
@@ -334,6 +338,9 @@ void vu1SetSpeculaMaterial(VU1_COLOR* pSpecula)
     vu1Specula.fR = 31.0f * pSpecula->fR;
     vu1Specula.fG = 31.0f * pSpecula->fG;
     vu1Specula.fB = 31.0f * pSpecula->fB;
+#ifdef TARGET_PC
+    pcColorSetSpecula(&pSpecula->fR);
+#endif
     
 #ifdef TARGET_PC
     {
@@ -382,6 +389,9 @@ void vu1SetAmbient(VU1_COLOR* pAmbient)
     vu1Ambient.fR = pAmbient->fR;
     vu1Ambient.fG = pAmbient->fG;
     vu1Ambient.fB = pAmbient->fB;
+#ifdef TARGET_PC
+    pcColorSetAmbient(&pAmbient->fR);
+#endif
     
 #ifdef TARGET_PC
     {
@@ -405,6 +415,9 @@ void vu1SetAmbient(VU1_COLOR* pAmbient)
 void vu1SetAlphaRatio(float fAlpha)
 {
     fVu1AlphaRatio = 128.0f * fAlpha;
+#ifdef TARGET_PC
+    pcColorSetAlphaRatio(fVu1AlphaRatio);
+#endif
 
 #ifdef TARGET_PC
     {
@@ -2016,6 +2029,7 @@ void vu1DrawTriangleStripTransDouble(unsigned long ulType, VU1_STRIP_BUF* pS, un
         g_v0.d[0] = (g_op0.d[0] & (uint64_t)(uint16_t)(0xF));
         g_t0.d[0] = A2C_SX32(g_zero.w[0] + (uint32_t)(g_v0.w[0]));
         a2c_ctc2(1, g_t0.w[0]);
+        pcClipSetColorMode((int)g_v0.w[0]);
         pcVu0Micro(365); /* VU0_INIT_CALC_COLOR */
         *(uint32_t*)&(usMode) = g_op0.w[0];
         (void)g_zero; (void)lo_; (void)fcc_;
@@ -2060,8 +2074,7 @@ void vu1DrawTriangleStripTransDouble(unsigned long ulType, VU1_STRIP_BUF* pS, un
             g_op2.d[0] = A2C_SX32((uint32_t)(uintptr_t)(pS));
             g_op3.d[0] = A2C_SX32((uint32_t)(uintptr_t)(pP));
             memcpy(&pcVu0.vf[4], A2C_PTR(((uint32_t)(g_op2.w[0] + (offsetof(VU1_STRIP_BUF, fIr))))), 16);
-            memcpy(&pcVu0.vf[14], A2C_PTR(((uint32_t)(g_op2.w[0] + (offsetof(VU1_STRIP_BUF, fVx))))), 16);
-            pcVu0Micro(394); /* VU0_CALC_COLOR */
+            pcClipColorVertex((const float*)A2C_PTR(((uint32_t)(g_op2.w[0] + (offsetof(VU1_STRIP_BUF, fVx))))), 2); /* VU0 CALC_COLOR */
             fr_1.u = *(uint32_t*)A2C_PTR(((uint32_t)(g_op2.w[0] + (offsetof(VU1_STRIP_BUF, fU)))));
             fr_2.u = *(uint32_t*)A2C_PTR(((uint32_t)(g_op2.w[0] + (offsetof(VU1_STRIP_BUF, fV)))));
             fr_3.u = *(uint32_t*)A2C_PTR(((uint32_t)(g_op2.w[0] + (offsetof(VU1_STRIP_BUF, fIz)))));
@@ -2165,8 +2178,7 @@ void vu1DrawTriangleStripTransDouble(unsigned long ulType, VU1_STRIP_BUF* pS, un
             g_op2.d[0] = A2C_SX32((uint32_t)(uintptr_t)(pS));
             g_op3.d[0] = A2C_SX32((uint32_t)(uintptr_t)(pP));
             memcpy(&pcVu0.vf[4], A2C_PTR(((uint32_t)(g_op2.w[0] + (offsetof(VU1_STRIP_BUF, fIr))))), 16);
-            memcpy(&pcVu0.vf[14], A2C_PTR(((uint32_t)(g_op2.w[0] + (offsetof(VU1_STRIP_BUF, fVx))))), 16);
-            pcVu0Micro(394); /* VU0_CALC_COLOR */
+            pcClipColorVertex((const float*)A2C_PTR(((uint32_t)(g_op2.w[0] + (offsetof(VU1_STRIP_BUF, fVx))))), 2); /* VU0 CALC_COLOR */
             fr_1.u = *(uint32_t*)A2C_PTR(((uint32_t)(g_op2.w[0] + (offsetof(VU1_STRIP_BUF, fU)))));
             fr_2.u = *(uint32_t*)A2C_PTR(((uint32_t)(g_op2.w[0] + (offsetof(VU1_STRIP_BUF, fV)))));
             fr_3.u = *(uint32_t*)A2C_PTR(((uint32_t)(g_op2.w[0] + (offsetof(VU1_STRIP_BUF, fIz)))));
@@ -2272,8 +2284,7 @@ void vu1DrawTriangleStripTransDouble(unsigned long ulType, VU1_STRIP_BUF* pS, un
                 g_op2.d[0] = A2C_SX32((uint32_t)(uintptr_t)(pS));
                 g_op3.d[0] = A2C_SX32((uint32_t)(uintptr_t)(pP));
                 memcpy(&pcVu0.vf[4], A2C_PTR(((uint32_t)(g_op2.w[0] + (offsetof(VU1_STRIP_BUF, fIr))))), 16);
-                memcpy(&pcVu0.vf[14], A2C_PTR(((uint32_t)(g_op2.w[0] + (offsetof(VU1_STRIP_BUF, fVx))))), 16);
-                pcVu0Micro(237); /* VU0_CLIP_VIEW_VOLUME_ALL */
+                pcClipColorVertex((const float*)A2C_PTR(((uint32_t)(g_op2.w[0] + (offsetof(VU1_STRIP_BUF, fVx))))), 1); /* VU0 CLIP_VIEW_VOLUME_ALL */
                 fr_1.u = *(uint32_t*)A2C_PTR(((uint32_t)(g_op2.w[0] + (offsetof(VU1_STRIP_BUF, fU)))));
                 fr_2.u = *(uint32_t*)A2C_PTR(((uint32_t)(g_op2.w[0] + (offsetof(VU1_STRIP_BUF, fV)))));
                 fr_3.u = *(uint32_t*)A2C_PTR(((uint32_t)(g_op2.w[0] + (offsetof(VU1_STRIP_BUF, fIz)))));
@@ -2393,7 +2404,7 @@ void vu1DrawTriangleStripTransDouble(unsigned long ulType, VU1_STRIP_BUF* pS, un
             uint64_t lo_ = 0; int fcc_ = 0;
             g_op0.d[0] = A2C_SX32((uint32_t)(uintptr_t)(pS));
             memcpy(&pcVu0.vf[4], A2C_PTR(((uint32_t)(g_op0.w[0] + (offsetof(VU1_STRIP_BUF, fIr))))), 16);
-            pcVu0Micro(394); /* VU0_CALC_COLOR */
+            pcClipColorVertex(NULL, 2); /* VU0_CALC_COLOR (reutiliza el ultimo vertice enviado a clip) */
             (void)g_zero; (void)lo_; (void)fcc_;
         }
 #else
@@ -2453,7 +2464,7 @@ void vu1DrawTriangleStripTransDouble(unsigned long ulType, VU1_STRIP_BUF* pS, un
             uint64_t lo_ = 0; int fcc_ = 0;
             g_op0.d[0] = A2C_SX32((uint32_t)(uintptr_t)(pS));
             memcpy(&pcVu0.vf[4], A2C_PTR(((uint32_t)(g_op0.w[0] + (offsetof(VU1_STRIP_BUF, fIr))))), 16);
-            pcVu0Micro(394); /* VU0_CALC_COLOR */
+            pcClipColorVertex(NULL, 2); /* VU0_CALC_COLOR (reutiliza el ultimo vertice enviado a clip) */
             (void)g_zero; (void)lo_; (void)fcc_;
         }
 #else
@@ -2515,7 +2526,7 @@ void vu1DrawTriangleStripTransDouble(unsigned long ulType, VU1_STRIP_BUF* pS, un
                 uint64_t lo_ = 0; int fcc_ = 0;
                 g_op0.d[0] = A2C_SX32((uint32_t)(uintptr_t)(pS));
                 memcpy(&pcVu0.vf[4], A2C_PTR(((uint32_t)(g_op0.w[0] + (offsetof(VU1_STRIP_BUF, fIr))))), 16);
-                pcVu0Micro(394); /* VU0_CALC_COLOR */
+                pcClipColorVertex(NULL, 2); /* VU0_CALC_COLOR (reutiliza el ultimo vertice enviado a clip) */
                 (void)g_zero; (void)lo_; (void)fcc_;
             }
 #else

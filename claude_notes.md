@@ -572,3 +572,10 @@ recalcula siempre, de modo que los cambios de paleta se detectan exactamente igu
 
 ## 0.9.168 - clip_native=1 por defecto
 - Validacion del usuario con clip_native=2: 81.674.241 llamadas, 0 diferencias (byte a byte). La ruta nativa pasa a ser la de por defecto (clip_native=0 vuelve al micro, 2 compara).
+
+## 0.9.169 - Micros 237 (con color) y 394 puros (3c, paso 2)
+- `pcClipStep(kind 0/1/2)` cubre 269/237/394 (394: un solo flag de clip, el del vertice nuevo); `PcClipState` incluye `p14` (ultimo vertice enviado a clip) porque 394 en 3 sitios (strips TransDouble, 2º vertice en adelante) NO recarga vf14 y vuelve a transformar el ultimo vertice de `_Clip_ViewVolume2` (se replica con `pcClipColorVertex(NULL, 2)`).
+- Color de los micros: `color_mode()` en pc_clip.c (rutinas vu0GetVertexColor*, distintas de las vu1GetVertexColor* de pc_vu1_color.h: otros registros: dif=vf20, spe=vf21 (x31), amb=vf22, alpha=vf23.w, y el modo 8 suma vf18=h18). Materiales en `mat` alimentados por los setters vu1Set* (`pcColorSet*`, con truncado de la VU) y el modo por `pcClipSetColorMode` en el INIT_CALC_COLOR.
+- Harness gcc contra el micro real: 60000 casos (11 modos, kinds 1 y 2, con/sin vf14 reutilizado), 0 diferencias en vf4, vf15/18/19, vf14, clip.
+- `clip_native` (default 1) tambien gobierna estas rutas: 0 = micro, 2 = ambas y compara. La entrada/salida del color sigue viajando por pcVu0.vf[4] (espejo) hasta 3d.
+- Pendiente: quitar setters vf20-22 y micro 365 (ahora ya innecesarios salvo modo 0/2), scissor (302/327/333/339), 3d.
