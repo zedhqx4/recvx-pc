@@ -2,6 +2,9 @@
 #include "../../../ps2/veronica/prog/ps2_NaFog.h"
 #include "../../../ps2/veronica/prog/ps2_NaView.h"
 #include "../../../ps2/veronica/prog/main.h"
+#ifdef TARGET_PC
+#include "pc_clip.h"
+#endif
 
 int lNaMatIsUnitMatrix;
 int lNaMatMatrixStuckMax;
@@ -48,7 +51,7 @@ void	njInitMatrix(NJS_MATRIX *m, Sint32 n, Int flag)
         pcVu0.vf[16].f[2] = 4095.0f;
         vu_set_q_now(&pcVu0, 1.0f);
 
-        pcVu0Micro(365); /* VU0_INIT_CALC_PROCESS */
+        pcClipResetHistory(); /* VU0_INIT_CALC_PROCESS */
     }
 #else
     asm volatile 

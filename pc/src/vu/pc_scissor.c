@@ -9,17 +9,6 @@
 typedef struct { float q[4][4]; } ScVert;
 static ScVert g_buf[2][16];
 
-int pcScissorMode(void)
-{
-    static int mode = -1;
-    if (mode < 0)
-    {
-        const char* e = getenv("RECVX_SCISSOR_NATIVE");
-        mode = (e != NULL) ? atoi(e) : pcIniGetInt("scissor_native", 1);
-    }
-    return mode;
-}
-
 static unsigned int flags6(const float* a)   /* CLIPw.xyz: 6 bits contra +-w */
 {
     const float aw = a[3] < 0 ? -a[3] : a[3];
@@ -129,40 +118,4 @@ void pcScissorEmit(void* out, size_t stride, int count, const float* aspect, con
         memcpy(o - 0x10, v9, 16);
     }
     pcVuRoundLeave(csr);
-}
-
-void pcScissorVerifyPoly(int work, int nverts, const char* what)
-{
-    static unsigned int calls = 0, bad = 0;
-    const ScVert* b = g_buf[work == 80 ? 0 : 1];
-    int i, q, diff = 0;
-    calls++;
-    for (i = 0; i < nverts; i++)
-        for (q = 0; q < 4; q++)
-            if (memcmp(pcVu0.mem[work + 4 * i + q].f, b[i].q[q], 16)) diff++;
-    if (diff)
-    {
-        if (bad < 12) pcLog("scissor MISMATCH (%s) buf %d: %d cuartetos distintos de %d vertices", what, work, diff, nverts);
-        bad++;
-    }
-    if ((calls & 0xFFFF) == 1) pcLog("scissor verify: %u comprobaciones de poligono, %u con diferencias", calls, bad);
-}
-
-void pcScissorVerifyEmit(const void* ref, const void* nat, size_t stride, int count)
-{
-    static unsigned int calls = 0, bad = 0;
-    int i, diff = 0;
-    calls++;
-    for (i = 0; i < count; i++)
-    {
-        const uint8_t* r = (const uint8_t*)ref + (size_t)(i + 1) * stride;
-        const uint8_t* n = (const uint8_t*)nat + (size_t)(i + 1) * stride;
-        if (memcmp(r - 0x30, n - 0x30, 48)) diff++;
-    }
-    if (diff)
-    {
-        if (bad < 12) pcLog("scissor MISMATCH (emit): %d de %d vertices distintos", diff, count);
-        bad++;
-    }
-    if ((calls & 0xFFF) == 1) pcLog("scissor verify: %u comprobaciones de salida, %u con diferencias", calls, bad);
 }

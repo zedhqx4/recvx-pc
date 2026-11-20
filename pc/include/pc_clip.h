@@ -33,8 +33,10 @@ void pcClipSetColorMode(int mode);           /* usMode & 0xF de la tira en curso
  * (igual que antes); p4 = NULL reutiliza el ultimo vertice enviado a clip. */
 void pcClipColorVertex(const float* p4, int kind);
 
-/* Puente con el codigo que aun usa registros VU0 (se retira junto con el scissor).
- * clip_native: 0 = micro, 1 = nativa, 2 = ambas y compara (INI clip_native o RECVX_CLIP_NATIVE). */
+/* Puente con el codigo que aun usa registros VU0 (se retira en el paso final de 3d). */
 void pcClipViewVolume(const float* p4, int all);
+
+/* Reinicia el historial de vertices de clip (vf15/vf18/vf19 = vf0): lo hacia el micro INIT_CALC_COLOR/PROCESS. */
+void pcClipResetHistory(void);
 
 #endif

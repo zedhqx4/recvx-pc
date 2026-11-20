@@ -22,11 +22,4 @@ int pcScissorClipPlane(int mask1, int mask2, int xyzflg, float sin, int work0, i
  * aspect = vf17.xy, offset = vf16.xy, proj = vf23.z. */
 void pcScissorEmit(void* out, size_t stride, int count, const float* aspect, const float* offset, float proj);
 
-/* 0 = micros (referencia), 1 = nativo, 2 = ambos y compara (INI scissor_native / RECVX_SCISSOR_NATIVE) */
-int pcScissorMode(void);
-
-/* Modo 2: compara la memoria de trabajo de VU0 con el buffer nativo (idx 80/128) y las salidas */
-void pcScissorVerifyPoly(int work, int nverts, const char* what);
-void pcScissorVerifyEmit(const void* ref, const void* nat, size_t stride, int count);
-
 #endif

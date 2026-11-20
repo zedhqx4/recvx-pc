@@ -2030,7 +2030,7 @@ void vu1DrawTriangleStripTransDouble(unsigned long ulType, VU1_STRIP_BUF* pS, un
         g_t0.d[0] = A2C_SX32(g_zero.w[0] + (uint32_t)(g_v0.w[0]));
         a2c_ctc2(1, g_t0.w[0]);
         pcClipSetColorMode((int)g_v0.w[0]);
-        pcVu0Micro(365); /* VU0_INIT_CALC_COLOR */
+        pcClipResetHistory(); /* VU0_INIT_CALC_COLOR: reinicia el historial de clip */
         *(uint32_t*)&(usMode) = g_op0.w[0];
         (void)g_zero; (void)lo_; (void)fcc_;
     }
