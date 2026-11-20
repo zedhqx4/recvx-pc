@@ -588,3 +588,6 @@ recalcula siempre, de modo que los cambios de paleta se detectan exactamente igu
 - Harness gcc contra los micros reales (copia literal de la rama PC de _ClipInter y del bucle de emision): 164.925 pasos de plano y 22.881 salidas, 0 diferencias, siempre que la referencia corra con truncado de la VU (como dentro de las funciones PCSP_BEGIN de vu1Draw*, que es desde donde se llama). Con redondeo al mas cercano en la referencia hay 1-14 ULP de diferencia: el codigo C de _ClipInter hereda el modo ambiente.
 - INI `scissor_native` (RECVX_SCISSOR_NATIVE): 0 = micros (default), 1 = nativo, 2 = ambos y compara (log "scissor MISMATCH"/"scissor verify"). Compara carga inicial, cada plano (vertices + cuartetos) y la salida.
 - Entradas que aun vienen de registros: vf15/18/19 (historial de clip), vf16/vf17/vf23.z (offset, aspecto, proyeccion). Se resuelven en 3d.
+
+## 0.9.171 - scissor_native=1 por defecto
+- Validacion del usuario con scissor_native=2: ~1.83M comprobaciones de poligono y >53K de salida, 0 diferencias. Ruta nativa por defecto. Con esto todos los micros VU0 usados por el juego (7/49/42, 237/269/394, 302/327/333/339) tienen ruta pura validada; falta 3d (borrar pcVu0, interprete y generacion).

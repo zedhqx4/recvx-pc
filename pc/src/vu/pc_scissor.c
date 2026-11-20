@@ -15,7 +15,7 @@ int pcScissorMode(void)
     if (mode < 0)
     {
         const char* e = getenv("RECVX_SCISSOR_NATIVE");
-        mode = (e != NULL) ? atoi(e) : pcIniGetInt("scissor_native", 0);
+        mode = (e != NULL) ? atoi(e) : pcIniGetInt("scissor_native", 1);
     }
     return mode;
 }
