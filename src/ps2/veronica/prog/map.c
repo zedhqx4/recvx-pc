@@ -852,16 +852,12 @@ static void MapCodeProcess()
             break;
         }
         case 12:
-#ifdef TARGET_PC
             {
                 /* PC: read in the PS2 compiler's left-to-right order (MSVC evaluates arguments right to left) */
                 int type = *ocP++, flag = *ocP++;
 
                 MapBoolSet(bhFlagCk(type, flag, 0), mode & 0xF000);
             }
-#else
-            MapBoolSet(bhFlagCk(*ocP++, *ocP++, 0), mode & 0xF000);
-#endif
             break;
         case 13:
             x = ocP[0] / 32.0f;
@@ -910,16 +906,12 @@ static void MapCodeProcess()
             ocP = &mwP->map_cdeP[*ocP];
             break;
         case 14:
-#ifdef TARGET_PC
             {
                 /* PC: read in the PS2 compiler's left-to-right order (MSVC evaluates arguments right to left) */
                 int type = *ocP++, flag = *ocP++;
 
                 MapBoolSet(bhFlagSet(type, flag, 0), mode & 0xF000);
             }
-#else
-            MapBoolSet(bhFlagSet(*ocP++, *ocP++, 0), mode & 0xF000);
-#endif
             break;
         case 15:
             if (!(*stsP & 0x40))
@@ -1374,9 +1366,7 @@ static func_wrk_typ* MapFuncIns(func_wrk_typ* bsP, func_wrk_typ* fwP)
     
     bsP->nextP->prevP = fwP;
     bsP->nextP        = fwP;
-#ifdef TARGET_PC /* the PS2 build returned whatever was left in the return register */
     return 0;
-#endif
 }
 
 // 100% matching!
@@ -1430,7 +1420,6 @@ static int FsubMapDraw(func_wrk_typ* fwP)
 }
 
 // 100% matching!
-#ifdef TARGET_PC
 /* widescreen: how far the map's background and frame reach past each 4:3 edge, in 640 wide
  * screen units, so they fill the side areas (0 at 4:3) */
 static float pc_wide_extra(void)
@@ -1439,11 +1428,9 @@ static float pc_wide_extra(void)
 
     return 320.0f / pcVideoWideScale() - 320.0f;
 }
-#endif
 
 static int FsubBackDraw() 
 {
-#ifdef TARGET_PC
     {
         extern int pcWide2DUnclipped;
         NJS_POINT2 p0 = mwP->bck_p0, p1 = mwP->bck_p1;
@@ -1455,9 +1442,6 @@ static int FsubBackDraw()
         MapDrawBackground(mwP->bck_depth, &p0, &p1);
         pcWide2DUnclipped = 0;
     }
-#else
-    MapDrawBackground(mwP->bck_depth, &mwP->bck_p0, &mwP->bck_p1);
-#endif
     
     return 1;
 }
@@ -2623,7 +2607,6 @@ static int FsubZoomScreen(FS_WRK* fsP)
 {
     int ang; 
     int tmp; 
-#ifdef TARGET_PC
     /* widescreen: the dark frame around the map window reaches the screen edges */
     extern int pcWide2DUnclipped;
     NJS_POINT2 ScrOut[2] = 
@@ -2631,13 +2614,6 @@ static int FsubZoomScreen(FS_WRK* fsP)
         { 0.0f,   0.0f   },
         { 640.0f, 480.0f }
     };
-#else
-    static const NJS_POINT2 ScrOut[2] = 
-    {
-        { 0.0f,   0.0f   },
-        { 640.0f, 480.0f }
-    };
-#endif
     static const NJS_POINT2 ScrIn[2] = 
     {
         {  56.0f,  64.0f },
@@ -2645,11 +2621,9 @@ static int FsubZoomScreen(FS_WRK* fsP)
     };
 	static NJS_POINT2 pnt[4];
 
-#ifdef TARGET_PC
     ScrOut[0].x -= pc_wide_extra();
     ScrOut[1].x += pc_wide_extra();
     pcWide2DUnclipped = 1;
-#endif
 
     switch (fsP->mode) 
     {                             
@@ -2767,9 +2741,7 @@ static int FsubZoomScreen(FS_WRK* fsP)
         break;
     }
     
-#ifdef TARGET_PC
     pcWide2DUnclipped = 0;
-#endif
     return 1;
 }
 
