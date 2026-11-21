@@ -214,7 +214,6 @@ void StoreRenderTex(void* tex_adr)
         sceGsExecStoreImage(&gs_simage, p);
     } 
     
-#ifdef TARGET_PC
     /* La GS limpia aqui el framebuffer (Ps2ScreenClear, sprite RGBA 0): lo que se dibuje despues parte de una pantalla vacia. Ps2ScreenClear
      * es un no-op en PC (limpiaba trabajo ya dibujado), asi que se limpia el frame explicitamente. */
     {
@@ -223,7 +222,6 @@ void StoreRenderTex(void* tex_adr)
         pcRendererClear(0.0f, 0.0f, 0.0f, 0.0f, 1);
     }
     return;
-#endif
     Ps2ScreenClear();
 }
 
@@ -280,11 +278,7 @@ int LoadToVram(unsigned long tbp, u_long128* addr, int tbw, int psm, int pos, in
 // 100% matching!
 void *UncAddr(void *val)
 {
-#ifdef TARGET_PC
     return val;
-#else
-    return (void*)(((u_int)val & UNCMASK)|UNCBASE);
-#endif
 }
 
 // 99.83% matching
@@ -297,7 +291,6 @@ int Send_1024_Clut_data(void* clt_adr, unsigned long send_clut_adr)
     u_long128* pClut;            
 
     pClut = clt_adr;
-#ifdef TARGET_PC
     {
         /* PC: la unica subida de 1024 entradas (njSetPaletteData -> CBP 0x3FF0) alimenta el CLUT residente que leen las texturas
          * PictFormat 5..8 (pc_texture.c). */
@@ -305,7 +298,6 @@ int Send_1024_Clut_data(void* clt_adr, unsigned long send_clut_adr)
 
         pcTextureUploadVramClut((const unsigned int*)clt_adr);
     }
-#endif
 
     for (clt_lp = 0; clt_lp < 4; clt_lp++) 
     {
@@ -355,9 +347,7 @@ int Send_1024_Clut_data(void* clt_adr, unsigned long send_clut_adr)
             pClut += 4;
         }
     } 
-#ifdef TARGET_PC /* the PS2 build returned whatever was left in the return register */
     return 0;
-#endif
 } 
 
 // 100% matching! 
@@ -431,7 +421,6 @@ int Clut_Load_Func(TIM2_PICTUREHEADER* ph, unsigned long clut_addr)
     return 0;
 }
 
-#ifdef TARGET_PC
 /* Reapply palette and texture metadata for a cached native indexed texture, without
  * transferring its image plane through the shared GS VRAM address. */
 int Send_Tim2_dataExClutOnly(void* tim2_top_adr, unsigned long send_image_adr, unsigned long send_clut_adr)
@@ -448,7 +437,6 @@ int Send_Tim2_dataExClutOnly(void* tim2_top_adr, unsigned long send_image_adr, u
     Set_GsTex(picture, send_image_adr, send_clut_adr);
     return 0;
 }
-#endif
 
 // 100% matching!
 int P32_Image_Load(TIM2_PICTUREHEADER* ph, unsigned long image_addr) 
@@ -591,107 +579,8 @@ void Ps2PxlconvCheck(void* timadr)
     }
 }
 
-#ifndef TARGET_PC /* pc/src/pc_libgraph.c */
-// 100% matching! 
-void SyncPath()
-{
-    unsigned int tmp;
 
-    tmp = DGET_D_PCR(); 
-    
-    DPUT_D_PCR(DGET_D_PCR() & 0x2); 
-    
-    asm volatile (bc0t label_0f1); 
 
-label_0b1:
-    asm volatile 
-    {
-        bc0f label_0b1
-        nop
-    }
-
-label_0f1:    
-    DPUT_D_PCR(DGET_D_PCR() | tmp); 
-
-    tmp = DGET_D_PCR(); 
-
-    DPUT_D_PCR(DGET_D_PCR() & 0x4); 
-    
-    asm volatile (bc0t label_0f2); 
-
-label_0b2:
-    asm volatile 
-    {
-        bc0f label_0b2
-        nop
-    }
-    
-label_0f2:
-    DPUT_D_PCR(DGET_D_PCR() | tmp); 
-
-    while (DGET_VIF1_STAT() & 0x1F000003); 
-
-    asm volatile 
-    {
-        loop:
-        cfc2 a2, vi29
-        
-        andi v0, a2, 0x100
-        bnez v0, loop
-    }
-    
-    while (DGET_GIF_STAT() & 0xC00); 
-} 
-#endif
-
-#ifndef TARGET_PC /* pc/src/pc_libgraph.c */
-// 100% matching! 
-void D2_SyncTag()
-{
-    unsigned int tmp;
-
-    tmp = DGET_D_PCR(); 
-    
-    DPUT_D_PCR(DGET_D_PCR() & 0x4); 
-    
-    if ((DGET_D_PCR() & 0x4)) 
-    { 
-        asm volatile (bc0t label_0f); 
-    
-    label_0b:
-        asm volatile 
-        {
-            bc0f label_0b
-            nop
-        }
-    }
-
-label_0f:
-    DPUT_D_PCR(DGET_D_PCR() | tmp); 
-}
-#endif
-
-#ifndef TARGET_PC /* pc/src/pc_libgraph.c */
-// 100% matching! 
-void loadImage(void* tags)
-{
-    asm volatile (bc0t label_0f); 
-    
-label_0b:
-    asm volatile 
-    {
-        bc0f label_0b
-        nop
-    }
-
-label_0f:
-    DPUT_D_PCR(4); 
-    DPUT_D_STAT(4); 
-
-    DPUT_D2_TADR((int)tags); 
-    DPUT_D2_CHCR(261); 
-} 
-#endif
 
 // 100% matching!
 void ClearVram()
