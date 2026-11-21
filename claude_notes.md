@@ -681,3 +681,7 @@ recalcula siempre, de modo que los cambios de paleta se detectan exactamente igu
 
 ## 0.9.191 - RECVX_CV_VN_BATCH ya no existe
 - ps2_NinjaCnk.c: el camino SSE2 de vertices CNK con luces direccionales se usa siempre (era el valor por defecto).
+
+## 0.9.192 - gpu_vertex ya no es interruptor (vertex shader siempre)
+- ps2_dummy.c: se borra pcGpuVertexEnabled (INI gpu_vertex / env RECVX_GPU_VERTEX). Las tiras 3D y el empaquetador del EE usan siempre la conversion en el vertex shader (screen_space 3/4), salvo los sprites (topologia 6), que siguen convirtiendo en la CPU (screen_space 2) como ya hacia la ruta GPU. Por eso el codigo de conversion CPU del bucle no se borra: sigue vivo para sprites.
+- Con gpu_vertex=1 (lo que corre el usuario) el comportamiento es identico.

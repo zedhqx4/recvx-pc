@@ -140,7 +140,7 @@ static const char* vertex_shader =
     "noperspective out vec4 vColor; out vec2 vTexCoord; noperspective out float vFog; out float vQ;\n"
     "void main(){\n"
     /* uScreenSpace==3: vertices CRUDOS de la VU1. Mismas operaciones, en el mismo orden, que pcSubmitStrip3D en la CPU
-     * (modo gpu_vertex=0): XYZ2 es punto fijo 12.4 (FTOI4 trunca a 1/16 de pixel), el Z de la GS es entero de 16 bits afin
+     * (ruta CPU de los sprites): XYZ2 es punto fijo 12.4 (FTOI4 trunca a 1/16 de pixel), el Z de la GS es entero de 16 bits afin
      * en Q (FTOI0 trunca), color y niebla se saturan a 0..255 y se truncan (FTOI0), y S/Q se pasa a texels. */
     "  if(uScreenSpace==3){\n"
     "    float q=aQ; if(q>-1e-9&&q<1e-9)q=1e-9;\n"

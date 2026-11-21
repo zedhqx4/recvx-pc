@@ -1562,7 +1562,6 @@ done:
     return;
 }
 
-static int pcGpuVertexEnabled(void);
 static void pcSubmitPrepared3DGpu(unsigned long prim, const void* data, unsigned int count, const PcPrim3D* mode);
 
 static void pcSubmitPrepared3D(unsigned long prim, const void* data, unsigned int count, const PcPrim3D* mode)
@@ -1581,9 +1580,9 @@ static void pcSubmitPrepared3D(unsigned long prim, const void* data, unsigned in
         return;
     if (textured && texture == 0)
         return;
-    /* gpu_vertex=1: conversion en el vertex shader. Los sprites (topologia 6) siguen aqui: copian Z/color/niebla del segundo
+    /* Conversion en el vertex shader. Los sprites (topologia 6) siguen aqui: copian Z/color/niebla del segundo
      * vertice y la Q del primero, y con vertices crudos la Z sale de la Q. */
-    if (pcGpuVertexEnabled() && ((prim >> 47) & 7u) != 6u) {
+    if (((prim >> 47) & 7u) != 6u) {
         pcSubmitPrepared3DGpu(prim, data, count, mode);
         return;
     }
@@ -1642,21 +1641,9 @@ done:
  * scissor: los vertices pasan como floats en pantalla homogenea (x*w, y*w, z*w, w con w = 1/Q) y la GPU recorta contra los
  * planos cercano/lejano y los lados. Lo que el juego decide se conserva: el kick por cara trasera (ulKick, tiras Single), las
  * politicas de OT y la profundidad de la GS (afin en Q, cuantizada a 16 bits en el fragmento). */
-/* gpu_vertex (recvx.ini) o RECVX_GPU_VERTEX: 0 = la CPU convierte cada vertice a lo que ve la GS (punto fijo 12.4, Z de 16 bits,
- * FTOI0 de color/niebla, S/Q en texels) y sube vertices ya convertidos; 1 = la CPU solo copia el registro crudo de la VU1 y esa
- * misma conversion, con las mismas operaciones, la hace el vertex shader (screen_space 3 del renderer). Ruta paralela: la
- * CPU sigue disponible para comparar con F8; el resultado debe coincidir (ver pc/tools/test_gpu_vertex.c y notas 0.9.146). */
-static int pcGpuVertexEnabled(void)
-{
-    static int on = -1;
-    if (on < 0) {
-        const char* e = getenv("RECVX_GPU_VERTEX");
-        on = e ? (e[0] != '0') : (pcIniGetInt("gpu_vertex", 0) != 0);
-        pcLog("tiras 3D: conversion de vertices en %s (gpu_vertex=1 en recvx.ini o RECVX_GPU_VERTEX=1 la mueve al vertex shader)",
-              on ? "GPU (vertex shader)" : "CPU");
-    }
-    return on;
-}
+/* Conversion de vertices: la CPU solo copia el registro crudo de la VU1 y el vertex shader (screen_space 3 del renderer) hace la
+ * conversion a lo que ve la GS: punto fijo 12.4, Z de 16 bits, FTOI0 de color/niebla, S/Q en texels (ver pc/tools/test_gpu_vertex.c y
+ * notas 0.9.146). Solo los sprites (topologia 6) siguen convirtiendo en la CPU (screen_space 2). */
 
 /* Perfil (debug=1 + profile_game=1): costes por separado de las tiras 3D. "convert" = CPU por vertice (bucle de conversion o de
  * copia + recorte ADC); "submit" = ensamblado + cola/lote + llamadas a GL hasta volver. El tiempo de GPU sale en
@@ -1762,7 +1749,7 @@ static void pcSubmitStrip3D(unsigned long prim, const void* data, unsigned int c
     unsigned int clip_hist = 0;
     /* Sprite (topologia 6): la GS usa Z/color/niebla del SEGUNDO vertice y la Q del primero para dos esquinas; el vertex shader
      * saca Z de la Q del vertice, asi que no puede expresar eso. Ese caso sigue por la conversion de la CPU (mismo resultado). */
-    const int gpu = pcGpuVertexEnabled() && ((prim >> 47) & 7u) != 6u;
+    const int gpu = ((prim >> 47) & 7u) != 6u;
     const int need_z = !gpu || (prim & PC_GIF_PRIM_ABE) != 0;   /* en GPU, la Z entera solo hace falta en CPU para ordenar el OT */
     const int profile = pcGameProfileEnabled();
     double t_start = profile ? pcGameProfileNowMs() : 0.0, t_conv = 0.0;
