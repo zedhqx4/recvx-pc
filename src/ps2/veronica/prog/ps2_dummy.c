@@ -1,4 +1,3 @@
-#ifdef TARGET_PC
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -6,7 +5,6 @@
 #include "../../../../pc/include/pc_vu.h"
 #include "../../../../pc/include/pc_game_profile.h"
 extern int Send_Tim2_dataExClutOnly(void* tim2_top_adr, unsigned long send_image_adr, unsigned long send_clut_adr);
-#endif
 #include "../../../ps2/veronica/prog/ps2_dummy.h"
 #include "../../../ps2/veronica/prog/ps2_loadtim2.h"
 #include "../../../ps2/veronica/prog/ps2_NaDraw2D.h"
@@ -17,11 +15,8 @@ extern int Send_Tim2_dataExClutOnly(void* tim2_top_adr, unsigned long send_image
 #include "../../../ps2/veronica/prog/ps2_texture.h"
 #include "../../../ps2/veronica/prog/sdfunc.h"
 #include "../../../ps2/veronica/prog/main.h"
-#ifdef TARGET_PC
 #include "pc_renderer.h"
-#endif
 
-#ifdef TARGET_PC
 #define PC_TIM2_FINGERPRINT_SLOTS 1024
 typedef struct {
     int valid;
@@ -128,7 +123,6 @@ void Ps2PcTextureSourceCacheReset(void)
     }
     Ps2_current_texbreak = 1;
 }
-#endif
 // the three vars below were originally defined as unsigned int in ps2_NaFog.c, and redeclared as unsigned long here
 extern unsigned long ulNaFogR;
 extern unsigned long ulNaFogG;
@@ -187,186 +181,12 @@ extern int ps2_vu0sub0 __attribute__((section(".vudata")));
 extern int ps2_vu1sub0 __attribute__((section(".vudata")));
 extern int ps2_vu1sub1 __attribute__((section(".vudata")));
 
-#ifndef TARGET_PC /* pc/src/pc_system.c */
-// 100% matching!
-void _builtin_set_imask(int mask) 
-{
 
-}
-#endif
 
-#ifndef TARGET_PC /* pc/src/pc_system.c */
-// 100% matching! 
-void Ps2Init() 
-{ 
-    Ps2_tex_buff = &Ps2_tex_mem; 
-    
-    sceDmaReset(1); 
-    sceVpu0Reset(); 
-    
-    sceGsResetPath(); 
-    sceGsResetGraph(0, SCE_GS_INTERLACE, SCE_GS_NTSC, SCE_GS_FIELD); 
-    
-    sceGsSyncV(0); 
-    
-    sceGsSetDefDBuffDc(&Db, SCE_GS_PSMCT32, DISP_WIDTH, DISP_HEIGHT, SCE_GS_ZGEQUAL, SCE_GS_PSMZ16S, 1); 
-    
-    Db.disp[0].dispfb.FBP = 150; 
-    Db.disp[0].dispfb.PSM = SCE_GS_PSMCT32;
-    
-    Db.draw01.frame1.FBP = 0; 
-    Db.draw01.frame1.PSM = SCE_GS_PSMCT32;
-    
-    Db.draw01.zbuf1.ZBP = 300;
-    
-    Db.draw02.frame2.FBP = 0; 
-    Db.draw02.frame2.PSM = SCE_GS_PSMCT32;
-    
-    Db.draw02.zbuf2.ZBP = 300; 
-    
-    Db.disp[1].dispfb.FBP = 150; 
-    Db.disp[1].dispfb.PSM = SCE_GS_PSMCT32;
-    
-    Db.draw11.frame1.FBP = 0; 
-    Db.draw11.frame1.PSM = SCE_GS_PSMCT32; 
-    
-    Db.draw11.zbuf1.ZBP = 300; 
-    
-    Db.draw12.frame2.FBP = 0; 
-    Db.draw12.frame2.PSM = SCE_GS_PSMCT32; 
-    
-    Db.draw12.zbuf2.ZBP = 300; 
-    
-    Db.disp[0].display.DY = 636; 
-    Db.disp[1].display.DY = 32; 
-    
-    ClearVram(); 
-    
-    *T0_MODE = 139; 
-    
-    FlushCache(0); 
-    
-    sceSifInitRpc(0); 
-    
-    while (sceCdInit(SCECdINIT) == 0); 
-    
-    sceCdMmode(SCECdDVD); 
-    
-    while (sceSifRebootIop("cdrom0:\\PS2_DATA\\MODULES\\IOPRP213.IMG;1") == 0);
-    
-    while (sceSifSyncIop() == 0);  
-    
-    sceSifInitRpc(0); 
-    
-    while (sceCdInit(SCECdINIT) == 0); 
-    
-    sceCdMmode(SCECdDVD); 
-    
-    sceFsReset(); 
-    
-    if (sceSifInitIopHeap() != 0)
-    { 
-        printf("Error:sceSifInitIopHeap Error\n");
-        
-        exit(-1);
-    }
-    
-    Ps2LoadModule("cdrom0:\\PS2_DATA\\MODULES\\SIO2MAN.IRX;1"); 
-    Ps2LoadModule("cdrom0:\\PS2_DATA\\MODULES\\PADMAN.IRX;1"); 
-    Ps2LoadModule("cdrom0:\\PS2_DATA\\MODULES\\MCMAN.IRX;1"); 
-    Ps2LoadModule("cdrom0:\\PS2_DATA\\MODULES\\MCSERV.IRX;1"); 
-    Ps2LoadModule("cdrom0:\\PS2_DATA\\MODULES\\LIBSD.IRX;1"); 
-    Ps2LoadModule("cdrom0:\\PS2_DATA\\MODULES\\MODHSYN.IRX;1"); 
-    Ps2LoadModule("cdrom0:\\PS2_DATA\\MODULES\\MODMIDI.IRX;1"); 
-    Ps2LoadModule("cdrom0:\\PS2_DATA\\MODULES\\MODMSIN.IRX;1"); 
-    Ps2LoadModule("cdrom0:\\PS2_DATA\\MODULES\\TSNDDRV.IRX;1"); 
-    
-    Snd_init(); 
-    Cd_init(); 
-    Card_init(); 
-    Pad_init(); 
-    
-    Ps2SetVSyncCounter(); 
-    
-    Ps2InitFunc(); 
-    
-    Ps2DispScreenClear(); 
-    Ps2ScreenClear(); 
-    
-    Db.disp[0].pmode.EN2 = 0; 
-    Db.disp[1].pmode.EN2 = 0;
-    
-    FlushCache(0); 
-    
-    Ps2SwapDBuff(); 
-    
-    Db.disp[0].pmode.EN2 = 1; 
-    Db.disp[1].pmode.EN2 = 1; 
-    
-    FlushCache(0); 
-    
-    Ps2InitTexCache(); 
-    Ps2InitPS2_GS_SAVE(); 
-    
-    njColorBlendingMode(0, 8); 
-    njColorBlendingMode(1, 6); 
 
-    njUserClipping(0, NULL); 
-    
-    _Make_SinTable(); 
-    
-    Ps2Vu0ProgSend(0); 
-    Ps2Vu1ProgSend(0); 
-    Ps2Vu1ProgSend(1); 
-}
-#endif
 
-#ifndef TARGET_PC /* pc/src/pc_system.c */
-// 100% matching!
-void Ps2LoadModule(char* p)
-{
-    if (sceSifLoadModule(p, 0, NULL) < 0) 
-    {
-        printf("LOAD ERROR!!! %s\n", p); 
-        
-        exit(0); 
-    }
-}
-#endif
 
-#ifndef TARGET_PC /* pc/src/pc_system.c */
-// 100% matching! 
-void Snd_init()
-{
 
-}
-#endif
-
-#ifndef TARGET_PC /* pc/src/pc_system.c */
-// 100% matching! 
-void Cd_init()
-{
-
-}
-#endif
-
-#ifndef TARGET_PC /* pc/src/pc_system.c */
-// 100% matching! 
-void Card_init()
-{
-
-}
-#endif
-
-#ifndef TARGET_PC /* pc/src/pc_system.c */
-// 100% matching!
-void PS2_jikken()
-{ 
-    pdGetPeripheral(PDD_PORT_A0); 
-    
-    Ps2SwapDBuff(); 
-} 
-#endif
 
 // 99.92% matching 
 void PS2_swap()
@@ -440,7 +260,6 @@ void PS2_swap()
 }
 
 // 99.93% matching
-#ifdef TARGET_PC
 extern int pcIniGetInt(const char* key, int def);
 extern void pcIniSet(const char* key, const char* value);
 
@@ -1168,7 +987,6 @@ static void pc_wide_clip(unsigned int* v, unsigned int num, int uv)
         }
     }
 }
-#endif
 
 /* CLAUDE-NOTE[N9]: dos descartes silenciosos al principio: (1) textured && Ps2_now_tex == NULL -> return sin log;
  * (2) mas abajo, en la ruta nativa 2D: count<1 || count>16384 -> return. Anadir contadores/log aqui.
@@ -1177,7 +995,6 @@ static void pc_wide_clip(unsigned int* v, unsigned int num, int uv)
  * difieren al flush (ver pc_renderer.c queue_transparent). Con clip_3d_on != 0 se cae al codigo PS2 original, que termina
  * en Ps2AddOT/loadImage (ambos inertes en PC): esos primitivos no se dibujan.
  * CLAUDE-NOTE[N11]: en la rama no-sprite de la ruta nativa, vertices[i].q no se inicializa (malloc sin memset). */
-#ifdef TARGET_PC
 /* pri de njDraw*2D (<= -1; -1 = mas cerca): la GS lo convertia con sz = a + b/pri, equivalente a un Z de vista = -pri */
 static float pcPriToViewZ(float pri)
 {
@@ -1225,9 +1042,7 @@ static void pcPrimDiag(const char* who, unsigned long prim, const void* dp, unsi
               c[0], c[1], c[2], c[3], v[8], v[9], v[10], v[11]);
     }
 }
-#endif
 
-#ifdef TARGET_PC
 /* Coordenada U o V de una primitiva con PRIM.FST=1 (registro UV de la GS): 14 bits, punto fijo 12.4 -> texels. La palabra llega
  * como float en el buffer de vertices; se reinterpreta su patron de bits. */
 static float pcFixedUv(float word)
@@ -1236,7 +1051,6 @@ static float pcFixedUv(float word)
     memcpy(&bits, &word, sizeof(bits));
     return (float)(bits & 0x3FFFu) / 16.0f;
 }
-#endif
 
 void Ps2AddPrim(unsigned long prim, void* dp, unsigned int num, unsigned int clip_3d_on)
 {
@@ -1252,14 +1066,10 @@ void Ps2AddPrim(unsigned long prim, void* dp, unsigned int num, unsigned int cli
     float sz;                   
     float x;                   
     float y;                    
-#ifdef TARGET_PC
     float wide_2d = 1.0f;
     static unsigned int wide_buf[64 * 12];
-#endif
 
-#ifdef TARGET_PC
     pcPrimLog(NULL, prim, num);
-#endif
     clip_flag = 0; 
     sc_flag = 0;
     st_clip_flag = 0x8000;
@@ -1288,7 +1098,6 @@ void Ps2AddPrim(unsigned long prim, void* dp, unsigned int num, unsigned int cli
         }
     } 
     
-#ifdef TARGET_PC
     if ((clip_3d_on == 0) && (prim & 0x8000000000000) && (prim & 0x80000000000000) && (num <= 64))
     {
         memcpy(wide_buf, dp, num * 48);
@@ -1408,9 +1217,7 @@ void Ps2AddPrim(unsigned long prim, void* dp, unsigned int num, unsigned int cli
             }
         }
     }
-#endif
 
-#ifdef TARGET_PC
     /* Native 2D path: consume Ninja's screen-space vertices directly. No VU1 packet,
        GIF tag, scratchpad DMA, GS register write or GS ordering-table submission. */
     if (clip_3d_on == 0)
@@ -1577,7 +1384,6 @@ void Ps2AddPrim(unsigned long prim, void* dp, unsigned int num, unsigned int cli
             free(vertices);
         return;
     }
-#endif
     
     p = (unsigned long*)WORKBASE; 
     
@@ -1624,12 +1430,10 @@ void Ps2AddPrim(unsigned long prim, void* dp, unsigned int num, unsigned int cli
         ((u_long128*)p)[1] = ((u_long128*)dp)[1]; 
         ((u_long128*)p)[2] = ((u_long128*)dp)[2]; 
         
-#ifdef TARGET_PC
         if (wide_2d < 1.0f)
         {
             ((float*)p)[8] = 2048.0f + ((((float*)p)[8] - 2048.0f) * wide_2d);
         }
-#endif
         x = ((float*)p)[8]; 
         y = ((float*)p)[9]; 
             
@@ -1720,7 +1524,6 @@ void Ps2AddPrim2D(unsigned long prim, void* dp, unsigned int num)
     Ps2AddPrim(prim, dp, num, 0);
 }
 
-#ifdef TARGET_PC
 /* Etapa final del pipeline 3D (Ps2AddPrim3D*): lo que la GS recibia tras el empaquetador VU0.
  *
  * El juego (vu1DrawTriangleStrip*, njCnk*) entrega vertices ya proyectados a coordenadas de la GS: ST/Q, color y XYZ + fog,
@@ -2222,7 +2025,6 @@ static void pcSubmitStrip3D(unsigned long prim, const void* data, unsigned int c
 done:
     return;
 }
-#endif
 
 void Ps2AddPrim3D(unsigned long prim, void* dp, unsigned int num)
 {
@@ -2271,14 +2073,12 @@ void Ps2AddPrim3D(unsigned long prim, void* dp, unsigned int num)
         }
     } 
 
-#ifdef TARGET_PC
     {
         PcPrim3D mode = { 0, 0, PC_OT_AVERAGE, 0.0f };
         pcPrimDiag("Ps2AddPrim3D", prim, dp, num);
         pcSubmitPrepared3D(prim, dp, num, &mode);
         return;
     }
-#endif
 
     p = (unsigned long*)WORKBASE;
     
@@ -2296,101 +2096,7 @@ void Ps2AddPrim3D(unsigned long prim, void* dp, unsigned int num)
     *p++ = (SCE_GIF_SET_TAG(0, 1, SCE_GIF_REGLIST, 0, 0, 3) | prim) | num;
     *p++ = GIF_REGLIST(SCE_GS_ST, SCE_GS_RGBAQ, SCE_GS_XYZF2);
     
-#ifdef TARGET_PC
     pcPs2Prim3DCore(dp, p, num, 0);
-#else
-    asm volatile
-    ("
-    .set noreorder
-        lqc2        vf10, 0(%3)
-        lqc2        vf13, 0(%0)
-        lqc2        vf12, 0(%1)
-        lqc2        vf11, 0(%2)
-        
-        vitof0.w    vf10, vf10
-        
-        vsub.xyzw   vf9, vf9, vf9
-        
-        lui         at, (0x3FFFF >> 16)
-        
-        ori         v0, zero,  0x8000
-    
-        ori         a0,   at, (0x3FFFF & 0xFFFF)
-        
-        ctc2        zero, vi18
-        ctc2        v0,   vi2
-    
-        viaddi      vi4, vi0, 0
-    
-        addu        v0, %6, zero
-        
-        vdiv        Q, vf0w, vf10w
-    
-    l_002CBEBC:
-        lqc2        vf4,    0(%4)
-        lqc2        vf5, 0x10(%4)
-        lqc2        vf6, 0x20(%4)
-        
-        vmtir       vi3, vf4w
-    
-        vadda.z     ACC, vf6, vf11
-        vmaddx.z    vf7, vf6, vf11x
-        
-        vsub.xy     vf7, vf6, vf13
-        
-        vclipw.xyz  vf7, vf13w        
-        
-        vadda.z     ACC, vf0, vf10
-        vmaddx.z    vf6, vf4, vf10x
-        
-        vmax.z      vf6, vf6, vf0
-        
-        vminiy.z    vf6, vf6, vf12y
-        
-        vaddz.w     vf9, vf9, vf6z
-        
-        vftoi4.xyzw vf6, vf6
-        
-        vmtir       vi5, vf6w
-    
-        cfc2        v1, vi18
-    
-        and         v1, v1, a0
-    
-        beqz        v1, l_002CBF0C
-        nop
-    
-        vior        vi3, vi3, vi2
-        
-    l_002CBF0C:
-        vior        vi5, vi5, vi3
-        viand       vi4, vi4, vi5
-    
-        vmfir.w     vf6, vi5
-        
-        sqc2        vf4,    0(%5)
-        sqc2        vf5, 0x10(%5)
-        sqc2        vf6, 0x20(%5) 
-        
-        addi        v0, v0, -1
-        addiu       %5, %5, 48
-        
-        bnez        v0, l_002CBEBC
-        
-        addiu       %4, %4, 48
-        
-        cfc2        v1, vi4
-        
-        bnez        v0, l_002CBF9C
-        nop
-    
-        vmulq.w     vf4, vf9, Q
-        
-        sqc2        vf4, 0(%5) 
-    .set reorder
-    " : : "r"(clip_vec), "r"(near_far_vec), "r"(zclip_ab_vec), "r"(zbuff_ab_vec), "r"(dp), "r"(p), "r"(num) : 
-    );
-#endif
 
     if ((prim & 0x20000000000000)) 
     {
@@ -2455,13 +2161,11 @@ void Ps2AddPrim3DEx(unsigned long prim, void* dp, unsigned int num)
         }
     } 
 
-#ifdef TARGET_PC
     {
         PcPrim3D mode = { 1, 0, PC_OT_AVERAGE, 0.0f };
         pcSubmitStrip3D(prim, dp, num, &mode);
         return;
     }
-#endif
 
     p = (unsigned long*)WORKBASE;
     
@@ -2479,103 +2183,7 @@ void Ps2AddPrim3DEx(unsigned long prim, void* dp, unsigned int num)
     *p++ = (SCE_GIF_SET_TAG(0, 1, SCE_GIF_REGLIST, 0, 0, 3) | prim) | num;
     *p++ = GIF_REGLIST(SCE_GS_ST, SCE_GS_RGBAQ, SCE_GS_XYZF2);
     
-#ifdef TARGET_PC
     pcPs2Prim3DCore(dp, p, num, 1);
-#else
-    asm volatile
-    ("
-    .set noreorder
-        lqc2        vf10, 0(%3)
-        lqc2        vf13, 0(%0)
-        lqc2        vf12, 0(%1)
-        lqc2        vf11, 0(%2)
-        
-        vitof0.w    vf10, vf10
-        
-        vsub.xyzw   vf9, vf9, vf9
-        
-        lui         at, (0x3FFFF >> 16)
-        
-        ori         v0, zero,  0x8000
-    
-        ori         a0,   at, (0x3FFFF & 0xFFFF)
-        
-        ctc2        zero, vi18
-        ctc2        v0,   vi2
-    
-        viaddi      vi4, vi0, 0
-    
-        addu        v0, %6, zero
-        
-        vdiv        Q, vf0w, vf10w
-    
-    l_002CC1CC:
-        lqc2        vf4,    0(%4)
-        lqc2        vf5, 0x10(%4)
-        lqc2        vf6, 0x20(%4)
-        
-        vmtir       vi3, vf4w
-    
-        vadda.z     ACC, vf6, vf11
-        vmaddx.z    vf7, vf6, vf11x
-        
-        vsub.xy     vf7, vf6, vf13
-        
-        vclipw.xyz  vf7, vf13w        
-        
-        vadda.z     ACC, vf0, vf10
-        vmaddx.z    vf6, vf4, vf10x
-        
-        vmax.z      vf6, vf6, vf0
-        
-        vftoi0.xyzw vf5, vf5
-        
-        vminiy.z    vf6, vf6, vf12y
-        
-        vaddz.w     vf9, vf9, vf6z
-        
-        vftoi4.xyzw vf6, vf6
-        
-        vmtir       vi5, vf6w
-    
-        cfc2        v1, vi18
-    
-        and         v1, v1, a0
-    
-        beqz        v1, l_002CC220
-        nop
-    
-        vior        vi3, vi3, vi2
-        
-    l_002CC220:
-        vior        vi5, vi5, vi3
-        viand       vi4, vi4, vi5
-    
-        vmfir.w     vf6, vi5
-        
-        sqc2        vf4,    0(%5)
-        sqc2        vf5, 0x10(%5)
-        sqc2        vf6, 0x20(%5) 
-        
-        addi        v0, v0, -1
-        addiu       %5, %5, 48
-        
-        bnez        v0, l_002CC1CC
-        
-        addiu       %4, %4, 48
-        
-        cfc2        v1, vi4
-        
-        bnez        v0, l_002CC2B0
-        nop
-    
-        vmulq.w     vf4, vf9, Q
-        
-        sqc2        vf4, 0(%5) 
-    .set reorder
-    " : : "r"(clip_vec), "r"(near_far_vec), "r"(zclip_ab_vec), "r"(zbuff_ab_vec), "r"(dp), "r"(p), "r"(num) : 
-    );
-#endif
 
     if ((prim & 0x20000000000000)) 
     {
@@ -2648,13 +2256,11 @@ void Ps2AddPrim3DEx1P(unsigned long prim, void* dp, unsigned int num)
         }
     } 
 
-#ifdef TARGET_PC
     {
         PcPrim3D mode = { 1, 0, (Ps2_albinoid_flag == 0) ? PC_OT_FIXED : PC_OT_IMMEDIATE, Ps2AddPrimPrio };
         pcSubmitStrip3D(prim, dp, num, &mode);
         return;
     }
-#endif
 
     p = (unsigned long*)WORKBASE;
     
@@ -2672,103 +2278,7 @@ void Ps2AddPrim3DEx1P(unsigned long prim, void* dp, unsigned int num)
     *p++ = (SCE_GIF_SET_TAG(0, 1, SCE_GIF_REGLIST, 0, 0, 3) | prim) | num;
     *p++ = GIF_REGLIST(SCE_GS_ST, SCE_GS_RGBAQ, SCE_GS_XYZF2);
     
-#ifdef TARGET_PC
     pcPs2Prim3DCore(dp, p, num, 1);
-#else
-    asm volatile
-    ("
-    .set noreorder
-        lqc2        vf10, 0(%3)
-        lqc2        vf13, 0(%0)
-        lqc2        vf12, 0(%1)
-        lqc2        vf11, 0(%2)
-        
-        vitof0.w    vf10, vf10
-        
-        vsub.xyzw   vf9, vf9, vf9
-        
-        lui         at, (0x3FFFF >> 16)
-        
-        ori         v0, zero,  0x8000
-    
-        ori         a0,   at, (0x3FFFF & 0xFFFF)
-        
-        ctc2        zero, vi18
-        ctc2        v0,   vi2
-    
-        viaddi      vi4, vi0, 0
-    
-        addu        v0, %6, zero
-        
-        vdiv        Q, vf0w, vf10w
-    
-    l_002CC51C:
-        lqc2        vf4,    0(%4)
-        lqc2        vf5, 0x10(%4)
-        lqc2        vf6, 0x20(%4)
-        
-        vmtir       vi3, vf4w
-    
-        vadda.z     ACC, vf6, vf11
-        vmaddx.z    vf7, vf6, vf11x
-        
-        vsub.xy     vf7, vf6, vf13
-        
-        vclipw.xyz  vf7, vf13w        
-        
-        vadda.z     ACC, vf0, vf10
-        vmaddx.z    vf6, vf4, vf10x
-        
-        vmax.z      vf6, vf6, vf0
-        
-        vftoi0.xyzw vf5, vf5
-        
-        vminiy.z    vf6, vf6, vf12y
-        
-        vaddz.w     vf9, vf9, vf6z
-        
-        vftoi4.xyzw vf6, vf6
-        
-        vmtir       vi5, vf6w
-    
-        cfc2        v1, vi18
-    
-        and         v1, v1, a0
-    
-        beqz        v1, l_002CC570
-        nop
-    
-        vior        vi3, vi3, vi2
-        
-    l_002CC570:
-        vior        vi5, vi5, vi3
-        viand       vi4, vi4, vi5
-    
-        vmfir.w     vf6, vi5
-        
-        sqc2        vf4,    0(%5)
-        sqc2        vf5, 0x10(%5)
-        sqc2        vf6, 0x20(%5) 
-        
-        addi        v0, v0, -1
-        addiu       %5, %5, 48
-        
-        bnez        v0, l_002CC51C
-        
-        addiu       %4, %4, 48
-        
-        cfc2        v1, vi4
-        
-        bnez        v0, l_002CC600
-        nop
-    
-        vmulq.w     vf4, vf9, Q
-        
-        sqc2        vf4, 0(%5) 
-    .set reorder
-    " : : "r"(clip_vec), "r"(near_far_vec), "r"(zclip_ab_vec), "r"(zbuff_ab_vec), "r"(dp), "r"(p), "r"(num) : 
-    );
-#endif
 
     if ((Ps2_albinoid_flag == 0) && ((prim & 0x20000000000000))) 
     {
@@ -2801,14 +2311,12 @@ void Ps2AddPrim3DMod(unsigned long prim, void* dp, unsigned int num)
     zbuff_ab_vec[2] = -Ps2_zbuff_a;
     zbuff_ab_vec[3] = *(float*)&num;  
     
-#ifdef TARGET_PC
     {
         PcPrim3D mode = { 1, 1, PC_OT_IMMEDIATE, 0.0f };
         pcPrimDiag("Ps2AddPrim3DMod", prim, dp, num);
         pcSubmitPrepared3D(prim, dp, num, &mode);
         return;
     }
-#endif
 
     p = (unsigned long*)WORKBASE;
     
@@ -2828,103 +2336,7 @@ void Ps2AddPrim3DMod(unsigned long prim, void* dp, unsigned int num)
     *p++ = (SCE_GIF_SET_TAG(0, 1, SCE_GIF_REGLIST, 0, 0, 3) | prim) | num;
     *p++ = GIF_REGLIST(SCE_GS_ST, SCE_GS_RGBAQ, SCE_GS_XYZF2);
     
-#ifdef TARGET_PC
     pcPs2Prim3DCore(dp, p, num, 1);
-#else
-    asm volatile
-    ("
-    .set noreorder
-        lqc2        vf10, 0(%3)
-        lqc2        vf13, 0(%0)
-        lqc2        vf12, 0(%1)
-        lqc2        vf11, 0(%2)
-        
-        vitof0.w    vf10, vf10
-        
-        vsub.xyzw   vf9, vf9, vf9
-        
-        lui         at, (0x3FFFF >> 16)
-        
-        ori         v0, zero,  0x8000
-    
-        ori         a0,   at, (0x3FFFF & 0xFFFF)
-        
-        ctc2        zero, vi18
-        ctc2        v0,   vi2
-    
-        viaddi      vi4, vi0, 0
-    
-        addu        v0, %6, zero
-        
-        vdiv        Q, vf0w, vf10w
-    
-    l_002CC78C:
-        lqc2        vf4,    0(%4)
-        lqc2        vf5, 0x10(%4)
-        lqc2        vf6, 0x20(%4)
-        
-        vmtir       vi3, vf4w
-    
-        vadda.z     ACC, vf6, vf11
-        vmaddx.z    vf7, vf6, vf11x
-        
-        vsub.xy     vf7, vf6, vf13
-        
-        vclipw.xyz  vf7, vf13w        
-        
-        vadda.z     ACC, vf0, vf10
-        vmaddx.z    vf6, vf4, vf10x
-        
-        vmax.z      vf6, vf6, vf0
-        
-        vftoi0.xyzw vf5, vf5
-        
-        vminiy.z    vf6, vf6, vf12y
-        
-        vaddz.w     vf9, vf9, vf6z
-        
-        vftoi4.xyzw vf6, vf6
-        
-        vmtir       vi5, vf6w
-    
-        cfc2        v1, vi18
-    
-        and         v1, v1, a0
-    
-        beqz        v1, l_002CC7E0
-        nop
-    
-        vior        vi3, vi3, vi2
-        
-    l_002CC7E0:
-        vior        vi5, vi5, vi3
-        viand       vi4, vi4, vi5
-    
-        vmfir.w     vf6, vi5
-        
-        sqc2        vf4,    0(%5)
-        sqc2        vf5, 0x10(%5)
-        sqc2        vf6, 0x20(%5) 
-        
-        addi        v0, v0, -1
-        addiu       %5, %5, 48
-        
-        bnez        v0, l_002CC78C
-        
-        addiu       %4, %4, 48
-        
-        cfc2        v1, vi4
-        
-        bnez        v0, l_002CC82C
-        nop
-    
-        vmulq.w     vf4, vf9, Q
-        
-        sqc2        vf4, 0(%5) 
-    .set reorder
-    " : : "r"(clip_vec), "r"(near_far_vec), "r"(zclip_ab_vec), "r"(zbuff_ab_vec), "r"(dp), "r"(p), "r"(num) : 
-    );
-#endif
 
     SyncPath();
     
@@ -2943,11 +2355,7 @@ void Ps2ClearOT()
     
     Ps2_ot_list_no = 0;
     
-#ifdef TARGET_PC
     Ps2_PP = (void*)Ps2_PBUFF;
-#else
-    Ps2_PP = (void*)((int)&Ps2_PBUFF | 0x30000000); 
-#endif
     
     for (i = 0; i < 4096; i++) 
     {
@@ -2969,47 +2377,23 @@ void Ps2AddOT(void* p, unsigned int num, float z, unsigned long prim)
         
         if (((id >= 26510) && (id <= 26614)) || (id == 107170)) 
         { 
-#ifdef TARGET_PC
             otz = (unsigned int)(int)z;
-#else
-            asm volatile (cvt.w.s f12, f12); 
-#endif
-#ifdef TARGET_PC
             /* (mfc1) */
-#else
-            asm volatile (mfc1      otz, f12); 
-#endif
             
             otz >>= 12;
         } 
         else 
         { 
-#ifdef TARGET_PC
             otz = (unsigned int)(int)z;
-#else
-            asm volatile (cvt.w.s f12, f12); 
-#endif
-#ifdef TARGET_PC
             /* (mfc1) */
-#else
-            asm volatile (mfc1      otz, f12); 
-#endif
             
             otz >>= 4;
         }
     } 
     else 
     { 
-#ifdef TARGET_PC
         otz = (unsigned int)(int)z;
-#else
-        asm volatile (cvt.w.s f12, f12); 
-#endif
-#ifdef TARGET_PC
         /* (mfc1) */
-#else
-        asm volatile (mfc1      otz, f12); 
-#endif
         
         otz >>= 4; 
     }
@@ -3079,16 +2463,8 @@ void Ps2AddOT(void* p, unsigned int num, float z, unsigned long prim)
  * (otz) que implementaba Ps2DrawOTagSub no existe. Ademas ya no envuelve el dibujo con Ps2ZbuffOff()/Ps2ZbuffOn(). */
 void Ps2DrawOTag()
 {
-#ifdef TARGET_PC
     pcRendererFlushTransparent();
     Ps2_current_texbreak = 1;
-#else
-    int i;
-    Ps2ZbuffOff();
-    for (i = 0; i < 4096; ) i = Ps2DrawOTagSub(i);
-    Ps2ZbuffOn();
-    Ps2_current_texbreak = 1;
-#endif
 }
 
 // 98.96% matching
@@ -3125,11 +2501,7 @@ int Ps2DrawOTagSub(int start_no)
     
     for (i = 0; i < 64; i++) 
     { 
-#ifdef TARGET_PC
         memset(&ps2_tp_cache[i], 0, 16);
-#else
-        *(u_long128*)&ps2_tp_cache[i] = 0; 
-#endif
     } 
     
     for (i = start_no; i < 4096; i++) 
@@ -3138,11 +2510,7 @@ int Ps2DrawOTagSub(int start_no)
         { 
             if (old_p != NULL) 
             { 
-#ifdef TARGET_PC
                 ((long*)old_p->p)[2] |= ((unsigned long)p->p & 0x7FFFFFFF) << 32; /* PC: full address */
-#else
-                ((long*)old_p->p)[2] |= ((unsigned long)p->p & 0xFFFFFFF) << 32; 
-#endif
             }
             else
             { 
@@ -3271,9 +2639,6 @@ int Ps2DrawOTagSub(int start_no)
         ((long*)old_p->p)[2] = (((long*)(temp = old_p)->p)[2] & 0xFFFFFFF) | 0x70000000; 
         ((long*)old_p->p)[8] = ((long*)old_p->p)[8] | 0x8000; 
         
-#ifndef TARGET_PC /* debug print every frame */
-        printf("TEX %05d:%05d]", 0x3F80 - tex_addr, 0x3FCC - clt_addr); 
-#endif
         
         save_alpha[0] = Ps2_gs_save.mode_bk[0]; 
         save_alpha[1] = Ps2_gs_save.mode_bk[1]; 
@@ -3283,11 +2648,7 @@ int Ps2DrawOTagSub(int start_no)
         
         SyncPath();
         
-#ifdef TARGET_PC
         loadImage(start_addr); /* PC: full address */
-#else
-        loadImage((void*)((int)start_addr & 0xFFFFFF));
-#endif
         
         SyncPath(); 
         
@@ -3303,7 +2664,6 @@ int Ps2DrawOTagSub(int start_no)
 // 100% matching!
 unsigned int Ps2BitCount(register unsigned int value)
 {
-#ifdef TARGET_PC
     {
         unsigned int v = value - 1;
         unsigned int n = 0;
@@ -3321,21 +2681,6 @@ unsigned int Ps2BitCount(register unsigned int value)
 
         return n;
     }
-#else
-    asm volatile
-    {
-        
-        addi  v0, value, -1
-        addi  v1, zero, 0x1F
-            
-        plzcw v0, v0
-            
-        subu  v0, v1, v0
-        
-        nop
-            
-    }
-#endif
 }
 
 // 100% matching!
@@ -3351,10 +2696,8 @@ void Ps2InitTexCache()
     } 
     
     Ps2_tex_cache_num = 4;
-#ifdef TARGET_PC
     Ps2PcTextureSourceCacheReset();
     pcRendererBindTexture(0);
-#endif
 }
 
 // 100% matching!
@@ -3372,28 +2715,19 @@ int Ps2GlobalIndexTexLoad(unsigned int index)
 	{
     	printf("Ps2GlobalIndexTexLoad ERROR!!! %08x\n", index);
 	}
-#ifdef TARGET_PC /* the PS2 build returned whatever was left in the return register */
     return 0;
-#endif
 }
 
 static int Ps2EnsureTextureImage(NJS_TEXMEMLIST* addr, TIM2_PICTUREHEADER_EX* timp,
                                   int asset_cache_eligible, int asset_cache_hit
-#ifdef TARGET_PC
                                   , int profile_texture, double* profile_send_ms,
                                   unsigned int* profile_send_calls, double* clut_only_ms,
                                   int* image_upload_skipped
-#endif
 )
 {
     unsigned int i;
     unsigned int cache_flag = 1;
-#ifdef TARGET_PC
     double profile_send_t0 = 0.0;
-#else
-    (void)asset_cache_eligible;
-    (void)asset_cache_hit;
-#endif
 
     if (Ps2_current_texbreak != 0) 
     {
@@ -3412,11 +2746,9 @@ static int Ps2EnsureTextureImage(NJS_TEXMEMLIST* addr, TIM2_PICTUREHEADER_EX* ti
     if (timp == Ps2_tex_cache_buff[0])
     {
         cache_flag = 0;
-#ifdef TARGET_PC
         /* Another material can overwrite shared CLUT VRAM while this image plane remains cached. */
         if (asset_cache_eligible && asset_cache_hit)
             goto label;
-#endif
     } 
     else if ((Ps2_tex_load_tp_cancel == 0) && (timp->TpFlag != 0)) 
     {
@@ -3429,7 +2761,6 @@ label:
         
         if ((PS2_Render_tex_sub_flag == 0) || ((timp->PictFormat >= 5) && (timp->PictFormat <= 8)) || ((timp->ImageType == 4) || (timp->ImageType == 5)))
         {
-#ifdef TARGET_PC
             int clut_only_ok = 0;
             if (asset_cache_hit)
             {
@@ -3463,9 +2794,6 @@ label:
                     (*profile_send_calls)++;
                 }
             }
-#else
-            Send_Tim2_dataEx(Ps2_tex_cache_buff[0], 190 * 64, 254 * 64);
-#endif
         }
     }
 
@@ -3546,7 +2874,6 @@ static void Ps2BindTextureState(NJS_TEXMEMLIST* addr, TIM2_PICTUREHEADER_EX* tim
 // 97.17% matching
 int Ps2TexLoad(NJS_TEXMEMLIST* addr)
 {
-#ifdef TARGET_PC
     extern int pcNativeTextureLoad(NJS_TEXMEMLIST* source);
     if (addr == NULL) {
         Ps2_now_tex = NULL;
@@ -3569,18 +2896,15 @@ int Ps2TexLoad(NJS_TEXMEMLIST* addr)
         }
     }
     return pcNativeTextureLoad(addr);
-#endif
 }
 
 // 100% matching!
 void Ps2SetFogColor()
 {
-#ifdef TARGET_PC
     extern float fNaFogR, fNaFogG, fNaFogB;
     extern unsigned int ulNaFogState;
     pcRendererSetGlobalFog(ulNaFogState != 0, fNaFogR, fNaFogG, fNaFogB);
     return;
-#endif
 	D2_SyncTag();
     
     ((u_long*)WORKBASE)[0] = DMAend | 0x2;
@@ -3600,11 +2924,9 @@ void Ps2SetFogColor()
 // 100% matching!
 void Ps2SetFogColorSys(unsigned int r, unsigned int g, unsigned int b)
 {
-#ifdef TARGET_PC
     extern unsigned int ulNaFogState;
     pcRendererSetGlobalFog(ulNaFogState != 0, r / 255.0f, g / 255.0f, b / 255.0f);
     return;
-#endif
     D2_SyncTag();
     
     ((u_long*)WORKBASE)[0] = DMAend | 0x2;
@@ -3644,9 +2966,7 @@ unsigned int Ps2AlphaIsHalf(unsigned int* cp, unsigned int num)
     {
         ((unsigned char*)cp)[3] = (((unsigned char*)cp)[3] + 1) >> 1;
     }
-#ifdef TARGET_PC /* the PS2 build returned whatever was left in the return register */
     return 0;
-#endif
 }
 
 // 100% matching!
@@ -3661,9 +2981,7 @@ unsigned int Ps2Alpha4to8(unsigned int* cp, unsigned int num)
         
         ((unsigned char*)cp)[3] = val | (val >> 4);
     }
-#ifdef TARGET_PC /* the PS2 build returned whatever was left in the return register */
     return 0;
-#endif
 }
 
 // 100% matching!
@@ -3826,11 +3144,9 @@ void Ps2InitPS2_GS_SAVE()
  * diferido dibujara. Llamarla despues de dibujar (StoreRenderTex, PS2_Render_Tex_Sub, Ps2Init...) borra el frame. */
 void Ps2ScreenClear()
 {
-#ifdef TARGET_PC
     /* Native drawing is immediate: clearing here wipes what was already drawn this frame (StoreRenderTex,
      * PS2_Render_Tex_Sub). The FBO is cleared at the start of every frame (pcRendererBeginFrame). */
     return;
-#endif
     SyncPath();
 
     ((u_long*)WORKBASE)[0] = DMAend | 0x8; 
@@ -3870,10 +3186,8 @@ void Ps2ScreenClear()
 /* CLAUDE-NOTE[N2]: igual que Ps2ScreenClear: limpieza inmediata del FBO, incluida la profundidad. */
 void Ps2DispScreenClear()
 {
-#ifdef TARGET_PC
     pcRendererClear(0.0f, 0.0f, 0.0f, 1.0f, 1);
     return;
-#endif
     SyncPath();
 
     ((u_long*)WORKBASE)[0] = DMAend | 0x8; 
@@ -3915,10 +3229,8 @@ void Ps2DispScreenClear()
  * se prueba contra el buffer de profundidad 3D. Revisar los llamadores sueltos en sub1.c. */
 void Ps2ZbuffOff()
 {
-#ifdef TARGET_PC
     pcRendererSetDepthMode(1, 0);   /* GS: ZTE=1 GEQUAL + ZMSK=1 */
     return;
-#endif
     D2_SyncTag();
     
     ((u_long*)WORKBASE)[0] = DMAend | 0x2;
@@ -3938,10 +3250,8 @@ void Ps2ZbuffOff()
 // 100% matching!
 void Ps2ZbuffOff2()
 {
-#ifdef TARGET_PC
     pcRendererSetDepthMode(1, 0);
     return;
-#endif
 	D2_SyncTag();
     
     ((u_long*)WORKBASE)[0] = DMAend | 0x3;
@@ -3964,10 +3274,8 @@ void Ps2ZbuffOff2()
 // 100% matching! 
 void Ps2ZbuffOn()
 {
-#ifdef TARGET_PC
     pcRendererSetDepthMode(1, 1);
     return;
-#endif
     D2_SyncTag();
     
     ((u_long*)WORKBASE)[0] = DMAend | 0x3;
@@ -3992,11 +3300,9 @@ void Ps2ShadowStart()
 {
 	Ps2_current_texbreak = 1;
     
-#ifdef TARGET_PC
     /* FRAME_2 = mascara de 16 bits (FBP 380) con la Z de la escena (ZBUF_2.ZMSK=1); se limpia a 0 */
     pcRendererShadowBegin();
     return;
-#endif
     D2_SyncTag();
     
     ((u_long*)WORKBASE)[0] = DMAend | 0xA;
@@ -4110,13 +3416,11 @@ void Ps2ShadowDraw()
         Ps2_shadow_vec[3] = 0;
     }
     
-#ifdef TARGET_PC
     /* sprite con la mascara como textura, RGB = fog*3/16, mezcla (Cd - Cs); despues se limpia el rectangulo de la mascara */
     pcRendererShadowCompose(Ps2_shadow_vec[0] - 1728.0f, Ps2_shadow_vec[1] - 1808.0f,
                             Ps2_shadow_vec[2] - 1728.0f, Ps2_shadow_vec[3] - 1808.0f,
                             (int)(((unsigned int)Ps2_shadow_fog * 3) / 16));
     return;
-#endif
     sceVu0FTOI4Vector(iv4, Ps2_shadow_vec);
     sceVu0FTOI0Vector(iv0, Ps2_shadow_vec);
     
@@ -4196,11 +3500,9 @@ void Ps2ShadowMain0()
 	Ps2_shadow_vec[2] = -65536.0f;
 	Ps2_shadow_vec[3] = -65536.0f;
 
-#ifdef TARGET_PC
     /* cabecera del paquete: ZBUF_2 (ZMSK=1) y ALPHA_2 = 0x8000000029 -> Cs + Cd (suma las caras del volumen) */
     pcRendererSetGsAlpha2(0x8000000029ULL);
     return;
-#endif
 	loadImage((void*)shadow_head);
 }
 
@@ -4209,11 +3511,9 @@ void Ps2ShadowMain1()
 {
 	static const unsigned long shadow_tail[6] = { 0x70000002UL, 0x0UL, 0x1000000000008001UL, 0x0EUL, 0x80000000A1UL, 0x43UL };
 
-#ifdef TARGET_PC
     /* ALPHA_2 = 0x80000000A1 -> Cd - Cs (resta las caras del otro sentido) */
     pcRendererSetGsAlpha2(0x80000000A1ULL);
     return;
-#endif
 
 	loadImage((void*)shadow_tail);
 }
@@ -4221,11 +3521,9 @@ void Ps2ShadowMain1()
 // 100% matching! 
 void Ps2ShadowEnd()
 {
-#ifdef TARGET_PC
     pcRendererShadowEnd();
     pcRendererSetGsAlpha2(0ULL);   /* ALPHA_2 = (Cs - Cs) * As + Cs: sin mezcla */
     return;
-#endif
     D2_SyncTag();
     
     ((u_long*)WORKBASE)[0] = DMAend | 0x5;
@@ -4326,13 +3624,11 @@ void Ps2AddPrim3DExI(unsigned long prim, void* dp, unsigned int num)
         }
     } 
 
-#ifdef TARGET_PC
     {
         PcPrim3D mode = { 1, 0, PC_OT_PER_TRIANGLE, 0.0f };
         pcSubmitStrip3D(prim, dp, num, &mode);
         return;
     }
-#endif
 
     p = (unsigned long*)WORKBASE;
     
@@ -4350,99 +3646,7 @@ void Ps2AddPrim3DExI(unsigned long prim, void* dp, unsigned int num)
     *p++ = (SCE_GIF_SET_TAG(0, 1, SCE_GIF_REGLIST, 0, 0, 3) | prim) | num;
     *p++ = GIF_REGLIST(SCE_GS_ST, SCE_GS_RGBAQ, SCE_GS_XYZF2);
     
-#ifdef TARGET_PC
     pcPs2Prim3DCore(dp, p, num, 1);
-#else
-    asm volatile
-    ("
-    .set noreorder
-        lqc2        vf10, 0(%3)
-        lqc2        vf13, 0(%0)
-        lqc2        vf12, 0(%1)
-        lqc2        vf11, 0(%2)
-        
-        vitof0.w    vf10, vf10
-        
-        vsub.xyzw   vf9, vf9, vf9
-        
-        li          v0, 0x8000
-        li          %9, 0x3FFFF
-        
-        ctc2        zero, vi18
-        ctc2        v0,   vi2
-    
-        viaddi      vi4, vi0, 0
-    
-        move        v0, %6
-        
-        vdiv        Q, vf0w, vf10w
-    
-    l_002CED6C:
-        lqc2        vf4,    0(%4)
-        lqc2        vf5, 0x10(%4)
-        lqc2        vf6, 0x20(%4)
-        
-        vmtir       vi3, vf4w
-    
-        vadda.z     ACC, vf6, vf11
-        vmaddx.z    vf7, vf6, vf11x
-        
-        vsub.xy     vf7, vf6, vf13
-        
-        vclipw.xyz  vf7, vf13w        
-        
-        vadda.z     ACC, vf0, vf10
-        vmaddx.z    vf6, vf4, vf10x
-        
-        vmax.z      vf6, vf6, vf0
-        
-        vftoi0.xyzw vf5, vf5
-        
-        vminiy.z    vf6, vf6, vf12y
-        
-        vaddz.w     vf9, vf9, vf6z
-        
-        vftoi4.xyzw vf6, vf6
-        
-        vmtir       vi5, vf6w
-    
-        cfc2        %8, vi18
-        
-        and         %7, %8, %9
-        beqz        %7, l_002CEDC0
-        nop
-    
-        vior        vi3, vi3, vi2
-        
-    l_002CEDC0:
-        vior        vi5, vi5, vi3
-        viand       vi4, vi4, vi5
-    
-        vmfir.w     vf6, vi5
-        
-        sqc2        vf4,    0(%5)
-        sqc2        vf5, 0x10(%5)
-        sqc2        vf6, 0x20(%5) 
-        
-        addi        v0, v0, -1
-        addiu       %5, %5, 48
-        
-        bnez        v0, l_002CED6C
-        
-        addiu       %4, %4, 48
-        
-        cfc2        %7, vi4
-        
-        bnez        v0, l_002CF178
-        nop
-    
-        vmulq.w     vf4, vf9, Q
-        
-        sqc2        vf4, 0(%5) 
-    .set reorder
-    " : : "r"(clip_vec), "r"(near_far_vec), "r"(zclip_ab_vec), "r"(zbuff_ab_vec), "r"(dp), "r"(p), "r"(num), "r"(clip_flag), "r"(st_clip_flag), "r"(clut_flag)  : "v0", "memory" 
-    );
-#endif
 
     if ((prim & 0x20000000000000)) 
     {
@@ -4564,12 +3768,10 @@ void PS2_Render_Tex_Sub()
 {
     PS2_Render_tex_sub_flag = 1;
 
-#ifdef TARGET_PC
     /* La GS copiaba la pantalla (sprite UV 0..640x480 -> XY 0,-16..320,240) a la zona de VRAM de 256x256 que despues se
      * enlazaba como textura (Ps2BindTextureState con el flag activo). Ver pcRendererCopyScreenToRenderTexture. */
     pcRendererCopyScreenToRenderTexture(0, 0, SCR_WIDTH2, SCR_HEIGHT2, 0, -16, SCR_WIDTH2 / 2, SCR_HEIGHT2 / 2);
     return;
-#endif
     D2_SyncTag();
     
     ((u_long*)WORKBASE)[0] = DMAend | 0xE;
