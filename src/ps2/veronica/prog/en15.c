@@ -600,11 +600,7 @@ static void __attack(BH_PWORK* epw)
     {
         switch (epw->frm_no / 65536) 
         {
-#ifdef TARGET_PC
         case 47: case 48: case 49: case 50: case 51: case 52: case 53: case 54:
-#else
-        case 47 ... 54:
-#endif
 
             ang = target_direction(epw);
 
@@ -2573,12 +2569,10 @@ static void PoisonAttack(O_WRK* op)
         {
             if (njRandom() < 0.6)
             {
-#ifdef TARGET_PC
                 extern int pcRandoNoNosferatuPoison(void);
 
                 /* randomizer: no_nosferatu_poison=1 (pc_rando.c) */
                 if (!pcRandoNoNosferatuPoison())
-#endif
                 plp->stflg |= 0x200000;
             }  
         }
