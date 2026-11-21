@@ -656,11 +656,7 @@ int LoadSoundPackFile(char* SpqFile)
         }
         else 
         {
-#ifdef TARGET_PC
             memcpy(&Room_SoundEnv, &pSdReadBuf[pSpqHeader->Offset], sizeof(RM_SNDENV));
-#else
-            memcpy(Room_SoundEnv, &pSdReadBuf[pSpqHeader->Offset], sizeof(RM_SNDENV)); 
-#endif
             
             FxLevelTimer = 16;
             
@@ -909,13 +905,9 @@ int SetupSeGenericParm(int SlotNo, int SeNo, NJS_POINT3* pPos, int Flag, unsigne
         RequestInfo.ListNo = -1;
     }
     
-#ifdef TARGET_PC
     /* PC: shift as the PS2 code does (sra); MSVC's division rounds negative sound numbers
      * (0x8000xxxx) toward zero, which picked the next bank and the sound was not found */
     RequestInfo.BankNo = (SeNo >> 8) & 0xF;
-#else
-    RequestInfo.BankNo = (SeNo / 256) & 0xF;
-#endif
     
     RequestInfo.Priority = 0;
     
@@ -1353,11 +1345,7 @@ void CallSystemSeBasic(int SeNo, int Volume, int FxLevel)
 {
     int SlotDef[2] = { 17, 18 };
 
-#ifdef TARGET_PC
     RequestInfo.BankNo = (SeNo >> 8) & 0xF;
-#else
-    RequestInfo.BankNo = (SeNo / 256) & 0xF;
-#endif
     RequestInfo.ListNo = SeNo;
     
     RequestInfo.Priority = 0;
@@ -1455,9 +1443,7 @@ int GetPlayerActionSeSlotNo(int Type, int Id)
     case 6:
         return 6;
     }
-#ifdef TARGET_PC /* the PS2 build returned whatever was left in the return register */
     return 0;
-#endif
 }
 
 // 100% matching!
@@ -1645,11 +1631,7 @@ void CallBackGroundSeEx(unsigned int SlotNo, int SeNo, short Timer)
     }
     
     RequestInfo.SlotNo = SlotDef[SlotNo];
-#ifdef TARGET_PC
     RequestInfo.BankNo = (SeNo >> 8) & 0xF;
-#else
-    RequestInfo.BankNo = (SeNo / 256) & 0xF;
-#endif
     RequestInfo.ListNo = SeNo;
     
     RequestInfo.Priority = 0;
@@ -1861,11 +1843,7 @@ int CallNativeEventSe(int SlotNo, NJS_POINT3* pPos, int SeNo, int Mode)
     SeNo = (SeNo & 0xFFFF00FF) | 0x200;
     
     RequestInfo.SlotNo = SlotDef[SlotNo];
-#ifdef TARGET_PC
     RequestInfo.BankNo = (SeNo >> 8) & 0xF;
-#else
-    RequestInfo.BankNo = (SeNo / 256) & 0xF;
-#endif
     RequestInfo.ListNo = SeNo;
     
     RequestInfo.Priority = 0;
@@ -2607,11 +2585,7 @@ void CallObjectSe2(unsigned int SlotNo, Object* oip, int Flag)
         } 
         else 
         {
-#ifdef TARGET_PC
             RequestInfo.BankNo = (oip->SeNo >> 8) & 0xF;
-#else
-            RequestInfo.BankNo = (oip->SeNo / 256) & 0xF;
-#endif
             RequestInfo.ListNo = oip->SeNo;
         }
         
