@@ -593,11 +593,7 @@ void ContinueAdx(unsigned int SlotNo)
 // 100% matching!
 int GetAdxStatus(unsigned int SlotNo)
 {
-#ifdef TARGET_PC
     return ADXT_GetStat(AdxTInfo[SlotNo].Handle);
-#else
-    ADXT_GetStat(AdxTInfo[SlotNo].Handle);
-#endif
 }
 
 // 100% matching!
