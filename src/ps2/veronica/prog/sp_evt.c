@@ -1940,23 +1940,15 @@ void bhControlComEvtScript()
             ce->scp++;
             break;
         case 236:
-#ifdef TARGET_PC
             /* PC: jump to the label itself. MSVC applied the ++ after storing the label, so every
              * jump landed one byte past it and the script read arguments as commands (it then
              * showed a message number that does not exist and crashed) */
             ce->scp = ce->sclb[*ce->scp];
-#else
-            ce->scp = ce->sclb[*ce->scp++];
-#endif
             break;
         case 237:
             if ((ce->lcflg & (1 << *ce->scp++))) 
             {
-#ifdef TARGET_PC
                 ce->scp = ce->sclb[*ce->scp];   /* PC: as in case 236 */
-#else
-                ce->scp = ce->sclb[*ce->scp++];
-#endif
             }
             else 
             {
@@ -1986,14 +1978,10 @@ void bhControlComEvtScript()
             ce->frm_no = *ce->scp++;
             break;
         case 240:
-#ifdef TARGET_PC
             /* PC: low byte first, in the PS2 compiler's left-to-right order (MSVC read the high
              * byte first and set the wrong event flag, so solved computer puzzles unlocked nothing) */
             flgno = *ce->scp++;
             flgno |= *ce->scp++ << 8;
-#else
-            flgno = *ce->scp++ | (*ce->scp++ << 8);
-#endif
             
             bhStFlg(sys->ev_flg, flgno);
             break;
