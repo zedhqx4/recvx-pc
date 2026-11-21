@@ -382,7 +382,6 @@ int AnalyzeDoor(_door_wrk* dwP, int typ_no, int attr)
 	return 1;
 }
 
-#ifdef TARGET_PC
 /* PC port: with skip_doors=1 in recvx.ini (a setting in recvx-config.exe), OK (Cross or Square)
  * ends the door animation, as in the PC versions of the classic games. OK also opens the door, so
  * it counts only after being let go once. The flags set are the ones the animation ends with (its sound
@@ -421,7 +420,6 @@ static void pc_door_skip(_door_wrk* dwP)
         pcLog("door animation skipped at frame %d\n", dwP->time);
     }
 }
-#endif
 
 // 100% matching!
 int bhControlDoor()
@@ -433,9 +431,7 @@ int bhControlDoor()
     
     lop = dwP->spd_mde;
 
-#ifdef TARGET_PC
     pc_door_skip(dwP);
-#endif
     
     if (!(dwP->status & 0x40))
     {
@@ -2048,9 +2044,7 @@ static int CompareFloat(float val_a, int cmp_typ, float val_b)
         
         break;
     }
-#ifdef TARGET_PC /* the PS2 build returned whatever was left in the return register */
     return 0;
-#endif
 }
 
 #pragma optimization_level 3
