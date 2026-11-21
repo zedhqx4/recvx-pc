@@ -934,19 +934,12 @@ static void apply_state(const PcNativeDrawState* st)
  * frame). Los draws inmediatos consecutivos con el MISMO estado (misma textura, mezcla, profundidad, scissor, niebla, destino...) se
  * acumulan y salen en un solo draw, en el mismo orden de envio: el resultado de pixeles es identico (las tiras se unen con
  * triangulos degenerados que no generan fragmentos, y se conserva la paridad de cada tira, asi que el sentido de los triangulos no
- * cambia). Todo lo que cambie estado GL o global del renderer vacia el lote antes (batch_flush). gl_batch=0 en recvx.ini lo desactiva. */
+ * cambia). Todo lo que cambie estado GL o global del renderer vacia el lote antes (batch_flush). */
 #define BATCH_MAX_VERTICES 65536
 static NativeGpuVertex* batch_vertices;
 static int batch_count, batch_target;
 static GLenum batch_topology;
 static PcNativeDrawState batch_state;
-
-static int gl_batch_on(void)
-{
-    static int on = -1;
-    if (on < 0) on = pcIniGetInt("gl_batch", 1) != 0;
-    return on;
-}
 
 static void emit_draw_impl(const NativeGpuVertex* upload, int count, const PcNativeDrawState* state, GLenum topology)
 {
@@ -1057,7 +1050,7 @@ static void draw_immediate(const PcNativeVertex* vertices, int count, const PcNa
             }
         }
     }
-    if (state && gl_batch_on() && (topology == GL_TRIANGLE_STRIP || topology == GL_TRIANGLES) && count < 8192) {
+    if (state && (topology == GL_TRIANGLE_STRIP || topology == GL_TRIANGLES) && count < 8192) {
         batch_add(upload, count, state, topology);
         return;
     }

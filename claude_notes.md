@@ -656,3 +656,6 @@ recalcula siempre, de modo que los cambios de paleta se detectan exactamente igu
 
 ## 0.9.183 - gl_shadow ya no es interruptor (siempre activo)
 - pc_renderer.c: se borra gl_shadow_on; la sombra del estado GL se usa siempre (era el valor por defecto y el que usa el usuario). Sin cambio de comportamiento con el INI por defecto.
+
+## 0.9.184 - gl_batch ya no es interruptor (siempre activo)
+- pc_renderer.c: se borra gl_batch_on(); la agrupacion de draws inmediatos se usa siempre.
