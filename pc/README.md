@@ -89,7 +89,7 @@ Developer diagnostics (in `recvx.ini`, next to `recvx.exe`):
 - `ui_uv_crop_left`, `ui_uv_crop_right`, `ui_uv_crop_top` and `ui_uv_crop_bottom` override the automatic amount for each edge.
 - Values use 1/16-texel units: `8` = half a texel; `16` = one texel; `0` = no crop. Each edge accepts 0–64 (up to four texels).
 - The legacy `ui_uv_crop` key, if present, supplies a fallback for edge keys not specified.
-- `ui_snap_uv=0` disables the older PC-side UV snapping workaround; `ui_uv_inset=0` disables the GS renderer's half-texel inset. Keep these as A/B diagnostics rather than prerequisites for normal use.
+- `ui_uv_inset=0` disables the GS renderer's half-texel inset (A/B diagnostic, not a prerequisite for normal use).
 
 Live tuning (requires `debug=1`; no restart required after the initial config is read):
 - Press `F10` to enter or leave UV crop tuning. While tuning, the game does not receive keyboard input.

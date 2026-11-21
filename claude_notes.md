@@ -672,3 +672,6 @@ recalcula siempre, de modo que los cambios de paleta se detectan exactamente igu
 ## 0.9.188 - gs_int ya no es interruptor (aritmetica entera de la GS siempre)
 - Shader de fragmento: se borra uniforme uGsInt y las ramas en coma flotante de MODULATE y niebla; queda la aritmetica entera (era el valor por defecto). Se borra el bloque de init que leia RECVX_GS_INT/gs_int.
 - No pude compilar GLSL aqui: revisar en el log del usuario que no aparezca "shader compile failed".
+
+## 0.9.189 - ui_snap_uv ya no es interruptor
+- ps2_dummy.c: pc_snap_uv se aplica siempre (era el valor por defecto). pc/README.md actualizado.
