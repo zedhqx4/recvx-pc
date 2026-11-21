@@ -240,26 +240,10 @@ Sint32  gdFsInit(Sint32 max_open, void *gdfs_work, Sint32 max_dirent, void *dirb
             
             for (loop = 0; loop < 20; loop++) 
             {
-#ifdef TARGET_PC
                 /* PC: no delay padding */
-#else
-                asm("nop");
-#endif
-#ifdef TARGET_PC
                 /* PC: no delay padding */
-#else
-                asm("nop");
-#endif
-#ifdef TARGET_PC
                 /* PC: no delay padding */
-#else
-                asm("nop");
-#endif
-#ifdef TARGET_PC
                 /* PC: no delay padding */
-#else
-                asm("nop");
-#endif
             }
             
             printf("found_serach %s\n", read_f_name);
@@ -287,26 +271,10 @@ Sint32  gdFsInit(Sint32 max_open, void *gdfs_work, Sint32 max_dirent, void *dirb
                     
                     for (loop = 0; loop < 20; loop++) 
                     {
-#ifdef TARGET_PC
                         /* PC: no delay padding */
-#else
-                        asm("nop");
-#endif
-#ifdef TARGET_PC
                         /* PC: no delay padding */
-#else
-                        asm("nop");
-#endif
-#ifdef TARGET_PC
                         /* PC: no delay padding */
-#else
-                        asm("nop");
-#endif
-#ifdef TARGET_PC
                         /* PC: no delay padding */
-#else
-                        asm("nop");
-#endif
                     }
                 }
                 
@@ -399,9 +367,7 @@ GDFS  gdFsOpen(const char *fname, GDFS_DIRREC gf_dirrec)
             }
         }
     }
-#ifdef TARGET_PC /* the PS2 build returned whatever was left in the return register */
     return 0;
-#endif
 }
 
 // 100% matching! 
@@ -446,26 +412,10 @@ Sint32  gdFsRead(GDFS gdfs, Sint32 nsct, void *buf)
         {
             for (loop = 0; loop < 20; loop++) 
             {
-#ifdef TARGET_PC
                 /* PC: no delay padding */
-#else
-                asm("nop");
-#endif
-#ifdef TARGET_PC
                 /* PC: no delay padding */
-#else
-                asm("nop");
-#endif
-#ifdef TARGET_PC
                 /* PC: no delay padding */
-#else
-                asm("nop");
-#endif
-#ifdef TARGET_PC
                 /* PC: no delay padding */
-#else
-                asm("nop");
-#endif
             }
         }
         
