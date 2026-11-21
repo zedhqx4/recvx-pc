@@ -733,11 +733,7 @@ void npTransform(NJS_CNK_OBJECT* srcobj, NJS_CNK_OBJECT* dstobj, register float 
     dp = (NJS_POINT4*)((HDR_PS*)fp + 1); 
     fp = (NJS_POINT4*)np.vlp2[ono]; 
 
-#ifdef TARGET_PC
     /* PC: no uncached-accelerated RAM mirror */
-#else
-    fp = (NJS_POINT4*)((int)fp | 0x30000000); 
-#endif
 
     ((HDR_PS*)fp)->ucType = pSrc->ucType; 
     ((HDR_PS*)fp)->ucAttr = pSrc->ucAttr; 
@@ -755,7 +751,6 @@ void npTransform(NJS_CNK_OBJECT* srcobj, NJS_CNK_OBJECT* dstobj, register float 
     { 
         if ((sp->x != dp->x) || (sp->y != dp->y) || (sp->z != dp->z)) 
         { 
-#ifdef TARGET_PC
             {
                 float* s = (float*)sp;
                 float* d = (float*)dp;
@@ -771,35 +766,6 @@ void npTransform(NJS_CNK_OBJECT* srcobj, NJS_CNK_OBJECT* dstobj, register float 
                 f[6] = (d[6] - s[6]) * no + s[6];
                 f[7] = d[7];
             }
-#else
-            asm volatile 
-            {
-            .set noreorder
-                
-                mfc1      t0, no 
-                
-                lqc2      vf4, 0x0(sp)
-                lqc2      vf5, 0x0(dp) 
-                lqc2      vf6, 0x10(sp) 
-                lqc2      vf7, 0x10(dp) 
-                
-                qmtc2     t0, vf12 
-                
-                vsub.xyz  vf5xyz, vf5xyz, vf4xyz 
-                vsub.xyz  vf7xyz, vf7xyz, vf6xyz 
-                
-                vmulx.xyz vf5xyz, vf5xyz, vf12x 
-                vmulx.xyz vf7xyz, vf7xyz, vf12x 
-                
-                vadd.xyz  vf5xyz, vf5xyz, vf4xyz 
-                vadd.xyz  vf7xyz, vf7xyz, vf6xyz 
-                
-                sqc2      vf5, 0x0(fp) 
-                sqc2      vf7, 0x10(fp) 
-
-            .set reorder
-            }
-#endif
                 
             fp += 2; 
             sp += 2; 
@@ -807,23 +773,8 @@ void npTransform(NJS_CNK_OBJECT* srcobj, NJS_CNK_OBJECT* dstobj, register float 
         } 
         else 
         { 
-#ifdef TARGET_PC
             pcCopyQword(&fp[0], &sp[0]);
             pcCopyQword(&fp[1], &sp[1]);
-#else
-            asm volatile
-            {
-                .set noreorder
-                
-                lqc2 vf4, 0x0(sp) 
-                lqc2 vf6, 0x10(sp)
-                    
-                sqc2 vf4, 0x0(fp)
-                sqc2 vf6, 0x10(fp)
-
-                .set reorder
-            }
-#endif
             
             fp += 2; 
             sp += 2;
@@ -1615,7 +1566,6 @@ void npSetOffsetUV(NJS_CNK_MODEL* mdlp, short offu, short offv)
             } 
             else 
             {
-#ifdef TARGET_PC
                 {
                     /* walk the strips: [count] then count * (index, u, v); count < 0 means reversed strip */
                     unsigned char* p = (unsigned char*)plp;
@@ -1644,46 +1594,6 @@ void npSetOffsetUV(NJS_CNK_MODEL* mdlp, short offu, short offv)
 
                     plp = (short*)p;
                 }
-#else
-                asm volatile 
-                ("
-                .set noreorder
-                
-                l_0012DE68: 
-                    lh   t2, 0(%0) 
-                    
-                    bgez t2, l_0012DE78
-                    add  %0, %0, 2
-                    
-                    neg  t2, t2
-                    
-                l_0012DE78:
-                    lh   t0, 2(%0)
-                    lh   t1, 4(%0)
-                    
-                    add  t0, t0, %1
-                    add  t1, t1, %2
-                    
-                    sh   t0, 2(%0)
-                    sh   t1, 4(%0)
-                    
-                    add  t2, t2, -1
-
-                    bgtz t2, l_0012DE78
-                    add  %0, %0, 6
-                    
-                    add  %0, %0, %3
-                    add  %4, %4, -1
-                    
-                    bgtz %4, l_0012DE68
-                    add  %0, %0, %3
-                    
-                    add  %0, %0, zero
-                    
-                .set reorder
-                " : "=r"(plp) : "r"(offu), "r"(offv), "r"(usr_num), "r"(srp_num) : "t0", "t1", "t2"
-                );
-#endif
             }
         }
         else if (head == 8) 
@@ -1726,7 +1636,6 @@ void npSetOffsetUV2(NJS_CNK_MODEL* mdlp, short offu, short offv)
             usr_num = (*++plp >> 14) & 0x3; 
             srp_num = *plp++ & ~0xC000;
            
-#ifdef TARGET_PC
             {
                 /* walk the strips: [count] then count * (index, u, v); count < 0 means reversed strip */
                 unsigned char* p = (unsigned char*)plp;
@@ -1755,44 +1664,6 @@ void npSetOffsetUV2(NJS_CNK_MODEL* mdlp, short offu, short offv)
 
                 plp = (short*)p;
             }
-#else
-            asm volatile 
-            ("
-            .set noreorder
-            
-            l_0012DFA8: 
-                lh   t2, 0(%0) 
-                
-                bgez t2, l_0012DFB8
-                add  %0, %0, 2
-                
-                neg  t2, t2
-                
-            l_0012DFB8:
-                lh   t0, 2(%0)
-                lh   t1, 4(%0)
-                
-                add  t0, t0, %1
-                add  t1, t1, %2
-                
-                sh   t0, 2(%0)
-                sh   t1, 4(%0)
-                
-                add  t2, t2, -1
-
-                bgtz t2, l_0012DFB8
-                add  %0, %0, 6
-                
-                add  %0, %0, %3
-                add  %4, %4, -1
-                
-                bgtz %4, l_0012DFA8
-                add  %0, %0, %3
-                
-            .set reorder
-            " : "=r"(plp) : "r"(offu), "r"(offv), "r"(usr_num), "r"(srp_num) : "t0", "t1", "t2"
-            );
-#endif
 
             break;
         }
@@ -1887,7 +1758,6 @@ void npInitCalcSkin(void* pwp, int obj_n, int* sknp)
                 np.sknp++; 
             }
             
-#ifdef TARGET_PC
             {
                 /* two copies of the object matrix with the character position removed from the translation */
                 float* m = owp->mtx;
@@ -1905,40 +1775,6 @@ void npInitCalcSkin(void* pwp, int obj_n, int* sknp)
                     d[12 + k] = d[28 + k] = m[12 + k] - pos[k];
                 }
             }
-#else
-            asm volatile 
-            ("
-            .set noreorder
-            
-                ldl      t0, 7(%1) 
-                ldr      t0, 0(%1)
-                
-                lw       t1, 8(%1)
-                
-                pcpyld   t0, t1, t0
-            
-                qmtc2    t0, vf8
-            
-                lqc2     vf7, 48(%0)
-                lqc2     vf4, 0(%0)
-                lqc2     vf5, 16(%0)
-                lqc2     vf6, 32(%0)
-                
-                vsub.xyz vf7xyz, vf7xyz, vf8xyz
-                
-                sqc2     vf4, 0(%2)
-                sqc2     vf5, 16(%2)
-                sqc2     vf6, 32(%2)
-                sqc2     vf7, 48(%2)
-                sqc2     vf4, 64(%2)
-                sqc2     vf5, 80(%2)
-                sqc2     vf6, 96(%2)
-                sqc2     vf7, 112(%2) 
-            
-            .set reorder
-            " : : "r"(&owp->mtx), "r"(&((BH_PWORK*)pwp)->px), "r"(np.mxp[i][0]), "r"(owp) 
-            );
-#endif
                 
             njRotXYZ(np.mxp[i][0], -op->ang[0], -op->ang[1], -op->ang[2]); 
         }
@@ -1989,11 +1825,7 @@ void npCalcSkin(void* pwp, int obj_n, int* sknp)
                     
                     nb = *np.sknp++;
     
-#ifdef TARGET_PC
                     /* PC: no uncached-accelerated RAM mirror */
-#else
-                    pHdr1 = (HDR_PS*)((int)pHdr1 | 0x30000000); 
-#endif
     
                     pHdr1->ucType = pHdr0->ucType;
                     pHdr1->ucAttr = pHdr0->ucAttr; 
@@ -2016,7 +1848,6 @@ void npCalcSkin(void* pwp, int obj_n, int* sknp)
                         
                         if (lv != 1.0f) 
                         { 
-#ifdef TARGET_PC
                             {
                                 /* blend vertex position between the two bone matrices by lv */
                                 float* m0 = (float*)np.mxp[rg0][0];
@@ -2031,57 +1862,10 @@ void npCalcSkin(void* pwp, int obj_n, int* sknp)
                                 p1[2] = (b[2] - a[2]) * lv + a[2];
                                 p1[3] = m1[11];
                             }
-#else
-                            asm volatile 
-                            ("
-                            .set noreorder
-                            
-                                mfc1        t0, %0 
-                                
-                                qmtc2       t0, vf13
-                                
-                                lqc2        vf4, 0(%1)
-                                lqc2        vf5, 0(%3)
-                                lqc2        vf6, 0x10(%3)
-                                lqc2        vf7, 0x20(%3)
-                                lqc2        vf8, 0x30(%3)
-                                
-                                vmulax.xyz  ACC, vf5, vf4x
-                                
-                                vmadday.xyz ACC, vf6, vf4y
-                                vmaddaz.xyz ACC, vf7, vf4z
-                                
-                                vmaddw.xyz  vf9, vf8, vf0w
-                                
-                                lqc2        vf5, 0(%4)
-                                lqc2        vf6, 0x10(%4)
-                                lqc2        vf7, 0x20(%4)
-                                lqc2        vf8, 0x30(%4)
-                                
-                                vmulax.xyz  ACC, vf5, vf4x
-                                
-                                vmadday.xyz ACC, vf6, vf4y
-                                vmaddaz.xyz ACC, vf7, vf4z
-                                
-                                vmaddw.xyz  vf10, vf8, vf0w
-                                
-                                vsub.xyz    vf5, vf10, vf9
-                                
-                                vmulx.xyz   vf6, vf5, vf13x
-                                
-                                vadd.xyz    vf7, vf6, vf9
-                                
-                                sqc2        vf7, 0(%2) 
-                                
-                            .set reorder
-                            " : : "f"(lv), "r"(p0), "r"(p1), "r"(np.mxp[rg0][0]), "r"(np.mxp[rg0][1]) : "t0" 
-                            );
-#endif
                             
                             p1 += 4; 
                             p0++; 
                             
-#ifdef TARGET_PC
                             {
                                 /* blend vertex normal between the two bone matrices by lv */
                                 float* m0 = (float*)np.mxp[rg0][0];
@@ -2096,54 +1880,12 @@ void npCalcSkin(void* pwp, int obj_n, int* sknp)
                                 p1[2] = (b[2] - a[2]) * lv + a[2];
                                 p1[3] = m0[11];
                             }
-#else
-                            asm volatile 
-                            ("
-                            .set noreorder
-                                             
-                                mfc1        t0, %0 
-                                
-                                qmtc2       t0, vf13
-                                
-                                lqc2        vf4, 0(%1)
-                                lqc2        vf5, 0(%3)
-                                lqc2        vf6, 0x10(%3)
-                                lqc2        vf7, 0x20(%3)
-                                lqc2        vf8, 0(%4)
-                                lqc2        vf9, 0x10(%4)
-                                lqc2        vf10, 0x20(%4)
-                                
-                                vmulax.xyz  ACC, vf5, vf4x
-                                
-                                vmadday.xyz ACC, vf6, vf4y
-                                
-                                vmaddz.xyz  vf11, vf7, vf4z
-                                
-                                vmulax.xyz  ACC, vf8, vf4x
-                                
-                                vmadday.xyz ACC, vf9, vf4y
-                                
-                                vmaddz.xyz  vf12, vf10, vf4z
-                                
-                                vsub.xyz    vf5, vf12, vf11
-                                
-                                vmulx.xyz   vf6, vf5, vf13x
-                                
-                                vadd.xyz    vf7, vf6, vf11
-                                
-                                sqc2        vf7, 0(%2) 
-                                
-                            .set reorder
-                            " : : "f"(lv), "r"(p0),  "r"(p1), "r"(np.mxp[rg0][0]), "r"(np.mxp[rg0][1]) : "t0" 
-                            );
-#endif
                             
                             p1 += 4; 
                             p0++;
                         } 
                         else 
                         { 
-#ifdef TARGET_PC
                             {
                                 /* vertex fully bound to the second bone matrix: transform position and normal */
                                 float* m1 = (float*)np.mxp[rg0][1];
@@ -2154,38 +1896,6 @@ void npCalcSkin(void* pwp, int obj_n, int* sknp)
                                 pcVu0XformVector(m1, (float*)&p0[1], &p1[4]);
                                 p1[7] = p0[1].w;
                             }
-#else
-                            asm volatile 
-                            ("
-                            .set noreorder
-                                              
-                                lqc2        vf4, 0(%0) 
-                                lqc2        vf11, 0x10(%0)
-                                lqc2        vf5, 0(%2)
-                                lqc2        vf6, 0x10(%2)
-                                lqc2        vf7, 0x20(%2)
-                                lqc2        vf8, 0x30(%2)
-                                
-                                vmulax.xyz  ACC, vf5xyz, vf4x
-                                
-                                vmadday.xyz ACC, vf6xyz, vf4y
-                                vmaddaz.xyz ACC, vf7xyz, vf4z
-                                
-                                vmaddw.xyz  vf9, vf8xyz, vf0w
-                                
-                                vmulax.xyz  ACC, vf5xyz, vf11x
-                                
-                                vmadday.xyz ACC, vf6xyz, vf11y
-                                
-                                vmaddz.xyz  vf10xyz, vf7xyz, vf11z
-                                
-                                sqc2        vf9, 0(%1)
-                                sqc2        vf10, 0x10(%1) 
-                                
-                            .set reorder
-                            " : : "r"(p0), "r"(p1), "r"(np.mxp[rg0][1]), "r"(op)
-                            ); 
-#endif
                             
                             p0 += 2; 
                             p1 += 8; 
@@ -2257,7 +1967,6 @@ void npInitCalcSkinFM(void* pwp, int obj_n, int* sknp)
                     np.sknp++; 
                 }
                 
-#ifdef TARGET_PC
                 {
                     /* two copies of the object matrix with the character position removed from the translation */
                     float* m = owp->mtx;
@@ -2275,40 +1984,6 @@ void npInitCalcSkinFM(void* pwp, int obj_n, int* sknp)
                         d[12 + k] = d[28 + k] = m[12 + k] - pos[k];
                     }
                 }
-#else
-                asm volatile 
-                ("
-                .set noreorder
-                
-                    ldl      t0, 7(%1) 
-                    ldr      t0, 0(%1)
-                    
-                    lw       t1, 8(%1)
-                    
-                    pcpyld   t0, t1, t0
-                
-                    qmtc2    t0, vf8
-                
-                    lqc2     vf7, 48(%0)
-                    lqc2     vf4, 0(%0)
-                    lqc2     vf5, 16(%0)
-                    lqc2     vf6, 32(%0)
-                    
-                    vsub.xyz vf7xyz, vf7xyz, vf8xyz
-                    
-                    sqc2     vf4, 0(%2)
-                    sqc2     vf5, 16(%2)
-                    sqc2     vf6, 32(%2)
-                    sqc2     vf7, 48(%2)
-                    sqc2     vf4, 64(%2)
-                    sqc2     vf5, 80(%2)
-                    sqc2     vf6, 96(%2)
-                    sqc2     vf7, 112(%2) 
-                
-                .set reorder
-                " : : "r"(&owp->mtx), "r"(&((BH_PWORK*)pwp)->px), "r"(np.mxp[i][0]), "r"(owp) 
-                );
-#endif
                     
                 njRotXYZ(np.mxp[i][0], -op->ang[0], -op->ang[1], -op->ang[2]); 
             }
@@ -2362,11 +2037,7 @@ void npCalcSkinFM(void* pwp, int obj_n, int* sknp)
                         
                         nb = *np.sknp++;
         
-#ifdef TARGET_PC
                         /* PC: no uncached-accelerated RAM mirror */
-#else
-                        pHdr1 = (HDR_PS*)((int)pHdr1 | 0x30000000); 
-#endif
         
                         pHdr1->ucType = pHdr0->ucType;
                         pHdr1->ucAttr = pHdr0->ucAttr; 
@@ -2394,7 +2065,6 @@ void npCalcSkinFM(void* pwp, int obj_n, int* sknp)
                             
                             if (lv != 1.0f) 
                             { 
-#ifdef TARGET_PC
                                 {
                                     /* blend vertex position between the two bone matrices by lv */
                                     float* m0 = (float*)np.mxp[rg0][0];
@@ -2409,57 +2079,10 @@ void npCalcSkinFM(void* pwp, int obj_n, int* sknp)
                                     p1[2] = (b[2] - a[2]) * lv + a[2];
                                     p1[3] = m1[11];
                                 }
-#else
-                                asm volatile 
-                                ("
-                                .set noreorder
-                                
-                                    mfc1        t0, %0 
-                                    
-                                    qmtc2       t0, vf13
-                                    
-                                    lqc2        vf4, 0(%1)
-                                    lqc2        vf5, 0(%3)
-                                    lqc2        vf6, 0x10(%3)
-                                    lqc2        vf7, 0x20(%3)
-                                    lqc2        vf8, 0x30(%3)
-                                    
-                                    vmulax.xyz  ACC, vf5, vf4x
-                                    
-                                    vmadday.xyz ACC, vf6, vf4y
-                                    vmaddaz.xyz ACC, vf7, vf4z
-                                    
-                                    vmaddw.xyz  vf9, vf8, vf0w
-                                    
-                                    lqc2        vf5, 0(%4)
-                                    lqc2        vf6, 0x10(%4)
-                                    lqc2        vf7, 0x20(%4)
-                                    lqc2        vf8, 0x30(%4)
-                                    
-                                    vmulax.xyz  ACC, vf5, vf4x
-                                    
-                                    vmadday.xyz ACC, vf6, vf4y
-                                    vmaddaz.xyz ACC, vf7, vf4z
-                                    
-                                    vmaddw.xyz  vf10, vf8, vf0w
-                                    
-                                    vsub.xyz    vf5, vf10, vf9
-                                    
-                                    vmulx.xyz   vf6, vf5, vf13x
-                                    
-                                    vadd.xyz    vf7, vf6, vf9
-                                    
-                                    sqc2        vf7, 0(%2) 
-                                    
-                                .set reorder
-                                " : : "f"(lv), "r"(p0), "r"(p1), "r"(np.mxp[rg0][0]), "r"(np.mxp[rg0][1]) : "t0" 
-                                );
-#endif
                                 
                                 p1 += 4; 
                                 p0++; 
                                 
-#ifdef TARGET_PC
                                 {
                                     /* blend vertex normal between the two bone matrices by lv */
                                     float* m0 = (float*)np.mxp[rg0][0];
@@ -2474,54 +2097,12 @@ void npCalcSkinFM(void* pwp, int obj_n, int* sknp)
                                     p1[2] = (b[2] - a[2]) * lv + a[2];
                                     p1[3] = m0[11];
                                 }
-#else
-                                asm volatile 
-                                ("
-                                .set noreorder
-                                                 
-                                    mfc1        t0, %0 
-                                    
-                                    qmtc2       t0, vf13
-                                    
-                                    lqc2        vf4, 0(%1)
-                                    lqc2        vf5, 0(%3)
-                                    lqc2        vf6, 0x10(%3)
-                                    lqc2        vf7, 0x20(%3)
-                                    lqc2        vf8, 0(%4)
-                                    lqc2        vf9, 0x10(%4)
-                                    lqc2        vf10, 0x20(%4)
-                                    
-                                    vmulax.xyz  ACC, vf5, vf4x
-                                    
-                                    vmadday.xyz ACC, vf6, vf4y
-                                    
-                                    vmaddz.xyz  vf11, vf7, vf4z
-                                    
-                                    vmulax.xyz  ACC, vf8, vf4x
-                                    
-                                    vmadday.xyz ACC, vf9, vf4y
-                                    
-                                    vmaddz.xyz  vf12, vf10, vf4z
-                                    
-                                    vsub.xyz    vf5, vf12, vf11
-                                    
-                                    vmulx.xyz   vf6, vf5, vf13x
-                                    
-                                    vadd.xyz    vf7, vf6, vf11
-                                    
-                                    sqc2        vf7, 0(%2) 
-                                    
-                                .set reorder
-                                " : : "f"(lv), "r"(p0),  "r"(p1), "r"(np.mxp[rg0][0]), "r"(np.mxp[rg0][1]) : "t0" 
-                                );
-#endif
                                 
                                 p1 += 4; 
                                 p0++;
                             } 
                             else 
                             { 
-#ifdef TARGET_PC
                                 {
                                     /* vertex fully bound to the second bone matrix: transform position and normal */
                                     float* m1 = (float*)np.mxp[rg0][1];
@@ -2532,38 +2113,6 @@ void npCalcSkinFM(void* pwp, int obj_n, int* sknp)
                                     pcVu0XformVector(m1, (float*)&p0[1], &p1[4]);
                                     p1[7] = p0[1].w;
                                 }
-#else
-                                asm volatile 
-                                ("
-                                .set noreorder
-                                                  
-                                    lqc2        vf4, 0(%0) 
-                                    lqc2        vf11, 0x10(%0)
-                                    lqc2        vf5, 0(%2)
-                                    lqc2        vf6, 0x10(%2)
-                                    lqc2        vf7, 0x20(%2)
-                                    lqc2        vf8, 0x30(%2)
-                                    
-                                    vmulax.xyz  ACC, vf5xyz, vf4x
-                                    
-                                    vmadday.xyz ACC, vf6xyz, vf4y
-                                    vmaddaz.xyz ACC, vf7xyz, vf4z
-                                    
-                                    vmaddw.xyz  vf9, vf8xyz, vf0w
-                                    
-                                    vmulax.xyz  ACC, vf5xyz, vf11x
-                                    
-                                    vmadday.xyz ACC, vf6xyz, vf11y
-                                    
-                                    vmaddz.xyz  vf10xyz, vf7xyz, vf11z
-                                    
-                                    sqc2        vf9, 0(%1)
-                                    sqc2        vf10, 0x10(%1) 
-                                    
-                                .set reorder
-                                " : : "r"(p0), "r"(p1), "r"(np.mxp[rg0][1]), "r"(op)
-                                ); 
-#endif
                                 
                                 p0 += 2; 
                                 p1 += 8; 
