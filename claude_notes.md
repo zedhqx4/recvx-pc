@@ -653,3 +653,6 @@ recalcula siempre, de modo que los cambios de paleta se detectan exactamente igu
 ## 0.9.182 - shims GS/DMA sin llamadores
 - pc_libgraph.c / libgraph.h: se borran `sceDmaReset`, `sceVpu0Reset`, `sceGsResetGraph`, `sceGsResetPath`, `sceGsSetDefDBuffDc`, `sceGsSwapDBuffDc` (git grep -w: cero llamadores en src/include/pc). Se conservan los que tienen llamadores: sceGsSyncPath, sceGsSetDef/ExecLoadImage (ps2_loadtim2.c), sceDmaSend/Sync (ps2_dummy.c:3559-3572), sceGsSetDef/ExecStoreImage (vivo, StoreRenderTex).
 - Sin cambio de comportamiento: solo se quita codigo que nadie llamaba. Validacion: git grep + balance de llaves; enlace lo comprueba el CI.
+
+## 0.9.183 - gl_shadow ya no es interruptor (siempre activo)
+- pc_renderer.c: se borra gl_shadow_on; la sombra del estado GL se usa siempre (era el valor por defecto y el que usa el usuario). Sin cambio de comportamiento con el INI por defecto.

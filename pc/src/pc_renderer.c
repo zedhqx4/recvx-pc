@@ -273,7 +273,6 @@ typedef struct {
     int sc[4];
 } GlShadow;
 static GlShadow gls;
-static int gl_shadow_on = -1;
 static void gl_shadow_invalidate(void) { gls.valid = 0; }
 static unsigned stat_batches;
 static void batch_flush(void);   /* agrupacion de draws inmediatos, mas abajo */
@@ -793,8 +792,6 @@ static void apply_state(const PcNativeDrawState* st)
 {
     int sv;   /* la sombra es fiable en esta llamada */
     PcNativeDrawState d;
-    if (gl_shadow_on < 0) gl_shadow_on = pcIniGetInt("gl_shadow", 1) != 0;
-    if (!gl_shadow_on) gls.valid = 0;
     sv = gls.valid;
     if (!st) {
         memset(&d, 0, sizeof(d));
@@ -877,7 +874,7 @@ static void apply_state(const PcNativeDrawState* st)
     }
 
     if (!sv || gls.program != program) { glUseProgram(program); gls.program = program; }
-    gls.valid = gl_shadow_on != 0;
+    gls.valid = 1;
     {
         /* Los uniformes pertenecen al programa: solo se suben los que cambian respecto al draw anterior
          * (en escenas de ~1000 draws por frame esto es lo que mas CPU consumia). */
