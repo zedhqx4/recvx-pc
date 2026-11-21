@@ -1192,18 +1192,7 @@ CHUNK_HEAD* njCnkCoSt(CHUNK_HEAD* pCnk)
 
 /* SSE2 fast path for the common CNK vertex-list case where all active lights
  * are directional. The old scalar implementation remains the reference path
- * for point lights and for small tails. Set RECVX_CV_VN_BATCH=0 to A/B test. */
-static int pcCnkCvVnBatchEnabled(void)
-{
-    static int enabled = -1;
-    if (enabled < 0)
-    {
-        const char* value = getenv("RECVX_CV_VN_BATCH");
-        enabled = (value == NULL) || (atoi(value) != 0);
-    }
-    return enabled;
-}
-
+ * for point lights and for small tails. */
 static int pcCnkCvVnDirectionalOnly(const CNK_LIGHT* lights, int lightCount)
 {
     int i;
@@ -1386,7 +1375,7 @@ CHUNK_HEAD* njCnkCvVn(CHUNK_HEAD* pCnk)
     lLightMax = pNaCnkCrntLighting->lLightMax;
     ulIndex = ((unsigned short*)&pCnk[1])[1];
 
-    if (ulIndex >= 8 && pcCnkCvVnBatchEnabled() && pcCnkCvVnDirectionalOnly(pLightTop, lLightMax))
+    if (ulIndex >= 8 && pcCnkCvVnDirectionalOnly(pLightTop, lLightMax))
     {
         pcProcessed = pcCnkCvVnDirectionalBatch(fpCnk, pBuffer, ulIndex,
                                                 pNaMatMatrixStuckPtr[0], _nj_screen_.dist,

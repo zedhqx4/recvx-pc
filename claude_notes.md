@@ -678,3 +678,6 @@ recalcula siempre, de modo que los cambios de paleta se detectan exactamente igu
 
 ## 0.9.190 - se borra ui_uv_crop_debug (log de diagnostico del recorte UV de UI)
 - ps2_dummy.c: se quitan pc_ui_uv_crop_debug_enabled/hash_add/log, sus 2 llamadas y las variables fail_* que solo alimentaban el log. El recorte no cambia (el log no modificaba el render).
+
+## 0.9.191 - RECVX_CV_VN_BATCH ya no existe
+- ps2_NinjaCnk.c: el camino SSE2 de vertices CNK con luces direccionales se usa siempre (era el valor por defecto).
