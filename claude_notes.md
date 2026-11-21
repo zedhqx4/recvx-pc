@@ -690,3 +690,6 @@ recalcula siempre, de modo que los cambios de paleta se detectan exactamente igu
 - Informe de GPT: coord/reports/G4.md (clasificacion A/B/C). Aqui solo el codigo que quedaba DESPUES de un `return` incondicional del camino PC: colas de Ps2AddPrim3D/Ex/Ex1P/Mod/ExI, Ps2SetFogColor/Sys, Ps2ScreenClear, Ps2DispScreenClear, Ps2ZbuffOff/Off2/On, Ps2ShadowStart/Draw/Main0/Main1/End, PS2_Render_Tex_Sub. Los preambulos vivos (comprobacion de textura TME/ABE, llamadas pcRenderer*) se conservan.
 - Tambien variables locales que solo usaba el codigo muerto (p, pp, p128, zsum, clip_vec, zbuff_ab_vec, ...). Las etiquetas l_00xxxx no tenian goto.
 - Validacion: el codigo es inalcanzable (return incondicional antes); balance de llaves/parentesis 0/0; solo se anaden 4 lineas en blanco. No se pudo compilar (SDK).
+
+## 0.9.194 - G4 paso 5b: colas muertas de njColorBlendingModeSys y njUserClipping (ps2_NaSystem.c, -64 lineas)
+- Quedaba detras de `return;` el constructor GIF (ALPHA/PABE/FBA y SCISSOR). Los llamadores vivos usan pcRendererSetGsAlpha / pcRendererSetScissor, que no cambian.

@@ -387,26 +387,6 @@ void njColorBlendingModeSys(int s_mode, int d_mode) // this function is not on t
     
     pcRendererSetGsAlpha((uint64_t)alpha_value);   /* mismo registro ALPHA que recibia la GS */
     return;
-    D2_SyncTag(); 
-    
-    ((u_long*)WORKBASE)[0] = DMAend | 0x4; 
-    ((u_long*)WORKBASE)[1] = 0; 
-
-    ((u_long*)WORKBASE)[2] = SCE_GIF_SET_TAG(3, SCE_GS_TRUE, SCE_GS_FALSE, 0, SCE_GIF_PACKED, 1); 
-    ((u_long*)WORKBASE)[3] = SCE_GIF_PACKED_AD; 
-    
-    ((u_long*)WORKBASE)[4] = Ps2_gs_save.ALPHA = alpha_value; 
-    ((u_long*)WORKBASE)[5] = SCE_GS_ALPHA_1; 
-    
-    ((u_long*)WORKBASE)[6] = 0; 
-    ((u_long*)WORKBASE)[7] = SCE_GS_PABE; 
-    
-    ((u_long*)WORKBASE)[8] = Ps2_gs_save.FBA = 0; 
-    ((u_long*)WORKBASE)[9] = SCE_GS_FBA_1; 
-    
-    loadImage((void*)0xF0000000); 
-    
-    SyncPath(); 
 } 
 
 // 100% matching! 
@@ -456,50 +436,6 @@ void	njUserClipping(Int mode ,NJS_POINT2 *p)
     }
     pcRendererSetScissor(0, 0, 0, 640, 480);
     return;
- 
-    unsigned long* np; // changed the original var name from the debugging symbols 
-    sceVu0FVECTOR posf;
-    sceVu0IVECTOR posi;
-
-    np = (unsigned long*)WORKBASE;
-    
-
-    D2_SyncTag(); 
-    
-    *np++ = DMAend | 0x2; 
-    *np++ = 0; 
-    
-    *np++ = SCE_GIF_SET_TAG(1, SCE_GS_TRUE, SCE_GS_FALSE, 0, SCE_GIF_PACKED, 1); 
-    *np++ = SCE_GIF_PACKED_AD; 
-
-    if (mode == 2)
-    { 
-        posf[0] = p[0].x * 32.0f; 
-        posf[1] = p[0].y * 32.0f; 
-        
-        posf[2] = p[1].x * 32.0f; 
-        posf[3] = p[1].y * 32.0f; 
-        
-        sceVu0FTOI0Vector(posi, posf); 
-        
-        *np++ = Ps2_gs_save.SCISSOR = SCE_GS_SET_SCISSOR(posi[0], posi[2] + 32, posi[1], posi[3] + 32); 
-    } 
-    else if (mode == 0) 
-    { 
-        *np++ = Ps2_gs_save.SCISSOR = SCE_GS_SET_SCISSOR(0, DISP_WIDTH, 0, DISP_HEIGHT); 
-    } 
-    else
-    { 
-        printf("njUserClipping ERROR!\n"); 
-        
-        exit(0); 
-    }
-    
-    *np++ = SCE_GS_SCISSOR_1; 
-    
-    loadImage((void*)0xF0000000); 
-    
-    D2_SyncTag(); 
 }
 
 // 100% matching!
