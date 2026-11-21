@@ -72,3 +72,26 @@ bajo `## Preguntas`.
 - Los pasos 1-2 de su orden de retirada (headers EE, stubs inertes) quedan en espera de la decision del usuario sobre la pregunta 1 (conservar o no la compilacion PS2).
 
 - Decision del usuario (G3, pregunta 1): se borran las ramas PS2. Hecho en 0.9.181 (-6412 lineas, preprocesado identico). Siguiente: shims `sceGs*`/`sceDma*` sin llamadores y limpieza de interruptores de INI.
+
+## G4 - Uso vivo de macros/tipos GIF y GS en el codigo del juego (paso 3 de G3)  [abierta, SOLO ANALISIS]
+Contexto: 0.9.192 validada. Queremos sustituir los macros `SCE_GIF_*`/`SCE_GS_*`/`GIF_REGLIST` y los tipos de paquete GIF por
+estructuras/constantes propias del renderer (sin cambiar resultados). Antes hay que saber exactamente que se usa y para que.
+Rama: `optimizacion-gpt` (primero `git merge origin/optimizacion`, parte de 0.9.192). NO modificar codigo fuente.
+Entregable: `coord/reports/G4.md`, un solo commit `[G4] ...`.
+Inventario (cita archivo:linea; recuenta con `git grep -c`):
+  1. Todos los usos de `SCE_GIF_*`, `SCE_GS_*`, `GIF_REGLIST`, `SCE_GS_SET_*` en `src/` y `include/` (hay ~270 en ps2_dummy.c,
+     52 en ps2_loadtim2.c, 26 en ps2_MovieFunc.c, 35 en types.h, 190 en pc/include/libgraph.h). Clasifica cada uso:
+     (A) arma un paquete que luego NADIE interpreta en PC (la build PC no decodifica GIF) -> candidato a borrar;
+     (B) el valor `prim`/`ulType`/bits SI se lee despues (p.ej. `prim & PC_GIF_PRIM_TME`, `(prim>>47)&7`, ABE, FST) -> hay que
+         conservar la informacion, en que funcion se consume;
+     (C) registros GS (TEX0/TEX1/ALPHA/TEST/FRAME/ZBUF/CLAMP) cuyo valor llega a pc_renderer/pc_texture -> listar el camino.
+  2. Para cada grupo (B) y (C): la lista de campos que de verdad se leen (bits y funcion lectora) y una propuesta de struct
+     explicita (nombres de campo, no bits) que lo sustituya. No escribas el struct en codigo, solo en el informe.
+  3. Los `PC_GIF_PRIM_*` y `PcPrim3D`: donde se definen, quien los lee.
+  4. Funciones que construyen buffers (`Ps2_DRAW_TMP`, `WORKBASE`, `p = (unsigned long*)...`) y son codigo inalcanzable tras un
+     `return` temprano en PC (ejemplo: Ps2AddPrim3D tras `pcSubmitPrepared3D(...); return;`). Lista las funciones/bloques MUERTOS
+     de ese tipo con lineas.
+  5. Orden de retirada propuesto en pasos pequenos (1 commit cada uno), de menor a mayor riesgo, con la prueba para cada uno
+     (preprocesado identico, harness, o log del usuario).
+Reglas: como G1-G3 (busca llamadores en todo `src/`, marca DUDOSA lo que requiera compilar con el SDK, dudas bajo `## Preguntas`).
+Terminado cuando: clasificacion A/B/C completa con conteos, lista de bloques muertos, propuesta de structs y orden de retirada.
