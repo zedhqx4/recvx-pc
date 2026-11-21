@@ -33,9 +33,7 @@ MWD_IF Ps2Func =
 Sint32 mwPlyCalcWorkSofdec(Sint32 ftype, Sint32 max_bps, Sint32 max_sx, Sint32 max_sy, Sint32 nfb)
 {
 
-#ifdef TARGET_PC /* the PS2 build returned whatever was left in the return register */
     return 0;
-#endif
 }
 
 // 100% matching!
@@ -71,26 +69,10 @@ MWPLY ps2mwPlyCreateSofdec(MWS_PLY_CPRM_SFD* cprm, char* fname)
         {
             for (loop = 0; loop < 100000; loop++)
             {
-#ifdef TARGET_PC
                 /* PC: no delay padding */
-#else
-                asm("nop");
-#endif
-#ifdef TARGET_PC
                 /* PC: no delay padding */
-#else
-                asm("nop");
-#endif
-#ifdef TARGET_PC
                 /* PC: no delay padding */
-#else
-                asm("nop");
-#endif
-#ifdef TARGET_PC
                 /* PC: no delay padding */
-#else
-                asm("nop");
-#endif
             }
         }
 
@@ -98,26 +80,10 @@ MWPLY ps2mwPlyCreateSofdec(MWS_PLY_CPRM_SFD* cprm, char* fname)
 
         for (loop = 0; loop < 100000; loop++)
         {
-#ifdef TARGET_PC
             /* PC: no delay padding */
-#else
-            asm("nop");
-#endif
-#ifdef TARGET_PC
             /* PC: no delay padding */
-#else
-            asm("nop");
-#endif
-#ifdef TARGET_PC
             /* PC: no delay padding */
-#else
-            asm("nop");
-#endif
-#ifdef TARGET_PC
             /* PC: no delay padding */
-#else
-            asm("nop");
-#endif
         }
     }
     
@@ -167,9 +133,7 @@ void mwPlyFinishSofdec(void)
 Sint32 mwPlyGetBright(MWPLY mwply)
 {
 
-#ifdef TARGET_PC /* the PS2 build returned whatever was left in the return register */
     return 0;
-#endif
 }
 
 // 100% matching!
@@ -254,13 +218,11 @@ void ps2mwPlyStartFname(MWPLY ply, Sint8 *fname)
         *dest++ = *src++;
     }
 
-#ifdef TARGET_PC
     {
         extern void pcMovieStart(const char* name);
 
         pcMovieStart(nameBuf);
     }
-#endif
 
     if (strcmp(nameBuf, "MV_016.PSS") == 0) 
     {
@@ -315,9 +277,7 @@ void ps2mwPlySetOutVol(MWPLY ply, Sint32 vol)
 Sint32 ps2mwPlyGetOutVol(MWPLY ply)
 {
 
-#ifdef TARGET_PC /* the PS2 build returned whatever was left in the return register */
     return 0;
-#endif
 }
 
 // 100% matching!
