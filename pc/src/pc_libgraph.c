@@ -17,37 +17,10 @@ void loadImage(void* tags) { (void)tags; }
 void SyncPath(void) {}
 void D2_SyncTag(void) {}
 
-void sceDmaReset(int mode) { (void)mode; }
-void sceVpu0Reset(void) {}
-
-int sceGsResetGraph(short mode, short inter, short omode, short ffmode)
-{
-    (void)mode; (void)inter; (void)omode; (void)ffmode;
-    return 0;
-}
-
-void sceGsResetPath(void) {}
-
 int sceGsSyncPath(int mode, unsigned short timeout)
 {
     (void)mode; (void)timeout;
     return 0;
-}
-
-int sceGsSetDefDBuffDc(sceGsDBuffDc* db, short psm, short w, short h,
-                       short ztest, short zpsm, short clear)
-{
-    (void)psm; (void)w; (void)h; (void)ztest; (void)zpsm; (void)clear;
-    if (db != NULL) memset(db, 0, sizeof(*db));
-    return 0;
-}
-
-int sceGsSwapDBuffDc(sceGsDBuffDc* db, int id)
-{
-    (void)db; (void)id;
-    pcRendererFlushTransparent();
-    pcVideoPresent();
-    return id;
 }
 
 void sceGsSetDefLoadImage(sceGsLoadImage* lp, short dbp, short dbw, short dpsm,

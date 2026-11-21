@@ -649,3 +649,7 @@ recalcula siempre, de modo que los cambios de paleta se detectan exactamente igu
 - 67 archivos de src/ e include/, un commit por archivo (revertible por separado). En los 67 el preprocesado con -DTARGET_PC es identico, es decir, el codigo que compila la build PC no cambia: solo desaparece lo que nunca se compilaba (ramas PS2, asm MIPS, `.set noreorder`...). Mayores: ps2_NaMatrix.c -1552, ps2_dummy.c -798, ps2_NinjaCnk.c -885, njplus.c -451, ps2_NaMath.c -375, ps2_Vu1Strip.c -375, face_bh.c -327, ps2_Vu1Scissor2.c -285.
 - Referencia PS2: milestone/0.9.180 (y el historial de git) conserva todo el codigo PS2.
 - Pendiente de comprobar por el usuario: que el CI de MSVC compila y el juego arranca igual (no deberia cambiar nada).
+
+## 0.9.182 - shims GS/DMA sin llamadores
+- pc_libgraph.c / libgraph.h: se borran `sceDmaReset`, `sceVpu0Reset`, `sceGsResetGraph`, `sceGsResetPath`, `sceGsSetDefDBuffDc`, `sceGsSwapDBuffDc` (git grep -w: cero llamadores en src/include/pc). Se conservan los que tienen llamadores: sceGsSyncPath, sceGsSetDef/ExecLoadImage (ps2_loadtim2.c), sceDmaSend/Sync (ps2_dummy.c:3559-3572), sceGsSetDef/ExecStoreImage (vivo, StoreRenderTex).
+- Sin cambio de comportamiento: solo se quita codigo que nadie llamaba. Validacion: git grep + balance de llaves; enlace lo comprueba el CI.

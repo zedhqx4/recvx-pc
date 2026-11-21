@@ -384,10 +384,6 @@ typedef struct {
 } sceGsStoreImage;
 
 /* ---- libgraph functions (pc/src/pc_libgraph.c) ---- */
-int  sceGsResetGraph(short mode, short inter, short omode, short ffmode);
-void sceGsResetPath(void);
-int  sceGsSetDefDBuffDc(sceGsDBuffDc* db, short psm, short w, short h, short ztest, short zpsm, short clear);
-int  sceGsSwapDBuffDc(sceGsDBuffDc* db, int id);
 void sceGsSetDefLoadImage(sceGsLoadImage* lp, short dbp, short dbw, short dpsm, short x, short y, short w, short h);
 int  sceGsExecLoadImage(sceGsLoadImage* lp, u_long128* srcaddr);
 void sceGsSetDefStoreImage(sceGsStoreImage* sp, short sbp, short sbw, short spsm, short x, short y, short w, short h);
