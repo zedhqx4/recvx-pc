@@ -643,3 +643,9 @@ recalcula siempre, de modo que los cambios de paleta se detectan exactamente igu
 - pc_vu.h: sin `PcVu0`, flags MAC/clip, Q ni historial; pc_asm2c.h sin cfc2/ctc2; pc_vu0_state.c -> pc_vu_round.c (solo pcVuTruncEnabled).
 - Las herramientas `pc/tools/asm2c.py` y `port_vu.py` siguen generando codigo con pcVu0: ya no sirven para codigo nuevo.
 - Equivalencia: el estado de clip se movio sin cambios de logica (state_load/store copian la misma estructura); verificado por compilacion (-fsyntax-only de todo pc/src, enlace de pc/src/vu sin simbolos duplicados) y revision; los harness anteriores ya no compilan porque comparaban contra el transpilado con pcVu0.
+
+## 0.9.181 - se retiran las ramas solo-PS2 (-6 412 lineas)
+- Herramientas nuevas: `pc/tools/strip_ps2_branches.py` (aplica `#ifdef TARGET_PC A #else B #endif -> A` y `#ifndef TARGET_PC B #endif -> nada`, respetando los demas condicionales) y `pc/tools/check_pp_equal.py` (compara el preprocesado `gcc -E -P -DTARGET_PC` antes/despues, con los includes que faltan sustituidos por archivos vacios).
+- 67 archivos de src/ e include/, un commit por archivo (revertible por separado). En los 67 el preprocesado con -DTARGET_PC es identico, es decir, el codigo que compila la build PC no cambia: solo desaparece lo que nunca se compilaba (ramas PS2, asm MIPS, `.set noreorder`...). Mayores: ps2_NaMatrix.c -1552, ps2_dummy.c -798, ps2_NinjaCnk.c -885, njplus.c -451, ps2_NaMath.c -375, ps2_Vu1Strip.c -375, face_bh.c -327, ps2_Vu1Scissor2.c -285.
+- Referencia PS2: milestone/0.9.180 (y el historial de git) conserva todo el codigo PS2.
+- Pendiente de comprobar por el usuario: que el CI de MSVC compila y el juego arranca igual (no deberia cambiar nada).

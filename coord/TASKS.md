@@ -70,3 +70,5 @@ bajo `## Preguntas`.
 - Lineas "muertas" medidas con script (ramas `#else` de `#ifdef TARGET_PC` y cuerpos de `#ifndef TARGET_PC`, 283 113 lineas totales en src/ e include/): **5 334** (NaMatrix 1417, NinjaCnk 833, ps2_dummy 651, njplus 406, NaMath 350, Vu1Strip 343, face_bh 306, Scissor2 274, expand 196, objitm 148). Las estimaciones por rangos de G3 no se usan.
 - Quedan 121 `asm volatile` en src/ (todas en ramas PS2 o rutas no PC; por verificar caso a caso al retirarlas).
 - Los pasos 1-2 de su orden de retirada (headers EE, stubs inertes) quedan en espera de la decision del usuario sobre la pregunta 1 (conservar o no la compilacion PS2).
+
+- Decision del usuario (G3, pregunta 1): se borran las ramas PS2. Hecho en 0.9.181 (-6412 lineas, preprocesado identico). Siguiente: shims `sceGs*`/`sceDma*` sin llamadores y limpieza de interruptores de INI.
