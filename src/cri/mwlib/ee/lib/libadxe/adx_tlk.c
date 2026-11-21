@@ -13,9 +13,7 @@
 #include "../../../cri/mwlib/ee/lib/libadxe/sjr_clt.h"
 
 #include <stdio.h>
-#ifdef TARGET_PC
 void pcAdxRnaReset(ADXRNA rna);
-#endif
 //#include <string.h>
 
 #define	ADXT_OBUF_DIST	(0x2020)
@@ -37,50 +35,10 @@ Sint32 adxt_time_unit = 0;
 float adxt_diff_av = 0;
 
 // 100% matching! 
-#ifdef TARGET_PC
 void adxt_disp_rna_stat(ADXT adxt)
 {
     printf("stat=%4d\n", adxt->stat);
 }
-#else
-void adxt_disp_rna_stat(ADXT adxt)
-{
-    PS2RNA rna;
-	SJ sjiop;
-	SJ sjtmp;
-	Sint32 ntmp0;
-	Sint32 ntmp2;
-	Sint32 niop0;
-	Sint32 niop2;
-    Sint32 sum;
-    Sint32 ttl;
-    
-    rna = adxt->rna;
-    
-    sjiop = PS2RNA_GetSjiop(rna, 0);
-    sjtmp = PS2RNA_GetSjtmp(rna, 0);
-    
-    ntmp0 = SJ_GetNumData(sjtmp, 1);
-    ntmp2 = SJ_GetNumData(sjtmp, 0);
-    
-    niop0 = SJRMT_GetNumData(sjiop, 1);
-    niop2 = SJRMT_GetNumData(sjiop, 0);
-    
-    sum = ntmp0 + ntmp2;
-    
-    printf("ntmp0=%4d, ntmp2=%4d, sum=%4d\n", ntmp0, ntmp2, sum);
-    
-    sum = niop0 + niop2;
-    
-    printf("niop0=%4d, niop2=%4d, sum=%4d\n", niop0, niop2, sum);
-    
-    sum = ntmp0 + niop2;
-    
-    ttl = niop0 + ntmp2;
-    
-    printf("stat=%4d, ttl=%4d\n", adxt->stat, sum + ttl);
-}
-#endif
 
 // 100% matching! 
 ADXT ADXT_Create(Sint32 maxnch, void *work, Sint32 worksize)
@@ -421,47 +379,8 @@ void ADXT_StopWithoutLsc(ADXT adxt)
 
     ADXCRS_Unlock();
     
-#ifdef TARGET_PC
     /* PC: stop the PC output stage (pc_adx_rna.c) instead of the IOP transfer */
     pcAdxRnaReset(adxt->rna);
-#else
-    rna = adxt->rna;
-    
-    nch = ADXT_GetNumChan(adxt);
-    
-    for (i = 0; i < nch; i++) 
-    {
-        if (rna->dtr[i]->trnflg == 1)
-        {
-            while (sceSifDmaStat(rna->dtr[i]->dma_id) >= 0);
-        }
-        
-        rna->dtr[i]->trnflg = 0;
-        
-        DTR_Stop(rna->dtr[i]);
-        
-        rna->trnsw = 0;
-        
-        rna->dtrstop_flg = 1;
-    } 
-    
-    for (i = 0; i < nch; i++) 
-    {
-        SJRMT_Reset(PS2RNA_GetSjiop(rna, i));
-    } 
-    
-    for (i = 0; i < nch; i++) 
-    {
-        SJX_Reset(rna->psj[i]->sjx);
-    } 
-    
-    for (i = 0; i < nch; i++) 
-    {
-        sjtmp = PS2RNA_GetSjtmp(rna, i);
-        
-        SJ_Reset(sjtmp);
-    } 
-#endif
     
     ADXCRS_Lock();
     
