@@ -1,8 +1,6 @@
 #include "../../../ps2/veronica/prog/ps2_NaFog.h"
 #include "../../../ps2/veronica/prog/ps2_dummy.h"
-#ifdef TARGET_PC
 #include "pc_renderer.h"
-#endif
 
 float fNaFogNear;
 float fNaFogFar;
@@ -24,18 +22,14 @@ unsigned int ulNaFogState;
 void njFogEnable()
 {
     ulNaFogState = 1;
-#ifdef TARGET_PC
     pcRendererSetGlobalFog(1, fNaFogR, fNaFogG, fNaFogB);
-#endif
 } 
 
 // 100% matching! 
 void njFogDisable()
 {
     ulNaFogState = 0;
-#ifdef TARGET_PC
     pcRendererSetGlobalFog(0, fNaFogR, fNaFogG, fNaFogB);
-#endif
 } 
 
 // 100% matching! 
@@ -284,7 +278,6 @@ float njCalcFogPower(float fVSZ)
     return ret;
 }
 
-#ifdef TARGET_PC
 /* Diagnostico de niebla (rafaga F8, ver pcPrimDiag): estado del juego y la tabla muestreada. F = 255 sin niebla, 0 = todo FOGCOL.
  * La tabla se indexa por vista-z (njCalcFogPower): se imprime F a varias distancias para compararlo con la GS. */
 extern void pcLog(const char* fmt, ...);
@@ -299,4 +292,3 @@ void pcFogDiag(void)
         pcLog("FOGDIAG   z=%.0f -> F(njCalcFogPower)=%.2f  F(njCalcFogPowerEx 1/z)=%.2f", zs[i], njCalcFogPower(zs[i]),
               njCalcFogPowerEx(1.0f / zs[i]));
 }
-#endif
