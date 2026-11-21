@@ -3,14 +3,11 @@
 #include "../../../ps2/veronica/prog/ps2_NaView.h"
 #include "../../../ps2/veronica/prog/ps2_dummy.h"
 #include "../../../ps2/veronica/prog/main.h"
-#ifdef TARGET_PC
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
-#endif
 
 
-#ifdef TARGET_PC
 /* Perfil opt-in (debug=1, profile_game=1): reparto del tiempo de cada tira entre color/recorte por vertice y el envio
  * (Ps2AddPrim3DEx). Cada 4000 tiras escribe una linea "PROFILE vu1Draw" en recvx.log. */
 #include "pc_game_profile.h"
@@ -46,10 +43,6 @@ static void pcStripProfRecord(int kind, double t0, double t1, double t2, unsigne
 #define PCSP_BEGIN unsigned int pcsp_csr = pcVuRoundEnter(); double pcsp_t0 = pcGameProfileEnabled() ? pcGameProfileNowMs() : 0.0, pcsp_t1 = 0.0;
 #define PCSP_SUBMIT(kind, call) do { pcVuRoundLeave(pcsp_csr); if (pcsp_t0 != 0.0) pcsp_t1 = pcGameProfileNowMs(); call; \
     if (pcsp_t0 != 0.0) pcStripProfRecord(kind, pcsp_t0, pcsp_t1, pcGameProfileNowMs(), usStripMax); } while (0)
-#else
-#define PCSP_BEGIN
-#define PCSP_SUBMIT(kind, call) call
-#endif
 
 static SCISSOR_PLANE planeset;
 static SCISSOR scissorflip;
@@ -63,29 +56,12 @@ float fVu1OffsetY;
 float fVu1AspectW;
 float fVu1AspectH;
 VU1_PRIM_BUF vu1ScessorBuf[16];
-#ifndef TARGET_PC
-void (*pColorCalcFuncTbl[11])(VU1_STRIP_BUF* pStrip, VU1_PRIM_BUF* pPrim) = 
-{
-	vu1GetVertexColor,
-	vu1GetVertexColorCM,
-	vu1GetVertexColorIgnore,
-	vu1GetVertexColorDif,
-	vu1GetVertexColorDifAmb,
-	vu1GetVertexColorDifSpe1,
-	vu1GetVertexColorDifSpe2,
-	vu1GetVertexColorDifSpe3,
-	vu1GetVertexColorDifSpe1Amb,
-	vu1GetVertexColorDifSpe2Amb,
-	vu1GetVertexColorDifSpe3Amb
-};
-#endif
 
 VU1_COLOR vu1Diffuse = { 1.0f, 1.0f, 1.0f, 1.0f };
 VU1_COLOR vu1Specula = { 1.0f, 1.0f, 1.0f, 1.0f };
 VU1_COLOR vu1Ambient = { 1.0f, 1.0f, 1.0f, 1.0f };
 float fVu1AlphaRatio = 128.0f;
 
-#ifdef TARGET_PC
 /* Color por vertice sin la unidad vectorial: pc/include/pc_vu1_color.h reproduce las 11 vu1GetVertexColor* como C escalar
  * (verificado bit a bit contra las funciones transpiladas, ver milestone/0.9.160 y claude_notes.md). */
 #include "pc_vu1_color.h"
@@ -109,9 +85,6 @@ void (*pColorCalcFuncTbl[11])(VU1_STRIP_BUF* pStrip, VU1_PRIM_BUF* pPrim) = {
     pcvcn_0, pcvcn_1, pcvcn_2, pcvcn_3, pcvcn_4, pcvcn_5, pcvcn_6, pcvcn_7, pcvcn_8, pcvcn_9, pcvcn_10
 };
 #define pcColorCalcFunc(k) pColorCalcFuncTbl[(k)]
-#else
-#define pcColorCalcFunc(k) pColorCalcFuncTbl[(k)]
-#endif
 
 extern void VU0_CLIP_VIEW_VOLUME_ALL() __attribute__((section(".vutext")));
 extern void VU0_CALC_COLOR() __attribute__((section(".vutext")));
@@ -749,374 +722,26 @@ void vu1DrawTriangleStripTransDouble(unsigned long ulType, VU1_STRIP_BUF* pS, un
 }
 
 // 100% matching!
-#ifndef TARGET_PC   /* PC: el color por vertice es pc/include/pc_vu1_color.h (sin VU0); esta version es la del PS2 original */
-void vu1GetVertexColor(VU1_STRIP_BUF* pStrip, VU1_PRIM_BUF* pPrim)
-{
-    asm volatile 
-    ("
-        lqc2      vf4, VU1_STRIP_BUF.fIr(%0)
-        
-        mfc1      t0, %2
-        mfc1      t1, %2
-        mfc1      t2, %2
-        mfc1      t3, %3
-        
-        pextlw    t0, t1, t0
-        pextlw    t2, t3, t2
-        pcpyld    t0, t2, t0
-    
-        qmtc2     t0, vf5
-    
-        vmul.xyzw vf4, vf4, vf5 
-        
-        sqc2      vf4, VU1_PRIM_BUF.fR(%1)
-    " : : "r"(pStrip), "r"(pPrim), "f"(128.0f), "f"(256.0f) : "$t0", "$t1", "$t2", "$t3"
-    );
-}
-#endif
 
 // 100% matching!
-#ifndef TARGET_PC   /* PC: el color por vertice es pc/include/pc_vu1_color.h (sin VU0); esta version es la del PS2 original */
-void vu1GetVertexColorCM(VU1_STRIP_BUF* pStrip, VU1_PRIM_BUF* pPrim) // first parameter is not present on the debugging symbols
-{
-    asm volatile 
-    ("
-        lqc2    vf4, VU1_COLOR.fR(%1)
-
-        lw      t0, fVu1AlphaRatio
-
-        qmtc2   t0, vf5 
-    
-        vmulx.w vf4, vf0, vf5x 
-
-        sqc2    vf4, VU1_PRIM_BUF.fR(%0)
-    " : : "r"(pPrim), "r"(&vu1Diffuse), "f"(fVu1AlphaRatio) : "$v1", "$t0"
-    );
-}
-#endif
 
 // 100% matching!
-#ifndef TARGET_PC   /* PC: el color por vertice es pc/include/pc_vu1_color.h (sin VU0); esta version es la del PS2 original */
-void vu1GetVertexColorIgnore(VU1_STRIP_BUF* pStrip, VU1_PRIM_BUF* pPrim) // first parameter is not present on the debugging symbols
-{
-    asm volatile 
-    ("
-        addi        t0, zero, 128
-        
-        qmtc2       t0, vf5
-        
-        vitof0.xyzw vf5, vf5
-        
-        lw          t1, fVu1AlphaRatio
-    
-        qmtc2       t1, vf6
-    
-        vaddx.xyz   vf4, vf0, vf5x
-        vmulx.w     vf4, vf0, vf6x 
-
-        sqc2        vf4, VU1_PRIM_BUF.fR(%0)
-    " : : "r"(pPrim), "f"(fVu1AlphaRatio) : "$t1"
-    );
-}
-#endif
 
 // 100% matching!
-#ifndef TARGET_PC   /* PC: el color por vertice es pc/include/pc_vu1_color.h (sin VU0); esta version es la del PS2 original */
-void vu1GetVertexColorDif(VU1_STRIP_BUF* pStrip, VU1_PRIM_BUF* pPrim)
-{
-    asm volatile 
-    ("
-        lqc2       vf4, VU1_STRIP_BUF.fIr(%0)
-        lqc2       vf5, VU1_COLOR.fR(%2)
-
-        lw         t0, fVu1AlphaRatio
-
-        vminiw.xyz vf4, vf4, vf0w
-        vmaxx.xyz  vf4, vf4, vf0x 
-        
-        qmtc2      t0, vf6 
-
-        vmul.xyz   vf4, vf4, vf5
-        vmulx.w    vf4, vf0, vf6x 
-
-        sqc2       vf4, VU1_PRIM_BUF.fR(%1)
-    " : : "r"(pStrip), "r"(pPrim), "r"(&vu1Diffuse), "f"(fVu1AlphaRatio) : "$v1", "$t0"
-    );
-}
-#endif
 
 // 100% matching!
-#ifndef TARGET_PC   /* PC: el color por vertice es pc/include/pc_vu1_color.h (sin VU0); esta version es la del PS2 original */
-void vu1GetVertexColorDifAmb(VU1_STRIP_BUF* pStrip, VU1_PRIM_BUF* pPrim) 
-{
-    asm volatile 
-    ("
-        lqc2       vf4, VU1_STRIP_BUF.fIr(%0)
-
-        lw         t0, fVu1AlphaRatio
-        
-        qmtc2      t0, vf8
-
-        vadd.xyz   vf7, vf4, vf22
-        
-        vmaxx.xyz  vf7, vf7, vf0x
-        vminiw.xyz vf7, vf7, vf0w
-        
-        vmul.xyz   vf4, vf7, vf20
-        vmulx.w    vf4, vf0, vf8x 
-
-        sqc2       vf4, VU1_PRIM_BUF.fR(%1)
-    " : : "r"(pStrip), "r"(pPrim), "f"(fVu1AlphaRatio) : "$t0"
-    );
-}
-#endif
 
 // 96.47% matching
-#ifndef TARGET_PC   /* PC: el color por vertice es pc/include/pc_vu1_color.h (sin VU0); esta version es la del PS2 original */
-void vu1GetVertexColorDifSpe1(VU1_STRIP_BUF* pStrip, VU1_PRIM_BUF* pPrim)
-{
-    asm volatile 
-    ("
-        lqc2       vf4, VU1_STRIP_BUF.fIr(%0)
-
-        lw         t0, fVu1AlphaRatio
-    
-        vmove.xyzw vf5, vf4
-        vmove.xyzw vf6, vf4
-        
-        qmtc2      t0, vf8
-    
-        vsubw.xyz  vf7, vf4, vf0w
-
-        vmaxx.xyz  vf4, vf4, vf0x
-        vminiw.xyz vf4, vf4, vf0w
-        
-        vmaxx.xyz  vf7, vf7, vf0x
-        vminiw.xyz vf7, vf7, vf0w
-        
-        vmul.xyz   vf4, vf4, vf5
-        vmul.xyz   vf7, vf7, vf6
-        
-        vadd.xyz   vf4, vf4, vf7
-        
-        vmulx.w    vf4, vf0, vf8x 
-
-        sqc2       vf4, VU1_PRIM_BUF.fR(%1)
-    " : : "r"(pStrip), "r"(pPrim), "f"(fVu1AlphaRatio) : "$t0", "memory"
-    );
-}
-#endif
 
 // 100% matching!
-#ifndef TARGET_PC   /* PC: el color por vertice es pc/include/pc_vu1_color.h (sin VU0); esta version es la del PS2 original */
-void vu1GetVertexColorDifSpe2(VU1_STRIP_BUF* pStrip, VU1_PRIM_BUF* pPrim)
-{
-    asm volatile 
-    ("
-        lqc2       vf4, VU1_STRIP_BUF.fIr(%0)
-        lqc2       vf5, VU1_COLOR.fR(%2)
-        lqc2       vf6, VU1_COLOR.fR(%3)
-        lqc2       vf7, VU1_COLOR.fR(%4)
-
-        lw         t0, fVu1AlphaRatio
-        
-        qmtc2      t0, vf8
-    
-        vadd.xyz   vf5, vf4, vf5
-        vsubw.xyz  vf5, vf5, vf0w
-
-        vmaxx.xyz  vf4, vf4, vf0x
-        vminiw.xyz vf4, vf4, vf0w
-        
-        vmaxx.xyz  vf5, vf5, vf0x
-        vminiw.xyz vf5, vf5, vf0w
-        
-        vmul.xyz   vf4, vf4, vf6
-        vmul.xyz   vf5, vf5, vf7
-        
-        vadd.xyz   vf4, vf4, vf5
-        
-        vmulx.w    vf4, vf0, vf8x 
-
-        sqc2       vf4, VU1_PRIM_BUF.fR(%1)
-    " : : "r"(pStrip), "r"(pPrim), "r"(&vu1Ambient), "r"(&vu1Diffuse), "r"(&vu1Specula), "f"(fVu1AlphaRatio) : "$v1", "$a2", "$a3", "$t0"
-    );
-}
-#endif
 
 // 100% matching!
-#ifndef TARGET_PC   /* PC: el color por vertice es pc/include/pc_vu1_color.h (sin VU0); esta version es la del PS2 original */
-void vu1GetVertexColorDifSpe3(VU1_STRIP_BUF* pStrip, VU1_PRIM_BUF* pPrim)
-{
-    asm volatile 
-    ("
-        lqc2       vf4, VU1_STRIP_BUF.fIr(%0)
-        lqc2       vf5, VU1_COLOR.fR(%2)
-        lqc2       vf6, VU1_COLOR.fR(%3)
-
-        lw         t0, fVu1AlphaRatio
-        
-        qmtc2      t0, vf8
-
-        addi       t1, zero, 17
-
-        vaddw.xyz  vf7, vf0, vf0w
-
-        l_002D5770:
-        vmul.xyz   vf7, vf7, vf4
-
-        addi       t1, t1, -1
-        nop
-        nop
-        nop
-
-        bnez       t1, l_002D5770
-        nop
-
-        vmaxx.xyz  vf4, vf4, vf0x
-        vminiw.xyz vf4, vf4, vf0w
-        
-        vmaxx.xyz  vf7, vf7, vf0x
-        vminiw.xyz vf7, vf7, vf0w
-        
-        vmul.xyz   vf4, vf4, vf5
-        vmul.xyz   vf7, vf7, vf6
-        
-        vadd.xyz   vf4, vf4, vf7
-        
-        vmulx.w    vf4, vf0, vf8x 
-
-        sqc2       vf4, VU1_PRIM_BUF.fR(%1)
-    " : : "r"(pStrip), "r"(pPrim), "r"(&vu1Diffuse), "r"(&vu1Specula), "f"(fVu1AlphaRatio) : "$v1", "$a2", "$t0"
-    );
-}
-#endif
 
 // 100% matching!
-#ifndef TARGET_PC   /* PC: el color por vertice es pc/include/pc_vu1_color.h (sin VU0); esta version es la del PS2 original */
-void vu1GetVertexColorDifSpe1Amb(VU1_STRIP_BUF* pStrip, VU1_PRIM_BUF* pPrim)
-{
-    asm volatile 
-    ("
-        lqc2       vf4, VU1_STRIP_BUF.fIr(%0)
-        lqc2       vf5, VU1_COLOR.fR(%2)
-        lqc2       vf6, VU1_COLOR.fR(%3)
-        lqc2       vf7, VU1_COLOR.fR(%4)
-
-        lw         t0, fVu1AlphaRatio
-        
-        qmtc2      t0, vf8
-    
-        vsubw.xyz  vf9, vf4, vf0w
-
-        vmaxx.xyz  vf9, vf9, vf0x
-        vminiw.xyz vf9, vf9, vf0w
-
-        vadd.xyz   vf4, vf4, vf5
-        
-        vmaxx.xyz  vf4, vf4, vf0x
-        vminiw.xyz vf4, vf4, vf0w
-        
-        vmul.xyz   vf9, vf9, vf7
-        vmul.xyz   vf4, vf4, vf6
-        
-        vadd.xyz   vf4, vf4, vf9
-        
-        vmulx.w    vf4, vf0, vf8x 
-
-        sqc2       vf4, VU1_PRIM_BUF.fR(%1)
-    " : : "r"(pStrip), "r"(pPrim), "r"(&vu1Ambient), "r"(&vu1Diffuse), "r"(&vu1Specula), "f"(fVu1AlphaRatio) : "$v1", "$a2", "$a3", "$t0"
-    );
-}
-#endif
 
 // 100% matching!
-#ifndef TARGET_PC   /* PC: el color por vertice es pc/include/pc_vu1_color.h (sin VU0); esta version es la del PS2 original */
-void vu1GetVertexColorDifSpe2Amb(VU1_STRIP_BUF* pStrip, VU1_PRIM_BUF* pPrim)
-{
-    asm volatile 
-    ("
-        lqc2       vf4, VU1_STRIP_BUF.fIr(%0)
-        lqc2       vf5, VU1_COLOR.fR(%2)
-        lqc2       vf6, VU1_COLOR.fR(%3)
-        lqc2       vf7, VU1_COLOR.fR(%4)
-
-        lw         t0, fVu1AlphaRatio
-        
-        qmtc2      t0, vf8
-
-        vadd.xyz   vf4, vf4, vf5
-        vsubw.xyz  vf9, vf4, vf0w
-
-        vmaxx.xyz  vf9, vf9, vf0x
-        vminiw.xyz vf9, vf9, vf0w
-        
-        vmaxx.xyz  vf4, vf4, vf0x
-        vminiw.xyz vf4, vf4, vf0w
-        
-        vmul.xyz   vf9, vf9, vf7
-        vmul.xyz   vf4, vf4, vf6
-        
-        vadd.xyz   vf4, vf4, vf9
-        
-        vmulx.w    vf4, vf0, vf8x 
-
-        sqc2       vf4, VU1_PRIM_BUF.fR(%1)
-    " : : "r"(pStrip), "r"(pPrim), "r"(&vu1Ambient), "r"(&vu1Diffuse), "r"(&vu1Specula), "f"(fVu1AlphaRatio) : "$v1", "$a2", "$a3", "$t0"
-    );
-}
-#endif
 
 // 100% matching!
-#ifndef TARGET_PC   /* PC: el color por vertice es pc/include/pc_vu1_color.h (sin VU0); esta version es la del PS2 original */
-void vu1GetVertexColorDifSpe3Amb(VU1_STRIP_BUF* pStrip, VU1_PRIM_BUF* pPrim)
-{
-    asm volatile 
-    ("
-        lqc2       vf4, VU1_STRIP_BUF.fIr(%0)
-        lqc2       vf5, VU1_COLOR.fR(%2)
-        lqc2       vf6, VU1_COLOR.fR(%3)
-        lqc2       vf7, VU1_COLOR.fR(%4)
-
-        lw         t0, fVu1AlphaRatio
-        
-        qmtc2      t0, vf8
-
-        vadd.xyz   vf4, vf4, vf5
-
-        addi       t1, zero, 17
-
-        vaddw.xyz  vf9, vf0, vf0w
-
-        l_002D58E0:
-        vmul.xyz   vf9, vf9, vf4
-
-        addi       t1, t1, -1
-        nop
-        nop
-        nop
-
-        bnez       t1, l_002D58E0
-        nop
-
-        vmaxx.xyz  vf4, vf4, vf0x
-        vminiw.xyz vf4, vf4, vf0w
-        
-        vmaxx.xyz  vf9, vf9, vf0x
-        vminiw.xyz vf9, vf9, vf0w
-        
-        vmul.xyz   vf4, vf4, vf6
-        vmul.xyz   vf9, vf9, vf7
-        
-        vadd.xyz   vf4, vf4, vf9
-        
-        vmulx.w    vf4, vf0, vf8x 
-
-        sqc2       vf4, VU1_PRIM_BUF.fR(%1)
-    " : : "r"(pStrip), "r"(pPrim), "r"(&vu1Ambient), "r"(&vu1Diffuse), "r"(&vu1Specula), "f"(fVu1AlphaRatio) : "$v1", "$a2", "$a3", "$t0"
-    );
-}
-#endif
 
 // 100% matching! 
 void vu1RotTransStripBuf(NJS_MATRIX* pMatrix, NJS_VECTOR* pVector, VU1_STRIP_BUF* pBuf)
