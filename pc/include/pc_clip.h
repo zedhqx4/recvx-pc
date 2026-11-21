@@ -40,6 +40,13 @@ void pcClipViewVolume(const float* p4, int all);
 uint32_t pcClipFlagsGet(void);
 void pcClipFlagsSet(uint32_t flags);
 
+/* Vertice a espacio de clip con la matriz de vista y sus 6 flags (CLIPw): lo que hacia _Clip_ViewVolume.
+ * Escribe out[4], empuja los flags al registro compartido y devuelve ese registro (24 bits). No toca el historial h15/h18/h19. */
+int pcClipViewVertex(float* out, const float* in);
+
+/* Flags de un punto en pantalla contra el area visible (_Clip_Screen): empuja y devuelve el registro de flags. */
+int pcClipScreen(const float* p4);
+
 /* Reinicia el historial de vertices de clip (vf15/vf18/vf19 = vf0): lo hacia el micro INIT_CALC_COLOR/PROCESS. */
 void pcClipResetHistory(void);
 

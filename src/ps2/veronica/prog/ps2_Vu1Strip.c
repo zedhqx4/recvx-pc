@@ -524,136 +524,20 @@ void _Init_ScissorSystem()
     InitNodeArraySet(&scissorflip);
 }
 
-// 100% matching! 
+// PC: C plano (pcClipViewVertex)
 int _Clip_ViewVolume(float* clip, float local_clip[4], float* vertex)
 {
-#ifdef TARGET_PC
-    {
-        PcGpr g_op0 = { 0 };
-        PcGpr g_op1 = { 0 };
-        PcGpr g_v0 = { 0 };
-        PcGpr g_zero = { 0 };
-        uint64_t lo_ = 0; int fcc_ = 0;
-        g_op0.d[0] = A2C_SX32((uint32_t)(uintptr_t)(clip));
-        g_op1.d[0] = A2C_SX32((uint32_t)(uintptr_t)(vertex));
-        memcpy(&pcVu0.vf[4], A2C_PTR(((uint32_t)(g_op1.w[0] + (0)))), 16);
-        { VuVec r_ = pcVu0.vf[0]; r_.f[0] = vu_f(pcVu0.vf[24].f[0] * pcVu0.vf[4].f[0]); r_.f[1] = vu_f(pcVu0.vf[24].f[1] * pcVu0.vf[4].f[0]); r_.f[2] = vu_f(pcVu0.vf[24].f[2] * pcVu0.vf[4].f[0]); r_.f[3] = vu_f(pcVu0.vf[24].f[3] * pcVu0.vf[4].f[0]); pcVu0.acc.f[0] = r_.f[0]; pcVu0.acc.f[1] = r_.f[1]; pcVu0.acc.f[2] = r_.f[2]; pcVu0.acc.f[3] = r_.f[3]; vu_set_mac(&pcVu0, &r_, 15); }
-        { VuVec r_ = pcVu0.vf[0]; r_.f[0] = vu_f(pcVu0.acc.f[0] + pcVu0.vf[25].f[0] * pcVu0.vf[4].f[1]); r_.f[1] = vu_f(pcVu0.acc.f[1] + pcVu0.vf[25].f[1] * pcVu0.vf[4].f[1]); r_.f[2] = vu_f(pcVu0.acc.f[2] + pcVu0.vf[25].f[2] * pcVu0.vf[4].f[1]); r_.f[3] = vu_f(pcVu0.acc.f[3] + pcVu0.vf[25].f[3] * pcVu0.vf[4].f[1]); pcVu0.acc.f[0] = r_.f[0]; pcVu0.acc.f[1] = r_.f[1]; pcVu0.acc.f[2] = r_.f[2]; pcVu0.acc.f[3] = r_.f[3]; vu_set_mac(&pcVu0, &r_, 15); }
-        { VuVec r_ = pcVu0.vf[0]; r_.f[0] = vu_f(pcVu0.acc.f[0] + pcVu0.vf[26].f[0] * pcVu0.vf[4].f[2]); r_.f[1] = vu_f(pcVu0.acc.f[1] + pcVu0.vf[26].f[1] * pcVu0.vf[4].f[2]); r_.f[2] = vu_f(pcVu0.acc.f[2] + pcVu0.vf[26].f[2] * pcVu0.vf[4].f[2]); r_.f[3] = vu_f(pcVu0.acc.f[3] + pcVu0.vf[26].f[3] * pcVu0.vf[4].f[2]); pcVu0.acc.f[0] = r_.f[0]; pcVu0.acc.f[1] = r_.f[1]; pcVu0.acc.f[2] = r_.f[2]; pcVu0.acc.f[3] = r_.f[3]; vu_set_mac(&pcVu0, &r_, 15); }
-        { VuVec r_ = pcVu0.vf[0]; r_.f[0] = vu_f(pcVu0.acc.f[0] + pcVu0.vf[27].f[0] * pcVu0.vf[0].f[3]); r_.f[1] = vu_f(pcVu0.acc.f[1] + pcVu0.vf[27].f[1] * pcVu0.vf[0].f[3]); r_.f[2] = vu_f(pcVu0.acc.f[2] + pcVu0.vf[27].f[2] * pcVu0.vf[0].f[3]); r_.f[3] = vu_f(pcVu0.acc.f[3] + pcVu0.vf[27].f[3] * pcVu0.vf[0].f[3]); pcVu0.vf[5].f[0] = r_.f[0]; pcVu0.vf[5].f[1] = r_.f[1]; pcVu0.vf[5].f[2] = r_.f[2]; pcVu0.vf[5].f[3] = r_.f[3]; vu_set_mac(&pcVu0, &r_, 15); }
-        vu_clip(&pcVu0, &pcVu0.vf[5], pcVu0.vf[5].f[3]);
-        memcpy(A2C_PTR(((uint32_t)(g_op0.w[0] + (0)))), &pcVu0.vf[5], 16);
-        g_v0.d[0] = A2C_SX32(a2c_cfc2(18));
-        (void)g_zero; (void)lo_; (void)fcc_;
-        return (int)g_v0.w[0];
-    }
-#else
-    asm volatile
-    ("
-        lqc2         vf4, 0(%1)
-            
-        vmulax.xyzw  ACC, vf24, vf4x
-            
-        vmadday.xyzw ACC, vf25, vf4y
-        vmaddaz.xyzw ACC, vf26, vf4z
-            
-        vmaddw.xyzw  vf5, vf27, vf0w
-            
-        vclipw.xyz   vf5xyz, vf5w
-        vnop
-        vnop
-        vnop
-        vnop
-        
-        sqc2         vf5, 0(%0)
-        
-        cfc2         v0, vi18
-    " : : "r"(clip), "r"(vertex) : 
-    );
-#endif
+    return pcClipViewVertex(clip, vertex);
 }
 
-// 100% matching!
+// PC: C plano. Copia el nodo a triangle.node[rotflag] y avanza rotflag en 0,1,2 (el asm usaba el NODE estatico `node`,
+// que es lo unico que se le pasa).
 void PushTriangleNodeArray(SCISSOR* scissor, NODE* nod)
 {
-#ifdef TARGET_PC
-    {
-        PcGpr g_at = { 0 };
-        PcGpr g_op0 = { 0 };
-        PcGpr g_op1 = { 0 };
-        PcGpr g_t0 = { 0 };
-        PcGpr g_t1 = { 0 };
-        PcGpr g_t2 = { 0 };
-        PcGpr g_v1 = { 0 };
-        PcGpr g_zero = { 0 };
-        uint64_t lo_ = 0; int fcc_ = 0;
-        g_op0.d[0] = A2C_SX32((uint32_t)(uintptr_t)(scissor));
-        g_op1.d[0] = A2C_SX32((uint32_t)(uintptr_t)(&node));
-        g_v1.d[0] = g_op1.d[0];
-        g_t0.d[0] = A2C_SX32(*(uint32_t*)A2C_PTR(((uint32_t)(g_op0.w[0] + (offsetof(SCISSOR, rotflag))))));
-        g_at.d[0] = (g_zero.d[0] + (uint64_t)(int64_t)((int64_t)(sizeof(NODE))));
-        lo_ = A2C_SX32((uint32_t)((int64_t)(int32_t)g_t0.w[0] * (int32_t)g_at.w[0]));
-        g_t1.d[0] = lo_;
-        g_t0.d[0] = A2C_SX32(g_t0.w[0] + (uint32_t)((int32_t)(1)));
-        g_t1.d[0] = A2C_SX32(g_t1.w[0] + (uint32_t)(g_op0.w[0]));
-        g_t0.d[0] = (g_t0.d[0] & (uint64_t)(uint16_t)(0x3));
-        memcpy(&pcVu0.vf[4], A2C_PTR(((uint32_t)(g_v1.w[0] + (offsetof(NODE, vertex))))), 16);
-        memcpy(&pcVu0.vf[5], A2C_PTR(((uint32_t)(g_v1.w[0] + (offsetof(NODE, color))))), 16);
-        memcpy(&pcVu0.vf[6], A2C_PTR(((uint32_t)(g_v1.w[0] + (offsetof(NODE, texUV))))), 16);
-        memcpy(&pcVu0.vf[7], A2C_PTR(((uint32_t)(g_v1.w[0] + (offsetof(NODE, clipV))))), 16);
-        memcpy(A2C_PTR(((uint32_t)(g_t1.w[0] + (offsetof(SCISSOR, triangle.node[0].vertex))))), &pcVu0.vf[4], 16);
-        memcpy(A2C_PTR(((uint32_t)(g_t1.w[0] + (offsetof(SCISSOR, triangle.node[0].color))))), &pcVu0.vf[5], 16);
-        memcpy(A2C_PTR(((uint32_t)(g_t1.w[0] + (offsetof(SCISSOR, triangle.node[0].texUV))))), &pcVu0.vf[6], 16);
-        memcpy(A2C_PTR(((uint32_t)(g_t1.w[0] + (offsetof(SCISSOR, triangle.node[0].clipV))))), &pcVu0.vf[7], 16);
-        g_t2.d[0] = A2C_SX32(g_t0.w[0] + (uint32_t)((int32_t)(-3)));
-        { int c_ = ((int64_t)g_t2.d[0] < 0);  if (c_) goto Vu1Strip_a10_l_002D4150; }
-        g_t0.d[0] = A2C_SX32(0u - g_zero.w[0]);
-        Vu1Strip_a10_l_002D4150:;
-        *(uint32_t*)A2C_PTR(((uint32_t)(g_op0.w[0] + (offsetof(SCISSOR, rotflag))))) = (uint32_t)g_t0.d[0];
-        (void)g_zero; (void)lo_; (void)fcc_;
-    }
-#else
-    asm volatile 
-    ("
-        move   v1, %1
-        
-        lw     t0, SCISSOR.rotflag(%0)
-        
-        daddiu at, zero, sizeof(NODE)
-    
-        mult   t0, at
-        nop
-        nop
-    
-        mflo   t1
-    
-        addi   t0, t0, 1
-        add    t1, t1, %0
-        
-        andi   t0, t0, 0x3
-    
-        lqc2   vf4, NODE.vertex(v1)
-        lqc2   vf5, NODE.color(v1)
-        lqc2   vf6, NODE.texUV(v1)
-        lqc2   vf7, NODE.clipV(v1)
-        
-        sqc2   vf4, SCISSOR.triangle.node[0].vertex(t1)
-        sqc2   vf5, SCISSOR.triangle.node[0].color(t1)
-        sqc2   vf6, SCISSOR.triangle.node[0].texUV(t1)
-        sqc2   vf7, SCISSOR.triangle.node[0].clipV(t1)
-        
-        addi   t2, t0, -3
-        
-        bltz   t2, l_002D4150
-        nop
-    
-        neg    t0, zero
-        
-        l_002D4150:
-        sw     t0, SCISSOR.rotflag(%0)
-    " : : "r"(scissor), "r"(&node) : "v1"
-    );
-#endif
+    unsigned int next = (scissor->rotflag + 1) & 0x3;
+
+    scissor->triangle.node[scissor->rotflag] = *nod;
+    scissor->rotflag = (next >= 3) ? 0 : next;
 }
 
 // 100% matching!
@@ -1211,58 +1095,10 @@ void vu1DrawTriangleStripTransSingle(unsigned long ulType, VU1_STRIP_BUF* pStrip
     PCSP_SUBMIT(2, Ps2AddPrim3DEx(ulType, Ps2_DRAW_TMP, usStripMax));
 }
 
-// 99.38% matching
+// PC: C plano (pcClipScreen)
 int _Clip_Screen(float* clip)
 {
-    int ret;         
-    static float para[2][4] = { 2048.0f, 2048.0f, 0, 240.0f, 0.75f, 1.0f, 0, 0 }; 
-
-    ret = 0;
-
-#ifdef TARGET_PC
-    {
-        PcGpr g_op0 = { 0 };
-        PcGpr g_op1 = { 0 };
-        PcGpr g_op2 = { 0 };
-        PcGpr g_zero = { 0 };
-        uint64_t lo_ = 0; int fcc_ = 0;
-        g_op0.d[0] = A2C_SX32((uint32_t)(uintptr_t)(ret));
-        g_op1.d[0] = A2C_SX32((uint32_t)(uintptr_t)(clip));
-        g_op2.d[0] = A2C_SX32((uint32_t)(uintptr_t)(&para));
-        memcpy(&pcVu0.vf[4], A2C_PTR(((uint32_t)(g_op1.w[0] + (0)))), 16);
-        memcpy(&pcVu0.vf[5], A2C_PTR(((uint32_t)(g_op2.w[0] + (0)))), 16);
-        memcpy(&pcVu0.vf[6], A2C_PTR(((uint32_t)(g_op2.w[0] + (16)))), 16);
-        { VuVec r_ = pcVu0.vf[0]; r_.f[0] = vu_f(pcVu0.vf[4].f[0] - pcVu0.vf[5].f[0]); r_.f[1] = vu_f(pcVu0.vf[4].f[1] - pcVu0.vf[5].f[1]); pcVu0.vf[4].f[0] = r_.f[0]; pcVu0.vf[4].f[1] = r_.f[1]; vu_set_mac(&pcVu0, &r_, 12); }
-        { VuVec r_ = pcVu0.vf[0]; r_.f[0] = vu_f(pcVu0.vf[4].f[0] * pcVu0.vf[6].f[0]); r_.f[1] = vu_f(pcVu0.vf[4].f[1] * pcVu0.vf[6].f[1]); r_.f[2] = vu_f(pcVu0.vf[4].f[2] * pcVu0.vf[6].f[2]); r_.f[3] = vu_f(pcVu0.vf[4].f[3] * pcVu0.vf[6].f[3]); pcVu0.vf[4].f[0] = r_.f[0]; pcVu0.vf[4].f[1] = r_.f[1]; pcVu0.vf[4].f[2] = r_.f[2]; pcVu0.vf[4].f[3] = r_.f[3]; vu_set_mac(&pcVu0, &r_, 15); }
-        vu_clip(&pcVu0, &pcVu0.vf[4], pcVu0.vf[5].f[3]);
-        g_op0.d[0] = A2C_SX32(a2c_cfc2(18));
-        *(uint32_t*)&(ret) = g_op0.w[0];
-        (void)g_zero; (void)lo_; (void)fcc_;
-    }
-#else
-    asm volatile
-    ("
-        lqc2       vf4, 0(%1)
-        lqc2       vf5, 0(%2)
-        lqc2       vf6, 16(%2)
-    
-        vsub.xy    vf4, vf4, vf5
-        
-        vmul.xyzw  vf4, vf4, vf6
-        
-        vclipw.xyz vf4, vf5
-        vnop
-        vnop
-        vnop
-        vnop
-        vnop
-    
-        cfc2       %0, vi18
-    " : "=r"(ret) : "f"(clip), "r"(&para) :
-    );
-#endif
-
-    return ret;
+    return pcClipScreen(clip);
 }
 
 // 97.44% matching

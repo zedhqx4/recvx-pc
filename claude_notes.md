@@ -612,3 +612,8 @@ recalcula siempre, de modo que los cambios de paleta se detectan exactamente igu
 - `ScissorTriangle` (ps2_Vu1Strip.c) pasa de ~780 lineas de VU0 transpilado a ~25 lineas de C: bucle de planos + alternancia de narray con flipflag. Sin `pcVu0` salvo el registro de flags, ahora accesible por `pcClipFlagsGet/Set` (pc_clip.c).
 - Validacion: harness gcc contra el ScissorTriangle transpilado de 0.9.174 (1M triangulos aleatorios: 185K vacios, 40K intactos, 774K recortados): 0 diferencias en nodos de salida, nodeNum y historial de clip. Respaldo: 0.9.174.
 - Rutas que lo usan: vu1DrawTriangleStripTransDoubleI (visor de items) y vu1DrawTriangleStripTransDouble1P (NaDraw 1P).
+
+## 0.9.176 - _Clip_ViewVolume, _Clip_Screen, PushTriangleNodeArray y _CVV sin pcVu0 (3d)
+- `pcClipViewVertex(out,in)` (matriz de vista -> clip + flags, devuelve el registro de flags de 24 bits) y `pcClipScreen(p4)` (flags contra el area de pantalla centro 2048, escala .75/1, semiancho 240) en pc_clip.c; `flags_push` unico para el registro compartido.
+- `_Clip_ViewVolume`/`_Clip_Screen` quedan en una linea; `PushTriangleNodeArray` en C plano (nodo -> triangle.node[rotflag], rotflag cicla 0..2). `_CVV` (ps2_NinjaCnk.c) lee `pcViewClipMatrix()` en vez de pcVu0.vf[24..27] y usa `pcClipFlagsGet/Set`.
+- Validacion: harness gcc contra los transpilados de 0.9.175, 1M casos aleatorios con historial de clip aleatorio: 0 diferencias en salida, valor devuelto e historial.

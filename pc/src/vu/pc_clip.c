@@ -89,6 +89,51 @@ void pcClipViewVolume(const float* p4, int all)
     state_store(&s, all);
 }
 
+static uint32_t flags_push(const float* a, float w)
+{
+    const float aw = w < 0 ? -w : w;
+    unsigned int f = 0;
+
+    if (a[0] > aw)  f |= 0x01;
+    if (a[0] < -aw) f |= 0x02;
+    if (a[1] > aw)  f |= 0x04;
+    if (a[1] < -aw) f |= 0x08;
+    if (a[2] > aw)  f |= 0x10;
+    if (a[2] < -aw) f |= 0x20;
+    pcVu0.clip = ((pcVu0.clip << 6) | f) & 0xFFFFFF;
+    return pcVu0.clip;
+}
+
+int pcClipViewVertex(float* out, const float* in)
+{
+    const unsigned int csr = pcVuRoundEnter();
+    const float* m = pcViewClipMatrix();
+    float acc[4], r[4];
+    int k;
+
+    for (k = 0; k < 4; k++) acc[k] = vu_f(m[k] * in[0]);
+    for (k = 0; k < 4; k++) acc[k] = vu_f(acc[k] + m[4 + k] * in[1]);
+    for (k = 0; k < 4; k++) acc[k] = vu_f(acc[k] + m[8 + k] * in[2]);
+    for (k = 0; k < 4; k++) r[k] = vu_f(acc[k] + m[12 + k] * 1.0f);
+    memcpy(out, r, 16);
+    pcVuRoundLeave(csr);
+    return (int)flags_push(r, r[3]);
+}
+
+int pcClipScreen(const float* p4)
+{
+    /* centro (2048, 2048), escala (0.75, 1.0) y semiancho 240: el punto queda "dentro" si |x'|,|y'| <= 240 */
+    const unsigned int csr = pcVuRoundEnter();
+    float r[4];
+
+    r[0] = vu_f(vu_f(p4[0] - 2048.0f) * 0.75f);
+    r[1] = vu_f(vu_f(p4[1] - 2048.0f) * 1.0f);
+    r[2] = vu_f(p4[2] * 0.0f);
+    r[3] = vu_f(p4[3] * 0.0f);
+    pcVuRoundLeave(csr);
+    return (int)flags_push(r, 240.0f);
+}
+
 uint32_t pcClipFlagsGet(void) { return pcVu0.clip; }
 void pcClipFlagsSet(uint32_t flags) { pcVu0.clip = flags & 0xFFFFFF; }
 

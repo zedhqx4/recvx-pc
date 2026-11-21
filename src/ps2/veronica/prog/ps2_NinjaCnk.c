@@ -15,6 +15,7 @@
 #include <stdlib.h>
 #include "../../../../pc/include/pc_vu.h"
 #include "../../../../pc/include/pc_calcpoint.h"
+#include "../../../../pc/include/pc_clip.h"
 #include "../../../../pc/include/pc_platform.h"
 
 /* Perfil opt-in (debug=1, profile_game=1): cuantas tiras de la ruta del EE llegan a vu1Draw* y cuantas se descartan por
@@ -2243,7 +2244,7 @@ int _CVV(float* v0)
     {
         /* Nativo: mismo calculo (x*M0 + y*M1) + z*M2 + M3 con el redondeo de la VU y los 6 bits de recorte de
          * la GS, sin el historial de banderas de la VU0 (aqui solo se leen los 6 bits bajos). */
-        const VuVec* const m = &pcVu0.vf[24];
+        const float* const m = pcViewClipMatrix();
         const float x = v0[0], y = v0[1], z = v0[2];
         float r[4];
         float aw;
@@ -2252,7 +2253,7 @@ int _CVV(float* v0)
 
         for (k_ = 0; k_ < 4; k_++)
         {
-            r[k_] = vu_f(vu_f(vu_f(m[0].f[k_] * x + m[1].f[k_] * y) + m[2].f[k_] * z) + m[3].f[k_]);
+            r[k_] = vu_f(vu_f(vu_f(m[k_] * x + m[4 + k_] * y) + m[8 + k_] * z) + m[12 + k_]);
         }
 
         aw = fabsf(r[3]);
@@ -2263,8 +2264,8 @@ int _CVV(float* v0)
         if (r[2] > aw)  f |= 0x10;
         if (r[2] < -aw) f |= 0x20;
 
-        pcVu0.clip = ((pcVu0.clip << 6) | f) & 0xFFFFFF;
-        return (int)pcVu0.clip;
+        pcClipFlagsSet((pcClipFlagsGet() << 6) | f);
+        return (int)pcClipFlagsGet();
     }
 #else
     asm volatile 
