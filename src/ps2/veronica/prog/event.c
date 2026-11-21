@@ -659,9 +659,7 @@ unsigned int bhSet()
         
         return 1;
     }
-#ifdef TARGET_PC /* the PS2 build returned whatever was left in the return register */
     return 0;
-#endif
 }
 
 // 100% matching!
@@ -732,9 +730,7 @@ unsigned int bhCmpB()
     case 5: 
         return v0 != v1; 
     }
-#ifdef TARGET_PC /* the PS2 build returned whatever was left in the return register */
     return 0;
-#endif
 }
 
 // 100% matching! 
@@ -796,9 +792,7 @@ unsigned int bhCmpW()
     case 5:                                         
         return v0 != v1; 
     }
-#ifdef TARGET_PC /* the PS2 build returned whatever was left in the return register */
     return 0;
-#endif
 }
 
 // 100% matching!
@@ -1115,13 +1109,11 @@ unsigned int bhBgmOn()
     bhScePtr++;
     bhScePtr++;
     
-#ifdef TARGET_PC
     {
         extern int pcRandoBgm(int bgm_no);
 
         v0 = pcRandoBgm(v0);   /* randomizer: bgm_map (pc_rando.c) */
     }
-#endif
     PlayBgm(v0, v1);
     
     return 1;
@@ -2431,9 +2423,7 @@ unsigned int bhDieEventCk()
     case 5: 
         return die_cnt != v2; 
     }
-#ifdef TARGET_PC /* the PS2 build returned whatever was left in the return register */
     return 0;
-#endif
 }
 
 // 100% matching!
@@ -2615,13 +2605,11 @@ unsigned int bhSetNextRoomBgm()
     bhScePtr += 2;
     
     NextSoundInfo.NextBgmNo = *bhScePtr;
-#ifdef TARGET_PC
     {
         extern int pcRandoBgm(int bgm_no);
 
         NextSoundInfo.NextBgmNo = pcRandoBgm(NextSoundInfo.NextBgmNo);   /* randomizer: bgm_map */
     }
-#endif
     
     bhScePtr++;
     
@@ -6689,13 +6677,11 @@ unsigned int bhBgmOn2()
         v2 = -45;
     }
     
-#ifdef TARGET_PC
     {
         extern int pcRandoBgm(int bgm_no);
 
         v0 = pcRandoBgm(v0);   /* randomizer: bgm_map (pc_rando.c) */
     }
-#endif
     PlayBgm2(v0, v2);
     
     return 1;
@@ -7069,13 +7055,11 @@ unsigned int bhBgmOnEx()
 
     bhScePtr++;
 
-#ifdef TARGET_PC
     {
         extern int pcRandoBgm(int bgm_no);
 
         v0 = pcRandoBgm(v0);   /* randomizer: bgm_map (pc_rando.c) */
     }
-#endif
     PlayBgmEx(v0, v1, v2);
 
     return 1;
@@ -7098,13 +7082,11 @@ unsigned int bhBgmOn2Ex()
 
     bhScePtr += 2;
 
-#ifdef TARGET_PC
     {
         extern int pcRandoBgm(int bgm_no);
 
         v0 = pcRandoBgm(v0);   /* randomizer: bgm_map (pc_rando.c) */
     }
-#endif
     PlayBgm2(v0, v1);
 
     return 1;
@@ -9750,9 +9732,7 @@ int Player_controll()
         bhScePtr++;
         break;
     }
-#ifdef TARGET_PC /* the PS2 build returned whatever was left in the return register */
     return 0;
-#endif
 }
 
 // 100% matching!
@@ -9792,9 +9772,7 @@ int Obj_controll()
     default:
         return;
     }
-#ifdef TARGET_PC /* the PS2 build returned whatever was left in the return register */
     return 0;
-#endif
 }
 
 // 100% matching!
@@ -10000,9 +9978,7 @@ int Sub_controll()
         bhScePtr++;
         break;
     }
-#ifdef TARGET_PC /* the PS2 build returned whatever was left in the return register */
     return 0;
-#endif
 }
 
 // 100% matching!
@@ -12763,9 +12739,7 @@ int Common_controll()
             bhScePtr++;
         break;
     }
-#ifdef TARGET_PC /* the PS2 build returned whatever was left in the return register */
     return 0;
-#endif
 }
 
 // 100% matching! 
@@ -13054,9 +13028,7 @@ int Event_init(BH_SCEWORK* a0, unsigned int evt_id)
     a0->ian[3][0] = 0;
     a0->ian[3][1] = 0;
     a0->ian[3][2] = 0;
-#ifdef TARGET_PC /* the PS2 build returned whatever was left in the return register */
     return 0;
-#endif
 }
 
 // 100% matching!
@@ -13124,9 +13096,7 @@ int bhEventScheduler2()
             }
         } 
     }
-#ifdef TARGET_PC /* the PS2 build returned whatever was left in the return register */
     return 0;
-#endif
 }
 
 // 100% matching!
@@ -13264,9 +13234,7 @@ unsigned int bhFlagSet(unsigned char type, unsigned int cnt, unsigned char flag)
         
         return 1;
     }
-#ifdef TARGET_PC /* the PS2 build returned whatever was left in the return register */
     return 0;
-#endif
 }
 
 // 100% matching!
