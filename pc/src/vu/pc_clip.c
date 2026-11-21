@@ -250,17 +250,14 @@ mulsum:
     c[3] = vu_f(1.0f * mat.alpha);
 }
 
-void pcClipColorVertex(const float* p4, int kind)
+void pcClipColorVertex(const float* p4, int kind, float* color)
 {
     const unsigned int csr = pcVuRoundEnter();
     PcClipState s;
-    float color[4];
 
     state_load(&s);
     pcClipStep(&s, p4 ? p4 : s.p14, pcViewClipMatrix(), kind);
-    memcpy(color, pcVu0.vf[4].f, 16);
     color_mode(mat.mode, color, s.h18);
     pcVuRoundLeave(csr);
     state_store(&s, kind == 1);
-    memcpy(pcVu0.vf[4].f, color, 16);
 }

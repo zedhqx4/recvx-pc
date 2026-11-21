@@ -1101,591 +1101,79 @@ int _Clip_Screen(float* clip)
     return pcClipScreen(clip);
 }
 
-// 97.44% matching
+// Un vertice de la tira: color y clip (pcClipColorVertex) y los datos que la GS espera en VU1_PRIM_BUF.
+// kind 2 = solo el flag de clip del vertice nuevo (los dos primeros), 1 = ademas el historial de tres vertices.
+static void StripPrimVertex(VU1_STRIP_BUF* pS, VU1_PRIM_BUF* pP, int kind)
+{
+    float color[4];
+
+    memcpy(color, &pS->fIr, sizeof(color));
+    pcClipColorVertex(&pS->fVx, kind, color);
+
+    memcpy(&pP->fX, &pS->fVx, 16);              /* x, y, z, fog */
+    pP->fS = pS->fU * pS->fIz;
+    pP->fT = pS->fV * pS->fIz;
+    pP->fQ = pS->fIz;
+    pP->ulKick = 0;
+    pP->fX = pS->fSx + fVu1OffsetX;
+    pP->fY = pS->fSy + fVu1OffsetY;
+    memcpy(&pP->fR, color, sizeof(color));
+}
+
+// PC: C plano. Los dos primeros vertices solo calculan color; desde el tercero se hace el clip contra el volumen de
+// vista y, si el triangulo toca algun plano de pantalla, se recorta (scissor nativo) y se dibuja aparte.
+// (La rama clipswitch != 0 del original era codigo muerto: clipswitch es una constante 0.)
 void vu1DrawTriangleStripTransDouble(unsigned long ulType, VU1_STRIP_BUF* pS, unsigned short usStripMax, unsigned short usMode)
 {
     PCSP_BEGIN
-    VU1_PRIM_BUF* pP;                            
-    float fIz;                                   
-    unsigned short usStripCnt;                  
-    unsigned int clipflag;                     
-    int flg;                                    
-    int count;   
-    int clipswitch;
+    VU1_PRIM_BUF* pP;
+    unsigned short usStripCnt;
+    unsigned int clipflag;
+    int flg;
+    int count;
 
-    clipswitch = 0; 
-    
-    clipflag = 0;
-    
-#ifdef TARGET_PC
+    pcClipSetColorMode(usMode & 0xF);
+    pcClipResetHistory();
+
+    pP = (VU1_PRIM_BUF*)Ps2_DRAW_TMP;
+
+    StripPrimVertex(pS, pP, 2);
+    flg = _Check_DisplayAreaPoint((NJS_VECTOR*)&pP->fX) << 2;
+    pP++;
+    pS++;
+
+    StripPrimVertex(pS, pP, 2);
+    flg |= _Check_DisplayAreaPoint((NJS_VECTOR*)&pP->fX) << 1;
+    pP++;
+    pS++;
+
+    for (usStripCnt = 2; usStripCnt < usStripMax; usStripCnt++, pS++, pP++)
     {
-        PcGpr g_op0 = { 0 };
-        PcGpr g_t0 = { 0 };
-        PcGpr g_v0 = { 0 };
-        PcGpr g_zero = { 0 };
-        uint64_t lo_ = 0; int fcc_ = 0;
-        g_op0.d[0] = A2C_SX32((uint32_t)(uintptr_t)(usMode));
-        g_v0.d[0] = (g_op0.d[0] & (uint64_t)(uint16_t)(0xF));
-        g_t0.d[0] = A2C_SX32(g_zero.w[0] + (uint32_t)(g_v0.w[0]));
-        a2c_ctc2(1, g_t0.w[0]);
-        pcClipSetColorMode((int)g_v0.w[0]);
-        pcClipResetHistory(); /* VU0_INIT_CALC_COLOR: reinicia el historial de clip */
-        *(uint32_t*)&(usMode) = g_op0.w[0];
-        (void)g_zero; (void)lo_; (void)fcc_;
-    }
-#else
-    asm volatile 
-    ("
-    .set noreorder
-        andi    v0, %0, 0xF    
+        StripPrimVertex(pS, pP, 1);
+        flg |= _Check_DisplayAreaPoint((NJS_VECTOR*)&pP->fX);
+        clipflag = pcClipFlagsGet();
 
-        add     t0, zero, v0 
-        
-        ctc2    t0, vi1      
-    
-        vcallms VU0_INIT_CALC_COLOR 
-        nop
-    .set reorder
-    " : "r"(usMode) : 
-    );
-#endif
-   
-    pP = (VU1_PRIM_BUF*)Ps2_DRAW_TMP; 
-    
-    if (clipswitch == 0) 
-    { 
-#ifdef TARGET_PC
+        if ((flg != 0) && ((clipflag & 0x3FFFF)))
         {
-            PcGpr g_op2 = { 0 };
-            PcGpr g_op3 = { 0 };
-            PcGpr g_t0 = { 0 };
-            PcGpr g_zero = { 0 };
-            union { float f; uint32_t u; int32_t i; } fr_1 = { 0 };
-            union { float f; uint32_t u; int32_t i; } fr_2 = { 0 };
-            union { float f; uint32_t u; int32_t i; } fr_3 = { 0 };
-            union { float f; uint32_t u; int32_t i; } fr_4 = { 0 };
-            union { float f; uint32_t u; int32_t i; } fr_5 = { 0 };
-            union { float f; uint32_t u; int32_t i; } fr_op0 = { 0 };
-            union { float f; uint32_t u; int32_t i; } fr_op1 = { 0 };
-            uint64_t lo_ = 0; int fcc_ = 0;
-            fr_op0.f = (float)(fVu1OffsetX);
-            fr_op1.f = (float)(fVu1OffsetY);
-            g_op2.d[0] = A2C_SX32((uint32_t)(uintptr_t)(pS));
-            g_op3.d[0] = A2C_SX32((uint32_t)(uintptr_t)(pP));
-            memcpy(&pcVu0.vf[4], A2C_PTR(((uint32_t)(g_op2.w[0] + (offsetof(VU1_STRIP_BUF, fIr))))), 16);
-            pcClipColorVertex((const float*)A2C_PTR(((uint32_t)(g_op2.w[0] + (offsetof(VU1_STRIP_BUF, fVx))))), 2); /* VU0 CALC_COLOR */
-            fr_1.u = *(uint32_t*)A2C_PTR(((uint32_t)(g_op2.w[0] + (offsetof(VU1_STRIP_BUF, fU)))));
-            fr_2.u = *(uint32_t*)A2C_PTR(((uint32_t)(g_op2.w[0] + (offsetof(VU1_STRIP_BUF, fV)))));
-            fr_3.u = *(uint32_t*)A2C_PTR(((uint32_t)(g_op2.w[0] + (offsetof(VU1_STRIP_BUF, fIz)))));
-            memcpy(&g_t0, A2C_PTR(((uint32_t)(g_op2.w[0] + (offsetof(VU1_STRIP_BUF, fVx))))), 16);
-            fr_4.u = *(uint32_t*)A2C_PTR(((uint32_t)(g_op2.w[0] + (offsetof(VU1_STRIP_BUF, fSx)))));
-            fr_5.u = *(uint32_t*)A2C_PTR(((uint32_t)(g_op2.w[0] + (offsetof(VU1_STRIP_BUF, fSy)))));
-            fr_1.f = fr_1.f * fr_3.f;
-            fr_2.f = fr_2.f * fr_3.f;
-            fr_4.f = fr_4.f + fr_op0.f;
-            fr_5.f = fr_5.f + fr_op1.f;
-            memcpy(A2C_PTR(((uint32_t)(g_op3.w[0] + (offsetof(VU1_PRIM_BUF, fX))))), &g_t0, 16);
-            *(uint32_t*)A2C_PTR(((uint32_t)(g_op3.w[0] + (offsetof(VU1_PRIM_BUF, fS))))) = fr_1.u;
-            *(uint32_t*)A2C_PTR(((uint32_t)(g_op3.w[0] + (offsetof(VU1_PRIM_BUF, fT))))) = fr_2.u;
-            *(uint32_t*)A2C_PTR(((uint32_t)(g_op3.w[0] + (offsetof(VU1_PRIM_BUF, fQ))))) = fr_3.u;
-            *(uint32_t*)A2C_PTR(((uint32_t)(g_op3.w[0] + (offsetof(VU1_PRIM_BUF, ulKick))))) = (uint32_t)g_zero.d[0];
-            *(uint32_t*)A2C_PTR(((uint32_t)(g_op3.w[0] + (offsetof(VU1_PRIM_BUF, fX))))) = fr_4.u;
-            *(uint32_t*)A2C_PTR(((uint32_t)(g_op3.w[0] + (offsetof(VU1_PRIM_BUF, fY))))) = fr_5.u;
-            (void)g_zero; (void)lo_; (void)fcc_;
-        }
-#else
-        asm volatile
-        ("
-        .set noreorder
-            lqc2    vf4, VU1_STRIP_BUF.fIr(%2) 
-            lqc2    vf14, VU1_STRIP_BUF.fVx(%2)
-            
-            vcallms VU0_CALC_COLOR  
-        
-            lwc1    f1, VU1_STRIP_BUF.fU(%2)
-            lwc1    f2, VU1_STRIP_BUF.fV(%2) 
-            lwc1    f3, VU1_STRIP_BUF.fIz(%2) 
-            
-            lq      t0, VU1_STRIP_BUF.fVx(%2) 
-            
-            lwc1    f4, VU1_STRIP_BUF.fSx(%2) 
-            lwc1    f5, VU1_STRIP_BUF.fSy(%2) 
-            
-            mul.s   f1, f1, f3 
-            mul.s   f2, f2, f3 
-            
-            add.s   f4, f4, %0 
-            add.s   f5, f5, %1 
-            
-            sq      t0, VU1_PRIM_BUF.fX(%3) 
-            
-            swc1    f1, VU1_PRIM_BUF.fS(%3) 
-            swc1    f2, VU1_PRIM_BUF.fT(%3) 
-            swc1    f3, VU1_PRIM_BUF.fQ(%3) 
-            
-            sw      zero, VU1_PRIM_BUF.ulKick(%3) 
-            
-            swc1    f4, VU1_PRIM_BUF.fX(%3) 
-            swc1    f5, VU1_PRIM_BUF.fY(%3) 
-        .set reorder
-        " : : "f"(fVu1OffsetX), "f"(fVu1OffsetY), "r"(pS), "r"(pP) : "$f1", "$f2", "$f3", "$f4", "$f5", "$t0", "memory"
-        );  
-#endif
-            
-        flg = _Check_DisplayAreaPoint((NJS_VECTOR*)&pP->fX) << 2;
-        
-#ifdef TARGET_PC
-        {
-            PcGpr g_op0 = { 0 };
-            PcGpr g_t0 = { 0 };
-            PcGpr g_zero = { 0 };
-            uint64_t lo_ = 0; int fcc_ = 0;
-            g_op0.d[0] = A2C_SX32((uint32_t)(uintptr_t)(pP));
-            memcpy(&g_t0, &pcVu0.vf[4], 16);
-            memcpy(A2C_PTR(((uint32_t)(g_op0.w[0] + (offsetof(VU1_PRIM_BUF, fR))))), &g_t0, 16);
-            (void)g_zero; (void)lo_; (void)fcc_;
-        }
-#else
-        asm volatile 
-        ("
-            qmfc2.i t0, vf4    
-            
-            sq      t0, VU1_PRIM_BUF.fR(%0) 
-        " : : "r"(pP) : "$t0", "memory" 
-        );
-#endif
-        
-        pP++; 
-        pS++; 
-        
-#ifdef TARGET_PC
-        {
-            PcGpr g_op2 = { 0 };
-            PcGpr g_op3 = { 0 };
-            PcGpr g_t0 = { 0 };
-            PcGpr g_zero = { 0 };
-            union { float f; uint32_t u; int32_t i; } fr_1 = { 0 };
-            union { float f; uint32_t u; int32_t i; } fr_2 = { 0 };
-            union { float f; uint32_t u; int32_t i; } fr_3 = { 0 };
-            union { float f; uint32_t u; int32_t i; } fr_4 = { 0 };
-            union { float f; uint32_t u; int32_t i; } fr_5 = { 0 };
-            union { float f; uint32_t u; int32_t i; } fr_op0 = { 0 };
-            union { float f; uint32_t u; int32_t i; } fr_op1 = { 0 };
-            uint64_t lo_ = 0; int fcc_ = 0;
-            fr_op0.f = (float)(fVu1OffsetX);
-            fr_op1.f = (float)(fVu1OffsetY);
-            g_op2.d[0] = A2C_SX32((uint32_t)(uintptr_t)(pS));
-            g_op3.d[0] = A2C_SX32((uint32_t)(uintptr_t)(pP));
-            memcpy(&pcVu0.vf[4], A2C_PTR(((uint32_t)(g_op2.w[0] + (offsetof(VU1_STRIP_BUF, fIr))))), 16);
-            pcClipColorVertex((const float*)A2C_PTR(((uint32_t)(g_op2.w[0] + (offsetof(VU1_STRIP_BUF, fVx))))), 2); /* VU0 CALC_COLOR */
-            fr_1.u = *(uint32_t*)A2C_PTR(((uint32_t)(g_op2.w[0] + (offsetof(VU1_STRIP_BUF, fU)))));
-            fr_2.u = *(uint32_t*)A2C_PTR(((uint32_t)(g_op2.w[0] + (offsetof(VU1_STRIP_BUF, fV)))));
-            fr_3.u = *(uint32_t*)A2C_PTR(((uint32_t)(g_op2.w[0] + (offsetof(VU1_STRIP_BUF, fIz)))));
-            memcpy(&g_t0, A2C_PTR(((uint32_t)(g_op2.w[0] + (offsetof(VU1_STRIP_BUF, fVx))))), 16);
-            fr_4.u = *(uint32_t*)A2C_PTR(((uint32_t)(g_op2.w[0] + (offsetof(VU1_STRIP_BUF, fSx)))));
-            fr_5.u = *(uint32_t*)A2C_PTR(((uint32_t)(g_op2.w[0] + (offsetof(VU1_STRIP_BUF, fSy)))));
-            fr_1.f = fr_1.f * fr_3.f;
-            fr_2.f = fr_2.f * fr_3.f;
-            fr_4.f = fr_4.f + fr_op0.f;
-            fr_5.f = fr_5.f + fr_op1.f;
-            memcpy(A2C_PTR(((uint32_t)(g_op3.w[0] + (offsetof(VU1_PRIM_BUF, fX))))), &g_t0, 16);
-            *(uint32_t*)A2C_PTR(((uint32_t)(g_op3.w[0] + (offsetof(VU1_PRIM_BUF, fS))))) = fr_1.u;
-            *(uint32_t*)A2C_PTR(((uint32_t)(g_op3.w[0] + (offsetof(VU1_PRIM_BUF, fT))))) = fr_2.u;
-            *(uint32_t*)A2C_PTR(((uint32_t)(g_op3.w[0] + (offsetof(VU1_PRIM_BUF, fQ))))) = fr_3.u;
-            *(uint32_t*)A2C_PTR(((uint32_t)(g_op3.w[0] + (offsetof(VU1_PRIM_BUF, ulKick))))) = (uint32_t)g_zero.d[0];
-            *(uint32_t*)A2C_PTR(((uint32_t)(g_op3.w[0] + (offsetof(VU1_PRIM_BUF, fX))))) = fr_4.u;
-            *(uint32_t*)A2C_PTR(((uint32_t)(g_op3.w[0] + (offsetof(VU1_PRIM_BUF, fY))))) = fr_5.u;
-            (void)g_zero; (void)lo_; (void)fcc_;
-        }
-#else
-        asm volatile 
-        (" 
-        .set noreorder
-            lqc2    vf4, VU1_STRIP_BUF.fIr(%2) 
-            lqc2    vf14, VU1_STRIP_BUF.fVx(%2)
-            
-            vcallms VU0_CALC_COLOR  
-        
-            lwc1    f1, VU1_STRIP_BUF.fU(%2)
-            lwc1    f2, VU1_STRIP_BUF.fV(%2) 
-            lwc1    f3, VU1_STRIP_BUF.fIz(%2) 
-            
-            lq      t0, VU1_STRIP_BUF.fVx(%2) 
-            
-            lwc1    f4, VU1_STRIP_BUF.fSx(%2) 
-            lwc1    f5, VU1_STRIP_BUF.fSy(%2) 
-            
-            mul.s   f1, f1, f3 
-            mul.s   f2, f2, f3 
-            
-            add.s   f4, f4, %0 
-            add.s   f5, f5, %1 
-            
-            sq      t0, VU1_PRIM_BUF.fX(%3) 
-            
-            swc1    f1, VU1_PRIM_BUF.fS(%3) 
-            swc1    f2, VU1_PRIM_BUF.fT(%3) 
-            swc1    f3, VU1_PRIM_BUF.fQ(%3) 
-            
-            sw      zero, VU1_PRIM_BUF.ulKick(%3) 
-            
-            swc1    f4, VU1_PRIM_BUF.fX(%3) 
-            swc1    f5, VU1_PRIM_BUF.fY(%3) 
-        .set reorder
-        " : : "f"(fVu1OffsetX), "f"(fVu1OffsetY), "r"(pS), "r"(pP) : "$f1", "$f2", "$f3", "$f4", "$f5", "$t0", "memory"
-        );
-#endif
-        
-        flg |= _Check_DisplayAreaPoint((NJS_VECTOR*)&pP->fX) << 1; 
-        
-#ifdef TARGET_PC
-        {
-            PcGpr g_op0 = { 0 };
-            PcGpr g_t0 = { 0 };
-            PcGpr g_zero = { 0 };
-            uint64_t lo_ = 0; int fcc_ = 0;
-            g_op0.d[0] = A2C_SX32((uint32_t)(uintptr_t)(pP));
-            memcpy(&g_t0, &pcVu0.vf[4], 16);
-            memcpy(A2C_PTR(((uint32_t)(g_op0.w[0] + (offsetof(VU1_PRIM_BUF, fR))))), &g_t0, 16);
-            (void)g_zero; (void)lo_; (void)fcc_;
-        }
-#else
-        asm volatile 
-        ("
-            qmfc2.i t0, vf4    
-            
-            sq      t0, VU1_PRIM_BUF.fR(%0) 
-        " : : "r"(pP) : "$t0", "memory" 
-        );
-#endif
-        
-        pP++; 
-        pS++;
-        
-        for (usStripCnt = 2; usStripCnt < usStripMax; usStripCnt++, pS++, pP++) 
-        {
-#ifdef TARGET_PC
-            {
-                PcGpr g_op2 = { 0 };
-                PcGpr g_op3 = { 0 };
-                PcGpr g_t0 = { 0 };
-                PcGpr g_zero = { 0 };
-                union { float f; uint32_t u; int32_t i; } fr_1 = { 0 };
-                union { float f; uint32_t u; int32_t i; } fr_2 = { 0 };
-                union { float f; uint32_t u; int32_t i; } fr_3 = { 0 };
-                union { float f; uint32_t u; int32_t i; } fr_4 = { 0 };
-                union { float f; uint32_t u; int32_t i; } fr_5 = { 0 };
-                union { float f; uint32_t u; int32_t i; } fr_op0 = { 0 };
-                union { float f; uint32_t u; int32_t i; } fr_op1 = { 0 };
-                uint64_t lo_ = 0; int fcc_ = 0;
-                fr_op0.f = (float)(fVu1OffsetX);
-                fr_op1.f = (float)(fVu1OffsetY);
-                g_op2.d[0] = A2C_SX32((uint32_t)(uintptr_t)(pS));
-                g_op3.d[0] = A2C_SX32((uint32_t)(uintptr_t)(pP));
-                memcpy(&pcVu0.vf[4], A2C_PTR(((uint32_t)(g_op2.w[0] + (offsetof(VU1_STRIP_BUF, fIr))))), 16);
-                pcClipColorVertex((const float*)A2C_PTR(((uint32_t)(g_op2.w[0] + (offsetof(VU1_STRIP_BUF, fVx))))), 1); /* VU0 CLIP_VIEW_VOLUME_ALL */
-                fr_1.u = *(uint32_t*)A2C_PTR(((uint32_t)(g_op2.w[0] + (offsetof(VU1_STRIP_BUF, fU)))));
-                fr_2.u = *(uint32_t*)A2C_PTR(((uint32_t)(g_op2.w[0] + (offsetof(VU1_STRIP_BUF, fV)))));
-                fr_3.u = *(uint32_t*)A2C_PTR(((uint32_t)(g_op2.w[0] + (offsetof(VU1_STRIP_BUF, fIz)))));
-                memcpy(&g_t0, A2C_PTR(((uint32_t)(g_op2.w[0] + (offsetof(VU1_STRIP_BUF, fVx))))), 16);
-                fr_4.u = *(uint32_t*)A2C_PTR(((uint32_t)(g_op2.w[0] + (offsetof(VU1_STRIP_BUF, fSx)))));
-                fr_5.u = *(uint32_t*)A2C_PTR(((uint32_t)(g_op2.w[0] + (offsetof(VU1_STRIP_BUF, fSy)))));
-                fr_1.f = fr_1.f * fr_3.f;
-                fr_2.f = fr_2.f * fr_3.f;
-                fr_4.f = fr_4.f + fr_op0.f;
-                fr_5.f = fr_5.f + fr_op1.f;
-                memcpy(A2C_PTR(((uint32_t)(g_op3.w[0] + (offsetof(VU1_PRIM_BUF, fX))))), &g_t0, 16);
-                *(uint32_t*)A2C_PTR(((uint32_t)(g_op3.w[0] + (offsetof(VU1_PRIM_BUF, fS))))) = fr_1.u;
-                *(uint32_t*)A2C_PTR(((uint32_t)(g_op3.w[0] + (offsetof(VU1_PRIM_BUF, fT))))) = fr_2.u;
-                *(uint32_t*)A2C_PTR(((uint32_t)(g_op3.w[0] + (offsetof(VU1_PRIM_BUF, fQ))))) = fr_3.u;
-                *(uint32_t*)A2C_PTR(((uint32_t)(g_op3.w[0] + (offsetof(VU1_PRIM_BUF, ulKick))))) = (uint32_t)g_zero.d[0];
-                *(uint32_t*)A2C_PTR(((uint32_t)(g_op3.w[0] + (offsetof(VU1_PRIM_BUF, fX))))) = fr_4.u;
-                *(uint32_t*)A2C_PTR(((uint32_t)(g_op3.w[0] + (offsetof(VU1_PRIM_BUF, fY))))) = fr_5.u;
-                (void)g_zero; (void)lo_; (void)fcc_;
-            }
-#else
-            asm volatile 
-            (" 
-            .set noreorder
-                lqc2    vf4, VU1_STRIP_BUF.fIr(%2) 
-                lqc2    vf14, VU1_STRIP_BUF.fVx(%2)
-                
-                vcallms VU0_CLIP_VIEW_VOLUME_ALL  
-            
-                lwc1    f1, VU1_STRIP_BUF.fU(%2)
-                lwc1    f2, VU1_STRIP_BUF.fV(%2) 
-                lwc1    f3, VU1_STRIP_BUF.fIz(%2) 
-                
-                lq      t0, VU1_STRIP_BUF.fVx(%2) 
-                
-                lwc1    f4, VU1_STRIP_BUF.fSx(%2) 
-                lwc1    f5, VU1_STRIP_BUF.fSy(%2) 
-                
-                mul.s   f1, f1, f3 
-                mul.s   f2, f2, f3 
-                
-                add.s   f4, f4, %0 
-                add.s   f5, f5, %1 
-                
-                sq      t0, VU1_PRIM_BUF.fX(%3) 
-                
-                swc1    f1, VU1_PRIM_BUF.fS(%3) 
-                swc1    f2, VU1_PRIM_BUF.fT(%3) 
-                swc1    f3, VU1_PRIM_BUF.fQ(%3) 
-                
-                sw      zero, VU1_PRIM_BUF.ulKick(%3) 
-                
-                swc1    f4, VU1_PRIM_BUF.fX(%3) 
-                swc1    f5, VU1_PRIM_BUF.fY(%3) 
-            .set reorder
-            " : : "f"(fVu1OffsetX), "f"(fVu1OffsetY), "r"(pS), "r"(pP) : "$f1", "$f2", "$f3", "$f4", "$f5", "$t0", "memory"
-            );
-#endif
-                
-            flg |= _Check_DisplayAreaPoint((NJS_VECTOR*)&pP->fX); 
-            
-#ifdef TARGET_PC
-            {
-                PcGpr g_op0 = { 0 };
-                PcGpr g_op1 = { 0 };
-                PcGpr g_t0 = { 0 };
-                PcGpr g_zero = { 0 };
-                uint64_t lo_ = 0; int fcc_ = 0;
-                g_op0.d[0] = A2C_SX32((uint32_t)(uintptr_t)(clipflag));
-                g_op1.d[0] = A2C_SX32((uint32_t)(uintptr_t)(pP));
-                memcpy(&g_t0, &pcVu0.vf[4], 16);
-                memcpy(A2C_PTR(((uint32_t)(g_op1.w[0] + (offsetof(VU1_PRIM_BUF, fR))))), &g_t0, 16);
-                g_op0.d[0] = A2C_SX32(a2c_cfc2(18));
-                g_op0.d[0] = A2C_SX32(g_op0.w[0] + (uint32_t)((int32_t)(0)));
-                *(uint32_t*)&(clipflag) = g_op0.w[0];
-                (void)g_zero; (void)lo_; (void)fcc_;
-            }
-#else
-            asm volatile 
-            ("
-                qmfc2.i t0, vf4     
-                
-                sq      t0, VU1_PRIM_BUF.fR(%1) 
-                
-                cfc2    %0, vi18    
-                
-                addi    %0, %0, 0
-            " : "=r"(clipflag) : "r"(pP) : "$t0" 
-            );
-#endif
+            pP->ulKick = 32768;
 
-            if ((flg != 0) && ((clipflag & 0x3FFFF)))
-            { 
-                pP->ulKick = 32768; 
-                
-                if (_Get_ClipVolumePlane() != 0) 
-                { 
-                    _Set_NodeArray(pS, pP); 
-                    
-                    count = _Check_ScissorPlane(); 
-                    
-                    if (count != 0)
-                    { 
-                        DrawScissorPolygonOpaque2(count, ulType); 
-                    }
+            if (_Get_ClipVolumePlane() != 0)
+            {
+                _Set_NodeArray(pS, pP);
+                count = _Check_ScissorPlane();
+
+                if (count != 0)
+                {
+                    DrawScissorPolygonOpaque2(count, ulType);
                 }
             }
-            
-            flg = (flg << 1) & 0x7; 
-        } 
+        }
+
+        flg = (flg << 1) & 0x7;
     }
-    else
-    {
-#ifdef TARGET_PC
-        {
-            PcGpr g_op0 = { 0 };
-            PcGpr g_zero = { 0 };
-            uint64_t lo_ = 0; int fcc_ = 0;
-            g_op0.d[0] = A2C_SX32((uint32_t)(uintptr_t)(pS));
-            memcpy(&pcVu0.vf[4], A2C_PTR(((uint32_t)(g_op0.w[0] + (offsetof(VU1_STRIP_BUF, fIr))))), 16);
-            pcClipColorVertex(NULL, 2); /* VU0_CALC_COLOR (reutiliza el ultimo vertice enviado a clip) */
-            (void)g_zero; (void)lo_; (void)fcc_;
-        }
-#else
-        asm volatile 
-        ("
-        .set noreorder
-            lqc2    vf4, VU1_STRIP_BUF.fIr(%0) 
-            
-            vcallms VU0_CALC_COLOR  
-            nop
-        .set reorder
-        " : : "r"(pS) : 
-        );   
-#endif
-        
-        fIz = pS->fIz; 
-        
-        pP->fS = pS->fU * fIz; 
-        pP->fT = pS->fV * fIz; 
-        pP->fQ = fIz; 
-        
-        pP->ulKick = 0; 
-        
-        pP->fX = fVu1OffsetX + pS->fSx; 
-        pP->fY = fVu1OffsetY + pS->fSy; 
-        pP->fZ = pS->fVz; 
-        
-        pP->fF = pS->fFog; 
-        
-#ifdef TARGET_PC
-        {
-            PcGpr g_op0 = { 0 };
-            PcGpr g_zero = { 0 };
-            uint64_t lo_ = 0; int fcc_ = 0;
-            g_op0.d[0] = A2C_SX32((uint32_t)(uintptr_t)(pP));
-            memcpy(A2C_PTR(((uint32_t)(g_op0.w[0] + (offsetof(VU1_PRIM_BUF, fR))))), &pcVu0.vf[4], 16);
-            (void)g_zero; (void)lo_; (void)fcc_;
-        }
-#else
-        asm volatile 
-        ("
-            sqc2 vf4, VU1_PRIM_BUF.fR(%0) 
-            nop                         
-        " : : "r"(pP) : 
-        );
-#endif
 
-        _Clip_ViewVolume2((NJS_POINT4*)&pS->fVx); 
-        
-        pP++; 
-        pS++; 
-
-#ifdef TARGET_PC
-        {
-            PcGpr g_op0 = { 0 };
-            PcGpr g_zero = { 0 };
-            uint64_t lo_ = 0; int fcc_ = 0;
-            g_op0.d[0] = A2C_SX32((uint32_t)(uintptr_t)(pS));
-            memcpy(&pcVu0.vf[4], A2C_PTR(((uint32_t)(g_op0.w[0] + (offsetof(VU1_STRIP_BUF, fIr))))), 16);
-            pcClipColorVertex(NULL, 2); /* VU0_CALC_COLOR (reutiliza el ultimo vertice enviado a clip) */
-            (void)g_zero; (void)lo_; (void)fcc_;
-        }
-#else
-        asm volatile 
-        ("
-        .set noreorder
-            lqc2    vf4, VU1_STRIP_BUF.fIr(%0) 
-            
-            vcallms VU0_CALC_COLOR  
-            nop
-        .set reorder
-        " : : "r"(pS) : 
-        );
-#endif
-        
-        fIz = pS->fIz; 
-        
-        pP->fS = pS->fU * fIz;  
-        pP->fT = pS->fV * fIz;
-        pP->fQ = fIz; 
-        
-        pP->ulKick = 0; 
-        
-        pP->fX = fVu1OffsetX + pS->fSx; 
-        pP->fY = fVu1OffsetY + pS->fSy; 
-        pP->fZ = pS->fVz; 
-        
-        pP->fF = pS->fFog; 
-        
-#ifdef TARGET_PC
-        {
-            PcGpr g_op0 = { 0 };
-            PcGpr g_zero = { 0 };
-            uint64_t lo_ = 0; int fcc_ = 0;
-            g_op0.d[0] = A2C_SX32((uint32_t)(uintptr_t)(pP));
-            memcpy(A2C_PTR(((uint32_t)(g_op0.w[0] + (offsetof(VU1_PRIM_BUF, fR))))), &pcVu0.vf[4], 16);
-            (void)g_zero; (void)lo_; (void)fcc_;
-        }
-#else
-        asm volatile 
-        ("
-            sqc2 vf4, VU1_PRIM_BUF.fR(%0) 
-            nop                         
-        " : : "r"(pP) : 
-        );
-#endif
-    
-        _Clip_ViewVolume2((NJS_POINT4*)&pS->fVx); 
-        
-        pP++; 
-        pS++; 
-        
-        for (usStripCnt = 2; usStripCnt < usStripMax; usStripCnt++, pS++, pP++) 
-        {
-#ifdef TARGET_PC
-            {
-                PcGpr g_op0 = { 0 };
-                PcGpr g_zero = { 0 };
-                uint64_t lo_ = 0; int fcc_ = 0;
-                g_op0.d[0] = A2C_SX32((uint32_t)(uintptr_t)(pS));
-                memcpy(&pcVu0.vf[4], A2C_PTR(((uint32_t)(g_op0.w[0] + (offsetof(VU1_STRIP_BUF, fIr))))), 16);
-                pcClipColorVertex(NULL, 2); /* VU0_CALC_COLOR (reutiliza el ultimo vertice enviado a clip) */
-                (void)g_zero; (void)lo_; (void)fcc_;
-            }
-#else
-            asm volatile 
-            ("
-            .set noreorder
-                lqc2    vf4, VU1_STRIP_BUF.fIr(%0) 
-                
-                vcallms VU0_CALC_COLOR  
-                nop
-            .set reorder
-            " : : "r"(pS) : 
-            );
-#endif
-            
-            fIz = pS->fIz; 
-            
-            pP->fS = pS->fU * fIz;
-            pP->fT = pS->fV * fIz; 
-            pP->fQ = fIz; 
-            
-            pP->ulKick = 0; 
-            
-            pP->fX = fVu1OffsetX + pS->fSx; 
-            pP->fY = fVu1OffsetY + pS->fSy; 
-            pP->fZ = pS->fVz; 
-            
-            pP->fF = pS->fFog; 
-            
-#ifdef TARGET_PC
-            {
-                PcGpr g_op0 = { 0 };
-                PcGpr g_zero = { 0 };
-                uint64_t lo_ = 0; int fcc_ = 0;
-                g_op0.d[0] = A2C_SX32((uint32_t)(uintptr_t)(pP));
-                memcpy(A2C_PTR(((uint32_t)(g_op0.w[0] + (offsetof(VU1_PRIM_BUF, fR))))), &pcVu0.vf[4], 16);
-                (void)g_zero; (void)lo_; (void)fcc_;
-            }
-#else
-            asm volatile 
-            ("
-                sqc2 vf4, VU1_PRIM_BUF.fR(%0) 
-                nop                         
-            " : : "r"(pP) : 
-            );
-#endif
-            
-            _Clip_ViewVolume2((NJS_POINT4*)&pS->fVx); 
-            
-            clipflag = _Get_ClipViewVolume2(); 
-            
-            if ((clipflag & 0x3FFFF))
-            { 
-                pP->ulKick = 32768; 
-            } 
-        } 
-    } 
-    
-    PCSP_SUBMIT(3, Ps2AddPrim3DEx(ulType, Ps2_DRAW_TMP, usStripMax)); 
-} 
+    PCSP_SUBMIT(3, Ps2AddPrim3DEx(ulType, Ps2_DRAW_TMP, usStripMax));
+}
 
 // 100% matching!
 #ifndef TARGET_PC   /* PC: el color por vertice es pc/include/pc_vu1_color.h (sin VU0); esta version es la del PS2 original */

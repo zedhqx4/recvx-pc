@@ -29,9 +29,9 @@ void pcColorSetAmbient(const float* rgb);
 void pcColorSetAlphaRatio(float ratio);      /* fVu1AlphaRatio ya multiplicado por 128 */
 void pcClipSetColorMode(int mode);           /* usMode & 0xF de la tira en curso (INIT_CALC_COLOR) */
 
-/* Vertice con color (micro 237: kind 1, micro 394: kind 2). El color de entrada y el de salida viajan en pcVu0.vf[4]
- * (igual que antes); p4 = NULL reutiliza el ultimo vertice enviado a clip. */
-void pcClipColorVertex(const float* p4, int kind);
+/* Vertice con color (micro 237: kind 1, micro 394: kind 2). `color` (rgba, 4 floats) entra con el color del vertice
+ * y sale con el color final; p4 = NULL reutiliza el ultimo vertice enviado a clip. */
+void pcClipColorVertex(const float* p4, int kind, float* color);
 
 /* Puente con el codigo que aun usa registros VU0 (se retira en el paso final de 3d). */
 void pcClipViewVolume(const float* p4, int all);

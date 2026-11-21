@@ -617,3 +617,8 @@ recalcula siempre, de modo que los cambios de paleta se detectan exactamente igu
 - `pcClipViewVertex(out,in)` (matriz de vista -> clip + flags, devuelve el registro de flags de 24 bits) y `pcClipScreen(p4)` (flags contra el area de pantalla centro 2048, escala .75/1, semiancho 240) en pc_clip.c; `flags_push` unico para el registro compartido.
 - `_Clip_ViewVolume`/`_Clip_Screen` quedan en una linea; `PushTriangleNodeArray` en C plano (nodo -> triangle.node[rotflag], rotflag cicla 0..2). `_CVV` (ps2_NinjaCnk.c) lee `pcViewClipMatrix()` en vez de pcVu0.vf[24..27] y usa `pcClipFlagsGet/Set`.
 - Validacion: harness gcc contra los transpilados de 0.9.175, 1M casos aleatorios con historial de clip aleatorio: 0 diferencias en salida, valor devuelto e historial.
+
+## 0.9.177 - vu1DrawTriangleStripTransDouble en C plano (3d)
+- `pcClipColorVertex(p4, kind, color)`: el color entra y sale por parametro (antes viajaba por pcVu0.vf[4]).
+- La tira principal pasa de ~590 lineas de VU0 transpilado a ~70: `StripPrimVertex` (color + clip + campos de VU1_PRIM_BUF) y el bucle con scissor nativo. Se quita la rama `clipswitch != 0` (muerta: clipswitch es constante 0).
+- Validacion: harness gcc contra el transpilado de 0.9.176 (100K tiras aleatorias de 3..8 vertices, modos de color 0..8, matriz/materiales aleatorios): 0 diferencias en VU1_PRIM_BUF, historial de clip y secuencia de llamadas a scissor (52K con _Set_NodeArray, 21K con DrawScissorPolygonOpaque2).
