@@ -793,41 +793,10 @@ void _fmCnkCalcMuscle(MASK_WORK* fm)
     
     n = fm->jnum;
     
-#ifdef TARGET_PC
     for ( ; n > 0; n--, jaw++)
     {
         pcCopyQword(&dvp[jaw->id * 8], &svp[jaw->id * 8]);
     }
-#else
-    asm volatile
-    ("
-    .set noreorder
-        ble  %0, zero, lbl_8C
-        
-        lw   t0, TANG_WORK.id(%1)
-        
-    lbl_5C:
-        muli t0, t0, 32
-        
-        add  t1, %4, t0
-        add  t2, %3, t0
-        
-        lq   t3, 0(t2)
-        
-        addi %1, %1,  8
-        addi %0, %0, -1
-        
-        lw   t0, TANG_WORK.id(%1)
-        
-        bgt  %0, zero, lbl_5C
-        
-        sq   t3, 0(t1)
-        
-    lbl_8C:
-    .set reorder
-    " : "=r"(n), "=r"(jaw) : "r"(jaw->id), "r"(svp), "r"(dvp) : "t0", "t1", "t2", "t3", "memory" 
-    );
-#endif
     
     con = fm->list;
     list = fm->vlist;
@@ -876,7 +845,6 @@ void _fmCnkCalcMuscle(MASK_WORK* fm)
         p0 = mvp;
         p1 = mrp;
         
-#ifdef TARGET_PC
         if (m > 0)
         {
             NJS_POINT3** vp = mvp;
@@ -897,65 +865,6 @@ void _fmCnkCalcMuscle(MASK_WORK* fm)
             dvp[1] = y;
             dvp[2] = z;
         }
-#else
-        asm volatile
-        ("
-        .set noreorder
-            ble   %7, zero, lbl_220
-            
-            mfc1  t0, %4
-            
-            addi  %2, %5, -4
-            addi  %3, %6, -4
-            addi  %7, %7, -1
-            
-            mtc1  t0, f8
-            
-            lwc1  f7, 0(%3)
-            
-            lw    t1, 0(%2)
-            
-            lwc1  f1, 0(%1)
-            lwc1  f2, 4(%1)
-            lwc1  f3, 8(%1)
-            
-        lbl_1D0:
-            mul.s f7, f7, f8
-            
-            lwc1  f4, 0(t1)
-            lwc1  f5, 4(t1)
-            lwc1  f6, 8(t1)
-            
-            addi  %3, %3, -4
-            
-            mul.s f4, f4, f7
-            mul.s f5, f5, f7
-            mul.s f6, f6, f7
-            
-            addi  %2, %2, -4
-            
-            add.s f1, f1, f4
-            add.s f2, f2, f5
-            add.s f3, f3, f6
-            
-            addi  %7, %7, -1
-            
-            lwc1  f7, 0(%3)
-            
-            bge   %7, zero, lbl_1D0
-            
-            lw    t1, 0(%2)
-            
-            swc1  f1, 0(%1)
-            swc1  f2, 4(%1)
-            swc1  f3, 8(%1)
-            
-        lbl_220:
-        .set reorder
-        " : "=r"(svp), "=r"(dvp), "=r"(p0), "=r"(p1) : "f"(rsum), "r"(mvp), "r"(mrp), "r"(m)
-          : "f1", "f2", "f3", "f4", "f5", "f6", "f7", "f8", "t0", "t1", "memory"
-        );
-#endif
     }
 }
 
@@ -1003,45 +912,8 @@ void _fmCnkCalcJaw(MASK_WORK* fm)
             
             if (jaw->rate == 1.0f) 
             {
-#ifdef TARGET_PC
                 pcVu0XformPoint((float*)mat, (float*)dvp1, (float*)&vec);
                 vec.w = dvp1->w;
-#else
-                asm volatile
-                ("
-                .set noreorder
-                    ldl         t0, 0x7(%2) 
-                    ldr         t0,   0(%2)
-                    
-                    lw          t1, NJS_POINT4.z(%2) 
-                    
-                    pcpyld      t0, t1, t0
-                
-                    qmtc2       t0, vf4
-                
-                    lqc2        vf5,    0(%1)
-                    lqc2        vf6, 0x10(%1)
-                    lqc2        vf7, 0x20(%1) 
-                    lqc2        vf8, 0x30(%1) 
-                    
-                    vmulax.xyz  ACC,  vf5, vf4
-                    
-                    vmadday.xyz ACC,  vf6, vf4
-                    vmaddaz.xyz ACC,  vf7, vf4
-                    vmaddw.xyz  vf18, vf8, vf0w
-                    
-                    qmfc2       t0, vf18
-                
-                    pcpyud      t1, t0, t0
-                
-                    sdl         t0, 0x7(%0)
-                    sdr         t0,   0(%0) 
-                    
-                    sw          t1, NJS_POINT4.z(%0) 
-                .set reorder
-                " : : "r"(&vec), "r"(mat), "r"(dvp1) : 
-                ); 
-#endif
             } 
             else 
             {
@@ -1049,7 +921,6 @@ void _fmCnkCalcJaw(MASK_WORK* fm)
                 
                 njRotateX(mat2, (int)(182.04445f * (jawang * jaw->rate)) & 0xFFFF);
                 
-#ifdef TARGET_PC
                 {
                     float* m2 = (float*)mat2;
                     float* j1 = (float*)jmat1;
@@ -1076,78 +947,6 @@ void _fmCnkCalcJaw(MASK_WORK* fm)
                     pcVu0XformPoint(t, (float*)dvp1, (float*)&vec);
                     vec.w = dvp1->w;
                 }
-#else
-                asm volatile
-                ("
-                .set noreorder
-                    mfc1        t0, %4
-                    
-                    lqc2        vf5,    0(%3)
-                    lqc2        vf6, 0x10(%3)
-                    lqc2        vf7, 0x20(%3)
-                    lqc2        vf8, 0x30(%3) 
-                    
-                    qmtc2       t0, vf4 
-                
-                    lqc2        vf9,     0(%2)  
-                    lqc2        vf10, 0x10(%2)
-                    lqc2        vf11, 0x20(%2)
-                    lqc2        vf12, 0x30(%2)
-                    
-                    vmulax.xyz  ACC, vf5, vf4
-                    
-                    vmaddax.xyz ACC, vf6, vf0
-                    vmaddax.xyz ACC, vf7, vf0
-                    vmaddw.xyz  vf8, vf8, vf0w
-                    
-                    ldl         t0, 0x7(%1) 
-                    ldr         t0,   0(%1) 
-                    
-                    lw          t1, NJS_POINT4.z(%1) 
-                    
-                    vmulax.xyz  ACC, vf5, vf9
-                    
-                    vmadday.xyz ACC, vf6, vf9
-                    vmaddz.xyz  vf9, vf7, vf9
-                    
-                    pcpyld      t0, t1, t0
-                
-                    vmulax.xyz  ACC,  vf5, vf10
-                    
-                    vmadday.xyz ACC,  vf6, vf10
-                    vmaddz.xyz  vf10, vf7, vf10
-                    
-                    qmtc2       t0, vf13
-                
-                    vmulax.xyz  ACC,  vf5, vf11
-                    
-                    vmadday.xyz ACC,  vf6, vf11
-                    vmaddz.xyz  vf11, vf7, vf11
-                    
-                    vmulax.xyz  ACC,  vf5, vf12
-                    
-                    vmadday.xyz ACC,  vf6, vf12
-                    vmaddaz.xyz ACC,  vf7, vf12
-                    vmaddw.xyz  vf12, vf8, vf0w
-                    
-                    vmulax.xyz  ACC,  vf9,  vf13
-                    
-                    vmadday.xyz ACC,  vf10, vf13
-                    vmaddaz.xyz ACC,  vf11, vf13
-                    vmaddw.xyz  vf18, vf12, vf0w
-                    
-                    qmfc2       t0, vf18 
-                
-                    pcpyud      t1, t0, t0
-                
-                    sdl         t0, 0x7(%0) 
-                    sdr         t0,   0(%0) 
-                    
-                    sw          t1, NJS_POINT4.z(%0) 
-                .set reorder
-                " : : "r"(&vec), "r"(dvp1), "r"(jmat1), "r"(mat2), "f"(jawtrans) : 
-                ); 
-#endif
             }
             
             *(u_long128*)dvp1 = *(u_long128*)&vec;
@@ -1191,7 +990,6 @@ void _fmCnkCalcEye(MASK_WORK* fm)
         { 
             njPushMatrix(NULL);
             
-#ifdef TARGET_PC
             {
                 float* em = (float*)&fm->eyemat[i];
                 float a[3], b[3];
@@ -1207,71 +1005,6 @@ void _fmCnkCalcEye(MASK_WORK* fm)
                 r3.y = b[1];
                 r3.z = b[2];
             }
-#else
-            asm volatile
-            ("
-            .set noreorder
-                ldl         t0, 7(%1)
-                ldr         t0, 0(%1)
-                lw          t1, NJS_POINT3.z(%1)
-                
-                pcpyld      t0, t1, t0
-            
-                qmtc2       t0, vf4
-            
-                ldl         t2, 7(%3)
-                ldr         t2, 0(%3)
-                lw          t3, NJS_POINT3.z(%3)
-                
-                pcpyld      t2, t3, t2
-            
-                qmtc2       t2, vf5
-            
-                ldl         t4, 7(%5)
-                ldr         t4, 0(%5)
-                lw          t5, NJS_POINT3.z(%5)
-                
-                pcpyld      t4, t5, t4
-        
-                qmtc2       t4, vf6
-            
-                lqc2        vf7,     0(%0)
-                lqc2        vf8,  0x10(%0)
-                lqc2        vf9,  0x20(%0)
-                lqc2        vf10, 0x30(%0)
-                
-                vmulax.xyz  ACC,  vf7,  vf4
-                
-                vmadday.xyz ACC,  vf8,  vf4
-                vmaddaz.xyz ACC,  vf9,  vf4
-                vmaddw.xyz  vf11, vf10, vf0
-                
-                vmulax.xyz  ACC,  vf7,  vf5
-                
-                vmadday.xyz ACC,  vf8,  vf5
-                vmaddaz.xyz ACC,  vf9,  vf5
-                vmaddw.xyz  vf12, vf10, vf0
-                
-                vadd.xyz    vf7,  vf11, vf6
-                vsub.xyz    vf8,  vf7,  vf11
-                
-                qmfc2       t0, vf12
-                qmfc2       t2, vf8
-            
-                pcpyud      t1, t0, t0
-                pcpyud      t3, t2, t2
-            
-                sdl         t0, 7(%4)
-                sdr         t0, 0(%4)
-                sw          t1, NJS_POINT3.z(%4)
-                
-                sdl         t2, 7(%2)
-                sdr         t2, 0(%2)
-                sw          t3, NJS_POINT3.z(%2)
-            .set reorder
-            " : : "r"(&fm->eyemat[i]), "r"(&obj->pos), "r"(&q3), "r"(&t3), "r"(&r3), "r"(&fm->param.eye) : 
-            ); 
-#endif
 
             dx = q3.x;
             dy = q3.y;
@@ -1333,7 +1066,6 @@ void _fmCnkCalcTang(MASK_WORK* fm)
        
         for ( ; i > 0; i--) 
         { 
-#ifdef TARGET_PC
             {
                 float* m = (float*)mat;
                 int r;
@@ -1343,31 +1075,12 @@ void _fmCnkCalcTang(MASK_WORK* fm)
                     m[r] = ((r % 5) == 0) ? 1.0f : 0.0f;
                 }
             }
-#else
-            asm volatile
-            ("
-            .set noreorder
-                vmulw.xyzw vf4, vf0, vf0w
-                
-                vmr32.xyzw vf5, vf4
-                vmr32.xyzw vf6, vf5
-                vmr32.xyzw vf7, vf6
-                
-                sqc2       vf4, 0x30(%0)
-                sqc2       vf5, 0x20(%0)
-                sqc2       vf6, 0x10(%0)
-                sqc2       vf7,    0(%0)
-            .set reorder
-            " : : "r"(mat) : 
-            ); 
-#endif
             
             njRotateX(mat, (int)(182.04445f * (tangx * tang->rate)) & 0xFFFF);
             njRotateY(mat, (int)(182.04445f * (tangy * tang->rate)) & 0xFFFF);
             
             calc_ofs = tang->id * vofs;
             
-#ifdef TARGET_PC
             {
                 float* m = (float*)mat;
                 float* s = &svp[calc_ofs];
@@ -1378,46 +1091,6 @@ void _fmCnkCalcTang(MASK_WORK* fm)
                 d[1] = m[1] * x + m[5] * y + (m[9]  * tangz) * z + m[13];
                 d[2] = m[2] * x + m[6] * y + (m[10] * tangz) * z + m[14];
             }
-#else
-            asm volatile  
-            ("
-            .set noreorder
-                mfc1        t2, %2
-                
-                ldl         t0, 0x7(%0)
-                ldr         t0,   0(%0)
-                
-                lw          t1, 0x8(%0)
-                
-                pcpyld      t0, t1, t0
-            
-                qmtc2       t2, vf9
-                qmtc2       t0, vf4
-            
-                lqc2        vf5,    0(%3)
-                lqc2        vf6, 0x10(%3)
-                lqc2        vf7, 0x20(%3)
-                lqc2        vf8, 0x30(%3)
-                
-                vmulx.xyz   vf7,  vf7, vf9x
-                vmulax.xyz  ACC,  vf5, vf4x
-                
-                vmadday.xyz ACC,  vf6, vf4y
-                vmaddaz.xyz ACC,  vf7, vf4z
-                vmaddw.xyz  vf18, vf8, vf0w
-                
-                qmfc2       t0, vf18
-            
-                pcpyud      t1, t0, t0
-            
-                sdl         t0, 7(%1)
-                sdr         t0, 0(%1)
-                
-                sw          t1, 8(%1)
-            .set reorder
-            " : : "r"(&svp[calc_ofs]), "r"(&dvp[calc_ofs]), "f"(tangz), "r"(mat) : 
-            );
-#endif
             
             tang++; 
         }
