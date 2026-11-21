@@ -9,7 +9,6 @@
 #include "../../../ps2/veronica/prog/ps2_NaTextureFunction.h"
 #include "../../../ps2/veronica/prog/ps2_NaView.h"
 #include "../../../ps2/veronica/prog/ps2_Vu1Strip.h"
-#ifdef TARGET_PC
 #include "../../../../pc/include/pc_game_profile.h"
 #include <emmintrin.h>
 #include <stdlib.h>
@@ -34,7 +33,6 @@ static void pcCnkCount(unsigned int verts, int culled)
     }
 }
 #define PC_CNK_COUNT(verts, culled) do { if (pcGameProfileEnabled()) pcCnkCount((verts), (culled)); } while (0)
-#endif
 
 static VU1_STRIP_BUF* pNaCnkVerBufTop;
 static int iNaCnkVerBufMax;
@@ -706,7 +704,6 @@ int njCnkDrawModelLocal(NJS_CNK_MODEL* pModel)
     CHUNK_HEAD* pCnk;           
     unsigned int modelclipflag; 
     float temp, temp2; // not from the debugging symbols
-#ifdef TARGET_PC
     int profile_scope = pcGameProfileScope;
     double profile_vlist_ms = 0.0;
     double profile_plist_ms = 0.0;
@@ -716,7 +713,6 @@ int njCnkDrawModelLocal(NJS_CNK_MODEL* pModel)
     unsigned int profile_plist_type = 0;
     unsigned int profile_plist_chunks = 0;
     int profile_cnk = profile_scope != PC_GAME_PROFILE_SCOPE_NONE;
-#endif
 
     modelclipflag = 0;
     
@@ -747,7 +743,6 @@ int njCnkDrawModelLocal(NJS_CNK_MODEL* pModel)
             
             fSX = Center.x * fZ;
             
-#ifdef TARGET_PC
             {
                 /* widescreen: fSX is without the aspect, so the visible half width in these units
                  * grows by 1 / pcVideoWideScale() (about 363 instead of 272 at 16:9; the PS2's 320
@@ -760,17 +755,6 @@ int njCnkDrawModelLocal(NJS_CNK_MODEL* pModel)
                     return 0;
                 }
             }
-#else
-            if ((fSX + fRW) < -fNaViwHalfW) 
-            {
-                return 0;
-            }
-            
-            if (fNaViwHalfW < (fSX - fRW)) 
-            {
-                return 0;
-            }
-#endif
             
             fSY = Center.y * fZ;
             
@@ -792,36 +776,30 @@ int njCnkDrawModelLocal(NJS_CNK_MODEL* pModel)
     
     if (pCnk != NULL)
     {
-#ifdef TARGET_PC
         if (profile_cnk)
         {
             profile_t0 = pcGameProfileNowMs();
             profile_vlist_type = pCnk->ucType;
         }
-#endif
         if (pCnk->ucType == 51)
         {
             modelclipflag = 1;
         }
         
         pCnkFuncTbl[pCnk->ucType](pCnk);
-#ifdef TARGET_PC
         if (profile_cnk)
         {
             profile_vlist_ms = pcGameProfileNowMs() - profile_t0;
             pcGameProfileRecordCnkType(profile_scope, profile_vlist_type, 0, profile_vlist_ms);
         }
-#endif
     }
     
     njPopMatrixEx();
     
     if ((modelclipflag != 0) && (Vu0ClipFlag != 0)) 
     {
-#ifdef TARGET_PC
         if (profile_cnk)
             pcGameProfileRecordCnk(profile_scope, profile_vlist_ms, 0.0, 1, 0);
-#endif
         return 1;  
     } 
     
@@ -832,34 +810,27 @@ int njCnkDrawModelLocal(NJS_CNK_MODEL* pModel)
     
     pCnk = (CHUNK_HEAD*)pModel->plist;
     
-#ifdef TARGET_PC
     if (profile_cnk && pCnk != NULL)
         profile_t0 = pcGameProfileNowMs();
-#endif
     if (pCnk != NULL) 
     {
         while (pCnk->ucType != 0xFF) 
         {
-#ifdef TARGET_PC
             if (profile_cnk)
             {
                 profile_plist_type = pCnk->ucType;
                 profile_chunk_t0 = pcGameProfileNowMs();
             }
-#endif
             pCnk = pCnkFuncTbl[pCnk->ucType](pCnk);
-#ifdef TARGET_PC
             if (profile_cnk)
             {
                 profile_plist_chunks++;
                 pcGameProfileRecordCnkType(profile_scope, profile_plist_type, 1,
                                              pcGameProfileNowMs() - profile_chunk_t0);
             }
-#endif
         }
     }
     
-#ifdef TARGET_PC
     if (profile_cnk)
     {
         if (profile_plist_chunks != 0)
@@ -867,7 +838,6 @@ int njCnkDrawModelLocal(NJS_CNK_MODEL* pModel)
         pcGameProfileRecordCnk(profile_scope, profile_vlist_ms, profile_plist_ms,
                                1, profile_plist_chunks);
     }
-#endif
     return 1;
 }
 
@@ -912,7 +882,6 @@ int njCnkDrawModelLocalMod(NJS_CNK_MODEL* pModel)
             
             fSX = Center.x * fZ;
             
-#ifdef TARGET_PC
             {
                 /* widescreen: fSX is without the aspect, so the visible half width in these units
                  * grows by 1 / pcVideoWideScale() (about 363 instead of 272 at 16:9; the PS2's 320
@@ -925,17 +894,6 @@ int njCnkDrawModelLocalMod(NJS_CNK_MODEL* pModel)
                     return 0;
                 }
             }
-#else
-            if ((fSX + fRW) < -fNaViwHalfW) 
-            {
-                return 0;
-            }
-            
-            if (fNaViwHalfW < (fSX - fRW)) 
-            {
-                return 0;
-            }
-#endif
             
             fSY = Center.y * fZ;
             
@@ -1232,7 +1190,6 @@ CHUNK_HEAD* njCnkCoSt(CHUNK_HEAD* pCnk)
     return (CHUNK_HEAD*)((char*)&pCnk[1] + (pCnk->usSize * 2));
 }
 
-#ifdef TARGET_PC
 /* SSE2 fast path for the common CNK vertex-list case where all active lights
  * are directional. The old scalar implementation remains the reference path
  * for point lights and for small tails. Set RECVX_CV_VN_BATCH=0 to A/B test. */
@@ -1361,7 +1318,6 @@ static unsigned int pcCnkCvVnDirectionalBatch(
 
     return processed;
 }
-#endif
 
 // 100% matching! 
 CHUNK_HEAD* njCnkCvVn(CHUNK_HEAD* pCnk)
@@ -1374,9 +1330,7 @@ CHUNK_HEAD* njCnkCvVn(CHUNK_HEAD* pCnk)
     const CNK_LIGHT* pLightTop;
     int lLightMax;
     int lLightCnt;
-#ifdef TARGET_PC
     unsigned int pcProcessed;
-#endif          
     float fI;             
     float fR;              
     float fG;             
@@ -1432,7 +1386,6 @@ CHUNK_HEAD* njCnkCvVn(CHUNK_HEAD* pCnk)
     lLightMax = pNaCnkCrntLighting->lLightMax;
     ulIndex = ((unsigned short*)&pCnk[1])[1];
 
-#ifdef TARGET_PC
     if (ulIndex >= 8 && pcCnkCvVnBatchEnabled() && pcCnkCvVnDirectionalOnly(pLightTop, lLightMax))
     {
         pcProcessed = pcCnkCvVnDirectionalBatch(fpCnk, pBuffer, ulIndex,
@@ -1443,7 +1396,6 @@ CHUNK_HEAD* njCnkCvVn(CHUNK_HEAD* pCnk)
         pBuffer += pcProcessed;
         ulIndex -= pcProcessed;
     }
-#endif
 
     for (; ulIndex != 0; ulIndex--, pBuffer++)
     {
@@ -1543,7 +1495,6 @@ CHUNK_HEAD* njCnkCvVn(CHUNK_HEAD* pCnk)
 }
 
 // 98.11% matching
-#ifdef TARGET_PC
 CHUNK_HEAD* njCnkCvVnPs2(CHUNK_HEAD* pCnk)
 {
     VU1_STRIP_BUF* pBuffer;
@@ -1646,202 +1597,6 @@ CHUNK_HEAD* njCnkCvVnPs2(CHUNK_HEAD* pCnk)
 
     return (CHUNK_HEAD*)(fpCnk + 8 * n);
 }
-#else
-CHUNK_HEAD* njCnkCvVnPs2(CHUNK_HEAD* pCnk)
-{
-    VU1_STRIP_BUF* pBuffer;                                    
-    unsigned int ulIndex;                                      
-    float* fpCnk;                                               
-    float fog;                                                  
-    float v[11][4];                                              
-    CNK_LIGHT* lp;                                               
-    unsigned int tmp;                                            
-    static unsigned int mask[5] = { 0, 0x88, 0xCC, 0xEE, 0xFF }; 
-
-    fog = 0;
-
-    lp = pNaCnkCrntLighting->pLightTop;
-    
-    v[0][0] = lp->fCx;
-    v[0][1] = lp[1].fCx;
-    v[0][2] = lp[2].fCx;
-    v[0][3] = lp[3].fCx;
-    
-    v[1][0] = lp->fCy;
-    v[1][1] = lp[1].fCy;
-    v[1][2] = lp[2].fCy;
-    v[1][3] = lp[3].fCy;
-    
-    v[2][0] = lp->fCz;
-    v[2][1] = lp[1].fCz;
-    v[2][2] = lp[2].fCz;
-    v[2][3] = lp[3].fCz;
-
-    tmp = lp[3].ulMode | ((lp[2].ulMode * 2) | ((lp[1].ulMode * 4) | ((lp->ulMode * 8) | ((lp[3].ulState * 16) | ((lp[2].ulState * 32) | ((lp->ulState * 128) | (lp[1].ulState * 64)))))));
-    
-    tmp &= mask[pNaCnkCrntLighting->lLightMax];
-    
-    *(int*)&v[3][0] = tmp;
-    
-    v[4][0] = lp->fNearRR;
-    v[4][1] = lp[1].fNearRR;
-    v[4][2] = lp[2].fNearRR;
-    v[4][3] = lp[3].fNearRR;
-    
-    v[5][0] = lp->fFarRR;
-    v[5][1] = lp[1].fFarRR;
-    v[5][2] = lp[2].fFarRR;
-    v[5][3] = lp[3].fFarRR;
-    
-    v[6][0] = lp->fI;
-    v[6][1] = lp[1].fI;
-    v[6][2] = lp[2].fI;
-    v[6][3] = lp[3].fI;
-    
-    v[7][0] = lp->fR;
-    v[7][1] = lp->fG;
-    v[7][2] = lp->fB;
-    v[7][3] = lp->fI;
-    
-    v[8][0] = lp[1].fR;
-    v[8][1] = lp[1].fG;
-    v[8][2] = lp[1].fB;
-    v[8][3] = lp[1].fI;
-    
-    v[9][0] = lp[2].fR;
-    v[9][1] = lp[2].fG;
-    v[9][2] = lp[2].fB;
-    v[9][3] = lp[2].fI;
-    
-    v[10][0] = lp[3].fR;
-    v[10][1] = lp[3].fG;
-    v[10][2] = lp[3].fB;
-    v[10][3] = lp[3].fI;
-    
-    asm volatile 
-    ("
-    .set noreorder
-        move v1, %0
-        
-        lqc2 vf4,     0(v1) 
-        lqc2 vf5,  0x10(v1) 
-        lqc2 vf6,  0x20(v1) 
-        lqc2 vf7,  0x30(v1) 
-        lqc2 vf8,  0x40(v1) 
-        lqc2 vf9,  0x50(v1) 
-        lqc2 vf10, 0x60(v1) 
-        lqc2 vf11, 0x70(v1) 
-        lqc2 vf12, 0x80(v1) 
-        lqc2 vf13, 0x90(v1) 
-        lqc2 vf14, 0xA0(v1) 
-    .set reorder
-    " : : "r"(v) : "$v1", "memory" 
-    ); 
-        
-    pCnk = (CHUNK_HEAD*)((int)pCnk | 0x30000000);
-    
-    pCnk++;
-    
-    ulIndex = pCnk->usSize;
-    
-    fpCnk = (float*)&pCnk[1];
-    
-    fpCnk += 14;
-    
-    pBuffer = &pNaCnkVerBufTop[*(unsigned short*)&pCnk[0]];
-    
-    njSetMatrixCN(pNaMatMatrixStuckPtr);
-    
-
-    asm volatile 
-    ("
-    .set noreorder
-        vcallms  VU0_CALCPOINT_INIT 
-    
-        lqc2     vf4,    0(%2)
-        lqc2     vf5, 0x10(%2)
-        
-        vcallms  VU0_CALCPOINT 
-    
-        qmfc2.i  t0, vf7 
-        qmfc2.i  t1, vf18 
-        qmfc2.i  t2, vf6 
-        
-        sq       t0, 0x10(%1)
-        sq       t1, 0x20(%1)
-        sq       t2, 0x30(%1)
-        
-        qmfc2.ni t3, vf11 
-        
-        mtc1     t3, %0  
-    .set reorder
-    " : "=f"(fog) : "r"(pBuffer), "r"(fpCnk) : "$f20", "$s1", "$s2", "memory" 
-    ); 
-        
-    ulIndex--;
-    
-    pBuffer++;
-    
-    fpCnk += 8;
-    
-
-    while (ulIndex != 0)
-    {
-        asm volatile 
-        ("
-        .set noreorder
-            lqc2    vf4,    0(%0)
-            lqc2    vf5, 0x10(%0)
-            
-            vcallms VU0_CALCPOINT
-            nop
-        .set reorder
-        " : : "r"(fpCnk) : "$s2", "memory" 
-        ); 
-            
-        pBuffer[-1].fFog = njCalcFogPowerEx(fog);
-        
-        asm volatile 
-        ("
-        .set noreorder
-            qmfc2.i  t0, vf7 
-            qmfc2.i  t1, vf18 
-            qmfc2.i  t2, vf6
-         
-            sq       t0, 0x10(%2)
-            sq       t1, 0x20(%2)
-            sq       t2, 0x30(%2)
-        
-            qmfc2.ni t3, vf11 
-        
-            mtc1     t3, %0
-        
-            cfc2.ni  t0, vi11 
-        
-            sw       t0, 0(%1)
-        .set reorder
-        " : "=f"(fog) : "r"(&Vu0ClipFlag), "r"(pBuffer) : "$f20", "$v0", "$s1", "memory" 
-        ); 
-
-        ulIndex--;
-        
-        pBuffer++;
-        
-        fpCnk += 8; 
-    }
-    
-    pBuffer[-1].fFog = njCalcFogPowerEx(fog);
-    
-    asm volatile 
-    ("
-    .set noreorder 
-        vcallms VU0_CALCPOINT_END 
-    .set reorder 
-    ");
-
-    return (CHUNK_HEAD*)fpCnk;
-}
-#endif
 
 // 100% matching! 
 CHUNK_HEAD* njCnkCvVMod(CHUNK_HEAD* pCnk)
@@ -2090,10 +1845,8 @@ CHUNK_HEAD* njCnkCoP3(CHUNK_HEAD* pCnk)
 }
 
 // 100% matching! 
-#ifdef TARGET_PC
 extern void pcLog(const char* fmt, ...);
 extern int pcRendererBurstDiag(void);
-#endif
 
 CHUNK_HEAD* njCnkCs(CHUNK_HEAD* pCnk)
 { 
@@ -2108,9 +1861,7 @@ CHUNK_HEAD* njCnkCs(CHUNK_HEAD* pCnk)
     unsigned short usCnt;
     unsigned short* uspCnk;                                                        
     unsigned short usStrip;                                                      
-#ifdef TARGET_PC
     unsigned short pcIdx[64]; int pcN;
-#endif
     unsigned short usColorCalc2; // not from the debugging symbols
     void (*pVu1Func)(unsigned long, VU1_STRIP_BUF*, unsigned short, unsigned short); 
 
@@ -2164,9 +1915,7 @@ CHUNK_HEAD* njCnkCs(CHUNK_HEAD* pCnk)
         
         uspCnk++;
         
-#ifdef TARGET_PC
         pcN = 0; pcIdx[pcN++] = *uspCnk;
-#endif
         pV = &pNaCnkVerBufTop[*uspCnk];
 
         uspCnk++;
@@ -2177,9 +1926,7 @@ CHUNK_HEAD* njCnkCs(CHUNK_HEAD* pCnk)
         
         pS++;
         
-#ifdef TARGET_PC
         pcIdx[pcN++] = *uspCnk;
-#endif
         pV = &pNaCnkVerBufTop[*uspCnk];
 
         uspCnk++;
@@ -2192,9 +1939,7 @@ CHUNK_HEAD* njCnkCs(CHUNK_HEAD* pCnk)
         
         for (usCnt = usMax - 2; usCnt; usCnt--) 
         {
-#ifdef TARGET_PC
             if (pcN < 64) pcIdx[pcN++] = *uspCnk;
-#endif
             pV = &pNaCnkVerBufTop[*uspCnk];
 
             uspCnk++;
@@ -2208,7 +1953,6 @@ CHUNK_HEAD* njCnkCs(CHUNK_HEAD* pCnk)
             uspCnk += usNext;
         }
         
-#ifdef TARGET_PC
         if (pcRendererBurstDiag() && usMax == 15)
         {
             /* diagnostico (F8): lo que recibe la funcion de tira; fNz decide el kick de caras traseras */
@@ -2228,7 +1972,6 @@ CHUNK_HEAD* njCnkCs(CHUNK_HEAD* pCnk)
                           NaCnkStrBufTop[k].fU, NaCnkStrBufTop[k].fV, NaCnkStrBufTop[k].fIr, NaCnkStrBufTop[k].fIg, NaCnkStrBufTop[k].fIb);
             }
         }
-#endif
         pVu1Func(ulType, NaCnkStrBufTop, usMax, usClip | usColorCalc2);
     }
     
@@ -2240,7 +1983,6 @@ int _CVV(float* v0)
 {
     register int ret;
     
-#ifdef TARGET_PC
     {
         /* Nativo: mismo calculo (x*M0 + y*M1) + z*M2 + M3 con el redondeo de la VU y los 6 bits de recorte de
          * la GS, sin el historial de banderas de la VU0 (aqui solo se leen los 6 bits bajos). */
@@ -2267,33 +2009,6 @@ int _CVV(float* v0)
         pcClipFlagsSet((pcClipFlagsGet() << 6) | f);
         return (int)pcClipFlagsGet();
     }
-#else
-    asm volatile 
-    {
-                      
-        lqc2         vf4, 0(a0)
-        
-        vmulax.xyzw  ACC, vf24, vf4x
-            
-        vmadday.xyzw ACC, vf25, vf4y
-        vmaddaz.xyzw ACC, vf26, vf4z
-            
-        vmaddw.xyzw  vf5, vf27, vf0w
-        
-        vclipw.xyz   vf5, vf5w  
-        vnop
-        vnop
-        vnop
-        vnop
-        vnop
-    
-        cfc2.ni      ret, vi18
-        
-        jr           ra
-        nop
-            
-    } 
-#endif
 }
 
 // 99.22% matching
@@ -2364,306 +2079,6 @@ CHUNK_HEAD* njCnkCsUvh(CHUNK_HEAD* pCnk)
     
     usStrip = *uspCnk++ & 0x3FFF;
     
-#ifndef TARGET_PC   /* PC: la ruta de la VU1 (DMA al VIF1 + microcodigo) ya no existe; solo la del EE de abajo */
-    if ((ulDrawGeneralPurposeWater != 0) || ((pVu1Func != vu1DrawTriangleStripTransDouble) && (pVu1Func != vu1DrawTriangleStripTransDoubleI))) 
-    {
-        TIM2_PICTUREHEADER_EX* timp;                                                 
-        unsigned int coflag;  
-
-        coflag = 0;  
-        
-        if ((pVu1Func == vu1DrawTriangleStripTransSingle) || (pVu1Func == vu1DrawTriangleStripOpaqueSingle))
-        {
-            vu1func_tag = SCE_VIF1_SET_MSCAL(700, 0);
-        }
-        else
-        {
-            vu1func_tag = SCE_VIF1_SET_MSCAL(0,   0);
-        }
-
-        timp = (TIM2_PICTUREHEADER_EX*)Ps2_now_tex->texinfo.texsurface.pSurface;
-        
-        if (timp->TpFlag != 0) 
-        {
-            Ps2_tex_load_tp_cancel = 1;
-            
-            Ps2TexLoad(Ps2_now_tex);
-            
-            Ps2_tex_load_tp_cancel = 0;
-        }
-        
-        ulpP = (u_long*)SPR_ADDR(0x3E80);
-        
-        ulpP[0] = DMAend | 0x10;
-        ulpP[1] = 0;
-        
-        ulpP[2] = JOIN_TAGS(SCE_VIF1_SET_BASE(0, 0), SCE_VIF1_SET_OFFSET(422, 0));
-        ulpP[3] = JOIN_TAGS(SCE_VIF1_SET_NOP(0),     SCE_VIF1_SET_UNPACK(884, 15, SCE_UPF_V4_32, 0));
-        
-        SET_VEC4_AT(ulpP, 32, &vu1Diffuse);
-        SET_VEC4_AT(ulpP, 48, &vu1Ambient);
-        SET_VEC4_AT(ulpP, 64, &vu1Specula);
-        
-        SET_DATA_AT(ulpP, 80, float, fVu1NearClip);
-        SET_DATA_AT(ulpP, 84, float, fVu1FarClip);
-        SET_DATA_AT(ulpP, 88, float, fVu1Projection);
-        SET_DATA_AT(ulpP, 92, float, fVu1AlphaRatio);
-        
-        SET_VEC4_AT(ulpP, 96, &ClipMatrix2[0]);
-        SET_VEC4_AT(ulpP, 112, &ClipMatrix2[1]);
-        SET_VEC4_AT(ulpP, 128, &ClipMatrix2[2]);
-        SET_VEC4_AT(ulpP, 144, &ClipMatrix2[3]);
-        
-        SET_DATA_AT(ulpP, 160, float, fVu1OffsetX);
-        SET_DATA_AT(ulpP, 164, float, fVu1OffsetY);
-        
-        SET_DATA_AT(ulpP, 168, float, 0);
-        SET_DATA_AT(ulpP, 172, float, 4095.0f);
-        
-        SET_DATA_AT(ulpP, 176, float, fVu1AspectW);
-        SET_DATA_AT(ulpP, 180, float, fVu1AspectH);
-        
-        SET_DATA_AT(ulpP, 184, float, 0);
-        SET_DATA_AT(ulpP, 188, float, 65535.0f);
-        
-        SET_VEC4_AT(ulpP, 192, &ClipScreenMatrix[0]);
-        SET_VEC4_AT(ulpP, 208, &ClipScreenMatrix[1]);
-        SET_VEC4_AT(ulpP, 224, &ClipScreenMatrix[2]);
-        SET_VEC4_AT(ulpP, 240, &ClipScreenMatrix[3]);
-        
-        ulpP[32] = SCE_GIF_SET_TAG(0, 1, SCE_GIF_REGLIST, NULL, 0, 3) | ulType2;
-        ulpP[33] = GIF_REGLIST(SCE_GS_ST, SCE_GS_RGBAQ, SCE_GS_XYZF2);
-        
-        sceDmaSend((sceDmaChan*)D1_CHCR, (void*)0xF0003E80);
-        sceDmaSync((sceDmaChan*)D1_CHCR, 0, 0);
-        
-        for (; usStrip; usStrip--)  
-        {
-            usClip = *uspCnk & 0x8000;
-            
-            usNum = usMax = (usClip != 0) ? ~*uspCnk + 1 : *uspCnk; 
-            
-            uspCnk++;
-            
-            sExit = 0;
-            
-            while (TRUE) 
-            {
-                ulpP = (Ps2_chunk_buff_flip != 0) ? (void*)0x70002000 : (void*)0x70002F40;
-                
-                p = (void*)&ulpP[6];
-                
-                pS = (void*)p;
-                
-                if ((usMax = usNum) > 60)
-                {
-                    usNum -= 58;
-                    
-                    usMax = 60;
-                } 
-                else 
-                {
-                    sExit = 1;
-                }
-                
-                ulpP[0] = DMAend | ((usMax * 4) + 3);
-                ulpP[1] = 0;
-                
-                ulpP[2] = 0;
-                ulpP[3] = JOIN_TAGS(SCE_VIF1_SET_NOP(0), SCE_VIF1_SET_UNPACK(32768, (usMax * 4) + 1, SCE_UPF_V4_32, 0));
-                
-                ulpP[4] = (SCE_GIF_SET_TAG(0, SCE_GS_TRUE, SCE_GS_TRUE, 0, SCE_GIF_PACKED, 3) | ulType) | usMax;
-                ulpP[5] = GIF_REGLIST(SCE_GS_ST, SCE_GS_RGBAQ, SCE_GS_XYZF2);
-
-                asm volatile
-                ("
-                .set noreorder
-                    addiu        %0, zero, 0x3F
-                    
-                    lhu          t0, 0(%1)
-                    
-                    addiu        a0, %1, 6
-                    
-                    sll          t0, t0, 6
-                    
-                    addi         %2, %2, -1
-                    add          t0, %3, t0
-                    
-                    lqc2         vf4, 0x20(t0)
-
-                    vmulax.xyzw  ACC, vf24, vf4x
-                    
-                    vmadday.xyzw ACC, vf25, vf4y
-                    vmaddaz.xyzw ACC, vf26, vf4z
-                    vmaddw.xyzw  vf5, vf27, vf0w
-                    
-                l_002D2AB8:
-                    lhu          t0, 0(a0)
-                    
-                    addiu        a0, a0,  6
-                    addi         %2, %2, -1 
-                    
-                    sll          t0, t0,  6
-                    
-                    beqz         %0, label
-                    
-                    add          t0, %3, t0 
-                    
-                    lqc2         vf4, 0x20(t0) 
-                    
-                    vclipw.xyz   vf5, vf5w                  
-                    
-                    vmulax.xyzw  ACC, vf24, vf4x
-                    
-                    vmadday.xyzw ACC, vf25, vf4y
-                    vmaddaz.xyzw ACC, vf26, vf4z
-                    vmaddw.xyzw  vf5, vf27, vf0w
-                    vnop
-
-                    cfc2         t1, vi18
-                    
-                    bnez         %2, l_002D2AB8
-                    
-                    and          %0, %0, t1
-                    
-                    vclipw.xyz   vf5, vf5w
-                    vnop
-                    vnop
-                    vnop
-                    vnop
-                    vnop
-
-                    cfc2         t1, vi18
-                    
-                    and          %0, %0, t1
-                .set reorder
-                " : "r"(coflag) : "r"(uspCnk), "r"(usMax), "m"(pNaCnkVerBufTop) : "memory"
-                );
-                    
-                if (coflag != 0)
-                {
-                    uspCnk += usMax * 3;
-                }
-                else
-                {
-                label:
-                {
-                    float zbuff[4] = { -Ps2_zbuff_b, 0.0009775171f, -Ps2_zbuff_a, 65534.0f }; 
-                    
-                    asm volatile
-                    ("
-                    .set noreorder
-                        lqc2 vf8, 0(%0)
-                    .set reorder
-                    " : : "r"(zbuff) : "v1", "memory"
-                    );  
-   
-                    asm volatile
-                    ("
-                    .set noreorder
-                        andi      %3, %3, 0xFFFF
-                        
-                        move      t3, %0
-                        move      t4, %1
-                    
-                        ldl       t0, 0x7(t4)
-                        ldr       t0,   0(t4)
-                        
-                        addiu     t4, t4, 6
-                    
-                        andi      t1, t0, 0xFFFF
-                        
-                        dsrl      t0, t0, 16
-                        sll       t1, t1, 6
-                        
-                        add       t2, %2, t1
-                        
-                    l_002D2B38: 
-                        lqc2      vf4,    0(t2)
-                        lqc2      vf5, 0x10(t2)
-                        lqc2      vf6, 0x20(t2)
-                        lqc2      vf7, 0x30(t2)
-
-                        pextlh    t0, zero, t0
-                    
-                        qmtc2     t0, vf4
-                    
-                        vitof0.xy vf4, vf4
-                        
-                        vmove.z   vf4, vf7
-                        
-                        vmuly.xy  vf4, vf4, vf8y
-                        
-                        vmove.w   vf5, vf7
-                        
-                        vmulax.z  ACC, vf7, vf8x
-                        
-                        vmaddw.z  vf7, vf8, vf0w
-                        
-                        ldl       t0, 0x7(t4)
-                        ldr       t0,   0(t4)
-                        
-                        addiu     t4, t4, 6
-                        
-                        vmax.z    vf7, vf7, vf0
-                        
-                        andi      t1, t0, 0xFFFF
-                    
-                        dsrl      t0, t0, 16
-                        sll       t1, t1, 6
-                        
-                        add       t2, %2, t1
-                        
-                        vminiw.z  vf7, vf7, vf8w
-                        
-                        vmove.w   vf7, vf6
-                        
-                        addi      %3, %3, -1
-                        
-                        sqc2      vf4,    0(t3)
-                        sqc2      vf5, 0x10(t3)
-                        sqc2      vf6, 0x20(t3)
-                        sqc2      vf7, 0x30(t3)
-                        
-                        sw        %4, VU1_STRIP_BUF.fPad1(%0)
-                        
-                        bnez      %3, l_002D2B38 
-                        
-                        addiu     t3, t3, 64
-                    .set reorder
-                    " : : "r"(pS), "r"(uspCnk), "m"(pNaCnkVerBufTop), "r"(usMax), "r"(usColorCalc) : "t0", "t1", "t2", "memory"
-                    );
-                
-                    uspCnk += usMax * 3;
-                    
-                    p = (void*)&pS[usMax];
-                    
-                    p[0] = 0;
-                    p[1] = vu1func_tag;
-                    
-                    sceDmaSend((sceDmaChan*)D1_CHCR, (void*)((unsigned int)ulpP | 0x80000000));
-                    
-                    Ps2_chunk_buff_flip ^= 1;
-                }
-                }
-                
-                if (sExit == 0) 
-                {
-                    uspCnk -= 6;
-                } 
-                else
-                {
-                    usStrip--; // FAKE - this line isn't actually on the code, but for some reason it matches the function from 93% to 99%
-                    usStrip++; // only purpose of this line is to cancel the effect of the subtraction above
-                    break;
-                }
-            }
-        }
-        
-        SyncPath();
-    }
-    else
-#endif
     {
         for (; usStrip; usStrip--)
         {
@@ -2805,306 +2220,6 @@ CHUNK_HEAD* njCnkCsUvn(CHUNK_HEAD* pCnk)
     
     usStrip = *uspCnk++ & 0x3FFF;
     
-#ifndef TARGET_PC   /* PC: la ruta de la VU1 (DMA al VIF1 + microcodigo) ya no existe; solo la del EE de abajo */
-    if ((ulDrawGeneralPurposeWater != 0) || ((pVu1Func != vu1DrawTriangleStripTransDouble) && (pVu1Func != vu1DrawTriangleStripTransDoubleI))) 
-    {
-        TIM2_PICTUREHEADER_EX* timp;                                                 
-        unsigned int coflag;  
-
-        coflag = 0;  
-        
-        if ((pVu1Func == vu1DrawTriangleStripTransSingle) || (pVu1Func == vu1DrawTriangleStripOpaqueSingle))
-        {
-            vu1func_tag = SCE_VIF1_SET_MSCAL(700, 0);
-        }
-        else
-        {
-            vu1func_tag = SCE_VIF1_SET_MSCAL(0,   0);
-        }
-
-        timp = (TIM2_PICTUREHEADER_EX*)Ps2_now_tex->texinfo.texsurface.pSurface;
-        
-        if (timp->TpFlag != 0) 
-        {
-            Ps2_tex_load_tp_cancel = 1;
-            
-            Ps2TexLoad(Ps2_now_tex);
-            
-            Ps2_tex_load_tp_cancel = 0;
-        }
-        
-        ulpP = (u_long*)SPR_ADDR(0x3E80);
-        
-        ulpP[0] = DMAend | 0x10;
-        ulpP[1] = 0;
-        
-        ulpP[2] = JOIN_TAGS(SCE_VIF1_SET_BASE(0, 0), SCE_VIF1_SET_OFFSET(422, 0));
-        ulpP[3] = JOIN_TAGS(SCE_VIF1_SET_NOP(0),     SCE_VIF1_SET_UNPACK(884, 15, SCE_UPF_V4_32, 0));
-        
-        SET_VEC4_AT(ulpP, 32, &vu1Diffuse);
-        SET_VEC4_AT(ulpP, 48, &vu1Ambient);
-        SET_VEC4_AT(ulpP, 64, &vu1Specula);
-        
-        SET_DATA_AT(ulpP, 80, float, fVu1NearClip);
-        SET_DATA_AT(ulpP, 84, float, fVu1FarClip);
-        SET_DATA_AT(ulpP, 88, float, fVu1Projection);
-        SET_DATA_AT(ulpP, 92, float, fVu1AlphaRatio);
-        
-        SET_VEC4_AT(ulpP, 96, &ClipMatrix2[0]);
-        SET_VEC4_AT(ulpP, 112, &ClipMatrix2[1]);
-        SET_VEC4_AT(ulpP, 128, &ClipMatrix2[2]);
-        SET_VEC4_AT(ulpP, 144, &ClipMatrix2[3]);
-        
-        SET_DATA_AT(ulpP, 160, float, fVu1OffsetX);
-        SET_DATA_AT(ulpP, 164, float, fVu1OffsetY);
-        
-        SET_DATA_AT(ulpP, 168, float, 0);
-        SET_DATA_AT(ulpP, 172, float, 4095.0f);
-        
-        SET_DATA_AT(ulpP, 176, float, fVu1AspectW);
-        SET_DATA_AT(ulpP, 180, float, fVu1AspectH);
-        
-        SET_DATA_AT(ulpP, 184, float, 0);
-        SET_DATA_AT(ulpP, 188, float, 65535.0f);
-        
-        SET_VEC4_AT(ulpP, 192, &ClipScreenMatrix[0]);
-        SET_VEC4_AT(ulpP, 208, &ClipScreenMatrix[1]);
-        SET_VEC4_AT(ulpP, 224, &ClipScreenMatrix[2]);
-        SET_VEC4_AT(ulpP, 240, &ClipScreenMatrix[3]);
-        
-        ulpP[32] = SCE_GIF_SET_TAG(0, 1, SCE_GIF_REGLIST, NULL, 0, 3) | ulType2;
-        ulpP[33] = GIF_REGLIST(SCE_GS_ST, SCE_GS_RGBAQ, SCE_GS_XYZF2);
-        
-        sceDmaSend((sceDmaChan*)D1_CHCR, (void*)0xF0003E80);
-        sceDmaSync((sceDmaChan*)D1_CHCR, 0, 0);
-        
-        for (; usStrip; usStrip--)  
-        {
-            usClip = *uspCnk & 0x8000;
-            
-            usNum = usMax = (usClip != 0) ? ~*uspCnk + 1 : *uspCnk; 
-            
-            uspCnk++;
-            
-            sExit = 0;
-            
-            while (TRUE) 
-            {
-                ulpP = (Ps2_chunk_buff_flip != 0) ? (void*)0x70002000 : (void*)0x70002F40;
-                
-                p = (void*)&ulpP[6];
-                
-                pS = (void*)p;
-                
-                if ((usMax = usNum) > 60)
-                {
-                    usNum -= 58;
-                    
-                    usMax = 60;
-                } 
-                else 
-                {
-                    sExit = 1;
-                }
-                
-                ulpP[0] = DMAend | ((usMax * 4) + 3);
-                ulpP[1] = 0;
-                
-                ulpP[2] = 0;
-                ulpP[3] = JOIN_TAGS(SCE_VIF1_SET_NOP(0), SCE_VIF1_SET_UNPACK(32768, (usMax * 4) + 1, SCE_UPF_V4_32, 0));
-                
-                ulpP[4] = (SCE_GIF_SET_TAG(0, SCE_GS_TRUE, SCE_GS_TRUE, 0, SCE_GIF_PACKED, 3) | ulType) | usMax;
-                ulpP[5] = GIF_REGLIST(SCE_GS_ST, SCE_GS_RGBAQ, SCE_GS_XYZF2);
-
-                asm volatile
-                ("
-                .set noreorder
-                    addiu        %0, zero, 0x3F
-                    
-                    lhu          t0, 0(%1)
-                    
-                    addiu        a0, %1, 6
-                    
-                    sll          t0, t0, 6
-                    
-                    addi         %2, %2, -1
-                    add          t0, %3, t0
-                    
-                    lqc2         vf4, 0x20(t0)
-
-                    vmulax.xyzw  ACC, vf24, vf4x
-                    
-                    vmadday.xyzw ACC, vf25, vf4y
-                    vmaddaz.xyzw ACC, vf26, vf4z
-                    vmaddw.xyzw  vf5, vf27, vf0w
-                    
-                l_002D2AB8:
-                    lhu          t0, 0(a0)
-                    
-                    addiu        a0, a0,  6
-                    addi         %2, %2, -1 
-                    
-                    sll          t0, t0,  6
-                    
-                    beqz         %0, label
-                    
-                    add          t0, %3, t0 
-                    
-                    lqc2         vf4, 0x20(t0) 
-                    
-                    vclipw.xyz   vf5, vf5w                  
-                    
-                    vmulax.xyzw  ACC, vf24, vf4x
-                    
-                    vmadday.xyzw ACC, vf25, vf4y
-                    vmaddaz.xyzw ACC, vf26, vf4z
-                    vmaddw.xyzw  vf5, vf27, vf0w
-                    vnop
-
-                    cfc2         t1, vi18
-                    
-                    bnez         %2, l_002D2AB8
-                    
-                    and          %0, %0, t1
-                    
-                    vclipw.xyz   vf5, vf5w
-                    vnop
-                    vnop
-                    vnop
-                    vnop
-                    vnop
-
-                    cfc2         t1, vi18
-                    
-                    and          %0, %0, t1
-                .set reorder
-                " : "r"(coflag) : "r"(uspCnk), "r"(usMax), "m"(pNaCnkVerBufTop) : "memory"
-                );
-                    
-                if (coflag != 0)
-                {
-                    uspCnk += usMax * 3;
-                }
-                else
-                {
-                label:
-                {
-                    float zbuff[4] = { -Ps2_zbuff_b, 0.003921569f, -Ps2_zbuff_a, 65534.0f }; 
-                    
-                    asm volatile
-                    ("
-                    .set noreorder
-                        lqc2 vf8, 0(%0)
-                    .set reorder
-                    " : : "r"(zbuff) : "v1", "memory"
-                    );  
-   
-                    asm volatile
-                    ("
-                    .set noreorder
-                        andi      %3, %3, 0xFFFF
-                        
-                        move      t3, %0
-                        move      t4, %1
-                    
-                        ldl       t0, 0x7(t4)
-                        ldr       t0,   0(t4)
-                        
-                        addiu     t4, t4, 6
-                    
-                        andi      t1, t0, 0xFFFF
-                        
-                        dsrl      t0, t0, 16
-                        sll       t1, t1, 6
-                        
-                        add       t2, %2, t1
-                        
-                    l_002D2B38: 
-                        lqc2      vf4,    0(t2)
-                        lqc2      vf5, 0x10(t2)
-                        lqc2      vf6, 0x20(t2)
-                        lqc2      vf7, 0x30(t2)
-
-                        pextlh    t0, zero, t0
-                    
-                        qmtc2     t0, vf4
-                    
-                        vitof0.xy vf4, vf4
-                        
-                        vmove.z   vf4, vf7
-                        
-                        vmuly.xy  vf4, vf4, vf8y
-                        
-                        vmove.w   vf5, vf7
-                        
-                        vmulax.z  ACC, vf7, vf8x
-                        
-                        vmaddw.z  vf7, vf8, vf0w
-                        
-                        ldl       t0, 0x7(t4)
-                        ldr       t0,   0(t4)
-                        
-                        addiu     t4, t4, 6
-                        
-                        vmax.z    vf7, vf7, vf0
-                        
-                        andi      t1, t0, 0xFFFF
-                    
-                        dsrl      t0, t0, 16
-                        sll       t1, t1, 6
-                        
-                        add       t2, %2, t1
-                        
-                        vminiw.z  vf7, vf7, vf8w
-                        
-                        vmove.w   vf7, vf6
-                        
-                        addi      %3, %3, -1
-                        
-                        sqc2      vf4,    0(t3)
-                        sqc2      vf5, 0x10(t3)
-                        sqc2      vf6, 0x20(t3)
-                        sqc2      vf7, 0x30(t3)
-                        
-                        sw        %4, VU1_STRIP_BUF.fPad1(%0)
-                        
-                        bnez      %3, l_002D2B38 
-                        
-                        addiu     t3, t3, 64
-                    .set reorder
-                    " : : "r"(pS), "r"(uspCnk), "m"(pNaCnkVerBufTop), "r"(usMax), "r"(usColorCalc) : "t0", "t1", "t2", "memory"
-                    );
-                
-                    uspCnk += usMax * 3;
-                    
-                    p = (void*)&pS[usMax];
-                    
-                    p[0] = 0;
-                    p[1] = vu1func_tag;
-                    
-                    sceDmaSend((sceDmaChan*)D1_CHCR, (void*)((unsigned int)ulpP | 0x80000000));
-                    
-                    Ps2_chunk_buff_flip ^= 1;
-                }
-                }
-                
-                if (sExit == 0) 
-                {
-                    uspCnk -= 6;
-                } 
-                else
-                {
-                    usStrip--; // FAKE - this line isn't actually on the code, but for some reason it matches the function from 93% to 99%
-                    usStrip++; // only purpose of this line is to cancel the effect of the subtraction above
-                    break;
-                }
-            }
-        }
-        
-        SyncPath();
-    }
-    else
-#endif
     {
         for (; usStrip; usStrip--)
         {
