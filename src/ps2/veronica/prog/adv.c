@@ -1071,7 +1071,6 @@ float AutoSaveLoadEasyDispMessage(float PosX, float PosY, unsigned char* ucpMsbT
     sy = PosY;
     
     smp = (unsigned char*)((int)ucpMsbTop + ((int*)ucpMsbTop)[MessageNo + 1]); 
-#ifdef TARGET_PC
     if (ucpMsbTop == SaveLoadMessage)
     {
         extern const unsigned short* pcMessageOverride(int table, int idx, const void* base);
@@ -1082,7 +1081,6 @@ float AutoSaveLoadEasyDispMessage(float PosX, float PosY, unsigned char* ucpMsbT
             smp = (unsigned char*)ov;   /* save/load wording for PC (pc_text.c) */
         }
     }
-#endif
     
     dmp = syMalloc(1024); 
     
@@ -1331,7 +1329,6 @@ int Adv_FirstWarningMessage()
             SetAdjustDisplay(); 
         }
 
-#ifdef TARGET_PC
         {
             /* skip_intro=1: the setup above (font, system data, options) is done; the two
              * warning pictures are left out */
@@ -1343,7 +1340,6 @@ int Adv_FirstWarningMessage()
                 break;
             }
         }
-#endif
 
         RequestAdvFade(2, GetSamurai(50)); 
         
@@ -1591,14 +1587,12 @@ void DisplayTitleBg()
 
     qp = &Qtex[1];
     
-#ifdef TARGET_PC
     {
         /* PC: the build number is shown at the bottom of the title screen (pc_overlay.c) */
         extern void pcOverlayTitleShown(void);
 
         pcOverlayTitleShown();
     }
-#endif
     AdvDwawOnePictureEx(0, 0xFFFFFFFF); 
 
     SetQuadPos(20.0f, 396.0f, 352.0f, 54.0f, qp); 
@@ -2679,10 +2673,8 @@ void DisplayOptionBg(int Level, int Flag)
 }
 
 // 99.65% matching
-#ifdef TARGET_PC
 /* PC: OPTION row not shown: 1 key config (recvx-config.exe sets the buttons) */
 #define PC_OPTION_HIDDEN(i) ((i) == 1)
-#endif
 
 int DisplayOptionPlateLevel0(int PortId, int Flag)
 {
@@ -2774,12 +2766,10 @@ int DisplayOptionPlateLevel0(int PortId, int Flag)
                     {
                         ap->OptIndex--;
                     }
-#ifdef TARGET_PC
                     while (PC_OPTION_HIDDEN(ap->OptIndex)) /* PC: rows left out, see below */
                     {
                         ap->OptIndex--;
                     }
-#endif
                     
                 label:
                     CallSystemSe(0, 2);
@@ -2798,12 +2788,10 @@ int DisplayOptionPlateLevel0(int PortId, int Flag)
                         {
                             ap->OptIndex++;
                         }
-#ifdef TARGET_PC
                         while (PC_OPTION_HIDDEN(ap->OptIndex)) /* PC: rows left out */
                         {
                             ap->OptIndex++;
                         }
-#endif
                     }
                     
                     CallSystemSe(0, 2);
@@ -2912,7 +2900,6 @@ int DisplayOptionPlateLevel0(int PortId, int Flag)
     SetQuadPos(96.0f, 96.0f, 448.0f, 48.0f, &qp[13]);
     SetQuadUv2(0, 320.0f, 448.0f, 48.0f, 2, &qp[13]);
     
-#ifdef TARGET_PC
     /* PC: the key config row (recvx-config.exe sets the buttons) is left out; the rows below
      * it move up, with the vibration row's ON and OFF */
     while (PC_OPTION_HIDDEN(ap->OptIndex))
@@ -2929,16 +2916,13 @@ int DisplayOptionPlateLevel0(int PortId, int Flag)
             qp[i].y2 -= up[i];
         }
     }
-#endif
 
     for (i = 0; i < 7; i++) 
     {
-#ifdef TARGET_PC
         if (PC_OPTION_HIDDEN(i))
         {
             continue;
         }
-#endif
         Alpha = 255;
         
         if (OptionDef[i].SelectFlag != 0) 
@@ -2984,18 +2968,6 @@ int DisplayOptionPlateLevel0(int PortId, int Flag)
         }
     }
     
-#ifndef TARGET_PC /* PC: no controls row */
-    if (ap->OptIndex == 1) 
-    {
-        AdvEasyDrawTexture(0, 0xDFFFFFFF, &Qtex[10], 0.05f, 1);
-        AdvEasyDrawTexture(0, 0xDFFFFFFF, &Qtex[11], 0.05f, 1);
-    } 
-    else 
-    {
-        AdvEasyDrawTexture(0, 0xDFCFCFCF, &Qtex[10], 0.05f, 1);
-        AdvEasyDrawTexture(0, 0xDFCFCFCF, &Qtex[11], 0.05f, 1);
-    }
-#endif
     
     if (OptionDef[4].Item == 0) 
     {
