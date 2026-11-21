@@ -89,6 +89,9 @@ void pcClipViewVolume(const float* p4, int all)
     state_store(&s, all);
 }
 
+uint32_t pcClipFlagsGet(void) { return pcVu0.clip; }
+void pcClipFlagsSet(uint32_t flags) { pcVu0.clip = flags & 0xFFFFFF; }
+
 void pcClipResetHistory(void)
 {
     static const float zero4[4] = { 0.0f, 0.0f, 0.0f, 1.0f };   /* vf0 */

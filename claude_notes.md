@@ -606,3 +606,9 @@ recalcula siempre, de modo que los cambios de paleta se detectan exactamente igu
 ## 0.9.174 - Integrado el trabajo de GPT (G1/G2)
 - G2: `Ps2TexLoad` sin rama `#else` PS2 (revisado, correcto). G1: inventario util, con un error (`_Clip_Screen` si se llama, NaDraw.c:337); corregido en coord/TASKS.md. Todo el scissor/clip viejo de ps2_Vu1Strip.c esta vivo.
 - Pendiente: reescritura del scissor de triangulos viejo y estado propio (sustituir pcVu0).
+
+## 0.9.175 - ScissorTriangle en C plano (3d)
+- Nuevo `pc/include/pc_tri_scissor.h` + `pc/src/vu/pc_tri_scissor.c`: `pcTriScissorPlane` recorta una lista de nodos (vertex/color/texUV/clipV) contra un plano (Sutherland-Hodgman, misma aritmetica truncada que la VU) y actualiza el historial de flags de clip de 24 bits (vi18).
+- `ScissorTriangle` (ps2_Vu1Strip.c) pasa de ~780 lineas de VU0 transpilado a ~25 lineas de C: bucle de planos + alternancia de narray con flipflag. Sin `pcVu0` salvo el registro de flags, ahora accesible por `pcClipFlagsGet/Set` (pc_clip.c).
+- Validacion: harness gcc contra el ScissorTriangle transpilado de 0.9.174 (1M triangulos aleatorios: 185K vacios, 40K intactos, 774K recortados): 0 diferencias en nodos de salida, nodeNum y historial de clip. Respaldo: 0.9.174.
+- Rutas que lo usan: vu1DrawTriangleStripTransDoubleI (visor de items) y vu1DrawTriangleStripTransDouble1P (NaDraw 1P).
