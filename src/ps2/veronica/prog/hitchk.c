@@ -4598,9 +4598,7 @@ void bhCheckExmAtari(BH_PWORK* pp)
     int etc_n;   
     int danf;    
     int ang;     
-#ifdef TARGET_PC
     int pc_only = -1; /* RECVX_TEST_DOOR: the one area this press may use */
-#endif
     
     njSinCos(pp->ay, &px, &pz);
     
@@ -4624,7 +4622,6 @@ void bhCheckExmAtari(BH_PWORK* pp)
     sys->cb_flg &= ~0x100;
     
     etc_n = rom->etc_n + sys->metc_n;
-#ifdef TARGET_PC
     {
         extern int pcTestDoorDue(void);
         int t = pcTestDoorDue();
@@ -4721,16 +4718,13 @@ void bhCheckExmAtari(BH_PWORK* pp)
             return;
         }
     }
-#endif
     
     for (i = 0; i < etc_n; i++)
     {
-#ifdef TARGET_PC
         if ((pc_only >= 0) && (i != pc_only))
         {
             continue;
         }
-#endif
         if (i < rom->etc_n) 
         {
             exp = &rom->etcp[i];
@@ -4778,7 +4772,6 @@ void bhCheckExmAtari(BH_PWORK* pp)
                         sys->door.pos_no = exp->prm2;
                     
                         sys->door.dor_tp = exp->prm3;
-#ifdef TARGET_PC
                         {
                             extern int pcRandoDoor(int stage, int room, int rcase, int area, int* tstage, int* troom, int* tpos);
                             extern const unsigned short* pcRandoLockedText(void);
@@ -4817,7 +4810,6 @@ void bhCheckExmAtari(BH_PWORK* pp)
                                 sys->door.pos_no = tpos;
                             }
                         }
-#endif
                     } 
                     
                     return;
