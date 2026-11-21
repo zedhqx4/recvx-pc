@@ -2072,9 +2072,7 @@ int bhEne26_ActionModeCheck(BH_PWORK* epw)
             }
         }
     }
-#ifdef TARGET_PC /* the PS2 build returned whatever was left in the return register */
     return 0;
-#endif
 }
 
 #pragma divbyzerocheck on
