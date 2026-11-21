@@ -9,9 +9,7 @@
 #include "../../../ps2/veronica/prog/macros.h"
 #include "../../../ps2/veronica/prog/eneset.h"
 #include "../../../ps2/veronica/prog/effect.h"
-#ifdef TARGET_PC
 #include "../../../ps2/veronica/prog/rutchk.h" /* returns unsigned char: needs a prototype */
-#endif
 
 // ENEMY: Alexia's Baby 
 
