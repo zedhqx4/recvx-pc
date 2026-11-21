@@ -16,7 +16,6 @@
 #include "../../../ps2/veronica/prog/ps2_dummy.h"
 #include "../../../ps2/veronica/prog/main.h"
 
-#ifdef TARGET_PC
 #include "../../../../pc/src/pc_os.h"
 #include "../../../../pc/include/pc_platform.h"
 #include "../../../../pc/include/pc_game_profile.h"
@@ -474,16 +473,11 @@ static void pcGameProfileEnd(int loop_ct, double total_ms)
          double _profile_t0 = pcGameProfileNowMs(); \
          pcGameProfileSetScope(scope); call; pcGameProfileSetScope(_old_scope); \
          pcGameProfileAdd((slot), pcGameProfileNowMs() - _profile_t0); } else { call; } } while (0)
-#else
-#define PC_PROFILE_CALL(enabled, slot, call) do { call; } while (0)
-#define PC_PROFILE_SCOPE_CALL(enabled, scope, slot, call) do { call; } while (0)
-#endif
 
 // 100% matching! 
 void bhMainSequence()
 {
     int i;
-#ifdef TARGET_PC
     int profile = pcGameProfileEnabled();
     double profile_frame_start = 0.0;
 
@@ -492,7 +486,6 @@ void bhMainSequence()
         pcGameProfileBegin();
         profile_frame_start = pcGameProfileNowMs();
     }
-#endif
 
     if ((sys->cb_flg & 0x1)) 
     {
@@ -786,16 +779,13 @@ void bhMainSequence()
         }
     }
 
-#ifdef TARGET_PC
     if (profile)
         pcGameProfileEnd(sys->loop_ct, pcGameProfileNowMs() - profile_frame_start);
-#endif
 }
 
 // 100% matching
 void bhAllDrawModel()
 {
-#ifdef TARGET_PC
     int profile = pcGameProfileEnabled();
     double model_profile_start = 0.0;
     double model_profile_children_start = 0.0;
@@ -809,7 +799,6 @@ void bhAllDrawModel()
             game_profile.frame[GP_MODEL_ENEMY] + game_profile.frame[GP_MODEL_PLAYER] +
             game_profile.frame[GP_MODEL_WATER];
     }
-#endif
     njControl3D(0x2500);
     njSetCheapShadowMode(0x80);
     njCnkSetEasyMultiAmbient(rom->amb_r[rom->amb_rom], rom->amb_g[rom->amb_rom], rom->amb_b[rom->amb_rom]);
@@ -868,7 +857,6 @@ void bhAllDrawModel()
     njControl3D(0x2400);
     PC_PROFILE_CALL(profile, GP_MODEL_WATER, bhDrawGeneralPurposeWater());
     njControl3D(0);
-#ifdef TARGET_PC
     if (profile)
     {
         double children_ms =
@@ -879,7 +867,6 @@ void bhAllDrawModel()
         double model_ms = pcGameProfileNowMs() - model_profile_start;
         pcGameProfileAdd(GP_MODEL_MISC, model_ms - children_ms);
     }
-#endif
 }
 
 // 100% matching
