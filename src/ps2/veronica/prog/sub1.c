@@ -1363,7 +1363,6 @@ void Ps2DrawOTagI()
 {
 	int i;
 	
-#ifdef TARGET_PC
 	{
 		/* El OT no existe en PC: los primitivos con ABE esperan en la cola del renderer. Ps2ZbuffOffI + Ps2ZbuffOff2 los
 		 * recorrian en dos pasadas (fragmentos con alfa >= 128 con Z, despues los de alfa < 128 sin Z). */
@@ -1372,7 +1371,6 @@ void Ps2DrawOTagI()
 		Ps2_current_texbreak = 1;
 		return;
 	}
-#endif
 
 	Ps2ZbuffOffI();
 
@@ -2273,7 +2271,6 @@ void SpriteSet2D(S_WORK* st, PARTS* cbjim, NJS_TEXANIM* anim1, NJS_TEXLIST* tlis
     }
 }
 
-#ifdef TARGET_PC
 /* widescreen: the background piece whose right edge was the screen's right edge (parts_07b,
  * anim 1) has a light border in its last texel column; with the pattern continued past the 4:3
  * edges that column would show as a line, so it is left out */
@@ -2307,7 +2304,6 @@ static void pc_wide_background(S_WORK* st, PARTS* table, PARTS* spr, NJS_TEXANIM
     SpriteSet2D(st, &copy, anim, tlist);
     pcWide2DUnclipped = 0;
 }
-#endif
 
 // 100% matching!
 void ItemSort()
@@ -3732,41 +3728,29 @@ void StatusMain()
                             {
                                 njSetTexture(&fv->fbtx_list);
                                 
-#ifdef TARGET_PC
                                 pc_wide_trim(spr_a);
-#endif
                                 SpriteSet2D(st, &spr_t, parts, &fv->fbtx_list);
-#ifdef TARGET_PC
                                 pc_wide_background(st, spr_a, &spr_t, parts, &fv->fbtx_list);
                                 pc_wide_trim(NULL);
-#endif
                             } 
                             else if ((spr_t.atr & 0x40)) 
                             {
                                 njSetTexture(&fv->fstx_list);
                                 
-#ifdef TARGET_PC
                                 pc_wide_trim(spr_a);
-#endif
                                 SpriteSet2D(st, &spr_t, parts, &fv->fstx_list);
-#ifdef TARGET_PC
                                 pc_wide_background(st, spr_a, &spr_t, parts, &fv->fstx_list);
                                 pc_wide_trim(NULL);
-#endif
                             }
                         }
                         else if ((!(sys->cb_flg & 0x20000)) && (fv->tex_flg == 0)) 
                         {
                             njSetTexture(&st->subtx_list);
                             
-#ifdef TARGET_PC
                             pc_wide_trim(spr_a);
-#endif
                             SpriteSet2D(st, &spr_t, parts, &st->subtx_list);
-#ifdef TARGET_PC
                                 pc_wide_background(st, spr_a, &spr_t, parts, &st->subtx_list);
                                 pc_wide_trim(NULL);
-#endif
                             
                             njSetPaletteBankNum(0, 5);
                         } 
@@ -7904,9 +7888,7 @@ void ItemBoxChange(S_WORK* st, unsigned short ibcsr)
                 lt_c3 = max + 1;
                 lt_c2 = lt_c;
 
-#ifdef TARGET_PC
                 itemid2 = itemid3;   /* the box item goes to the slot after the list (see below) */
-#endif
                 itemid3 = 0;
 
                 chk2 = 1;
@@ -7937,7 +7919,6 @@ void ItemBoxChange(S_WORK* st, unsigned short ibcsr)
         {
             if ((id2 != standard[sys->ply_id][0]) && (id2 != standard[sys->ply_id][1]))
             {
-#ifdef TARGET_PC
                 /* as the PS2 code: with room in the list the box item goes after it; with no
                  * room only an empty box slot can be swapped with the standard slot */
                 if (bmax >= 1)
@@ -7954,17 +7935,6 @@ void ItemBoxChange(S_WORK* st, unsigned short ibcsr)
                 {
                     chk2 = 1;
                 }
-#else
-                if ((bmax >= 1) || (!id2))
-                {
-                    lt_c3 = max + 1;
-                    lt_c2 = lt_c;
-
-                    itemid3 = 0;
-
-                    chk2 = 1;
-                }
-#endif
             }
             else
             {
@@ -7980,14 +7950,10 @@ void ItemBoxChange(S_WORK* st, unsigned short ibcsr)
                 lt_c3 = lt_c;
                 lt_c2 = 1;
 
-#ifdef TARGET_PC
                 /* a standard item (lighter) taken out onto another slot goes to the standard
                  * slot, the cursor slot's item into the box, and the cursor slot is left empty:
                  * the PS2 code goes ahead with this (the decompiled chk2 = 0 refused it) */
                 itemid2 = 0;
-#else
-                chk2 = 0;
-#endif
             }
         }
     }
@@ -8035,7 +8001,6 @@ void ItemBoxChange(S_WORK* st, unsigned short ibcsr)
         st->bxp[ibcsr] = st->pip[lt_c];
         st->pip[num1]  = itemid3;
 
-#ifdef TARGET_PC
         /* PC port: this part follows the PS2 code (the decompile of this function is unreliable).
          * Storing an item from above the equipped weapon (into an empty box slot, or swapping it
          * for a standard item) moves the equipped slot up by one, as the list closes up; the
@@ -8082,50 +8047,6 @@ void ItemBoxChange(S_WORK* st, unsigned short ibcsr)
                 *st->pip += 1;
             }
         }
-#else
-        if (lt_c3)
-        {
-            st->pip[lt_c3] = 2;
-        }
-
-        if (*st->pip > 1)
-        {
-            if (itemid1 != 1) 
-            {
-                if ((id2) && ((id2 == standard[sys->ply_id][0]) || (id2 == standard[sys->ply_id][1]))) 
-                {
-                    if (itemid1 < *st->pip) 
-                    {
-                        *st->pip -= 1;
-                        return;
-                    }
-
-                    if (id1) 
-                    {
-                        if ((itemdata[id2].type & 0x100)) 
-                        {
-                            if (((!(itemdata[id1].type & 0x100)) && (!(itemdata[arms].type & 0x100))) && (itemid1 < *st->pip)) 
-                            {
-                                *st->pip += 1;
-                            }
-                        } 
-                        else if (((!(itemdata[id2].type & 0x100)) && ((itemdata[id1].type & 0x100))) && (itemid1 > *st->pip) && ((itemdata[arms].type & 0x100))) 
-                        {
-                            *st->pip -= 1;
-                        }
-                    } 
-                    else if (((itemdata[id2].type & 0x100)) && (!(itemdata[arms].type & 0x100))) 
-                    {
-                        *st->pip += 1;
-                    }
-                }
-            }
-        } 
-        else if ((*st->pip > 1) && (itemid1 == 1) && ((itemdata[id2].type & 0x100)))
-        {
-            *st->pip += 1;
-        }
-#endif
 
         if ((itemid1 != 1) && ((st->listcsr_0 > sakai) || (((st->listcsr_2 & 0x1)) && (st->listcsr_0 == (sakai - 1))))) 
         {
@@ -8692,7 +8613,6 @@ void AllItemInit()
         swork.pip[2] = 0x220190;
     }
     
-#ifdef TARGET_PC
     if (sys->gm_mode != 3)
     {
         extern void pcRandoStartItems(int player, unsigned int* pip);
@@ -8702,7 +8622,6 @@ void AllItemInit()
         pcRandoStartItems(1, &sys->itm[16]);
     }
     
-#endif
     sys->itm[383] = 1;
 }
 
@@ -9054,14 +8973,10 @@ int bhSearchBullet()
     {
         y = ((st->pip + i)[2] >> 16) & 0xFF;
 
-#ifdef TARGET_PC
         /* items with no combination list (cmb -1, e.g. item 145) would read combidata[-1]: 0 in
          * the PS2 executable (no match), arbitrary memory here, where it ran past the table and
          * could "find" ammo for a weapon without a reload motion (crash in SetMtnFastHokan) */
         if ((itemdata[y].type & 0x2) && (itemdata[y].cmb >= 0))
-#else
-        if ((itemdata[y].type & 0x2))
-#endif
         {
             z = combidata[itemdata[y].cmb];
             
