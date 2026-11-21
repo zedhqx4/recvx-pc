@@ -38,18 +38,14 @@ char* cpNameList[18] =
     cSaveData08, cSaveData09, cSaveData10, cSaveData11, cSaveData12, cSaveData13, cSaveData14
 }; 
 
-#ifdef TARGET_PC
 /* PC: saves go to one place (pc_mc.c), so there is no memory card slot to pick. The slot screen
  * is skipped on the way in; coming back to it (cancel, or after a message) leaves the screen. */
 static int pcAutoCard;
-#endif
 
 // 100% matching! 
 SAVE_SCREEN* CreateSaveScreen(SAVE_SCREEN* pSave, void* vpWorkPtrSys) 
 {
-#ifdef TARGET_PC
     pcAutoCard = 1;
-#endif
     pSave->ulState = 0;
     pSave->ulSubState = 0;
     
@@ -451,7 +447,6 @@ void ExecuteStateSaveScreenErrUnPS2MemCard(SAVE_SCREEN* pSave)
 // 100% matching! 
 void SetStateSaveScreenSelectCard(SAVE_SCREEN* pSave)
 {
-#ifdef TARGET_PC
     if (pcAutoCard)
     {
         pcAutoCard = 0;
@@ -468,7 +463,6 @@ void SetStateSaveScreenSelectCard(SAVE_SCREEN* pSave)
     }
 
     return;
-#endif
     pSave->ulState = 10;
     
     pSave->cMesFlag = 0;
@@ -832,11 +826,9 @@ void ExecuteStateSaveScreenErrFreeCapacity(SAVE_SCREEN* pSave)
 // 100% matching! 
 void SetStateSaveScreenCreateSaveFileCheck(SAVE_SCREEN* pSave)
 {
-#ifdef TARGET_PC
     /* nothing to ask: the save files are created on the first save */
     SetStateSaveScreenCreateSaveFile(pSave);
     return;
-#endif
     pSave->ulState = 15;
     
     pSave->cMesFlag = 5;
@@ -1744,9 +1736,7 @@ void ExecuteStateSaveScreenErrDer(SAVE_SCREEN* pSave)
 // 96.47% matching
 void SetDispSelectMessage()
 {
-#ifdef TARGET_PC
     return;
-#endif
     bhFontScaleSet(0.71f, 0.71f, 0.75f);
     
     bhDispMessage(96.0f, 82.0f, -0.1f, 1, 472, 0, 0);
@@ -1762,9 +1752,7 @@ void SetDispSelectMessage()
 // 100% matching!
 void CheckDispMemoryCard(SAVE_SCREEN* pSave)
 {
-#ifdef TARGET_PC
     return;
-#endif
     int lPort0Card, lPort1Card;
     int lPort0CurX, lPort1CurX; 
     int lPort0CurY, lPort1CurY; // not from the debugging symbols
