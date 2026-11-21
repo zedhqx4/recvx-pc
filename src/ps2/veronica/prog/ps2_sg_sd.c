@@ -1656,9 +1656,7 @@ int sndr_trans_func()
         
         break;
     }
-#ifdef TARGET_PC /* the PS2 build returned whatever was left in the return register */
     return 0;
-#endif
 }
 
 // 100% matching!
@@ -1991,25 +1989,9 @@ void CpEEWait(int val)
 {
     while (val-- > 0) 
     {
-#ifdef TARGET_PC
         /* PC: no delay padding */
-#else
-        asm("nop");
-#endif
-#ifdef TARGET_PC
         /* PC: no delay padding */
-#else
-        asm("nop");
-#endif
-#ifdef TARGET_PC
         /* PC: no delay padding */
-#else
-        asm("nop");
-#endif
-#ifdef TARGET_PC
         /* PC: no delay padding */
-#else
-        asm("nop");
-#endif
     }
 }
