@@ -260,8 +260,7 @@ static GLuint create_program(void)
 /* Sombra del estado GL que apply_state fija en cada draw. En escenas de ~550 tiras por frame, 15-20 llamadas GL por tira
  * (FBO, viewport, profundidad, mezcla, culling, scissor, programa) eran la mayor parte del coste de envio, y casi todas
  * repetian el valor anterior. Solo se emite lo que cambia. Cualquier funcion que toque ese estado fuera de apply_state
- * (limpiar, sombras, copias, lectura, desenfoque, presentar...) invalida la sombra al entrar y al salir. gl_shadow=0
- * (recvx.ini) la desactiva para comparar. */
+ * (limpiar, sombras, copias, lectura, desenfoque, presentar...) invalida la sombra al entrar y al salir. */
 typedef struct {
     int valid;
     GLuint fbo, program;
