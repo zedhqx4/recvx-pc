@@ -659,3 +659,6 @@ recalcula siempre, de modo que los cambios de paleta se detectan exactamente igu
 
 ## 0.9.184 - gl_batch ya no es interruptor (siempre activo)
 - pc_renderer.c: se borra gl_batch_on(); la agrupacion de draws inmediatos se usa siempre.
+
+## 0.9.185 - rtt_blit_draw ya no es interruptor
+- La copia de la pantalla a textura se hace siempre por draw (rtt_draw_copy). glBlitFramebuffer queda solo como respaldo si el programa no enlaza (ya existia: rtt_draw_copy devuelve 0).

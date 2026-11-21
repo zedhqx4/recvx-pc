@@ -1608,23 +1608,13 @@ void pcRendererCopyScreenToRenderTexture(int sx0, int sy0, int sx1, int sy1, int
 
 /* Copia una franja de un TIM2 renderizado a una unica textura GL persistente.
  * width/height son dimensiones lógicas; el almacenamiento físico usa render_texture_scale. */
-/* ---- Copia a textura por draw (rtt_blit_draw, 1 por defecto) ----------------------------------------------------------------------------
+/* ---- Copia a textura por draw ----------------------------------------------------------------------------
  * Ruta paralela a glBlitFramebuffer, activable por INI. La copia por blit costaba 3-6 ms de GPU por banda aunque la textura destino
  * fuera de 1024^2 o de 2048^2 y sin esperas de CPU (log 5eb925c7), asi que no era trabajo por pixel. Aqui se dibuja un triangulo
  * que cubre el rectangulo destino y el fragmento muestrea la pantalla con el MISMO mapeo que el blit: centro de cada pixel destino
  * -> coordenada de origen = origen + (px+0.5)*(ancho_origen/ancho_destino), con el eje Y invertido, filtro LINEAR y borde fijado. */
 static GLuint rtt_program, rtt_vao;
 static GLint rtt_u_map, rtt_u_org, rtt_u_size;
-
-static int rtt_blit_draw_on(void)
-{
-    static int on = -1;
-    if (on < 0) {
-        on = pcIniGetInt("rtt_blit_draw", 1) != 0;
-        pcLog("native renderer: rtt_blit_draw=%d: copia a textura por %s", on, on ? "draw (valor por defecto; rtt_blit_draw=0 usa glBlitFramebuffer)" : "glBlitFramebuffer");
-    }
-    return on;
-}
 
 static int rtt_draw_prepare(void)
 {
@@ -1645,7 +1635,7 @@ static int rtt_draw_prepare(void)
         glGetProgramiv(rtt_program, GL_LINK_STATUS, &ok);
         glDeleteShader(vs);
         glDeleteShader(fs);
-        if (!ok) { glDeleteProgram(rtt_program); rtt_program = 0; pcLog("native renderer: rtt_blit_draw: link failed, se usa el blit"); return 0; }
+        if (!ok) { glDeleteProgram(rtt_program); rtt_program = 0; pcLog("native renderer: rtt: link failed, se usa glBlitFramebuffer"); return 0; }
         glUseProgram(rtt_program);
         glUniform1i(glGetUniformLocation(rtt_program, "uSrc"), 0);
         rtt_u_map = glGetUniformLocation(rtt_program, "uMap");
@@ -1762,10 +1752,9 @@ static int copy_rect_to_texture_impl(unsigned int* texture, int x, int y, int w,
     gpu_mark(GPUCAT_RTT_BLIT);
     if (vw > 0 && vh > 0) {
         double cpu_t0 = gpu_profile_on() ? pcGameProfileNowMs() : 0.0;
-        if (!(rtt_blit_draw_on() &&
-              rtt_draw_copy(x * scale, y * scale, vw * scale, vh * scale,
-                            (GLint)(x * kx), render_height - (GLint)(y * ky),
-                            (GLint)((x + vw) * kx), render_height - (GLint)((y + vh) * ky))))
+        if (!rtt_draw_copy(x * scale, y * scale, vw * scale, vh * scale,
+                           (GLint)(x * kx), render_height - (GLint)(y * ky),
+                           (GLint)((x + vw) * kx), render_height - (GLint)((y + vh) * ky)))   /* sin programa (fallo de enlace): glBlitFramebuffer */
         glBlitFramebuffer((GLint)(x * kx), render_height - (GLint)(y * ky),
                           (GLint)((x + vw) * kx), render_height - (GLint)((y + vh) * ky),
                           x * scale, y * scale, (x + vw) * scale, (y + vh) * scale,
