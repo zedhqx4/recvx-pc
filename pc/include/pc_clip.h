@@ -17,6 +17,10 @@ typedef struct {
     int vi2;                        /* 237: 0 si algun plano lo descarta, 1 si no */
 } PcClipState;
 
+/* Registros de clip que en la PS2 eran vf14/15/18/19, vi1/vi2 y el registro de flags de VU0 (vi18). h18 lo comparte
+ * pcVu0Last (ultimo punto transformado por la libreria de matrices), igual que en el hardware. */
+extern PcClipState pcClipRegs;
+
 /* kind = 0: micro 269 (historial y 3 flags); 1: micro 237 (ademas vi1/vi2); 2: micro 394 (solo el flag del vertice nuevo).
  * view = matriz de vista a clip (16 floats por filas). */
 void pcClipStep(PcClipState* s, const float* p4, const float* view, int kind);

@@ -635,3 +635,11 @@ recalcula siempre, de modo que los cambios de paleta se detectan exactamente igu
 - `vu1DrawTriangleStripTransDoubleI` (visor de items): ~170 lineas de VU0 transpilado -> ~60 de C. Usa `pcClipViewVertex` para clip + nodo, `pcScreen()->offset` para el offset.
 - Validacion: harness gcc contra el transpilado de 0.9.178 (100K tiras, 16 modos de color, 99% con ScissorTriangle): 0 diferencias en VU1_PRIM_BUF, nodos/rotflag/in/out del SCISSOR, historial de clip y secuencia de llamadas.
 - Nota de fidelidad: TransDoubleI y TransDouble1P corren con el redondeo normal del host (no hay PCSP_BEGIN), asi que el transpilado anterior hacia la matriz de clip con redondeo al mas cercano; `pcClipViewVertex` (desde 0.9.176) trunca como la VU. La diferencia es de 1 ULP en coordenadas de clip y solo cambia un flag de recorte justo en el borde del volumen.
+
+## 0.9.180 - se elimina PcVu0 (fin del 3d)
+- `pcClipRegs` (PcClipState global en pc_clip.c) guarda lo que eran vf14/15/18/19, vi1/vi2 y el registro de flags de clip; `pcCN[16]` (vu0_calcpoint.c) la matriz CN (vf28..31). `pcVu0Last` sigue siendo h18 (registro compartido, como en el hardware).
+- ps2_Vu1Scissor2.c: `InitNodeArraySet2`, `_Clip_ViewVolume2`, `_Get_ClipViewVolume2`, `_Get_ClipVolumePlane`, `_Check_ClipViewAll` en C plano; `pcScissorSetNode` lee pcClipRegs.
+- ps2_NaMatrix.c: se borran las constantes VU0 (vf1/2/3/4/9/10/11/16.z y Q), que ya no lee nadie; ps2_NaView.c: se borra la copia de la matriz de vista a vf24..27 (queda pcViewSetClipMatrix).
+- pc_vu.h: sin `PcVu0`, flags MAC/clip, Q ni historial; pc_asm2c.h sin cfc2/ctc2; pc_vu0_state.c -> pc_vu_round.c (solo pcVuTruncEnabled).
+- Las herramientas `pc/tools/asm2c.py` y `port_vu.py` siguen generando codigo con pcVu0: ya no sirven para codigo nuevo.
+- Equivalencia: el estado de clip se movio sin cambios de logica (state_load/store copian la misma estructura); verificado por compilacion (-fsyntax-only de todo pc/src, enlace de pc/src/vu sin simbolos duplicados) y revision; los harness anteriores ya no compilan porque comparaban contra el transpilado con pcVu0.

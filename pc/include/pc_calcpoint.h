@@ -9,6 +9,8 @@
 
 #include <stdint.h>
 
+extern float pcCN[16];   /* matriz CN: la fija la libreria de matrices, la lee njCnkCvVnPs2 */
+
 typedef struct {
     const float* cn;            /* matriz de Ninja (CN), 16 floats por filas */
     const float* view;          /* matriz de vista a clip (ClipMatrix2), 16 floats por filas */

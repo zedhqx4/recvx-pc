@@ -69,44 +69,6 @@ static __inline void a2c_sdr(uint64_t rt, uint32_t addr)
 static __inline float a2c_bits_f(uint32_t u) { float f; memcpy(&f, &u, 4); return f; }
 static __inline uint32_t a2c_f_bits(float f) { uint32_t u; memcpy(&u, &f, 4); return u; }
 
-/* COP2 control registers (cfc2/ctc2) */
-static __inline uint32_t a2c_cfc2(int reg)
-{
-    PcVu0* v = &pcVu0;
-
-    if (reg < 16) return (uint32_t)(v->vi[reg] & 0xFFFF);
-
-    switch (reg)
-    {
-    case 16: return v->status;
-    case 17: return v->mac;
-    case 18: return v->clip;
-    case 20: return 0;
-    case 21: return a2c_f_bits(v->i);
-    case 22: vu_waitq(v); return a2c_f_bits(v->q);
-    case 29: return 0;          /* VPU-STAT: VU0 idle */
-    }
-
-    return 0;
-}
-
-static __inline void a2c_ctc2(int reg, uint32_t val)
-{
-    PcVu0* v = &pcVu0;
-
-    if (reg == 0) return;
-    if (reg < 16) { v->vi[reg] = vu_vi((int)val); return; }
-
-    switch (reg)
-    {
-    case 16: v->status = val; break;
-    case 17: v->mac = val; break;
-    case 18: v->clip = val & 0xFFFFFF; vu_hist_push(v); break;
-    case 21: v->i = a2c_bits_f(val); break;
-    case 22: v->q = a2c_bits_f(val); v->q_ready = 0; break;
-    }
-}
-
 static __inline uint32_t a2c_plzcw1(uint32_t x)
 {
     /* leading bits equal to the sign bit, minus one */

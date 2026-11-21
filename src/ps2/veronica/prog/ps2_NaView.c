@@ -282,7 +282,6 @@ void _Make_ClipMatrix(sceVu0FMATRIX sc, float scr, float near, float far)
     mp2 = &ClipMatrix2[0]; 
     
 #ifdef TARGET_PC
-    memcpy(&pcVu0.vf[24], mp2, 64); /* vf24-vf27 */
     pcViewSetClipMatrix((const float*)mp2);   /* copia para pcCalcPoint */
 #else
     asm volatile 

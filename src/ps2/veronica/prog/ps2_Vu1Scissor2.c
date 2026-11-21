@@ -68,153 +68,42 @@ void DrawScissorPolygonOpaque2(int count, unsigned long ulType)
     Ps2AddPrim3DEx(ulType, pPrim, count);
 }
 
-// 100% matching!
+// PC: C plano. Pone a cero el historial de clip (vf15/vf18/vf19 = vf0 en la VU)
 void InitNodeArraySet2()
 {
-#ifdef TARGET_PC
-    {
-        PcGpr g_zero = { 0 };
-        uint64_t lo_ = 0; int fcc_ = 0;
-        { VuVec r_ = pcVu0.vf[0]; r_.u[0] = pcVu0.vf[0].u[0]; r_.u[1] = pcVu0.vf[0].u[1]; r_.u[2] = pcVu0.vf[0].u[2]; r_.u[3] = pcVu0.vf[0].u[3]; pcVu0.vf[15].f[0] = r_.f[0]; pcVu0.vf[15].f[1] = r_.f[1]; pcVu0.vf[15].f[2] = r_.f[2]; pcVu0.vf[15].f[3] = r_.f[3]; }
-        { VuVec r_ = pcVu0.vf[0]; r_.u[0] = pcVu0.vf[0].u[0]; r_.u[1] = pcVu0.vf[0].u[1]; r_.u[2] = pcVu0.vf[0].u[2]; r_.u[3] = pcVu0.vf[0].u[3]; pcVu0.vf[18].f[0] = r_.f[0]; pcVu0.vf[18].f[1] = r_.f[1]; pcVu0.vf[18].f[2] = r_.f[2]; pcVu0.vf[18].f[3] = r_.f[3]; }
-        { VuVec r_ = pcVu0.vf[0]; r_.u[0] = pcVu0.vf[0].u[0]; r_.u[1] = pcVu0.vf[0].u[1]; r_.u[2] = pcVu0.vf[0].u[2]; r_.u[3] = pcVu0.vf[0].u[3]; pcVu0.vf[19].f[0] = r_.f[0]; pcVu0.vf[19].f[1] = r_.f[1]; pcVu0.vf[19].f[2] = r_.f[2]; pcVu0.vf[19].f[3] = r_.f[3]; }
-        (void)g_zero; (void)lo_; (void)fcc_;
-    }
-#else
-    asm volatile 
-    {
-        vmove.xyzw vf15, vf0
-        vmove.xyzw vf18, vf0
-        vmove.xyzw vf19, vf0
-    }
-#endif
+    pcClipResetHistory();
 }
 
-// 92.50% matching
-unsigned int _Clip_ViewVolume2(NJS_POINT4* vec) 
+// PC: C plano. Manda el vertice a clip (historial de tres vertices y 3 flags); devuelve 0 como el original.
+unsigned int _Clip_ViewVolume2(NJS_POINT4* vec)
 {
-    unsigned int ret;
-    
-    ret = 0;
-    
-#ifdef TARGET_PC
-    {
-        PcGpr g_op0 = { 0 };
-        PcGpr g_zero = { 0 };
-        uint64_t lo_ = 0; int fcc_ = 0;
-        g_op0.d[0] = A2C_SX32((uint32_t)(uintptr_t)(vec));
-        pcClipViewVolume((const float*)A2C_PTR(((uint32_t)(g_op0.w[0] + (offsetof(NJS_POINT4, x))))), 0); /* VU0_CLIP_VIEW_VOLUME */
-        (void)g_zero; (void)lo_; (void)fcc_;
-    }
-#else
-    asm volatile
-    ("
-    .set noreorder
-        lqc2    vf14, NJS_POINT4.x(%0)
-        
-        vcallms VU0_CLIP_VIEW_VOLUME
-    .set reorder
-    " : : "r"(vec) : 
-    );
-#endif
-    
-    return ret;
+    pcClipViewVolume(&vec->x, 0);
+    return 0;
 }
 
-// 100% matching! 
+// PC: C plano. Flags de clip (vi18) del ultimo vertice enviado
 unsigned int _Get_ClipViewVolume2()
 {
-    unsigned int ret;
-
-    ret = 0;
-
-#ifdef TARGET_PC
-    {
-        PcGpr g_op0 = { 0 };
-        PcGpr g_zero = { 0 };
-        uint64_t lo_ = 0; int fcc_ = 0;
-        g_op0.d[0] = A2C_SX32((uint32_t)(uintptr_t)(ret));
-        g_op0.d[0] = A2C_SX32(a2c_cfc2(18));
-        g_op0.d[0] = A2C_SX32(g_op0.w[0] + (uint32_t)((int32_t)(0)));
-        *(uint32_t*)&(ret) = g_op0.w[0];
-        (void)g_zero; (void)lo_; (void)fcc_;
-    }
-#else
-    asm volatile 
-    ("
-        cfc2.i %0, vi18
-        
-        addi   %0, %0, 0 
-    " : "=r"(ret) : : 
-    );
-#endif
-
-    return ret;
+    return pcClipFlagsGet();
 }
 
-// 100% matching! 
-int _Get_ClipVolumePlane() 
+// PC: C plano. vi2 del micro 237: 0 si algun plano descarta el triangulo, 1 si no
+int _Get_ClipVolumePlane()
 {
-    int ret;
-
-    ret = 0;
-
-#ifdef TARGET_PC
-    {
-        PcGpr g_op0 = { 0 };
-        PcGpr g_zero = { 0 };
-        uint64_t lo_ = 0; int fcc_ = 0;
-        g_op0.d[0] = A2C_SX32((uint32_t)(uintptr_t)(ret));
-        g_op0.d[0] = A2C_SX32(a2c_cfc2(2));
-        g_op0.d[0] = A2C_SX32(g_op0.w[0] + (uint32_t)((int32_t)(0)));
-        *(uint32_t*)&(ret) = g_op0.w[0];
-        (void)g_zero; (void)lo_; (void)fcc_;
-    }
-#else
-    asm volatile 
-    ("
-    .set noreorder
-        cfc2.i %0, vi2
-        
-        addi   %0, %0, 0 
-    .set reorder
-    " : "=r"(ret) : : 
-    );
-#endif
-
-    return ret;
+    return pcClipRegs.vi2;
 }
 
-// 91.43% matching
-void _Check_ClipViewAll(NJS_POINT4* vec) 
+// PC: C plano. Igual que _Clip_ViewVolume2 pero con vi1/vi2 (micro 237)
+void _Check_ClipViewAll(NJS_POINT4* vec)
 {
-#ifdef TARGET_PC
-    {
-        PcGpr g_op0 = { 0 };
-        PcGpr g_zero = { 0 };
-        uint64_t lo_ = 0; int fcc_ = 0;
-        g_op0.d[0] = A2C_SX32((uint32_t)(uintptr_t)(vec));
-        pcClipViewVolume((const float*)A2C_PTR(((uint32_t)(g_op0.w[0] + (offsetof(NJS_POINT4, x))))), 1); /* VU0_CLIP_VIEW_VOLUME_ALL */
-        (void)g_zero; (void)lo_; (void)fcc_;
-    }
-#else
-    asm volatile
-    ("
-    .set noreorder
-        lqc2    vf14, NJS_POINT4.x(%0)
-        
-        vcallms VU0_CLIP_VIEW_VOLUME_ALL
-    .set reorder
-    " : : "r"(vec) : 
-    );
-#endif
+    pcClipViewVolume(&vec->x, 1);
 }
 
 // 96% matching
 void _Set_NodeArray(VU1_STRIP_BUF* pS, VU1_PRIM_BUF* pP)
 {
 #ifdef TARGET_PC
-    pcScissorSetNode(pS, pP, pcVu0.vf[19].f, pcVu0.vf[18].f, pcVu0.vf[15].f);
+    pcScissorSetNode(pS, pP, pcClipRegs.h19, pcClipRegs.h18, pcClipRegs.h15);
 #else
     asm volatile 
     ("

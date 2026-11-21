@@ -1627,7 +1627,7 @@ CHUNK_HEAD* njCnkCvVnPs2(CHUNK_HEAD* pCnk)
     n = (int)ulIndex;
     if (n != 0)
     {
-        ctx.cn = &pcVu0.vf[28].f[0];
+        ctx.cn = pcCN;
         ctx.view = pcViewClipMatrix();
         ctx.aspect[0] = fVu1AspectW;
         ctx.aspect[1] = fVu1AspectH;

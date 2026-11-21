@@ -59,25 +59,21 @@ void pcClipStep(PcClipState* s, const float* p, const float* m, int kind)
     pcVuRoundLeave(csr);
 }
 
+PcClipState pcClipRegs;   /* estado inicial de la VU0: todo a cero */
+
 static void state_load(PcClipState* s)
 {
-    memcpy(s->h15, pcVu0.vf[15].f, 16);
-    memcpy(s->h18, pcVu0.vf[18].f, 16);
-    memcpy(s->h19, pcVu0.vf[19].f, 16);
-    memcpy(s->p14, pcVu0.vf[14].f, 16);
-    s->clip = pcVu0.clip;
-    s->vi1 = pcVu0.vi[1];
-    s->vi2 = pcVu0.vi[2];
+    *s = pcClipRegs;
 }
 
 static void state_store(const PcClipState* s, int all)
 {
-    memcpy(pcVu0.vf[15].f, s->h15, 16);
-    memcpy(pcVu0.vf[18].f, s->h18, 16);
-    memcpy(pcVu0.vf[19].f, s->h19, 16);
-    memcpy(pcVu0.vf[14].f, s->p14, 16);
-    pcVu0.clip = s->clip;
-    if (all) { pcVu0.vi[1] = s->vi1; pcVu0.vi[2] = s->vi2; }
+    memcpy(pcClipRegs.h15, s->h15, 16);
+    memcpy(pcClipRegs.h18, s->h18, 16);
+    memcpy(pcClipRegs.h19, s->h19, 16);
+    memcpy(pcClipRegs.p14, s->p14, 16);
+    pcClipRegs.clip = s->clip;
+    if (all) { pcClipRegs.vi1 = s->vi1; pcClipRegs.vi2 = s->vi2; }
 }
 
 void pcClipViewVolume(const float* p4, int all)
@@ -100,8 +96,8 @@ static uint32_t flags_push(const float* a, float w)
     if (a[1] < -aw) f |= 0x08;
     if (a[2] > aw)  f |= 0x10;
     if (a[2] < -aw) f |= 0x20;
-    pcVu0.clip = ((pcVu0.clip << 6) | f) & 0xFFFFFF;
-    return pcVu0.clip;
+    pcClipRegs.clip = ((pcClipRegs.clip << 6) | f) & 0xFFFFFF;
+    return pcClipRegs.clip;
 }
 
 int pcClipViewVertex(float* out, const float* in)
@@ -134,15 +130,15 @@ int pcClipScreen(const float* p4)
     return (int)flags_push(r, 240.0f);
 }
 
-uint32_t pcClipFlagsGet(void) { return pcVu0.clip; }
-void pcClipFlagsSet(uint32_t flags) { pcVu0.clip = flags & 0xFFFFFF; }
+uint32_t pcClipFlagsGet(void) { return pcClipRegs.clip; }
+void pcClipFlagsSet(uint32_t flags) { pcClipRegs.clip = flags & 0xFFFFFF; }
 
 void pcClipResetHistory(void)
 {
     static const float zero4[4] = { 0.0f, 0.0f, 0.0f, 1.0f };   /* vf0 */
-    memcpy(pcVu0.vf[15].f, zero4, 16);
-    memcpy(pcVu0.vf[18].f, zero4, 16);
-    memcpy(pcVu0.vf[19].f, zero4, 16);
+    memcpy(pcClipRegs.h15, zero4, 16);
+    memcpy(pcClipRegs.h18, zero4, 16);
+    memcpy(pcClipRegs.h19, zero4, 16);
 }
 
 /* ---- color de los micros 237/394 ---- */

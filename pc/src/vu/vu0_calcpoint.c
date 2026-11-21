@@ -39,6 +39,8 @@ static __inline V4 v4clamp(V4 x)
     a = _mm_and_ps(_mm_min_ps(a, _mm_set1_ps(FLT_MAX)), keep);
     return _mm_or_ps(a, _mm_and_ps(sg, x));
 }
+float pcCN[16];   /* matriz CN (antes vf28..31) */
+
 static __inline V4 v4ld(const VuVec* v) { return _mm_loadu_ps(v->f); }
 static __inline void v4st(VuVec* v, V4 x) { _mm_storeu_ps(v->f, x); }
 static __inline V4 v4mul(V4 a, V4 b) { return v4clamp(_mm_mul_ps(a, b)); }
