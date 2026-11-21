@@ -10,9 +10,7 @@
 #include "../../../ps2/veronica/prog/njplus.h"
 #include "../../../ps2/veronica/prog/ps2_NaMatrix.h"
 #include "../../../ps2/veronica/prog/hitchkl.h"
-#ifdef TARGET_PC
 #include "../../../ps2/veronica/prog/rutchk.h" /* returns unsigned char: needs a prototype */
-#endif
 
 // ENEMY: First Form Alexia 
 
@@ -1683,14 +1681,10 @@ void bhEne12_PlayerControl(BH_PWORK* epw)
 
             case 2:
                 if (plp->frm_no == 0) {
-#ifdef TARGET_PC
                     /* the player gets their own motions back (the PS2 code loads mnwPb from the
                      * player, not from Alexia): with hers, Chris T-posed and lost control after
                      * her fire attack, since her set has no motion 71 */
                     plp->mnwP = plp->mnwPb;
-#else
-                    plp->mnwP= epw->mnwPb;
-#endif
                     plp->flg &= ~0x10004;
                     plp->flg2 &= ~0x1;
                     plp->flg |= 8;
