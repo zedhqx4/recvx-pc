@@ -622,3 +622,10 @@ recalcula siempre, de modo que los cambios de paleta se detectan exactamente igu
 - `pcClipColorVertex(p4, kind, color)`: el color entra y sale por parametro (antes viajaba por pcVu0.vf[4]).
 - La tira principal pasa de ~590 lineas de VU0 transpilado a ~70: `StripPrimVertex` (color + clip + campos de VU1_PRIM_BUF) y el bucle con scissor nativo. Se quita la rama `clipswitch != 0` (muerta: clipswitch es constante 0).
 - Validacion: harness gcc contra el transpilado de 0.9.176 (100K tiras aleatorias de 3..8 vertices, modos de color 0..8, matriz/materiales aleatorios): 0 diferencias en VU1_PRIM_BUF, historial de clip y secuencia de llamadas a scissor (52K con _Set_NodeArray, 21K con DrawScissorPolygonOpaque2).
+
+## 0.9.178 - estado de pantalla propio, setters y emisores de poligono sin pcVu0 (3d)
+- `PcScreen` (offset, aspecto, proyeccion) en pc_scissor.c con `pcScreenSetOffset/Aspect/Projection` (misma normalizacion `vu_f(0+x)` que el registro) y `pcScreen()`; sustituye a vf16/vf17/vf23.z. `pcScissorEmit(out,stride,count)` ya no recibe punteros a registros.
+- `pcScissorProject(...)` generico (origen = 4 cuartetos con offsets/stride) lo usan pcScissorEmit (zFirst=0) y los emisores del scissor de triangulos (zFirst=1): las dos rutas del juego multiplican en distinto orden, con 1 ULP de diferencia en ~3% de los casos.
+- Setters (Projection/NearFar/Offset/Aspect/Diffuse/Specula/Ambient/AlphaRatio) sin escritura a registros: vf20/21/22 y vf23.x/y/w no los lee nadie.
+- `DrawScissorPolygonOpaque` y `DrawScissorPolygonTrans1P` en C plano (~10 lineas c/u).
+- Validacion: harness gcc contra los transpilados de 0.9.177 (300K poligonos de 3..8 nodos, incluyendo z=0 y valores enormes): 0 diferencias en VU1_PRIM_BUF y argumentos de Ps2AddPrim3DEx/1P.

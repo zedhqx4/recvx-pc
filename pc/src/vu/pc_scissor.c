@@ -89,33 +89,56 @@ int pcScissorClipPlane(int mask1, int mask2, int xyzflg, float sin, int work0, i
     return ret;
 }
 
-void pcScissorEmit(void* out, size_t stride, int count, const float* aspect, const float* offset, float proj)
+static PcScreen g_screen = { { 0.0f, 0.0f }, { 0.0f, 0.0f }, 0.0f };
+
+void pcScreenSetOffset(float x, float y) { g_screen.offset[0] = vu_f(0.0f + x); g_screen.offset[1] = vu_f(0.0f + y); }
+void pcScreenSetAspect(float w, float h) { g_screen.aspect[0] = vu_f(0.0f + w); g_screen.aspect[1] = vu_f(0.0f + h); }
+void pcScreenSetProjection(float proj)   { g_screen.proj = vu_f(0.0f + proj); }
+const PcScreen* pcScreen(void)           { return &g_screen; }
+
+void pcScissorProject(void* out, size_t outStride, int count, const void* src, size_t srcStride,
+                      size_t offVertex, size_t offTexUV, size_t offColor, int zFirst)
 {
     const unsigned int csr = pcVuRoundEnter();
     uint8_t* o = (uint8_t*)out;
-    const ScVert* src = g_buf[0];
+    const uint8_t* s = (const uint8_t*)src;
     int i, k;
 
-    for (i = 0; i < count; i++)
+    for (i = 0; i < count; i++, s += srcStride)
     {
         float v9[4], v10[4], q, z4;
-        memcpy(v9, src[i].q[1], 16);
-        memcpy(v10, src[i].q[2], 16);
+        memcpy(v9, s + offVertex, 16);
+        memcpy(v10, s + offTexUV, 16);
         q = vu_div(1.0f, v9[2]);
         v10[3] = vu_f(0.0f * 0.0f);
-        v9[0] = vu_f(v9[0] * aspect[0]);
-        v9[1] = vu_f(v9[1] * aspect[1]);
         v10[2] = vu_f(0.0f + 1.0f);
-        z4 = vu_f(proj * q);
+        z4 = vu_f(g_screen.proj * q);
         for (k = 0; k < 3; k++) v10[k] = vu_f(v10[k] * q);
-        v9[0] = vu_f(v9[0] * z4);
-        v9[1] = vu_f(v9[1] * z4);
-        v9[0] = vu_f(v9[0] + offset[0]);
-        v9[1] = vu_f(v9[1] + offset[1]);
-        o += stride;
+        if (zFirst)     /* (v * z4) * aspecto: scissor de triangulos */
+        {
+            v9[0] = vu_f(v9[0] * z4);
+            v9[1] = vu_f(v9[1] * z4);
+            v9[0] = vu_f(v9[0] * g_screen.aspect[0]);
+            v9[1] = vu_f(v9[1] * g_screen.aspect[1]);
+        }
+        else            /* (v * aspecto) * z4: scissor de poligonos (micros 302..339) */
+        {
+            v9[0] = vu_f(v9[0] * g_screen.aspect[0]);
+            v9[1] = vu_f(v9[1] * g_screen.aspect[1]);
+            v9[0] = vu_f(v9[0] * z4);
+            v9[1] = vu_f(v9[1] * z4);
+        }
+        v9[0] = vu_f(v9[0] + g_screen.offset[0]);
+        v9[1] = vu_f(v9[1] + g_screen.offset[1]);
+        o += outStride;
         memcpy(o - 0x30, v10, 16);
-        memcpy(o - 0x20, src[i].q[3], 16);
+        memcpy(o - 0x20, s + offColor, 16);
         memcpy(o - 0x10, v9, 16);
     }
     pcVuRoundLeave(csr);
+}
+
+void pcScissorEmit(void* out, size_t stride, int count)
+{
+    pcScissorProject(out, stride, count, g_buf[0], sizeof(ScVert), 16, 32, 48, 0);
 }

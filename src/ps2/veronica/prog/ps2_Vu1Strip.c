@@ -17,6 +17,7 @@
 #include "pc_platform.h"
 #include "pc_vu.h"
 #include "pc_clip.h"
+#include "pc_scissor.h"
 #include "pc_tri_scissor.h"
 static struct { double total, submit; unsigned int strips, verts; } pcsp_acc[4];
 static unsigned int pcsp_count;
@@ -116,334 +117,74 @@ extern void VU0_CLIP_VIEW_VOLUME_ALL() __attribute__((section(".vutext")));
 extern void VU0_CALC_COLOR() __attribute__((section(".vutext")));
 extern void VU0_INIT_CALC_COLOR() __attribute__((section(".vutext")));
 
-// 100% matching!
+// PC: los registros VU0 que escribia (vf23) ya no se leen; la proyeccion queda en pcScreen()
 void vu1SetScreenProjection(float fProjection)
 {
     fVu1Projection = fProjection;
-    
-#ifdef TARGET_PC
-    {
-        PcGpr g_t0 = { 0 };
-        PcGpr g_zero = { 0 };
-        union { float f; uint32_t u; int32_t i; } fr_12 = { 0 };
-        uint64_t lo_ = 0; int fcc_ = 0;
-        fr_12.f = fProjection;
-        g_t0.d[0] = A2C_SX32(fr_12.u);
-        memcpy(&pcVu0.vf[4], &g_t0, 16);
-        { VuVec r_ = pcVu0.vf[0]; r_.f[2] = vu_f(pcVu0.vf[0].f[2] + pcVu0.vf[4].f[0]); pcVu0.vf[23].f[2] = r_.f[2]; vu_set_mac(&pcVu0, &r_, 2); }
-        (void)g_zero; (void)lo_; (void)fcc_;
-    }
-#else
-    asm volatile 
-    {
+    pcScreenSetProjection(fProjection);
 
-        mfc1     t0, $f12
-        nop
-        
-        qmtc2    t0, $vf4
-
-        vaddx.z  $vf23, $vf0, $vf4x
-        
-    }
-#endif
-    
     _Make_ClipMatrix(ClipMatrix2, fVu1Projection, _fNaViwClipNear, _fNaViwClipFar);
 }
 
-// 100% matching!
+// PC: vf23.x/y (near/far) ya no los lee nadie
 void vu1SetNearFarClip(float fNear, float fFar)
 {
     fVu1NearClip = fNear;
     fVu1FarClip = fFar;
-    
+
     fVu1InvNearClip = 1.0f / fVu1NearClip;
 
-#ifdef TARGET_PC
-    {
-        PcGpr g_t0 = { 0 };
-        PcGpr g_t1 = { 0 };
-        PcGpr g_zero = { 0 };
-        union { float f; uint32_t u; int32_t i; } fr_12 = { 0 };
-        union { float f; uint32_t u; int32_t i; } fr_13 = { 0 };
-        uint64_t lo_ = 0; int fcc_ = 0;
-        fr_12.f = fNear;
-        fr_13.f = fFar;
-        g_t0.d[0] = A2C_SX32(fr_12.u);
-        g_t1.d[0] = A2C_SX32(fr_13.u);
-        memcpy(&pcVu0.vf[4], &g_t0, 16);
-        memcpy(&pcVu0.vf[5], &g_t1, 16);
-        { VuVec r_ = pcVu0.vf[0]; r_.f[0] = vu_f(pcVu0.vf[0].f[0] + pcVu0.vf[4].f[0]); pcVu0.vf[23].f[0] = r_.f[0]; vu_set_mac(&pcVu0, &r_, 8); }
-        { VuVec r_ = pcVu0.vf[0]; r_.f[1] = vu_f(pcVu0.vf[0].f[1] + pcVu0.vf[5].f[0]); pcVu0.vf[23].f[1] = r_.f[1]; vu_set_mac(&pcVu0, &r_, 4); }
-        (void)g_zero; (void)lo_; (void)fcc_;
-    }
-#else
-    asm volatile 
-    {
-        
-        mfc1     t0, $f12
-        mfc1     t1, $f13
-
-        qmtc2    t0, $vf4
-        qmtc2    t1, $vf5
-
-        vaddx.x  $vf23x, $vf0x, $vf4x
-        vaddx.y  $vf23y, $vf0y, $vf5x
-        
-    }
-#endif
-    
     _Make_ClipMatrix(ClipMatrix2, fVu1Projection, _fNaViwClipNear, _fNaViwClipFar);
 }
 
-// 100% matching!
+// PC: el offset queda en pcScreen() (antes vf16)
 void vu1SetScreenOffset(float fOffsetX, float fOffsetY)
 {
     fVu1OffsetX = fOffsetX;
     fVu1OffsetY = fOffsetY;
-    
-#ifdef TARGET_PC
-    {
-        PcGpr g_t0 = { 0 };
-        PcGpr g_t1 = { 0 };
-        PcGpr g_zero = { 0 };
-        union { float f; uint32_t u; int32_t i; } fr_12 = { 0 };
-        union { float f; uint32_t u; int32_t i; } fr_13 = { 0 };
-        uint64_t lo_ = 0; int fcc_ = 0;
-        fr_12.f = fOffsetX;
-        fr_13.f = fOffsetY;
-        g_t0.d[0] = A2C_SX32(fr_12.u);
-        g_t1.d[0] = A2C_SX32(fr_13.u);
-        memcpy(&pcVu0.vf[4], &g_t0, 16);
-        memcpy(&pcVu0.vf[5], &g_t1, 16);
-        { VuVec r_ = pcVu0.vf[0]; r_.f[0] = vu_f(pcVu0.vf[0].f[0] + pcVu0.vf[4].f[0]); pcVu0.vf[16].f[0] = r_.f[0]; vu_set_mac(&pcVu0, &r_, 8); }
-        { VuVec r_ = pcVu0.vf[0]; r_.f[1] = vu_f(pcVu0.vf[0].f[1] + pcVu0.vf[5].f[0]); pcVu0.vf[16].f[1] = r_.f[1]; vu_set_mac(&pcVu0, &r_, 4); }
-        (void)g_zero; (void)lo_; (void)fcc_;
-    }
-#else
-    asm volatile 
-    {
-        
-        mfc1     t0, $f12
-        mfc1     t1, $f13
-
-        qmtc2    t0, $vf4
-        qmtc2    t1, $vf5
-
-        vaddx.x  $vf16, $vf0, $vf4x
-        vaddx.y  $vf16, $vf0, $vf5x
-        
-    }
-#endif
+    pcScreenSetOffset(fOffsetX, fOffsetY);
 }
 
-// 100% matching!
+// PC: el aspecto queda en pcScreen() (antes vf17)
 void vu1SetScreenAspect(float fAspectW, float fAspectH)
 {
     fVu1AspectW = fAspectW;
     fVu1AspectH = fAspectH;
-
-#ifdef TARGET_PC
-    {
-        PcGpr g_t0 = { 0 };
-        PcGpr g_t1 = { 0 };
-        PcGpr g_zero = { 0 };
-        union { float f; uint32_t u; int32_t i; } fr_12 = { 0 };
-        union { float f; uint32_t u; int32_t i; } fr_13 = { 0 };
-        uint64_t lo_ = 0; int fcc_ = 0;
-        fr_12.f = fAspectW;
-        fr_13.f = fAspectH;
-        g_t0.d[0] = A2C_SX32(fr_12.u);
-        g_t1.d[0] = A2C_SX32(fr_13.u);
-        memcpy(&pcVu0.vf[4], &g_t0, 16);
-        memcpy(&pcVu0.vf[5], &g_t1, 16);
-        { VuVec r_ = pcVu0.vf[0]; r_.f[0] = vu_f(pcVu0.vf[0].f[0] + pcVu0.vf[4].f[0]); pcVu0.vf[17].f[0] = r_.f[0]; vu_set_mac(&pcVu0, &r_, 8); }
-        { VuVec r_ = pcVu0.vf[0]; r_.f[1] = vu_f(pcVu0.vf[0].f[1] + pcVu0.vf[5].f[0]); pcVu0.vf[17].f[1] = r_.f[1]; vu_set_mac(&pcVu0, &r_, 4); }
-        (void)g_zero; (void)lo_; (void)fcc_;
-    }
-#else
-    asm volatile 
-    {
-        
-        mfc1     t0, $f12
-        mfc1     t1, $f13
-
-        qmtc2    t0, $vf4
-        qmtc2    t1, $vf5
-
-        vaddx.x  $vf17x, $vf0x, $vf4x
-        vaddx.y  $vf17y, $vf0y, $vf5x
-        
-    }
-#endif
+    pcScreenSetAspect(fAspectW, fAspectH);
 }
 
-// 100% matching!
+// PC: el color lo calcula pc_clip.c con estos materiales (vf20 ya no se lee)
 void vu1SetDiffuseMaterial(VU1_COLOR* pDiffuse)
 {
     vu1Diffuse.fR = 128.0f * pDiffuse->fR;
     vu1Diffuse.fG = 128.0f * pDiffuse->fG;
     vu1Diffuse.fB = 128.0f * pDiffuse->fB;
-#ifdef TARGET_PC
     pcColorSetDiffuse(&pDiffuse->fR);
-#endif
-    
-#ifdef TARGET_PC
-    {
-        PcGpr g_op0 = { 0 };
-        PcGpr g_t0 = { 0 };
-        PcGpr g_t1 = { 0 };
-        PcGpr g_t2 = { 0 };
-        PcGpr g_t3 = { 0 };
-        PcGpr g_zero = { 0 };
-        union { float f; uint32_t u; int32_t i; } fr_op1 = { 0 };
-        uint64_t lo_ = 0; int fcc_ = 0;
-        g_op0.d[0] = A2C_SX32((uint32_t)(uintptr_t)(pDiffuse));
-        fr_op1.f = (float)(128.0f);
-        memcpy(&g_t3, A2C_PTR(((uint32_t)(g_op0.w[0] + (offsetof(VU1_COLOR, fR))))), 16);
-        g_t0.d[0] = A2C_SX32(fr_op1.u);
-        g_t1.d[0] = A2C_SX32(fr_op1.u);
-        g_t2.d[0] = A2C_SX32(fr_op1.u);
-        { PcGpr r_; r_.w[0] = g_t0.w[0]; r_.w[1] = g_t1.w[0]; r_.w[2] = g_t0.w[1]; r_.w[3] = g_t1.w[1]; g_t0 = r_; }
-        { PcGpr r_; r_.d[0] = g_t0.d[0]; r_.d[1] = g_t2.d[0]; g_t0 = r_; }
-        memcpy(&pcVu0.vf[4], &g_t3, 16);
-        memcpy(&pcVu0.vf[5], &g_t0, 16);
-        { VuVec r_ = pcVu0.vf[0]; r_.f[0] = vu_f(pcVu0.vf[4].f[0] * pcVu0.vf[5].f[0]); r_.f[1] = vu_f(pcVu0.vf[4].f[1] * pcVu0.vf[5].f[1]); r_.f[2] = vu_f(pcVu0.vf[4].f[2] * pcVu0.vf[5].f[2]); pcVu0.vf[4].f[0] = r_.f[0]; pcVu0.vf[4].f[1] = r_.f[1]; pcVu0.vf[4].f[2] = r_.f[2]; vu_set_mac(&pcVu0, &r_, 14); }
-        { VuVec r_ = pcVu0.vf[0]; r_.f[0] = vu_f(pcVu0.vf[4].f[0] + pcVu0.vf[0].f[0]); r_.f[1] = vu_f(pcVu0.vf[4].f[1] + pcVu0.vf[0].f[0]); r_.f[2] = vu_f(pcVu0.vf[4].f[2] + pcVu0.vf[0].f[0]); r_.f[3] = vu_f(pcVu0.vf[4].f[3] + pcVu0.vf[0].f[0]); pcVu0.vf[20].f[0] = r_.f[0]; pcVu0.vf[20].f[1] = r_.f[1]; pcVu0.vf[20].f[2] = r_.f[2]; pcVu0.vf[20].f[3] = r_.f[3]; vu_set_mac(&pcVu0, &r_, 15); }
-        (void)g_zero; (void)lo_; (void)fcc_;
-    }
-#else
-    asm volatile 
-    ("
-        lq         t3, VU1_COLOR.fR(%0)
-    
-        mfc1       t0, %1
-        mfc1       t1, %1
-        mfc1       t2, %1
-        
-        pextlw     t0, t1, t0 
-        pcpyld     t0, t2, t0 
-    
-        qmtc2      t3, $vf4 
-        qmtc2      t0, $vf5 
-    
-        vmul.xyz   $vf4,  $vf4, $vf5 
-        vaddx.xyzw $vf20, $vf4, $vf0x 
-    " : : "r"(pDiffuse), "f"(128.0f) : "t0"
-    );
-#endif
 }
 
-// 100% matching!
+// PC: el color lo calcula pc_clip.c con estos materiales (vf21 ya no se lee)
 void vu1SetSpeculaMaterial(VU1_COLOR* pSpecula)
 {
     vu1Specula.fR = 31.0f * pSpecula->fR;
     vu1Specula.fG = 31.0f * pSpecula->fG;
     vu1Specula.fB = 31.0f * pSpecula->fB;
-#ifdef TARGET_PC
     pcColorSetSpecula(&pSpecula->fR);
-#endif
-    
-#ifdef TARGET_PC
-    {
-        PcGpr g_t0 = { 0 };
-        PcGpr g_t1 = { 0 };
-        PcGpr g_t2 = { 0 };
-        PcGpr g_t3 = { 0 };
-        PcGpr g_zero = { 0 };
-        union { float f; uint32_t u; int32_t i; } fr_op0 = { 0 };
-        uint64_t lo_ = 0; int fcc_ = 0;
-        fr_op0.f = (float)(31.0f);
-        g_t0.d[0] = A2C_SX32(fr_op0.u);
-        g_t1.d[0] = A2C_SX32(fr_op0.u);
-        g_t2.d[0] = A2C_SX32(fr_op0.u);
-        { PcGpr r_; r_.w[0] = g_t0.w[0]; r_.w[1] = g_t1.w[0]; r_.w[2] = g_t0.w[1]; r_.w[3] = g_t1.w[1]; g_t0 = r_; }
-        { PcGpr r_; r_.d[0] = g_t0.d[0]; r_.d[1] = g_t2.d[0]; g_t0 = r_; }
-        memcpy(&pcVu0.vf[4], &g_t3, 16);
-        memcpy(&pcVu0.vf[5], &g_t0, 16);
-        { VuVec r_ = pcVu0.vf[0]; r_.f[0] = vu_f(pcVu0.vf[4].f[0] * pcVu0.vf[5].f[0]); r_.f[1] = vu_f(pcVu0.vf[4].f[1] * pcVu0.vf[5].f[1]); r_.f[2] = vu_f(pcVu0.vf[4].f[2] * pcVu0.vf[5].f[2]); pcVu0.vf[4].f[0] = r_.f[0]; pcVu0.vf[4].f[1] = r_.f[1]; pcVu0.vf[4].f[2] = r_.f[2]; vu_set_mac(&pcVu0, &r_, 14); }
-        { VuVec r_ = pcVu0.vf[0]; r_.f[0] = vu_f(pcVu0.vf[4].f[0] + pcVu0.vf[0].f[0]); r_.f[1] = vu_f(pcVu0.vf[4].f[1] + pcVu0.vf[0].f[0]); r_.f[2] = vu_f(pcVu0.vf[4].f[2] + pcVu0.vf[0].f[0]); r_.f[3] = vu_f(pcVu0.vf[4].f[3] + pcVu0.vf[0].f[0]); pcVu0.vf[21].f[0] = r_.f[0]; pcVu0.vf[21].f[1] = r_.f[1]; pcVu0.vf[21].f[2] = r_.f[2]; pcVu0.vf[21].f[3] = r_.f[3]; vu_set_mac(&pcVu0, &r_, 15); }
-        (void)g_zero; (void)lo_; (void)fcc_;
-    }
-#else
-    asm volatile 
-    ("
-        mfc1       t0, %0
-        mfc1       t1, %0
-        mfc1       t2, %0
-        
-        pextlw     t0, t1, t0 
-        pcpyld     t0, t2, t0 
-    
-        qmtc2      t3, $vf4 
-        qmtc2      t0, $vf5 
-    
-        vmul.xyz   $vf4,  $vf4, $vf5 
-        vaddx.xyzw $vf21, $vf4, $vf0x 
-    " : : "f"(31.0f) : "t0", "t1", "t2"
-    );
-#endif
 }
 
-// 100% matching!
+// PC: vf22 ya no se lee
 void vu1SetAmbient(VU1_COLOR* pAmbient)
 {
     vu1Ambient.fR = pAmbient->fR;
     vu1Ambient.fG = pAmbient->fG;
     vu1Ambient.fB = pAmbient->fB;
-#ifdef TARGET_PC
     pcColorSetAmbient(&pAmbient->fR);
-#endif
-    
-#ifdef TARGET_PC
-    {
-        PcGpr g_op0 = { 0 };
-        PcGpr g_zero = { 0 };
-        uint64_t lo_ = 0; int fcc_ = 0;
-        g_op0.d[0] = A2C_SX32((uint32_t)(uintptr_t)(pAmbient));
-        memcpy(&pcVu0.vf[22], A2C_PTR(((uint32_t)(g_op0.w[0] + (offsetof(VU1_COLOR, fR))))), 16);
-        (void)g_zero; (void)lo_; (void)fcc_;
-    }
-#else
-    asm volatile
-    ("
-        lqc2 vf22, VU1_COLOR.fR(%0)
-    " : : "r"(pAmbient) : 
-    );
-#endif
 }
 
-// 100% matching!
+// PC: vf23.w ya no se lee
 void vu1SetAlphaRatio(float fAlpha)
 {
     fVu1AlphaRatio = 128.0f * fAlpha;
-#ifdef TARGET_PC
     pcColorSetAlphaRatio(fVu1AlphaRatio);
-#endif
-
-#ifdef TARGET_PC
-    {
-        PcGpr g_t0 = { 0 };
-        PcGpr g_zero = { 0 };
-        union { float f; uint32_t u; int32_t i; } fr_op0 = { 0 };
-        uint64_t lo_ = 0; int fcc_ = 0;
-        fr_op0.f = (float)(fVu1AlphaRatio);
-        g_t0.d[0] = A2C_SX32(fr_op0.u);
-        memcpy(&pcVu0.vf[4], &g_t0, 16);
-        { VuVec r_ = pcVu0.vf[0]; r_.f[3] = vu_f(pcVu0.vf[0].f[3] * pcVu0.vf[4].f[0]); pcVu0.vf[23].f[3] = r_.f[3]; vu_set_mac(&pcVu0, &r_, 1); }
-        (void)g_zero; (void)lo_; (void)fcc_;
-    }
-#else
-    asm volatile 
-    ("
-
-        mfc1    t0, %0       
-        qmtc2   t0, $vf4 
-
-        vmulx.w $vf23, $vf0, $vf4x
-
-    " : : "f"(fVu1AlphaRatio) : "t0"
-    );
-#endif
 }
 
 #include "ps2_Vu1Scissor2.c"
@@ -627,113 +368,15 @@ int _Check_DisplayAreaPoint(NJS_VECTOR* vec)
     return 1;
 }
 
-// 100% matching!
+// PC: C plano. Proyecta los nodos del poligono recortado (pcScissorProject) y los manda como un abanico.
 void DrawScissorPolygonOpaque(SCISSOR* scissor, unsigned long ulType)
 {
-    SCISSOR_NODE* in; 
-    VU1_PRIM_BUF* pP; // not from the debugging symbols
+    SCISSOR_NODE* in = scissor->in;
 
-    in = scissor->in;
-    
-#ifdef TARGET_PC
-    {
-        PcGpr g_op0 = { 0 };
-        PcGpr g_op1 = { 0 };
-        PcGpr g_t0 = { 0 };
-        PcGpr g_t6 = { 0 };
-        PcGpr g_t7 = { 0 };
-        PcGpr g_zero = { 0 };
-        uint64_t lo_ = 0; int fcc_ = 0;
-        g_op0.d[0] = A2C_SX32((uint32_t)(uintptr_t)(scissor));
-        g_op1.d[0] = A2C_SX32((uint32_t)(uintptr_t)(vu1ScessorBuf));
-        g_t6.d[0] = A2C_SX32(g_op0.w[0] + (uint32_t)((int32_t)(offsetof(SCISSOR, in))));
-        g_t6.d[0] = A2C_SX32(*(uint32_t*)A2C_PTR(((uint32_t)(g_t6.w[0] + (offsetof(SCISSOR, triangle.node[0]))))));
-        g_t7.d[0] = A2C_SX32(g_zero.w[0] + (uint32_t)(g_op1.w[0]));
-        g_t0.d[0] = A2C_SX32(*(uint32_t*)A2C_PTR(((uint32_t)(g_t6.w[0] + (offsetof(SCISSOR_NODE, nodeNum))))));
-        Vu1Strip_a22_l_002D4720:;
-        memcpy(&pcVu0.vf[4], A2C_PTR(((uint32_t)(g_t6.w[0] + (offsetof(SCISSOR, triangle.node[0].vertex))))), 16);
-        vu_set_q_now(&pcVu0, vu_div(pcVu0.vf[0].f[3], pcVu0.vf[4].f[2]));
-        memcpy(&pcVu0.vf[7], A2C_PTR(((uint32_t)(g_t6.w[0] + (offsetof(SCISSOR, triangle.node[0].color))))), 16);
-        memcpy(A2C_PTR(((uint32_t)(g_t7.w[0] + (offsetof(VU1_PRIM_BUF, fR))))), &pcVu0.vf[7], 16);
-        { VuVec r_ = pcVu0.vf[0]; r_.f[0] = vu_f(pcVu0.vf[0].f[0] + pcVu0.vf[23].f[2]); pcVu0.vf[5].f[0] = r_.f[0]; vu_set_mac(&pcVu0, &r_, 8); }
-        memcpy(&pcVu0.vf[6], A2C_PTR(((uint32_t)(g_t6.w[0] + (offsetof(SCISSOR, triangle.node[0].texUV))))), 16);
-        g_t0.d[0] = A2C_SX32(g_t0.w[0] + (uint32_t)((int32_t)(-1)));
-        vu_waitq(&pcVu0);
-        { VuVec r_ = pcVu0.vf[0]; r_.f[0] = vu_f(pcVu0.vf[5].f[0] * vu_q(&pcVu0)); pcVu0.vf[5].f[0] = r_.f[0]; vu_set_mac(&pcVu0, &r_, 8); }
-        { VuVec r_ = pcVu0.vf[0]; r_.f[0] = vu_f(pcVu0.vf[6].f[0] * vu_q(&pcVu0)); r_.f[1] = vu_f(pcVu0.vf[6].f[1] * vu_q(&pcVu0)); pcVu0.vf[6].f[0] = r_.f[0]; pcVu0.vf[6].f[1] = r_.f[1]; vu_set_mac(&pcVu0, &r_, 12); }
-        { VuVec r_ = pcVu0.vf[0]; r_.f[2] = vu_f(pcVu0.vf[0].f[2] + vu_q(&pcVu0)); pcVu0.vf[6].f[2] = r_.f[2]; vu_set_mac(&pcVu0, &r_, 2); }
-        { VuVec r_ = pcVu0.vf[0]; r_.f[3] = vu_f(pcVu0.vf[6].f[3] - pcVu0.vf[6].f[3]); pcVu0.vf[6].f[3] = r_.f[3]; vu_set_mac(&pcVu0, &r_, 1); }
-        { VuVec r_ = pcVu0.vf[0]; r_.f[0] = vu_f(pcVu0.vf[4].f[0] * pcVu0.vf[5].f[0]); r_.f[1] = vu_f(pcVu0.vf[4].f[1] * pcVu0.vf[5].f[0]); pcVu0.vf[4].f[0] = r_.f[0]; pcVu0.vf[4].f[1] = r_.f[1]; vu_set_mac(&pcVu0, &r_, 12); }
-        memcpy(A2C_PTR(((uint32_t)(g_t7.w[0] + (offsetof(VU1_PRIM_BUF, fS))))), &pcVu0.vf[6], 16);
-        { VuVec r_ = pcVu0.vf[0]; r_.f[0] = vu_f(pcVu0.vf[4].f[0] * pcVu0.vf[17].f[0]); r_.f[1] = vu_f(pcVu0.vf[4].f[1] * pcVu0.vf[17].f[1]); pcVu0.vf[4].f[0] = r_.f[0]; pcVu0.vf[4].f[1] = r_.f[1]; vu_set_mac(&pcVu0, &r_, 12); }
-        { VuVec r_ = pcVu0.vf[0]; r_.f[0] = vu_f(pcVu0.vf[4].f[0] + pcVu0.vf[16].f[0]); r_.f[1] = vu_f(pcVu0.vf[4].f[1] + pcVu0.vf[16].f[1]); pcVu0.vf[4].f[0] = r_.f[0]; pcVu0.vf[4].f[1] = r_.f[1]; vu_set_mac(&pcVu0, &r_, 12); }
-        g_t6.d[0] = A2C_SX32(g_t6.w[0] + (uint32_t)((int32_t)(sizeof(NODE))));
-        memcpy(A2C_PTR(((uint32_t)(g_t7.w[0] + (offsetof(VU1_PRIM_BUF, fX))))), &pcVu0.vf[4], 16);
-        g_t7.d[0] = A2C_SX32(g_t7.w[0] + (uint32_t)((int32_t)(sizeof(VU1_PRIM_BUF))));
-        { int c_ = (g_t0.d[0] != 0);  if (c_) goto Vu1Strip_a22_l_002D4720; }
-        (void)g_zero; (void)lo_; (void)fcc_;
-    }
-#else
-    asm volatile
-    ("
-        addi     t6, %0, SCISSOR.in
-    
-        lw       t6, SCISSOR.triangle.node[0](t6)
-        
-        add      t7, zero, %1
-    
-        lw       t0, SCISSOR_NODE.nodeNum(t6)
-        nop
-        
-        l_002D4720:
-        lqc2     vf4, SCISSOR.triangle.node[0].vertex(t6)
-        
-        vdiv     Q, vf0w, vf4z
-    
-        lqc2     vf7, SCISSOR.triangle.node[0].color(t6)
-        
-        sqc2     vf7, VU1_PRIM_BUF.fR(t7)
-    
-        vaddz.x  vf5, vf0, vf23z
-        
-        lqc2     vf6, SCISSOR.triangle.node[0].texUV(t6)
-    
-        addi     t0, t0, -1
-        
-        vwaitq
-        
-        vmulq.x  vf5, vf5, Q
-        vmulq.xy vf6, vf6, Q
-        
-        vaddq.z  vf6, vf0, Q
-        
-        vsub.w   vf6, vf6, vf6
-        
-        vmulx.xy vf4, vf4, vf5x
-        
-        sqc2     vf6, VU1_PRIM_BUF.fS(t7)
-    
-        vmul.xy  vf4, vf4, vf17
-        
-        vadd.xy  vf4, vf4, vf16
-        
-        addi     t6, t6, sizeof(NODE)
-    
-        sqc2     vf4, VU1_PRIM_BUF.fX(t7)
-    
-        addi     t7, t7, sizeof(VU1_PRIM_BUF)
-    
-        bnez     t0, l_002D4720
-        vnop
-    " : : "r"(scissor), "r"(vu1ScessorBuf) : "t7"
-    );
-#endif
-
+    pcScissorProject(vu1ScessorBuf, sizeof(VU1_PRIM_BUF), (int)in->nodeNum, in->node, sizeof(NODE),
+                     offsetof(NODE, vertex), offsetof(NODE, texUV), offsetof(NODE, color), 1);
     ulType = (ulType & 0xFFFDFFFFFFFFFFFF) | 0x6800000000000;
-    
-    pP = vu1ScessorBuf;
-    
-    Ps2AddPrim3DEx(ulType, pP, in->nodeNum);
+    Ps2AddPrim3DEx(ulType, vu1ScessorBuf, in->nodeNum);
 }
 
 // 100% matching! 
@@ -1734,113 +1377,15 @@ void vu1DrawTriangleStripTransDoubleI(unsigned long ulType, VU1_STRIP_BUF* pS, u
     Ps2AddPrim3DExI(ulType, Ps2_DRAW_TMP, usStripMax); 
 } 
 
-// 100% matching!
+// PC: igual que DrawScissorPolygonOpaque, hacia la cola 1P
 void DrawScissorPolygonTrans1P(SCISSOR* scissor, unsigned long ulType)
 {
-    SCISSOR_NODE* in; 
-    VU1_PRIM_BUF* pP; // not from the debugging symbols
+    SCISSOR_NODE* in = scissor->in;
 
-    in = scissor->in;
-    
-#ifdef TARGET_PC
-    {
-        PcGpr g_op0 = { 0 };
-        PcGpr g_op1 = { 0 };
-        PcGpr g_t0 = { 0 };
-        PcGpr g_t6 = { 0 };
-        PcGpr g_t7 = { 0 };
-        PcGpr g_zero = { 0 };
-        uint64_t lo_ = 0; int fcc_ = 0;
-        g_op0.d[0] = A2C_SX32((uint32_t)(uintptr_t)(scissor));
-        g_op1.d[0] = A2C_SX32((uint32_t)(uintptr_t)(vu1ScessorBuf));
-        g_t6.d[0] = A2C_SX32(g_op0.w[0] + (uint32_t)((int32_t)(offsetof(SCISSOR, in))));
-        g_t6.d[0] = A2C_SX32(*(uint32_t*)A2C_PTR(((uint32_t)(g_t6.w[0] + (offsetof(SCISSOR, triangle.node[0]))))));
-        g_t7.d[0] = A2C_SX32(g_zero.w[0] + (uint32_t)(g_op1.w[0]));
-        g_t0.d[0] = A2C_SX32(*(uint32_t*)A2C_PTR(((uint32_t)(g_t6.w[0] + (offsetof(SCISSOR_NODE, nodeNum))))));
-        Vu1Strip_a49_l_002D4720:;
-        memcpy(&pcVu0.vf[4], A2C_PTR(((uint32_t)(g_t6.w[0] + (offsetof(SCISSOR, triangle.node[0].vertex))))), 16);
-        vu_set_q_now(&pcVu0, vu_div(pcVu0.vf[0].f[3], pcVu0.vf[4].f[2]));
-        memcpy(&pcVu0.vf[7], A2C_PTR(((uint32_t)(g_t6.w[0] + (offsetof(SCISSOR, triangle.node[0].color))))), 16);
-        memcpy(A2C_PTR(((uint32_t)(g_t7.w[0] + (offsetof(VU1_PRIM_BUF, fR))))), &pcVu0.vf[7], 16);
-        { VuVec r_ = pcVu0.vf[0]; r_.f[0] = vu_f(pcVu0.vf[0].f[0] + pcVu0.vf[23].f[2]); pcVu0.vf[5].f[0] = r_.f[0]; vu_set_mac(&pcVu0, &r_, 8); }
-        memcpy(&pcVu0.vf[6], A2C_PTR(((uint32_t)(g_t6.w[0] + (offsetof(SCISSOR, triangle.node[0].texUV))))), 16);
-        g_t0.d[0] = A2C_SX32(g_t0.w[0] + (uint32_t)((int32_t)(-1)));
-        vu_waitq(&pcVu0);
-        { VuVec r_ = pcVu0.vf[0]; r_.f[0] = vu_f(pcVu0.vf[5].f[0] * vu_q(&pcVu0)); pcVu0.vf[5].f[0] = r_.f[0]; vu_set_mac(&pcVu0, &r_, 8); }
-        { VuVec r_ = pcVu0.vf[0]; r_.f[0] = vu_f(pcVu0.vf[6].f[0] * vu_q(&pcVu0)); r_.f[1] = vu_f(pcVu0.vf[6].f[1] * vu_q(&pcVu0)); pcVu0.vf[6].f[0] = r_.f[0]; pcVu0.vf[6].f[1] = r_.f[1]; vu_set_mac(&pcVu0, &r_, 12); }
-        { VuVec r_ = pcVu0.vf[0]; r_.f[2] = vu_f(pcVu0.vf[0].f[2] + vu_q(&pcVu0)); pcVu0.vf[6].f[2] = r_.f[2]; vu_set_mac(&pcVu0, &r_, 2); }
-        { VuVec r_ = pcVu0.vf[0]; r_.f[3] = vu_f(pcVu0.vf[6].f[3] - pcVu0.vf[6].f[3]); pcVu0.vf[6].f[3] = r_.f[3]; vu_set_mac(&pcVu0, &r_, 1); }
-        { VuVec r_ = pcVu0.vf[0]; r_.f[0] = vu_f(pcVu0.vf[4].f[0] * pcVu0.vf[5].f[0]); r_.f[1] = vu_f(pcVu0.vf[4].f[1] * pcVu0.vf[5].f[0]); pcVu0.vf[4].f[0] = r_.f[0]; pcVu0.vf[4].f[1] = r_.f[1]; vu_set_mac(&pcVu0, &r_, 12); }
-        memcpy(A2C_PTR(((uint32_t)(g_t7.w[0] + (offsetof(VU1_PRIM_BUF, fS))))), &pcVu0.vf[6], 16);
-        { VuVec r_ = pcVu0.vf[0]; r_.f[0] = vu_f(pcVu0.vf[4].f[0] * pcVu0.vf[17].f[0]); r_.f[1] = vu_f(pcVu0.vf[4].f[1] * pcVu0.vf[17].f[1]); pcVu0.vf[4].f[0] = r_.f[0]; pcVu0.vf[4].f[1] = r_.f[1]; vu_set_mac(&pcVu0, &r_, 12); }
-        { VuVec r_ = pcVu0.vf[0]; r_.f[0] = vu_f(pcVu0.vf[4].f[0] + pcVu0.vf[16].f[0]); r_.f[1] = vu_f(pcVu0.vf[4].f[1] + pcVu0.vf[16].f[1]); pcVu0.vf[4].f[0] = r_.f[0]; pcVu0.vf[4].f[1] = r_.f[1]; vu_set_mac(&pcVu0, &r_, 12); }
-        g_t6.d[0] = A2C_SX32(g_t6.w[0] + (uint32_t)((int32_t)(sizeof(NODE))));
-        memcpy(A2C_PTR(((uint32_t)(g_t7.w[0] + (offsetof(VU1_PRIM_BUF, fX))))), &pcVu0.vf[4], 16);
-        g_t7.d[0] = A2C_SX32(g_t7.w[0] + (uint32_t)((int32_t)(sizeof(VU1_PRIM_BUF))));
-        { int c_ = (g_t0.d[0] != 0);  if (c_) goto Vu1Strip_a49_l_002D4720; }
-        (void)g_zero; (void)lo_; (void)fcc_;
-    }
-#else
-    asm volatile
-    ("
-        addi     t6, %0, SCISSOR.in
-    
-        lw       t6, SCISSOR.triangle.node[0](t6)
-        
-        add      t7, zero, %1
-    
-        lw       t0, SCISSOR_NODE.nodeNum(t6)
-        nop
-        
-        l_002D4720:
-        lqc2     vf4, SCISSOR.triangle.node[0].vertex(t6)
-        
-        vdiv     Q, vf0w, vf4z
-    
-        lqc2     vf7, SCISSOR.triangle.node[0].color(t6)
-        
-        sqc2     vf7, VU1_PRIM_BUF.fR(t7)
-    
-        vaddz.x  vf5, vf0, vf23z
-        
-        lqc2     vf6, SCISSOR.triangle.node[0].texUV(t6)
-    
-        addi     t0, t0, -1
-        
-        vwaitq
-        
-        vmulq.x  vf5, vf5, Q
-        vmulq.xy vf6, vf6, Q
-        
-        vaddq.z  vf6, vf0, Q
-        
-        vsub.w   vf6, vf6, vf6
-        
-        vmulx.xy vf4, vf4, vf5x
-        
-        sqc2     vf6, VU1_PRIM_BUF.fS(t7)
-    
-        vmul.xy  vf4, vf4, vf17
-        
-        vadd.xy  vf4, vf4, vf16
-        
-        addi     t6, t6, sizeof(NODE)
-    
-        sqc2     vf4, VU1_PRIM_BUF.fX(t7)
-    
-        addi     t7, t7, sizeof(VU1_PRIM_BUF)
-    
-        bnez     t0, l_002D4720
-        vnop
-    " : : "r"(scissor), "r"(vu1ScessorBuf) : "t7"
-    );
-#endif
-
+    pcScissorProject(vu1ScessorBuf, sizeof(VU1_PRIM_BUF), (int)in->nodeNum, in->node, sizeof(NODE),
+                     offsetof(NODE, vertex), offsetof(NODE, texUV), offsetof(NODE, color), 1);
     ulType = (ulType & 0xFFFDFFFFFFFFFFFF) | 0x6800000000000;
-    
-    pP = vu1ScessorBuf;
-    
-    Ps2AddPrim3DEx1P(ulType, pP, in->nodeNum);
+    Ps2AddPrim3DEx1P(ulType, vu1ScessorBuf, in->nodeNum);
 }
 
 // 100% matching!

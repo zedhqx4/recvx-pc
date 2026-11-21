@@ -20,8 +20,7 @@ void DrawScissorPolygonOpaque2(int count, unsigned long ulType)
     VU1_PRIM_BUF* pPrim; 
 
 #ifdef TARGET_PC
-    pcScissorEmit(vu1ScessorBuf, sizeof(VU1_PRIM_BUF), count,
-                  &pcVu0.vf[17].f[0], &pcVu0.vf[16].f[0], pcVu0.vf[23].f[2]);
+    pcScissorEmit(vu1ScessorBuf, sizeof(VU1_PRIM_BUF), count);
 #else
     asm volatile
     ("
