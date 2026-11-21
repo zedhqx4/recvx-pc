@@ -25,3 +25,8 @@ Un solo commit `[G2] ...`. Informe en `coord/reports/G2.md`.
 - `_Clip_Screen` SI tiene llamador: `ps2_NaDraw.c:337` (`cflag &= _Clip_Screen(&scr.x)`). Es VIVA.
 - Dudas resueltas por grep: `njCnkEasyMultiDrawObjectI` se llama desde `itemview.c:265,272` (visor de items) -> `vu1DrawTriangleStripTransDoubleI` y `DrawScissorPolygonOpaque` alcanzables; `_Init_ScissorSystem` en `ps2_NinjaCnk.c:220`; ruta 1P: `NaDraw.c:292 -> njDrawTexture3DExSetData1P -> njDrawTextureSub3D1P -> vu1DrawTriangleStripTransDouble1P (NaDraw.c:393)`.
 - Conclusion: todo el scissor/clip viejo de ps2_Vu1Strip.c esta VIVO: se reescribe, no se borra.
+
+## Estado 3d (0.9.180)
+- `pcVu0` eliminado. Todo el scissor/clip/color de ps2_Vu1Strip.c y ps2_Vu1Scissor2.c es C plano con estado propio (pcClipRegs, pcScreen, pcCN).
+- Pendiente de Claude: nada del 3d. Pendiente del usuario: probar 0.9.175..0.9.180 (ver notas).
+- Candidatas para GPT (independientes, con harness): residuos de bloques `PcGpr`/asm2c en otros archivos (inventario por grep de `PcGpr`, `A2C_PTR`), sin tocar pc/src/vu.
