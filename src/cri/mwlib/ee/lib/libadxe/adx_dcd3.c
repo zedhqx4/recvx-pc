@@ -1,7 +1,6 @@
 #include "../../../cri/mwlib/ee/lib/libadxe/adx_dcd3.h"
 #include "../../../cri/mwlib/ee/lib/libadxe/adx_qtbl.h"
 
-#ifdef TARGET_PC
 /* PC: float -> int as the PS2 FPU does it (saturating). x86 gives INT_MIN for any value out of
  * range, so a loud peak just past full scale became a -32768 spike: crackling in hot music. */
 static Sint32 pc_adx_f2i(Float32 x)
@@ -9,9 +8,6 @@ static Sint32 pc_adx_f2i(Float32 x)
     return (x >= 2147483520.0f) ? 0x7FFFFFFF : (x <= -2147483648.0f) ? (Sint32)0x80000000 : (Sint32)x;
 }
 #define ADX_F2I(x) pc_adx_f2i(x)
-#else
-#define ADX_F2I(x) ((Sint32)(x))
-#endif
 
 Sint32 adx_decode_output_mono_flag = 0;
 
