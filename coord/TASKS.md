@@ -29,4 +29,37 @@ Un solo commit `[G2] ...`. Informe en `coord/reports/G2.md`.
 ## Estado 3d (0.9.180)
 - `pcVu0` eliminado. Todo el scissor/clip/color de ps2_Vu1Strip.c y ps2_Vu1Scissor2.c es C plano con estado propio (pcClipRegs, pcScreen, pcCN).
 - Pendiente de Claude: nada del 3d. Pendiente del usuario: probar 0.9.175..0.9.180 (ver notas).
-- Candidatas para GPT (independientes, con harness): residuos de bloques `PcGpr`/asm2c en otros archivos (inventario por grep de `PcGpr`, `A2C_PTR`), sin tocar pc/src/vu.
+- Siguiente tarea para GPT: G3 (inventario GS/GIF/VIF/EE). Los bloques `PcGpr`/asm2c ya no aparecen en `src/` (grep=0).
+
+## G3 - Inventario de las capas de emulacion PS2 que quedan (GS, EE, GIF, VIF)  [abierta, SOLO ANALISIS]
+Contexto: tras 0.9.180 ya no existe `pcVu0` ni emulacion de VU0/VU1. Queremos saber que queda de GS, EE, GIF y VIF en el
+repositorio y en que orden se puede retirar, con los mismos resultados visuales. Rama de trabajo: `optimizacion-gpt`
+(primero `git merge origin/optimizacion` para partir de 0.9.180). Alcance: NO modificar codigo fuente.
+Entregable: `coord/reports/G3.md`. Un solo commit `[G3] ...` con el informe.
+
+Que hay que inventariar (busca por nombres de funcion, tipos y macros, no solo por archivo):
+  1. GS: registros/paquetes (`GS_*`, `sceGs*`, `GIF` tags, `PRIM`/`RGBAQ`/`ST`/`XYZ2`, `ulType` con bits de PRIM, TEX0/TEX1,
+     ALPHA, TEST, FRAME/ZBUF), emulacion de memoria de video (`Ps2TexLoad`, `pcNativeTextureLoad`, CLUT, PSM).
+  2. GIF/VIF: construccion de paquetes (DMA chains, `Ps2AddPrim*`, `Ps2_DRAW_TMP`, `vu1ScessorBuf`, `VU1_PRIM_BUF`), cualquier
+     decodificador de paquetes que aun exista en `pc/src`.
+  3. EE: capa de compatibilidad (tipos `u_long128`, `sce*`, DMA, scratchpad `SPR`, cache flush, `asm volatile` de EE,
+     `PcGpr`/`A2C_*`/`pc_asm2c.h`).
+  4. Cualquier otro modulo que simule hardware (timers, SPU/IOP si se ve de paso, solo listarlo).
+
+Para cada elemento indica: (a) archivo:linea de definicion, (b) quien lo usa (archivo:linea, al menos 3 llamadores o "ninguno"),
+(c) si se ejecuta en `TARGET_PC` (condiciones: macros, flags de INI, modos), (d) veredicto VIVA / MUERTA / DUDOSA con evidencia,
+(e) a que otro elemento esta acoplado, (f) tamano aproximado en lineas.
+
+Ademas:
+  - Una tabla resumen por capa (GS, GIF/VIF, EE) con lineas totales, lineas VIVAS y lineas MUERTAS.
+  - Un grafo de dependencias en texto (A -> B) entre subsistemas vivos.
+  - Una propuesta de orden de retirada, de menor a mayor riesgo, con para cada paso: que se borra o reescribe, que prueba
+    lo validaria (harness gcc contra la version actual, o log del juego) y que podria salir mal.
+  - Lista de lo que NO debe tocarse (hace falta para que el juego funcione: dilo explicitamente).
+
+Reglas: cuenta las lineas con `wc -l` o un script y pon el comando; cita archivo:linea en todo veredicto; si no puedes
+comprobar algo (porque requiere compilar con el SDK o correr el juego), marcalo DUDOSA y ponlo bajo `## Preguntas`.
+Recuerda las correcciones de G1: antes de declarar MUERTA una funcion, busca llamadores en TODO `src/` (incluidos
+`itemview.c`, `ps2_NaDraw.c`, `ps2_NinjaCnk.c`) y verifica con la lista de usos de INI.
+Terminado cuando: las cuatro areas estan cubiertas, la tabla resumen y la propuesta de orden existen, y las dudas estan
+bajo `## Preguntas`.
