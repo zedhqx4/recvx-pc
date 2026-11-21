@@ -1,6 +1,6 @@
 # Registro de avance (lo mantiene Claude; leer esto primero al retomar)
 
-Ultima actualizacion: 0.9.192 (sin probar por el usuario/CI; probar que arranca y se ve igual; revisar log por 'shader' errores). Base validada: 0.9.181.
+Ultima actualizacion: 0.9.192 VALIDADA por el usuario (log sin errores, juega normal). Base validada: 0.9.192.
 Milestones: `milestone/0.9.181` (ultimo bueno), `0.9.180`, `0.9.171`... El hook "unpushed commits" es falso: comprobar con `git ls-remote origin optimizacion`.
 
 ## Hecho (resumen)
@@ -20,3 +20,4 @@ Cada paso: commit propio, version sube 1, notas en claude_notes.md, push, milest
 - 0.9.182 (2026-11-21): paso 2 parte 1 hecha: borrados 6 shims sin llamadores (ver claude_notes.md). Quedan con llamadores: sceGsSyncPath, Set/ExecLoadImage, sceDmaSend/Sync (ps2_dummy.c 3559-3572, evaluar si esas rutas son codigo muerto). Siguiente: paso 1 (INI) - pedir recvx.ini al usuario.
 - 0.9.183-0.9.191 (2026-11-21): colapsados 8 interruptores INI + 1 env (un commit y version cada uno; detalle en claude_notes.md). Con el INI del usuario el comportamiento debe ser identico. Riesgo mayor: 0.9.188 (GLSL sin compilar aqui). Si algo falla, revertir ese commit.
 - 0.9.192: gpu_vertex colapsado. Siguientes: rtt_gpu_copy (respaldo), revisar sprites->GPU para poder borrar la conversion CPU, luego G3 pasos 3-7.
+- 0.9.192 validada por el usuario (2026-11-21). milestone/0.9.192.
