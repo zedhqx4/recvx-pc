@@ -3333,15 +3333,9 @@ void bhEne03_DG02(BH_PWORK* epw)
 
         mkfP = epw->mnwP[epw->mtn_no].md2P->p[0];
         
-#ifdef TARGET_PC
         trans.x = mkfP->key[0];
         trans.y = mkfP->key[1];
         trans.z = mkfP->key[2];
-#else
-        trans.x = *mkfP->key++;
-        trans.y = *mkfP->key++;
-        trans.z = *mkfP->key++;
-#endif
 
         njCalcVector((NJS_MATRIX*)epw->exp0, &trans, &trans);
 
@@ -3353,15 +3347,9 @@ void bhEne03_DG02(BH_PWORK* epw)
 
         mkaP = epw->mnwP[epw->mtn_no].md2P->p[1];
         
-#ifdef TARGET_PC
         epw->mlwP->objP->ang[0] = mkaP->key[0];
         epw->mlwP->objP->ang[1] = mkaP->key[1];
         epw->mlwP->objP->ang[2] = mkaP->key[2];
-#else
-        epw->mlwP->objP->ang[0] = *mkaP->key++;
-        epw->mlwP->objP->ang[1] = *mkaP->key++;
-        epw->mlwP->objP->ang[2] = *mkaP->key++;
-#endif
 
         *(ATR_WORK**)&EXP0_I(96) = NULL;
         
@@ -3904,11 +3892,7 @@ void bhEne03_DG11(BH_PWORK* epw)
         mkaP  = epw->mnwP[epw->mtn_no].md2P->p[1];
         mkaP += epw->frm_no / 65536;
         
-#ifdef TARGET_PC
         njRotateXYZ((NJS_MATRIX*)epw->exp0, mkaP->key[0], mkaP->key[1], mkaP->key[2]);
-#else
-        njRotateXYZ((NJS_MATRIX*)epw->exp0, *mkaP->key++, *mkaP->key++, *mkaP->key++);
-#endif
         
         epw->mtn_md |= 0x100;
         
@@ -3927,15 +3911,9 @@ void bhEne03_DG11(BH_PWORK* epw)
             
         mkaP = epw->mnwP[epw->mtn_no].md2P->p[1];
             
-#ifdef TARGET_PC
         epw->mlwP->objP->ang[0] = mkaP->key[0];
         epw->mlwP->objP->ang[1] = mkaP->key[1];
         epw->mlwP->objP->ang[2] = mkaP->key[2];
-#else
-        epw->mlwP->objP->ang[0] = *mkaP->key++;
-        epw->mlwP->objP->ang[1] = *mkaP->key++;
-        epw->mlwP->objP->ang[2] = *mkaP->key++;
-#endif
         }
         
         if ((EXP0_C(105) == 0) || (EXP0_C(105) == 1)) 
@@ -4093,19 +4071,11 @@ void bhEne03_DG12(BH_PWORK* epw)
         
         if ((epw->mtn_md & 0x2)) 
         {
-#ifdef TARGET_PC
             njRotateXYZ((NJS_MATRIX*)epw->exp0, mkaP->key[0], -mkaP->key[1], -mkaP->key[2]);
-#else
-            njRotateXYZ((NJS_MATRIX*)epw->exp0, *mkaP->key++, -*mkaP->key++, -*mkaP->key++);
-#endif
         } 
         else 
         {
-#ifdef TARGET_PC
             njRotateXYZ((NJS_MATRIX*)epw->exp0, mkaP->key[0], mkaP->key[1], mkaP->key[2]);
-#else
-            njRotateXYZ((NJS_MATRIX*)epw->exp0, *mkaP->key++, *mkaP->key++, *mkaP->key++);
-#endif
         }
         
         if ((epw->flg & 0x80000)) 
@@ -4141,15 +4111,9 @@ void bhEne03_DG12(BH_PWORK* epw)
             
         mkaP = epw->mnwP[epw->mtn_no].md2P->p[1];
             
-#ifdef TARGET_PC
         epw->mlwP->objP->ang[0] = mkaP->key[0];
         epw->mlwP->objP->ang[1] = mkaP->key[1];
         epw->mlwP->objP->ang[2] = mkaP->key[2];
-#else
-        epw->mlwP->objP->ang[0] = *mkaP->key++;
-        epw->mlwP->objP->ang[1] = *mkaP->key++;
-        epw->mlwP->objP->ang[2] = *mkaP->key++;
-#endif
         
         njCalcVector((NJS_MATRIX*)epw->exp0, (NJS_VECTOR*)epw->mnwP[epw->mtn_no].md2P->p[0], &trans);
         njSubVector((NJS_VECTOR*)&epw->px, &trans);
@@ -4341,11 +4305,7 @@ void bhEne03_DD01(BH_PWORK* epw)
             mkaP  = epw->mnwP[epw->mtn_no].md2P->p[1];
             mkaP += epw->frm_no / 65536;
             
-#ifdef TARGET_PC
             njRotateXYZ((NJS_MATRIX*)epw->exp0, mkaP->key[0], mkaP->key[1], mkaP->key[2]);
-#else
-            njRotateXYZ((NJS_MATRIX*)epw->exp0, *mkaP->key++, *mkaP->key++, *mkaP->key++);
-#endif
         }
         
         epw->mtn_no = 17;
@@ -4363,15 +4323,9 @@ void bhEne03_DD01(BH_PWORK* epw)
             
         mkaP = epw->mnwP[epw->mtn_no].md2P->p[1];
             
-#ifdef TARGET_PC
         epw->mlwP->objP->ang[0] = mkaP->key[0];
         epw->mlwP->objP->ang[1] = mkaP->key[1];
         epw->mlwP->objP->ang[2] = mkaP->key[2];
-#else
-        epw->mlwP->objP->ang[0] = *mkaP->key++;
-        epw->mlwP->objP->ang[1] = *mkaP->key++;
-        epw->mlwP->objP->ang[2] = *mkaP->key++;
-#endif
 
         EXP0_F(84) = EXP0_F(16) / 2.0f;
         EXP0_F(88) = EXP0_F(20) / 2.0f;
@@ -4381,15 +4335,9 @@ void bhEne03_DD01(BH_PWORK* epw)
 
         mkfP = epw->mnwP[epw->mtn_no].md2P->p[0];
             
-#ifdef TARGET_PC
         trans.x = mkfP->key[0];
         trans.y = mkfP->key[1];
         trans.z = mkfP->key[2];
-#else
-        trans.x = *mkfP->key++;
-        trans.y = *mkfP->key++;
-        trans.z = *mkfP->key++;
-#endif
 
         njCalcVector((NJS_MATRIX*)epw->exp0, &trans, &trans);
 
@@ -4528,15 +4476,9 @@ void bhEne03_DD02(BH_PWORK* epw)
 
         mkfP = epw->mnwP[epw->mtn_no].md2P->p[0];
         
-#ifdef TARGET_PC
         trans.x = mkfP->key[0];
         trans.y = mkfP->key[1];
         trans.z = mkfP->key[2];
-#else
-        trans.x = *mkfP->key++;
-        trans.y = *mkfP->key++;
-        trans.z = *mkfP->key++;
-#endif
 
         njCalcVector((NJS_MATRIX*)epw->exp0, &trans, &trans);
 
@@ -4548,15 +4490,9 @@ void bhEne03_DD02(BH_PWORK* epw)
 
         mkaP = epw->mnwP[epw->mtn_no].md2P->p[1];
         
-#ifdef TARGET_PC
         epw->mlwP->objP->ang[0] = mkaP->key[0];
         epw->mlwP->objP->ang[1] = mkaP->key[1];
         epw->mlwP->objP->ang[2] = mkaP->key[2];
-#else
-        epw->mlwP->objP->ang[0] = *mkaP->key++;
-        epw->mlwP->objP->ang[1] = *mkaP->key++;
-        epw->mlwP->objP->ang[2] = *mkaP->key++;
-#endif
 
         *(ATR_WORK**)&EXP0_I(96) = NULL;
         
@@ -4732,15 +4668,9 @@ void bhEne03_DD04(BH_PWORK* epw)
 
         mkaP = epw->mnwP[epw->mtn_no].md2P->p[1];
         
-#ifdef TARGET_PC
         epw->mlwP->objP->ang[0] = mkaP->key[0];
         epw->mlwP->objP->ang[1] = mkaP->key[1];
         epw->mlwP->objP->ang[2] = mkaP->key[2];
-#else
-        epw->mlwP->objP->ang[0] = *mkaP->key++;
-        epw->mlwP->objP->ang[1] = *mkaP->key++;
-        epw->mlwP->objP->ang[2] = *mkaP->key++;
-#endif
 
         *(ATR_WORK**)&EXP0_I(96) = NULL;
         
@@ -6430,9 +6360,7 @@ int bhEne03_GetWallDir(NJS_VECTOR* v)
     {
         return 3;
     }
-#ifdef TARGET_PC /* the PS2 build returned whatever was left in the return register */
     return 0;
-#endif
 }
 
 // 100% matching!
