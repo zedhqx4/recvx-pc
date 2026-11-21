@@ -5,7 +5,7 @@
  * (macro-codigo VU0 transpilado): vminiw / vmaxx / vadd / vsubw / vmul sobre xyz y alpha = 1.0 * AlphaRatio en w.
  * Cada resultado intermedio pasa por vu_f() (inf/NaN -> max, denormal -> 0), igual que la unidad vectorial.
  * No toca pcVu0 (ni registros vf, ni banderas MAC): es una funcion pura de sus argumentos.
- * El redondeo (vu_trunc) lo fija quien llama con pcVuRoundEnter(), igual que antes.
+ * El redondeo lo fija quien llama con pcVuRoundEnter(), igual que antes.
  *
  * Entradas: c = color del vertice (fIr,fIg,fIb,fA); amb/dif/spe = vu1Ambient/vu1Diffuse/vu1Specula (rgb);
  * ratio = fVu1AlphaRatio. Salida: out = (r,g,b,a) para VU1_PRIM_BUF.fR..fA.

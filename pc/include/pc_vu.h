@@ -22,19 +22,14 @@ typedef union {
  * La FPU del EE y las FMAC de las VU truncan hacia cero (no hay redondeo al mas cercano) y vacian los
  * denormales. En x86 eso es MXCSR con RC=11, FTZ y DAZ. pcVuRoundEnter/Leave lo activan solo mientras corre
  * matematica de VU (las funciones vu1Draw*), de modo que el driver de GL, SDL y el resto del proceso siguen con
- * el redondeo normal. Activo por defecto; vu_trunc=0 en recvx.ini (o RECVX_VU_TRUNC=0) vuelve al redondeo del host para comparar. */
+ * el redondeo normal.  */
 #if defined(_M_IX86) || defined(_M_X64) || defined(__SSE__)
 #include <xmmintrin.h>
-int pcVuTruncEnabled(void);
 static __inline unsigned int pcVuRoundEnter(void)
 {
-    if (pcVuTruncEnabled())
-    {
-        unsigned int old = _mm_getcsr();
-        _mm_setcsr(old | 0x6000u | 0x8000u | 0x0040u);
-        return old;
-    }
-    return 0xFFFFFFFFu;
+    unsigned int old = _mm_getcsr();
+    _mm_setcsr(old | 0x6000u | 0x8000u | 0x0040u);
+    return old;
 }
 static __inline void pcVuRoundLeave(unsigned int old)
 {

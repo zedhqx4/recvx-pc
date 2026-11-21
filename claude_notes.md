@@ -665,3 +665,6 @@ recalcula siempre, de modo que los cambios de paleta se detectan exactamente igu
 
 ## 0.9.186 - tex_frame_memo ya no es interruptor (siempre activo)
 - pc_texture.c: la memoria del hash de imagen por frame se usa siempre (el usuario la corre en 1; era 0 por defecto).
+
+## 0.9.187 - vu_trunc ya no es interruptor (siempre trunca)
+- pc_vu.h: pcVuRoundEnter siempre activa truncado + FTZ/DAZ; se borra pc_vu_round.c (pcVuTruncEnabled). Los helpers siguen devolviendo 0xFFFFFFFF solo en plataformas sin SSE.
