@@ -675,3 +675,6 @@ recalcula siempre, de modo que los cambios de paleta se detectan exactamente igu
 
 ## 0.9.189 - ui_snap_uv ya no es interruptor
 - ps2_dummy.c: pc_snap_uv se aplica siempre (era el valor por defecto). pc/README.md actualizado.
+
+## 0.9.190 - se borra ui_uv_crop_debug (log de diagnostico del recorte UV de UI)
+- ps2_dummy.c: se quitan pc_ui_uv_crop_debug_enabled/hash_add/log, sus 2 llamadas y las variables fail_* que solo alimentaban el log. El recorte no cambia (el log no modificaba el render).
