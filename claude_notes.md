@@ -629,3 +629,9 @@ recalcula siempre, de modo que los cambios de paleta se detectan exactamente igu
 - Setters (Projection/NearFar/Offset/Aspect/Diffuse/Specula/Ambient/AlphaRatio) sin escritura a registros: vf20/21/22 y vf23.x/y/w no los lee nadie.
 - `DrawScissorPolygonOpaque` y `DrawScissorPolygonTrans1P` en C plano (~10 lineas c/u).
 - Validacion: harness gcc contra los transpilados de 0.9.177 (300K poligonos de 3..8 nodos, incluyendo z=0 y valores enormes): 0 diferencias en VU1_PRIM_BUF y argumentos de Ps2AddPrim3DEx/1P.
+
+## 0.9.179 - vu1DrawTriangleStripTransDoubleI, InitNodeArraySet y ResetNodeArraySet en C plano (3d)
+- ps2_Vu1Strip.c ya no tiene ningun `pcVu0`.
+- `vu1DrawTriangleStripTransDoubleI` (visor de items): ~170 lineas de VU0 transpilado -> ~60 de C. Usa `pcClipViewVertex` para clip + nodo, `pcScreen()->offset` para el offset.
+- Validacion: harness gcc contra el transpilado de 0.9.178 (100K tiras, 16 modos de color, 99% con ScissorTriangle): 0 diferencias en VU1_PRIM_BUF, nodos/rotflag/in/out del SCISSOR, historial de clip y secuencia de llamadas.
+- Nota de fidelidad: TransDoubleI y TransDouble1P corren con el redondeo normal del host (no hay PCSP_BEGIN), asi que el transpilado anterior hacia la matriz de clip con redondeo al mas cercano; `pcClipViewVertex` (desde 0.9.176) trunca como la VU. La diferencia es de 1 ULP en coordenadas de clip y solo cambia un flag de recorte justo en el borde del volumen.
