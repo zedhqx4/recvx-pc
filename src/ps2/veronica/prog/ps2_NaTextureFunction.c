@@ -212,17 +212,13 @@ Sint32	njLoadTexture(NJS_TEXLIST *texlist)
     unsigned int attr;
     NJS_TEXMEMLIST* addr; 
     
-#ifdef TARGET_PC
     { extern void pcTextureInvalidateSources(void); pcTextureInvalidateSources(); }
-#endif
     no = Ps2_texcontinue_no;
     
     tex_num = texlist->nbTexture;
     
     addr = Ps2_tex_info;
-#ifdef TARGET_PC
     Ps2PcTextureSourceCacheReset();
-#endif
     
     ring_check();
     
@@ -350,9 +346,7 @@ Sint32	njSetTexture(NJS_TEXLIST *texlist)
         
         Ps2_current_texno = 0;
     }
-#ifdef TARGET_PC /* the PS2 build returned whatever was left in the return register */
     return 0;
-#endif
 }
 
 // 100% matching! 
@@ -370,9 +364,7 @@ Sint32	njSetTextureNum(Uint32 n)
     Ps2_current_gindex = ((TIM2_PICTUREHEADER_EX*)(Ps2_current_texmemlist->texinfo.texsurface.pSurface))->Gindex; 
     
     Ps2TexLoad(Ps2_current_texmemlist);
-#ifdef TARGET_PC /* the PS2 build returned whatever was left in the return register */
     return 0;
-#endif
 }
 
 // 100% matching!
@@ -395,26 +387,20 @@ Sint32	njSetTextureNumG(Uint32 globalIndex)
         
         exit(0);
     }
-#ifdef TARGET_PC /* the PS2 build returned whatever was left in the return register */
     return 0;
-#endif
 }
 
 // 100% matching!
 int njSetTextureNumSys(unsigned int n)
 {
     Ps2TexLoad((NJS_TEXMEMLIST*)Ps2_current_texlist->textures[n].texaddr);
-#ifdef TARGET_PC /* the PS2 build returned whatever was left in the return register */
     return 0;
-#endif
 }
 
 // 100% matching!
 void	njReleaseTextureAll(void)
 {
-#ifdef TARGET_PC
     { extern void pcTextureInvalidateSources(void); pcTextureInvalidateSources(); }   /* memoria de texturas recargada/liberada */
-#endif
     njInitTexture(Ps2_tex_info, Ps2_texmemlist_num);
 }
 
@@ -426,9 +412,7 @@ Sint32	njReleaseTexture(NJS_TEXLIST *texlist)
     NJS_TEXMEMLIST* p;
 
     Ps2_current_texbreak = 1;
-#ifdef TARGET_PC
     { extern void pcTextureInvalidateSources(void); pcTextureInvalidateSources(); }   /* memoria de texturas recargada/liberada */
-#endif
     
     tex_num = texlist->nbTexture;
     
@@ -476,9 +460,7 @@ Sint32	njReleaseTexture(NJS_TEXLIST *texlist)
     } 
     
     ring_check();
-#ifdef TARGET_PC /* the PS2 build returned whatever was left in the return register */
     return 0;
-#endif
 }
 
 // 100% matching! 
@@ -555,9 +537,7 @@ void 	njSetPaletteMode(Uint32 mode)
 Uint32	njGetPaletteMode(void)
 {
 
-#ifdef TARGET_PC /* the PS2 build returned whatever was left in the return register */
     return 0;
-#endif
 }
 
 // 100% matching!
@@ -569,9 +549,7 @@ void 	njSetPaletteData(Sint32 offset,Sint32 count,void* data)
 // 100% matching!
 void	njGarbageTexture(NJS_TEXMEMLIST *addr,Uint32 n)
 {
-#ifdef TARGET_PC
     { extern void pcTextureInvalidateSources(void); pcTextureInvalidateSources(); }
-#endif
     Ps2TextureGarbageCollectionAll();
 }
 
@@ -692,9 +670,7 @@ int Ps2TextureFree(NJS_TEXMEMLIST* p)
     
     if (*temp2 == 0) 
     {
-#ifdef TARGET_PC
         { extern void pcTextureForgetRenderTarget(const void* image); pcTextureForgetRenderTarget((const unsigned char*)timp + 256); }
-#endif
         before = timp->admin.before;
         after = timp->admin.after;
         
@@ -788,9 +764,7 @@ int Ps2TextureGarbageCollectionAll()
             size = temp->admin.size / 4;
 
             Ps2MemCopy4(real_p, temp, size);
-#ifdef TARGET_PC
             { extern void pcTextureRemapRenderTarget(const void* old_image, const void* new_image); pcTextureRemapRenderTarget((const unsigned char*)temp + 256, (const unsigned char*)real_p + 256); }
-#endif
         
             Ps2ReplaceTexAddr(after2->admin.gindex, real_p);
         }
@@ -828,7 +802,5 @@ int ring_check()
     after = p;
     
     return printf("RING ERROR %x\n", after->admin.addr);
-#ifdef TARGET_PC /* the PS2 build returned whatever was left in the return register */
     return 0;
-#endif
 }
