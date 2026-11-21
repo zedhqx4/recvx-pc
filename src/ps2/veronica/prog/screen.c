@@ -15,12 +15,10 @@
 #include "../../../ps2/veronica/prog/pwksub.h"
 #include "../../../ps2/veronica/prog/main.h"
 
-#ifdef TARGET_PC
 /* PC: called without a prototype, MSVC passed the float as a double and the function read
  * 2.0 instead of the screen distance, so after drawing a camera view for an in-game monitor
  * (bhDrawSmallScreenRenderTexture) the room itself was drawn tiny in the middle of the screen */
 void njSetScreenProjection(float dist);
-#endif
 
 unsigned int Ps2_rendertex_initflag;
 
@@ -864,7 +862,6 @@ void bhDrawFullScreenRenderTexture()
     
     njTextureFilterMode(0);
     
-#ifdef TARGET_PC
     {
         /* PC: the strips are the room itself, rippled (the gas trap, water): in widescreen they
          * span the whole width; squeezed into 4:3 like 2D art, the screen went 4:3 */
@@ -872,7 +869,6 @@ void bhDrawFullScreenRenderTexture()
 
         pcWide2DStretch = 1;
     }
-#endif
     for (i = 0; i < 15; i++)
     {
         y = i * 16;
@@ -929,13 +925,11 @@ void bhDrawFullScreenRenderTexture()
         njDrawTextureH(tvh, 32, 1, 0);
     } 
     
-#ifdef TARGET_PC
     {
         extern int pcWide2DStretch;
 
         pcWide2DStretch = 0;
     }
-#endif
     njTextureFilterMode(1);
 }
 
