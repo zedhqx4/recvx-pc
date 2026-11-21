@@ -662,3 +662,6 @@ recalcula siempre, de modo que los cambios de paleta se detectan exactamente igu
 
 ## 0.9.185 - rtt_blit_draw ya no es interruptor
 - La copia de la pantalla a textura se hace siempre por draw (rtt_draw_copy). glBlitFramebuffer queda solo como respaldo si el programa no enlaza (ya existia: rtt_draw_copy devuelve 0).
+
+## 0.9.186 - tex_frame_memo ya no es interruptor (siempre activo)
+- pc_texture.c: la memoria del hash de imagen por frame se usa siempre (el usuario la corre en 1; era 0 por defecto).

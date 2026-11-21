@@ -263,11 +263,11 @@ static struct {
     int valid;
 } bind_memo;
 
-/* tex_frame_memo=1 (INI, por defecto 0): memoria del hash de la IMAGEN por frame, hasta 64 imagenes distintas. El hash del CLUT
+/* Memoria del hash de la IMAGEN por frame, hasta 64 imagenes distintas. El hash del CLUT
  * (como mucho 1 KB) se recalcula SIEMPRE, asi un cambio de paleta se detecta exactamente igual que sin el memo; lo unico que se
  * omite es volver a recorrer la imagen (64 KB-1 MB) cada vez que el modelo de la sala cambia de textura (~100 veces por frame).
  * Misma suposicion documentada arriba para bind_memo: la imagen no cambia dentro de un frame sin una recarga de texturas
- * (pcTextureInvalidateSources). Una sola ruta paralela: con 0 el comportamiento es el de siempre. */
+ * (pcTextureInvalidateSources). */
 #define IMAGE_HASH_MEMO_N 64
 static struct {
     const unsigned char* image;
@@ -276,16 +276,6 @@ static struct {
     uint64_t hash;
     int valid;
 } image_hash_memo[IMAGE_HASH_MEMO_N];
-
-static int image_hash_memo_on(void)
-{
-    static int on = -1;
-    if (on < 0) {
-        on = pcIniGetInt("tex_frame_memo", 0) != 0;
-        pcLog("native texture: tex_frame_memo=%d (%s)", on, on ? "hash de imagen memorizado por frame" : "sin memoria de hash por frame");
-    }
-    return on;
-}
 
 void pcTextureInvalidateSources(void)
 {
@@ -672,7 +662,7 @@ static int native_texture_load_impl(NJS_TEXMEMLIST* addr)
     }
     {
         double th0 = pcGameProfileEnabled() ? pcGameProfileNowMs() : 0.0;
-        if (image_hash_memo_on()) {
+        {
             unsigned int slot = (unsigned int)(((uintptr_t)image >> 4) % IMAGE_HASH_MEMO_N);
             if (image_hash_memo[slot].valid && image_hash_memo[slot].image == image && image_hash_memo[slot].size == image_size &&
                 image_hash_memo[slot].frame == pcRendererFrameNumber()) {
@@ -685,8 +675,6 @@ static int native_texture_load_impl(NJS_TEXMEMLIST* addr)
                 image_hash_memo[slot].hash = ih;
                 image_hash_memo[slot].valid = 1;
             }
-        } else {
-            ih = hash_bytes(image, image_size);
         }
         ch = hash_bytes(clut, clut_size);
         if (th0 != 0.0) tex_ms_hash += pcGameProfileNowMs() - th0;
