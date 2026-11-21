@@ -35,7 +35,6 @@ void Ps2CalcScreenCone()
 
     cp[2] = -_nj_screen_.dist;
 
-#ifdef TARGET_PC
     {
         extern float pcVideoWideScale(void);
         sceVu0FMATRIX wide;
@@ -55,12 +54,6 @@ void Ps2CalcScreenCone()
         Ps2SetPlane(&c_plane[3], cp, wide[3], wide[2]);
         Ps2SetPlane(&c_plane[4], cp, wide[0], wide[3]);
     }
-#else
-    Ps2SetPlane(&c_plane[1], cp, pos[1], pos[0]);
-    Ps2SetPlane(&c_plane[2], cp, pos[2], pos[1]);
-    Ps2SetPlane(&c_plane[3], cp, pos[3], pos[2]);
-    Ps2SetPlane(&c_plane[4], cp, pos[0], pos[3]);
-#endif
 }
 
 // 100% matching! 
@@ -107,9 +100,7 @@ int CalcIntersectionCone(float* ans, float* v0, float* v1)
     
     sceVu0ScaleVector(ans, tmp1, tmpf);
     sceVu0AddVector(ans, ans, v0);
-#ifdef TARGET_PC /* the PS2 build returned whatever was left in the return register */
     return 0;
-#endif
 }
 
 // 100% matching!
