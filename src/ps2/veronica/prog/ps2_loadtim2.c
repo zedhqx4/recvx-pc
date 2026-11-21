@@ -221,8 +221,6 @@ void StoreRenderTex(void* tex_adr)
 
         pcRendererClear(0.0f, 0.0f, 0.0f, 0.0f, 1);
     }
-    return;
-    Ps2ScreenClear();
 }
 
 // 99.82% matching

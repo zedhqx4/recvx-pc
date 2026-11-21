@@ -693,3 +693,6 @@ recalcula siempre, de modo que los cambios de paleta se detectan exactamente igu
 
 ## 0.9.194 - G4 paso 5b: colas muertas de njColorBlendingModeSys y njUserClipping (ps2_NaSystem.c, -64 lineas)
 - Quedaba detras de `return;` el constructor GIF (ALPHA/PABE/FBA y SCISSOR). Los llamadores vivos usan pcRendererSetGsAlpha / pcRendererSetScissor, que no cambian.
+
+## 0.9.195 - G4 paso 5c: colas muertas de Ps2DrawOTagI (sub1.c) y StoreRenderTex (ps2_loadtim2.c)
+- Ps2DrawOTagI: se quita la segunda pasada del OT (Ps2ZbuffOffI/Ps2DrawOTagSub/Ps2ZbuffOff2/Ps2ZbuffOn) que estaba tras el return PC. StoreRenderTex: se quita `Ps2ScreenClear()` tras el return (la limpieza real es pcRendererClear, antes).

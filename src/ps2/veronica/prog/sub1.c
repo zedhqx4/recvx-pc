@@ -1361,8 +1361,6 @@ void Ps2ZbuffOffI()
 // 100% matching! 
 void Ps2DrawOTagI()
 {
-	int i;
-	
 	{
 		/* El OT no existe en PC: los primitivos con ABE esperan en la cola del renderer. Ps2ZbuffOffI + Ps2ZbuffOff2 los
 		 * recorrian en dos pasadas (fragmentos con alfa >= 128 con Z, despues los de alfa < 128 sin Z). */
@@ -1371,26 +1369,6 @@ void Ps2DrawOTagI()
 		Ps2_current_texbreak = 1;
 		return;
 	}
-
-	Ps2ZbuffOffI();
-
-	for (i = 0; i < 4096; ) 
-	{
-		i = Ps2DrawOTagSub(i);
-	}
-
-	SyncPath();
-
-	Ps2ZbuffOff2();
-
-	for (i = 0; i < 4096; ) 
-	{
-		i = Ps2DrawOTagSub(i);
-	}
-
-	Ps2ZbuffOn();
-
-	Ps2_current_texbreak = 1;
 }
 
 
