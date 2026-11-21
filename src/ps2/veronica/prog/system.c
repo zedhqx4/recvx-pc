@@ -332,7 +332,6 @@ void bhSysCallWarning()
     
     if (Adv_FirstWarningMessage() != 0)
     { 
-#ifdef TARGET_PC
         /* skip_intro=1: no Capcom logo and opening movie at startup, straight to the title (the
          * title screen's own demo loop still shows them) */
         extern int pcIniGetInt(const char* key, int def);
@@ -342,7 +341,6 @@ void bhSysCallWarning()
             sys->tk_flg = 0x300008;
             return;
         }
-#endif
         sys->tk_flg = 0x300004; 
     }
 } 
@@ -508,7 +506,6 @@ void bhFirstGameStart()
             sys->rcase = 0;
             
             sys->ply_id = 0;
-#ifdef TARGET_PC
             {
                 extern int pcWarpGet(int* stage, int* room, int* pos, int* rcase, int* player);
                 int stage, room, pos, rcase, player = 0;
@@ -522,7 +519,6 @@ void bhFirstGameStart()
                     sys->ply_id = player;
                 }
             }
-#endif
         }
         else 
         {
@@ -587,7 +583,6 @@ void bhCheckSubTask()
 {
     if ((!(sys->ss_flg & 0x80000000)) && (!(sys->st_flg & 0x1C040008)) && (!(sys->cb_flg & 0x3)) && ((sys->ts_flg & 0x1000)))
     { 
-#ifdef TARGET_PC
         {
             /* PC debug: save anywhere (F5 with debug_save=1). The typewriter's event script sets
              * 0x200000 after the ink ribbon question; set it here, only while the player could
@@ -602,7 +597,6 @@ void bhCheckSubTask()
                 pcLog("save anywhere: opening the save screen");
             }
         }
-#endif
         if (((plp->flg & 0x6)) && (!(sys->cb_flg & 0x4))) 
         {
             return; 
@@ -1280,11 +1274,7 @@ void bhSysCallOption()
     { 
         if (sys->opt_md0 != 0) 
         {
-#ifdef TARGET_PC
             /* PC: no delay slot padding needed */
-#else
-            asm("nop"); 
-#endif
         } 
         else if (!(sys->cb_flg & 0x2))
         { 
@@ -1669,7 +1659,6 @@ void bhSysCallMonitor()
                     sprintf(sys->mes, "rm_%1d%02d%1d.rdx", sys->stg_no, sys->rom_no, sys->rcase); 
                     
                     sz = GetFileSize(sys->mes);
-#ifdef TARGET_PC
                     /* The room case is global and only room scripts set it, so after random
                        doors it can name a variant this room does not have: the load would wait
                        forever. Use the room's first variant instead. */
@@ -1682,7 +1671,6 @@ void bhSysCallMonitor()
                         sprintf(sys->mes, "rm_%1d%02d%1d.rdx", sys->stg_no, sys->rom_no, sys->rcase);
                         sz = GetFileSize(sys->mes);
                     }
-#endif
                     
                     if (sz != 0) 
                     {
@@ -1748,7 +1736,6 @@ void bhSysCallMonitor()
                 {
                     FlushCache(0);
                     
-#ifdef TARGET_PC
                     {
                         extern void pcLog(const char* fmt, ...);
                         extern void pcRandoRoomLoaded(int stage, int room, int rcase);
@@ -1763,9 +1750,6 @@ void bhSysCallMonitor()
                         pcLog("room %s: %d bytes expanded, %d packed at %d, pool %d", sys->mes, sys->rdtsz,
                               (int)(sys->endp - packed), (int)(packed - sys->memp), (int)(sys->endp - sys->memp));
                     }
-#else
-                    sys->rdtsz = Expand((char*)sys->rdtp, sys->memp);
-#endif
                     
                     sys->rdtp = sys->memp;
                     
@@ -1798,14 +1782,12 @@ void bhSysCallMonitor()
                 else 
                 {
                     bhFinishRoom();
-#ifdef TARGET_PC
                     {
                         extern void pcLog(const char* fmt, ...);
 
                         /* room memory: what is left above the room and its work areas */
                         pcLog("room %s: %d KB free after setup", sys->mes, (int)(sys->endp - sys->memp) >> 10);
                     }
-#endif
                     
                     if ((sys->cb_flg & 0x80)) 
                     {
@@ -2260,7 +2242,6 @@ void bhSysCallMonitor()
     } 
 }
 
-#ifdef TARGET_PC
 /* PC: back to the title screen (F9, pc_platform.c) through the game's soft reset is offered only
  * while playing (the game tasks running, not in a movie), where bhSysCallSndMonitor does the
  * reset; at the title screen and in movies bhCheckSoftReset would end the program instead */
@@ -2268,12 +2249,10 @@ int pcTitleAllowed(void)
 {
     return ((sys->tk_flg & 0x40)) && (!(sys->tk_flg & 0x3F)) && (!(sys->ss_flg & 0x520000));
 }
-#endif
 
 // 100% matching! 
 void bhSysCallSndMonitor()
 {
-#ifdef TARGET_PC
     {
         extern int pcTitleAllowed(void);
         extern int pcTitleRequested(void);
@@ -2283,7 +2262,6 @@ void bhSysCallSndMonitor()
             SoftResetFlag = 1;
         }
     }
-#endif
 
     if (((!(sys->ss_flg & 0x120000)) && (!(sys->tk_flg & 0x3F))) && (SoftResetFlag == 1)) 
     {
