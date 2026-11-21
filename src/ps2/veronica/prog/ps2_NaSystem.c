@@ -2,9 +2,7 @@
 #include "../../../ps2/veronica/prog/ps2_dummy.h"
 #include "../../../ps2/veronica/prog/ps2_loadtim2.h"
 #include "../../../ps2/veronica/prog/main.h"
-#ifdef TARGET_PC
 #include "pc_renderer.h"
-#endif
 
 
 PS2_NJ_SAVE Ps2_nj_save_current;
@@ -22,11 +20,7 @@ void	njSetVertexBuffer(Uint32 *buffer,Sint32 size)
 }
 
 // 100% matching!
-#ifdef TARGET_PC
 void	njInitSystem( Int mode, Int frame, Int count )
-#else
-void	njInitSystem( Int, Int, Int )
-#endif
 {
     Ps2Init();
 }
@@ -74,7 +68,6 @@ void 	njSetEORFunction( void (*func)(void) )
 // 100% matching!
 void Ps2SwapDBuff()
 {
-#ifdef TARGET_PC
     Ps2DrawOTag();
     Ps2ClearOT();
     EorFunc();
@@ -87,27 +80,10 @@ void Ps2SwapDBuff()
     pcVideoPresent();
     Ps2_vcount = 0;
     VsyncFunc();
-#else
-    SyncPath();
-    Ps2DrawOTag();
-    Ps2ClearOT();
-    SyncPath();
-    EorFunc();
-    while (Ps2_vcount < 2) { asm("nop"); }
-    PS2_swap();
-    sceGsSwapDBuffDc(&Db, Ps2_dbuff);
-    Ps2_dbuff = (Ps2_dbuff + 1) & 0x1;
-    Ps2_vcount = 0;
-    VsyncFunc();
-#endif
 }
 
 // 100% matching! 
-#ifdef TARGET_PC
 int vsync_func(int cause)
-#else
-int vsync_func(int) 
-#endif
 {
     Ps2_vcount++; 
     
@@ -117,9 +93,7 @@ int vsync_func(int)
     }
     
     ExitHandler(); 
-#ifdef TARGET_PC /* the PS2 build returned whatever was left in the return register */
     return 0;
-#endif
 } 
 
 #pragma optimization_level reset
@@ -164,7 +138,6 @@ void	njSetBackColor( Uint32 col1, Uint32 col2, Uint32 col3 )
     
     *(unsigned long*)UNCACHED(&Db.clear0.rgbaq) = tmp; 
     *(unsigned long*)UNCACHED(&Db.clear1.rgbaq) = tmp; 
-#ifdef TARGET_PC
     /* Db.clear0/1 era el sprite con el que la GS limpiaba el frame buffer al cambiar de buffer (PS2_swap): el color de fondo.
      * El renderer limpia el FBO al empezar cada frame con ese mismo color (el logo ADX y otras pantallas usan fondo blanco). */
     {
@@ -172,7 +145,6 @@ void	njSetBackColor( Uint32 col1, Uint32 col2, Uint32 col3 )
         pcRendererSetClearColor((float)((col1 >> 16) & 0xFF) / 255.0f, (float)((col1 >> 8) & 0xFF) / 255.0f,
                                 (float)(col1 & 0xFF) / 255.0f, a > 1.0f ? 1.0f : a);
     }
-#endif
 } 
 
 // 100% matching! 
@@ -413,10 +385,8 @@ void njColorBlendingModeSys(int s_mode, int d_mode) // this function is not on t
         while (TRUE); 
     }
     
-#ifdef TARGET_PC
     pcRendererSetGsAlpha((uint64_t)alpha_value);   /* mismo registro ALPHA que recibia la GS */
     return;
-#endif
     D2_SyncTag(); 
     
     ((u_long*)WORKBASE)[0] = DMAend | 0x4; 
@@ -466,7 +436,6 @@ void    njSetCheapShadowMode( Int mode )
 // 99.95% matching 
 void	njUserClipping(Int mode ,NJS_POINT2 *p)
 {
-#ifdef TARGET_PC
     if (mode == 0) {
         pcRendererSetScissor(0, 0, 0, 640, 480);
         return;
@@ -487,7 +456,6 @@ void	njUserClipping(Int mode ,NJS_POINT2 *p)
     }
     pcRendererSetScissor(0, 0, 0, 640, 480);
     return;
-#endif
  
     unsigned long* np; // changed the original var name from the debugging symbols 
     sceVu0FVECTOR posf;
