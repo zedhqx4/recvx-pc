@@ -186,11 +186,11 @@ static const char* fragment_shader =
     "#version 330 core\n"
     "noperspective in vec4 vColor; in vec2 vTexCoord; noperspective in float vFog; in float vQ;\n"
     "uniform sampler2D uTexture; uniform int uTextured; uniform int uFogEnabled;\n"
-    "uniform vec3 uFogColor; uniform int uAlphaTest; uniform float uAlphaRef; uniform vec2 uTextureSize; uniform int uTextureFunction, uTextureAlpha, uTexturePerspective, uScreenSpace, uAlphaPass, uGsInt;\n"
+    "uniform vec3 uFogColor; uniform int uAlphaTest; uniform float uAlphaRef; uniform vec2 uTextureSize; uniform int uTextureFunction, uTextureAlpha, uTexturePerspective, uScreenSpace, uAlphaPass;\n"
     "out vec4 oColor;\n"
     "void main(){ vec4 c=vColor; if(uTextured!=0){ vec2 uv=vTexCoord; if(uScreenSpace!=0 && uTexturePerspective!=0)uv/=max(vQ,0.000001); vec4 t=texture(uTexture,uv/uTextureSize);\n"
     /* MODULATE de la GS en enteros: Cs = min((Ct*Cv) >> 7, 255), con Ct y Cv de 8 bits */
-    "    if(uTextureFunction==0){ c.rgb=(uGsInt!=0)?min(floor(floor(t.rgb*255.0+0.001)*floor(c.rgb*255.0+0.001)/128.0),vec3(255.0))/255.0:t.rgb*c.rgb*1.9921875; if(uTextureAlpha!=0)c.a=t.a*c.a; }\n"
+    "    if(uTextureFunction==0){ c.rgb=min(floor(floor(t.rgb*255.0+0.001)*floor(c.rgb*255.0+0.001)/128.0),vec3(255.0))/255.0; if(uTextureAlpha!=0)c.a=t.a*c.a; }\n"
     "    else if(uTextureFunction==1){ c.rgb=t.rgb; if(uTextureAlpha!=0)c.a=t.a; }\n"
     "    else if(uTextureFunction==2){ c.rgb=clamp(t.rgb*c.rgb*1.9921875+vec3(c.a*0.5019608),0.0,1.0); if(uTextureAlpha!=0)c.a=clamp(t.a+c.a,0.0,1.0); }\n"
     "    else if(uTextureFunction==3){ c.rgb=clamp(t.rgb*c.rgb*1.9921875+vec3(c.a*0.5019608),0.0,1.0); if(uTextureAlpha!=0)c.a=t.a; }\n"
@@ -201,9 +201,8 @@ static const char* fragment_shader =
     /* Niebla de la GS en enteros: C = (F*Cs + (255-F)*FOGCOL) >> 8 con Cs, F y FOGCOL de 8 bits (Cs ya saturado). Es 255/256 de la
      * mezcla "real" con truncado: F=0 da floor(255*FOGCOL/256) = FOGCOL-1 (la GS pinta (17,17,27) con FOGCOL (18,18,28)) y hasta con
      * F=255 resta 1. En escenas oscuras ese escalon se ve como brillo/negros distintos y como siluetas de lo totalmente nublado. */
-    "  if(uFogEnabled!=0){ if(uGsInt!=0){ vec3 cs=clamp(floor(c.rgb*255.0+0.001),0.0,255.0); float F=floor(clamp(vFog,0.0,1.0)*255.0+0.001); vec3 fc=floor(uFogColor*255.0+0.001);\n"
-    "      c.rgb=floor((F*cs+(255.0-F)*fc)/256.0)/255.0; }\n"
-    "    else c.rgb=mix(uFogColor,clamp(c.rgb,0.0,1.0),clamp(vFog,0.0,1.0)); }\n"
+    "  if(uFogEnabled!=0){ vec3 cs=clamp(floor(c.rgb*255.0+0.001),0.0,255.0); float F=floor(clamp(vFog,0.0,1.0)*255.0+0.001); vec3 fc=floor(uFogColor*255.0+0.001);\n"
+    "    c.rgb=floor((F*cs+(255.0-F)*fc)/256.0)/255.0; }\n"
     "  oColor=c;\n"
     /* El Z-buffer de la GS es PSMZ16 (ZBUF_1 = PSMCT16S/Z16): el Z interpolado se guarda entero de 16 bits (sz = 0..65535). Dos
      * superficies casi coplanares dan el MISMO Z y gana la dibujada despues (ZTST=GEQUAL). Con la profundidad de 24 bits de GL
@@ -374,14 +373,6 @@ int pcRendererInit(int width, int height)
     u_texture_alpha = glGetUniformLocation(program, "uTextureAlpha");
     u_texture_perspective = glGetUniformLocation(program, "uTexturePerspective");
     u_alpha_pass = glGetUniformLocation(program, "uAlphaPass");
-    {   /* RECVX_GS_INT=0 vuelve a la mezcla en coma flotante (comparar A/B con la aritmetica entera de la GS, por defecto activa) */
-        const char* e = getenv("RECVX_GS_INT");
-        int gs_int = e ? (*e != '0') : (pcIniGetInt("gs_int", 1) != 0);   /* entorno RECVX_GS_INT o gs_int= en recvx.ini */
-        glUseProgram(program);
-        glUniform1i(glGetUniformLocation(program, "uGsInt"), gs_int);
-        pcLog("native renderer: aritmetica entera de la GS (MODULATE >>7, niebla >>8): %s", gs_int ? "activa" : "desactivada (gs_int=0 / RECVX_GS_INT=0)");
-    }
-
     glGenVertexArrays(1, &vertex_array);
     glBindVertexArray(vertex_array);
     glGenBuffers(1, &vertex_buffer);
