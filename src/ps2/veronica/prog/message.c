@@ -583,7 +583,6 @@ int bhDispMessage(float px, float py, float pri, int mes_typ, int mes_idx, int c
         mes_dp = sys->mes_sp;
         
         dp = (unsigned short*)((char*)mes_dp + sys->mes_sp[mes_idx + 1]);
-#ifdef TARGET_PC
         {
             extern const unsigned short* pcMessageOverride(int table, int idx, const void* base);
             const unsigned short* ov = pcMessageOverride(1, mes_idx, sys->mes_sp);
@@ -593,7 +592,6 @@ int bhDispMessage(float px, float py, float pri, int mes_typ, int mes_idx, int c
                 dp = (unsigned short*)ov;   /* save/load wording for PC (pc_text.c) */
             }
         }
-#endif
         break;
 
     default:
@@ -699,7 +697,6 @@ int bhDispMessageEx(float px, float py, float pri, int mes_typ, int mes_idx, uns
         mes_dp = sys->mes_sp;
         
         dp = (unsigned short*)((char*)mes_dp + sys->mes_sp[mes_idx + 1]);
-#ifdef TARGET_PC
         {
             extern const unsigned short* pcMessageOverride(int table, int idx, const void* base);
             const unsigned short* ov = pcMessageOverride(1, mes_idx, sys->mes_sp);
@@ -709,7 +706,6 @@ int bhDispMessageEx(float px, float py, float pri, int mes_typ, int mes_idx, uns
                 dp = (unsigned short*)ov;   /* save/load wording for PC (pc_text.c) */
             }
         }
-#endif
         break;
     default:
         dp = sys->mes_tp;
