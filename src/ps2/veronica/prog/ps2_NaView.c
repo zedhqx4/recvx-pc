@@ -4,9 +4,7 @@
 #include "../../../ps2/veronica/prog/ps2_NaGraphics3D.h"
 #include "../../../ps2/veronica/prog/ps2_Vu1Strip.h"
 #include "../../../ps2/veronica/prog/main.h"
-#ifdef TARGET_PC
 #include "pc_calcpoint.h"
-#endif
 
 NJS_MATRIX NaViwViewMatrix;
 float fNaViwHalfW;
@@ -83,14 +81,12 @@ void njSetScreenProjection(float dist)
 // 100% matching!
 void    njSetAspect(Float ax, Float ay)
 { 
-#ifdef TARGET_PC
     {
         extern float pcVideoWideScale(void);
 
         /* widescreen: a wider view squeezed into the 640 wide frame, stretched when shown */
         ax *= pcVideoWideScale();
     }
-#endif
     fNaViwAspectW = ax; 
     fNaViwAspectH = ay; 
     
@@ -260,13 +256,11 @@ void _Make_ClipMatrix(sceVu0FMATRIX sc, float scr, float near, float far)
     
     gsx = (near * cv->x) / scr; 
     gsy = (near * cv->y) / scr; 
-#ifdef TARGET_PC
     {
         extern float pcVideoWideScale(void);
 
         gsx /= pcVideoWideScale();   /* widescreen: clip against the wider view */
     }
-#endif
     
     sceVu0UnitMatrix(mp); 
 
@@ -281,44 +275,15 @@ void _Make_ClipMatrix(sceVu0FMATRIX sc, float scr, float near, float far)
 
     mp2 = &ClipMatrix2[0]; 
     
-#ifdef TARGET_PC
     pcViewSetClipMatrix((const float*)mp2);   /* copia para pcCalcPoint */
-#else
-    asm volatile 
-    { 
-    .set noreorder
-        
-        lqc2 $vf24, 0x0(mp2) 
-        lqc2 $vf25, 0x10(mp2) 
-        lqc2 $vf26, 0x20(mp2) 
-        lqc2 $vf27, 0x30(mp2)
-
-    .set reorder
-    }
-#endif
 
     fM = ClipScreenMatrix[0];
     
     fw = &ClipDispW; 
     fh = &ClipDispH; 
 
-#ifdef TARGET_PC
     fM[11] = *fw;
     fM[10] = *fh;
-#else
-    asm volatile 
-    { 
-    .set noreorder
-        
-        lwc1 $f8, 0x0(fw) 
-        lwc1 $f9, 0x0(fh) 
-        
-        swc1 $f8, 0x2C(fM) 
-        swc1 $f9, 0x28(fM)
-
-    .set reorder
-    }
-#endif
 } 
 
 // 100% matching!
