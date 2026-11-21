@@ -889,7 +889,6 @@ void bhDraw137(O_WRK* op)
     p[3].x = 0;
     p[3].y = 95.0f;
     
-#ifdef TARGET_PC
     {
         /* PC: the camera view's tint and scanline bands cover the picture: in widescreen they
          * span the whole width (the frame, arrows and numbers below stay 4:3) */
@@ -897,7 +896,6 @@ void bhDraw137(O_WRK* op)
 
         pcWide2DFullWidth = 1;
     }
-#endif
     for (i = 0; i < 5; i++) 
     {
         njDrawPolygon2DM(&p2c, 4, -1.6f, 0x80000060);
@@ -908,13 +906,11 @@ void bhDraw137(O_WRK* op)
         p[3].y += 96.0f;
     } 
     
-#ifdef TARGET_PC
     {
         extern int pcWide2DFullWidth;
 
         pcWide2DFullWidth = 0;
     }
-#endif
 
     col[3].color = col[2].color = col[1].color = col[0].color = 0xC0FFFFFF;
     
@@ -1427,7 +1423,6 @@ void bhDraw138(O_WRK* op)
     p[3].x = 0;
     p[3].y = 480.0f;
     
-#ifdef TARGET_PC
     {
         /* PC: the panel is 4:3 art (translucent, so the widescreen rule would take it for a
          * screen filter and stretch it): keep it 4:3 under the gauges, fills and digits */
@@ -1437,9 +1432,6 @@ void bhDraw138(O_WRK* op)
         njDrawPolygon2D(&p2c, 4, -3.0f, 0x80000060);
         pcWide2DKeep43 = 0;
     }
-#else
-    njDrawPolygon2D(&p2c, 4, -3.0f, 0x80000060);
-#endif
     
     njTextureFilterMode(0);
     
