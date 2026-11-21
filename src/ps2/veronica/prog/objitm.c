@@ -1383,7 +1383,6 @@ void bhObj005(O_WRK* op)
         
         nb = op->ct2;
         
-#ifdef TARGET_PC
         {
             unsigned char* s = (unsigned char*)pCnk;
             unsigned char* d = (unsigned char*)pOrg;
@@ -1426,97 +1425,7 @@ void bhObj005(O_WRK* op)
                 d += 64;
             } while (--cnt != 0);
         }
-#else
-        asm volatile 
-        ("
-        .set noreorder
-            vcallms    VU0_WAVE_INIT
-            
-            srl        t0,  %0, 1
-            
-            muli       $t1, %6, 4
-            
-            bnez       %5, l_00285C50 
-            nop
-        
-            lwc1       f1,   0x4(%1)
-            lw         t2,     0(%1)
-            
-            addi       t0, t0, -1 
-            
-            lwc1       f2,     0(t2)
-            
-            addi       %2, %2, 32 
-
-            add.s      f1, f1, f2
-
-            addi       %1, %1, 32 
-            
-            swc1       f1, -0x1C(%2)
-            
-        l_00285C50:
-            lw         t2, 0(%1)
-            
-            addi       %2, %2, 16 
-            addi       %1, %1, 16 
-            
-            addi       t3, t2, -4 
-
-            add        t4, t2, t1 
-
-            addi       t5, t2, 4 
-        
-            sub        t6, t2, t1 
-            
-        l_00285C6C:
-            lw         t3,    0(t3)
-            lw         t4,    0(t4)
-            lw         t5,    0(t5)
-            lw         t6,    0(t6)
-            
-            qmtc2      t3, vf6
-            qmtc2      t4, vf7
-            qmtc2      t5, vf8
-            qmtc2      t6, vf9
-        
-            vcallms    VU0_WAVE_CALC
-            
-            lw         t7, 0x10(%1)
-            lwc1       f1, 0x14(%1)
-            lw         t2, 0x30(%1)
-            
-            lwc1       f2,    0(t7)
-            
-            addi       t3, t2, -4 
-            
-            add        t4, t2, t1 
-            add.s      f1, f1, f2
-
-            addi       t5, t2, 4 
-        
-            sub        t6, t2, t1 
-            
-            vwaitq
-            
-            vmulq.xyz  vf10, vf10, Q
-            
-            addi       t0, t0, -1 
-            
-            swc1       f1, 0x14(%2)
-            
-            addi       %1, %1, 64 
-            
-            sqc2       vf10,  0(%2)
-            
-            bnez       t0, l_00285C6C
-        
-            addi       %2, %2, 64 
-        .set reorder
-        " : : "r"(nb), "r"(pCnk), "r"(pOrg), "r"(sys->gfrm_ct), "r"(xp), "r"(j), "r"(sys->wt_zp) : "$s2", "$s5", "memory" 
-        ); 
-#endif
      
-#ifdef TARGET_PC
         {
             /* As in the original binary (the reload of vf6 sits after the loop): every 16-float block
              * gets its second quadword from the *first* block's. */
@@ -1541,69 +1450,6 @@ void bhObj005(O_WRK* op)
                 }
             }
         }
-#else
-        asm volatile 
-        (" 
-            
-            srl        t0, %0, 2
-            
-            mfc1       t1, %2
-            
-            srl        t2, t0, 2
-            
-            qmtc2      t1, vf4
-            
-            lqc2       vf5,    0(%1)
-            lqc2       vf6, 0x10(%1)
-            
-        l_00285D1C:
-            lqc2       vf7, 0x20(%1)
-            lqc2       vf8, 0x30(%1)
-            
-            vsubx.xyzw vf9,  vf5, vf4x
-            vsubx.xyzw vf10, vf6, vf4x
-            vsubx.xyzw vf11, vf7, vf4x
-            vsubx.xyzw vf12, vf8, vf4x
-            
-            vmaxx.xyzw vf9,  vf9,  vf0x
-            vmaxx.xyzw vf10, vf10, vf0x
-            vmaxx.xyzw vf11, vf11, vf0x
-            vmaxx.xyzw vf12, vf12, vf0x
-            
-            sqc2       vf9,     0(%1)
-            sqc2       vf10, 0x10(%1)
-            sqc2       vf11, 0x20(%1)
-            sqc2       vf12, 0x30(%1)
-            
-            addi       t2, t2, -1 
-            addi       %1, %1, 64 
-            
-            lqc2       vf5,    0(%1)
-            
-            bnez       t2, l_00285D1C
-        
-            lqc2       vf6, 0x10(%1)
-            
-            andi       t0, t0, 0x3
-        
-        l_00285D6C:
-            bnez       t0, exit
-        
-            addi       t0, t0, -1 
-            
-            vsubx.xyzw vf9, vf5, vf4x
-            
-            addi       %1, %1, 16 
-            
-            vmaxx.xyzw vf9, vf9, vf0x
-            
-            lqc2       vf5, 0(%1)
-            
-            b          l_00285D6C
-        
-        " : : "r"(sys->wt_nbpt), "r"(sys->wt_wvp), "f"(0.2f) : "$t0", "$t1", "$t2", "memory" 
-        );  
-#endif
             
     exit:
         break;
