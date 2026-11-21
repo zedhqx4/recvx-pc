@@ -63,3 +63,10 @@ Recuerda las correcciones de G1: antes de declarar MUERTA una funcion, busca lla
 `itemview.c`, `ps2_NaDraw.c`, `ps2_NinjaCnk.c`) y verifica con la lista de usos de INI.
 Terminado cuando: las cuatro areas estan cubiertas, la tabla resumen y la propuesta de orden existen, y las dudas estan
 bajo `## Preguntas`.
+
+## Correcciones de Claude al informe G3
+- Conclusion de G3 confirmada: la build PC no emula GS/GIF/VIF/DMA; quedan shims de API (`sceGs*`, `sceDma*`, `FlushCache`), layouts/ABI y ramas PS2 sin compilar.
+- Error: `vu1ScessorBuf` SI existe (`ps2_Vu1Strip.c:65`, usado en `ps2_Vu1Strip.c:306,309` y `ps2_Vu1Scissor2.c`); no es errata.
+- Lineas "muertas" medidas con script (ramas `#else` de `#ifdef TARGET_PC` y cuerpos de `#ifndef TARGET_PC`, 283 113 lineas totales en src/ e include/): **5 334** (NaMatrix 1417, NinjaCnk 833, ps2_dummy 651, njplus 406, NaMath 350, Vu1Strip 343, face_bh 306, Scissor2 274, expand 196, objitm 148). Las estimaciones por rangos de G3 no se usan.
+- Quedan 121 `asm volatile` en src/ (todas en ramas PS2 o rutas no PC; por verificar caso a caso al retirarlas).
+- Los pasos 1-2 de su orden de retirada (headers EE, stubs inertes) quedan en espera de la decision del usuario sobre la pregunta 1 (conservar o no la compilacion PS2).
