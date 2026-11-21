@@ -685,3 +685,8 @@ recalcula siempre, de modo que los cambios de paleta se detectan exactamente igu
 ## 0.9.192 - gpu_vertex ya no es interruptor (vertex shader siempre)
 - ps2_dummy.c: se borra pcGpuVertexEnabled (INI gpu_vertex / env RECVX_GPU_VERTEX). Las tiras 3D y el empaquetador del EE usan siempre la conversion en el vertex shader (screen_space 3/4), salvo los sprites (topologia 6), que siguen convirtiendo en la CPU (screen_space 2) como ya hacia la ruta GPU. Por eso el codigo de conversion CPU del bucle no se borra: sigue vivo para sprites.
 - Con gpu_vertex=1 (lo que corre el usuario) el comportamiento es identico.
+
+## 0.9.193 - G4 paso 5a: se borran los constructores GIF/GS inalcanzables de ps2_dummy.c (-642 lineas)
+- Informe de GPT: coord/reports/G4.md (clasificacion A/B/C). Aqui solo el codigo que quedaba DESPUES de un `return` incondicional del camino PC: colas de Ps2AddPrim3D/Ex/Ex1P/Mod/ExI, Ps2SetFogColor/Sys, Ps2ScreenClear, Ps2DispScreenClear, Ps2ZbuffOff/Off2/On, Ps2ShadowStart/Draw/Main0/Main1/End, PS2_Render_Tex_Sub. Los preambulos vivos (comprobacion de textura TME/ABE, llamadas pcRenderer*) se conservan.
+- Tambien variables locales que solo usaba el codigo muerto (p, pp, p128, zsum, clip_vec, zbuff_ab_vec, ...). Las etiquetas l_00xxxx no tenian goto.
+- Validacion: el codigo es inalcanzable (return incondicional antes); balance de llaves/parentesis 0/0; solo se anaden 4 lineas en blanco. No se pudo compilar (SDK).
