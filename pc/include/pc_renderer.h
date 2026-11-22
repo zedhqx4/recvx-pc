@@ -39,6 +39,8 @@ typedef struct {
     int ot_queue;              /* 1: goes through the OT even without ABE (2D: the GS ordered it by Z bucket, then by submission) */
     int immediate;             /* blended primitive that the game draws at once instead of through the OT */
     float zbuff_a, zbuff_b;    /* screen_space 3 y 4: constantes de Z de la GS, sz = -a + q * -b (0 en los demas modos) */
+    int uv_clamp;              /* 1: el fragmento solo muestrea dentro de uv_clamp_rect (piezas 2D cortadas de un atlas: sin sangrado de vecinas) */
+    float uv_clamp_rect[4];    /* u0, v0, u1, v1 en texels; solo se lee con uv_clamp != 0 */
 } PcNativeDrawState;
 
 int pcRendererInit(int width, int height);

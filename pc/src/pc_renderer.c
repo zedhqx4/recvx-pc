@@ -81,6 +81,7 @@ static GLuint vertex_buffer;
 static GLuint program;
 static GLint u_target, u_projection, u_aspect, u_offset, u_near, u_far;
 static GLint u_textured, u_texture, u_fog_enabled, u_fog_color, u_alpha_test, u_alpha_ref;
+static GLint u_uv_clamp, u_uv_clamp_on;
 static GLint u_zbuf, u_screen_space, u_texture_size, u_texture_function, u_texture_alpha, u_texture_perspective, u_alpha_pass;
 static int output_width = 640;
 static int output_height = 480;
@@ -186,9 +187,10 @@ static const char* fragment_shader =
     "#version 330 core\n"
     "noperspective in vec4 vColor; in vec2 vTexCoord; noperspective in float vFog; in float vQ;\n"
     "uniform sampler2D uTexture; uniform int uTextured; uniform int uFogEnabled;\n"
+    "uniform vec4 uUvClamp; uniform int uUvClampOn;\n"
     "uniform vec3 uFogColor; uniform int uAlphaTest; uniform float uAlphaRef; uniform vec2 uTextureSize; uniform int uTextureFunction, uTextureAlpha, uTexturePerspective, uScreenSpace, uAlphaPass;\n"
     "out vec4 oColor;\n"
-    "void main(){ vec4 c=vColor; if(uTextured!=0){ vec2 uv=vTexCoord; if(uScreenSpace!=0 && uTexturePerspective!=0)uv/=max(vQ,0.000001); vec4 t=texture(uTexture,uv/uTextureSize);\n"
+    "void main(){ vec4 c=vColor; if(uTextured!=0){ vec2 uv=vTexCoord; if(uScreenSpace!=0 && uTexturePerspective!=0)uv/=max(vQ,0.000001); if(uUvClampOn!=0)uv=clamp(uv,uUvClamp.xy,uUvClamp.zw); vec4 t=texture(uTexture,uv/uTextureSize);\n"
     /* MODULATE de la GS en enteros: Cs = min((Ct*Cv) >> 7, 255), con Ct y Cv de 8 bits */
     "    if(uTextureFunction==0){ c.rgb=min(floor(floor(t.rgb*255.0+0.001)*floor(c.rgb*255.0+0.001)/128.0),vec3(255.0))/255.0; if(uTextureAlpha!=0)c.a=t.a*c.a; }\n"
     "    else if(uTextureFunction==1){ c.rgb=t.rgb; if(uTextureAlpha!=0)c.a=t.a; }\n"
@@ -367,6 +369,8 @@ int pcRendererInit(int width, int height)
     u_alpha_test = glGetUniformLocation(program, "uAlphaTest");
     u_alpha_ref = glGetUniformLocation(program, "uAlphaRef");
     u_screen_space = glGetUniformLocation(program, "uScreenSpace");
+    u_uv_clamp = glGetUniformLocation(program, "uUvClamp");
+    u_uv_clamp_on = glGetUniformLocation(program, "uUvClampOn");
     u_zbuf = glGetUniformLocation(program, "uZbuf");
     u_texture_size = glGetUniformLocation(program, "uTextureSize");
     u_texture_function = glGetUniformLocation(program, "uTextureFunction");
@@ -772,8 +776,8 @@ void pcRendererSetBlend2(const PcBlendEquation* eq) { batch_flush(); blend_decod
  * profundidad tambien en transparentes y test de profundidad en 2D. */
 /* Ultimos valores subidos al programa (ver apply_state). */
 typedef struct {
-    float target[2], projection, aspect[2], offset[2], fog_color[3], alpha_ref, texture_size[2], zbuf[2];
-    int textured, fog_enabled, alpha_test, screen_space, texture_function, texture_alpha, texture_perspective, alpha_pass;
+    float target[2], projection, aspect[2], offset[2], fog_color[3], alpha_ref, texture_size[2], zbuf[2], uv_clamp[4];
+    int textured, fog_enabled, alpha_test, screen_space, texture_function, texture_alpha, texture_perspective, alpha_pass, uv_clamp_on;
 } UniformCache;
 static UniformCache uniform_cache;
 static int uniform_cache_valid;
@@ -887,6 +891,8 @@ static void apply_state(const PcNativeDrawState* st)
         n.texture_perspective = st->texture_perspective != 0;
         n.alpha_pass = alpha_pass;
         n.zbuf[0] = st->zbuff_a; n.zbuf[1] = st->zbuff_b;
+        n.uv_clamp_on = st->uv_clamp != 0;
+        if (n.uv_clamp_on) memcpy(n.uv_clamp, st->uv_clamp_rect, sizeof(n.uv_clamp));
 #define UNIFORM_CHANGED(f) (!uniform_cache_valid || memcmp(&uniform_cache.f, &n.f, sizeof(n.f)) != 0)
         if (UNIFORM_CHANGED(target)) glUniform2f(u_target, n.target[0], n.target[1]);
         if (UNIFORM_CHANGED(projection)) glUniform1f(u_projection, n.projection);
@@ -909,6 +915,8 @@ static void apply_state(const PcNativeDrawState* st)
         if (UNIFORM_CHANGED(texture_alpha)) glUniform1i(u_texture_alpha, n.texture_alpha);
         if (UNIFORM_CHANGED(texture_perspective)) glUniform1i(u_texture_perspective, n.texture_perspective);
         if (UNIFORM_CHANGED(alpha_pass)) glUniform1i(u_alpha_pass, n.alpha_pass);
+        if (UNIFORM_CHANGED(uv_clamp_on)) glUniform1i(u_uv_clamp_on, n.uv_clamp_on);
+        if (UNIFORM_CHANGED(uv_clamp)) glUniform4f(u_uv_clamp, n.uv_clamp[0], n.uv_clamp[1], n.uv_clamp[2], n.uv_clamp[3]);
 #undef UNIFORM_CHANGED
         uniform_cache = n;
         uniform_cache_valid = 1;

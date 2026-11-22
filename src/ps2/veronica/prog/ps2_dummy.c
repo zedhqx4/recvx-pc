@@ -1041,6 +1041,34 @@ void Ps2AddPrim2D(unsigned long prim, void* dp, unsigned int num)
         state.linear_filter = 1;
         state.screen_space = 1;
         state.cull_backfaces = 0;
+        if (state.textured && use_uv && count > 0)
+        {
+            /* Piezas 2D (UV enteras) cortadas de un atlas: ampliadas, el filtrado en su borde mezclaria la pieza vecina del atlas.
+             * Solo pueden muestrear sus propios texels: desde medio texel dentro de su rectangulo UV (lo que hacia el renderer
+             * GS de pc-port). Los modelos 3D usan ST y no pasan por aqui. */
+            static int uv_clamp_mode = -1;
+
+            if (uv_clamp_mode < 0)
+                uv_clamp_mode = pcIniGetInt("ui_uv_clamp", 0);
+            if (uv_clamp_mode != 0)
+            {
+                float u0 = vertices[0].u, v0 = vertices[0].v, u1 = u0, v1 = v0;
+                int k;
+
+                for (k = 1; k < count; k++)
+                {
+                    if (vertices[k].u < u0) u0 = vertices[k].u;
+                    if (vertices[k].u > u1) u1 = vertices[k].u;
+                    if (vertices[k].v < v0) v0 = vertices[k].v;
+                    if (vertices[k].v > v1) v1 = vertices[k].v;
+                }
+                if (u1 - u0 >= 1.0f) { u0 += 0.5f; u1 -= 0.5f; } else { u0 = u1 = (u0 + u1) * 0.5f; }
+                if (v1 - v0 >= 1.0f) { v0 += 0.5f; v1 -= 0.5f; } else { v0 = v1 = (v0 + v1) * 0.5f; }
+                state.uv_clamp = 1;
+                state.uv_clamp_rect[0] = u0; state.uv_clamp_rect[1] = v0;
+                state.uv_clamp_rect[2] = u1; state.uv_clamp_rect[3] = v1;
+            }
+        }
         {
             /* Ps2AddOT usa el sz del ultimo vertice como clave del OT */
             float zv = pcPriToViewZ(use_last_pri);
