@@ -4,7 +4,6 @@
 #include <stdint.h>
 #include "../../../../pc/include/pc_vu.h"
 #include "../../../../pc/include/pc_game_profile.h"
-extern int Send_Tim2_dataExClutOnly(void* tim2_top_adr, unsigned long send_image_adr, unsigned long send_clut_adr);
 #include "../../../ps2/veronica/prog/ps2_dummy.h"
 #include "../../../ps2/veronica/prog/ps2_loadtim2.h"
 #include "../../../ps2/veronica/prog/ps2_NaDraw2D.h"
@@ -129,77 +128,6 @@ extern int ps2_vu1sub1 __attribute__((section(".vudata")));
 
 
 
-
-// 99.92% matching 
-void PS2_swap()
-{
-    unsigned long *p;
-
-    p = (unsigned long*)WORKBASE;
-
-    D2_SyncTag();
-
-    *p++ = DMAend | 0xF;
-    *p++ = 0;
-
-    *p++ = SCE_GIF_SET_TAG(14, SCE_GS_TRUE, SCE_GS_FALSE, 0, SCE_GIF_PACKED, 1);
-    *p++ = SCE_GIF_PACKED_AD;
-
-    *p++ = SCE_GS_SET_FRAME_2(150, 10, SCE_GS_PSMCT32, 0);
-    *p++ = SCE_GS_FRAME_2;
-
-    *p++ = 0;
-    *p++ = SCE_GS_TEXFLUSH;
-
-    *p++ = SCE_GS_SET_TEX1_2(0, 0, SCE_GS_NEAREST, SCE_GS_NEAREST, 0, 0, 0);
-    *p++ = SCE_GS_TEX1_2;
-
-    *p++ = SCE_GS_SET_PABE(0);
-    *p++ = SCE_GS_PABE;
-
-    if (MovieInfo.ExecMovieSystemFlag != 0)
-    {
-        *p++ = SCE_GS_SET_ALPHA_2(SCE_GS_ALPHA_CS, SCE_GS_ALPHA_CD, SCE_GS_ALPHA_FIX, SCE_GS_ALPHA_CD, 128);
-    }
-    else
-    {
-        *p++ = SCE_GS_SET_ALPHA_2(SCE_GS_ALPHA_CS, SCE_GS_ALPHA_CD, SCE_GS_ALPHA_FIX, SCE_GS_ALPHA_CD, 96);
-    }
-
-    *p++ = SCE_GS_ALPHA_2;
-
-    *p++ = SCE_GS_SET_TEST_2(0, SCE_GS_ALPHA_NEVER, 0, SCE_GS_AFAIL_KEEP, 0, 0, 1, SCE_GS_DEPTH_ALWAYS);
-    *p++ = SCE_GS_TEST_2;
-
-    *p++ = SCE_GS_SET_TEX0_2(0, 10, SCE_GS_PSMCT32, 10, 9, 1, SCE_GS_MODULATE, 0, SCE_GS_PSMCT32, 0, 0, 0);
-    *p++ = SCE_GS_TEX0_2;
-
-    *p++ = SCE_GS_SET_PRIM(SCE_GS_PRIM_SPRITE, 0, 1, 0, 1, 0, 1, 1, 0);
-    *p++ = SCE_GS_PRIM;
-
-    *p++ = SCE_GS_SET_RGBAQ(128, 128, 128, 128, 0);
-    *p++ = SCE_GS_RGBAQ;
-
-    *p++ = SCE_GS_SET_UV(8, 8);
-    *p++ = SCE_GS_UV;
-
-    *p++ = SCE_GS_SET_XYZF2(GS_X_COORD(0), GS_Y_COORD(-128), 256, 0);
-    *p++ = SCE_GS_XYZF2;
-
-    *p++ = SCE_GS_SET_UV(8 + (DISP_WIDTH * 16), 8 + (DISP_HEIGHT * 16));
-    *p++ = SCE_GS_UV;
-
-    *p++ = SCE_GS_SET_XYZF2(GS_X_COORD(SCR_WIDTH), GS_Y_COORD(352), 256, 0);
-    *p++ = SCE_GS_XYZF2;
-
-    *p++ = SCE_GS_SET_TEST_2(0, SCE_GS_ALPHA_NEVER, 0, SCE_GS_AFAIL_KEEP, 0, 0, 1, SCE_GS_DEPTH_GEQUAL);
-    *p++ = SCE_GS_TEST_2;
-    
-    loadImage((void*)0xF0000000);
-    
-    D2_SyncTag();
-    SyncPath();
-}
 
 // 99.93% matching
 extern int pcIniGetInt(const char* key, int def);
@@ -2129,77 +2057,6 @@ int Ps2GlobalIndexTexLoad(unsigned int index)
     	printf("Ps2GlobalIndexTexLoad ERROR!!! %08x\n", index);
 	}
     return 0;
-}
-
-static void Ps2BindTextureState(NJS_TEXMEMLIST* addr, TIM2_PICTUREHEADER_EX* timp,
-                                  unsigned int psm, unsigned int tbw,
-                                  unsigned int tw, unsigned int th)
-{
-    unsigned long* p;
-    unsigned int temp;
-
-    p = (unsigned long*)WORKBASE;
-
-    D2_SyncTag();
-
-    *p++ = DMAend | 0x7;
-    *p++ = 0;
-
-    *p++ = SCE_GS_SET_TEX0_1(6, 2, SCE_GS_PSMCT32, 0, 0, 0, SCE_GS_MODULATE, 0, SCE_GS_PSMCT32, 0, 16, 0);
-    *p++ = 0xEEEEEE;
-
-    *p++ = 0;
-    *p++ = SCE_GS_TEXFLUSH;
-
-    temp = 190;
-
-    if ((timp->PictFormat >= 5) && (timp->PictFormat <= 8)) 
-    {
-        Ps2_now_bank = addr->bank;
-     
-        *p++ = Ps2_gs_save.TEX0 = SCE_GS_SET_TEX0_1(temp * 64, tbw, SCE_GS_PSMT8, tw, th, 1, SCE_GS_MODULATE, ((addr->bank & 0x30) / 4) + 16368, SCE_GS_PSMCT32, 0, 0, 2);
-        *p++ = SCE_GS_TEX0_1;
-
-        *p++ = Ps2_gs_save.TEX0_NEXT = SCE_GS_SET_TEX0_1(temp * 64, tbw, psm, tw, th, 1, SCE_GS_MODULATE, ((addr->bank & 0x30) / 4) + 16368, SCE_GS_PSMCT32, 0, addr->bank & 0xF, 0);
-        *p++ = SCE_GS_TEX0_1;
-    } 
-    else if (psm != 0) 
-    {
-        *p++ = Ps2_gs_save.TEX0 = SCE_GS_SET_TEX0_1(temp * 64, tbw, psm, tw, th, 1, SCE_GS_MODULATE, 254 * 64, SCE_GS_PSMCT32, 0, 0, 2);
-        *p++ = SCE_GS_TEX0_1;
-
-        *p++ = Ps2_gs_save.TEX0_NEXT = SCE_GS_SET_TEX0_1(temp * 64, tbw, psm, tw, th, 1, SCE_GS_MODULATE, 254 * 64, SCE_GS_PSMCT32, 0, 0, 2);
-        *p++ = SCE_GS_TEX0_1;
-    } 
-    else if (PS2_Render_tex_sub_flag == 0)
-    {
-        *p++ = Ps2_gs_save.TEX0 = SCE_GS_SET_TEX0_1(temp * 64, tbw, psm, tw, th, 0, SCE_GS_MODULATE, 254 * 64, SCE_GS_PSMCT32, 0, 0, 2);
-        *p++ = SCE_GS_TEX0_1;
-
-        *p++ = Ps2_gs_save.TEX0_NEXT = SCE_GS_SET_TEX0_1(temp * 64, tbw, psm, tw, th, 0, SCE_GS_MODULATE, 254 * 64, SCE_GS_PSMCT32, 0, 0, 2);
-        *p++ = SCE_GS_TEX0_1;
-    } 
-    else 
-    {
-        *p++ = Ps2_gs_save.TEX0 = SCE_GS_SET_TEX0_1((temp * 64) + (48 * 64), 4, SCE_GS_PSMCT32, 8, 8, 0, SCE_GS_MODULATE, 0, SCE_GS_PSMCT32, 0, 0, 0);
-        *p++ = SCE_GS_TEX0_1;
-
-        *p++ = Ps2_gs_save.TEX0_NEXT = SCE_GS_SET_TEX0_1((temp * 64) + (48 * 64), 4, SCE_GS_PSMCT32, 8, 8, 0, SCE_GS_MODULATE, 0, SCE_GS_PSMCT32, 0, 0, 0);
-        *p++ = SCE_GS_TEX0_1;
-
-        PS2_Render_tex_sub_flag = 0;
-    }
-
-    *p++ = Ps2_gs_save.TEX1 = SCE_GS_SET_TEX1_1(0, 0, SCE_GS_LINEAR, SCE_GS_LINEAR, 0, 0, 0);
-    *p++ = SCE_GS_TEX1_1;
-
-    *p++ = Ps2_gs_save.CLAMP = SCE_GS_SET_CLAMP_1(timp->ClampFlag, SCE_GS_REPEAT, 255, 0, 255, 0);
-    *p++ = SCE_GS_CLAMP_1;
-
-    *p++ = Ps2_gs_save.TEST = SCE_GS_SET_TEST_1(1, SCE_GS_ALPHA_GREATER, 0, SCE_GS_AFAIL_KEEP, 0, 0, 1, SCE_GS_DEPTH_GEQUAL);
-    *p++ = SCE_GS_TEST_1;
-
-    loadImage((void*)0xF0000000);
 }
 
 // 97.17% matching
