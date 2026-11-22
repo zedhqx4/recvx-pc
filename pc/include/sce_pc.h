@@ -155,8 +155,6 @@ int  SetAlarm(unsigned short time, void (*handler)(int, unsigned short, void*), 
 int  iSetAlarm(unsigned short time, void (*handler)(int, unsigned short, void*), void* arg);
 int  ReleaseAlarm(int alarm_id);
 int  iReleaseAlarm(int alarm_id);
-int  sceGsSyncV(int mode);
-int  sceGsSyncVCallback(int (*func)(int));
 
 /* ---- SIF RPC (EE <-> IOP); the IOP side does not exist on PC ---- */
 typedef void* (*sceSifRpcFunc)(unsigned int fno, void* data, int size);

@@ -32,3 +32,5 @@ Cada paso: commit propio, version sube 1, notas en claude_notes.md, push, milest
 - 0.9.211 validada (log sin errores). 0.9.212: StoreImage -> pcTextureCaptureScreen (toca ruta viva: render textures; validar visualmente). Siguiente: sceGsSyncV/SyncPath, poda macros GS.
 - 0.9.212 validada (log limpio, GPU-only capture 4x).
 - 0.9.213: borrado pc_libgraph.c (shims inertes SyncPath etc). Siguiente: sceGsSyncV/Callback -> API vsync neutra; poda macros GS de headers.
+- 0.9.213 validada (log limpio).
+- 0.9.214: sceGsSyncV/Callback -> pcKernelWaitVblank/SetVblankCallback. Siguiente: poda de macros/tipos GS en libgraph.h, types.h, macros.h, sce_pc.h (sceGsDBuffDc sin uso etc).

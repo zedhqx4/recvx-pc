@@ -73,7 +73,7 @@ int ADXPS2_VsyncCallback(int arg)
 // 100% matching!
 void ADXPS2_RestoreVsyncCallback(void) 
 {
-    adxps2_old_cbf = (void*)sceGsSyncVCallback(ADXPS2_VsyncCallback);
+    adxps2_old_cbf = pcKernelSetVblankCallback(ADXPS2_VsyncCallback);
 }
 
 // 99.89% matching

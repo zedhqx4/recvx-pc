@@ -363,6 +363,3 @@ typedef struct {
     sceGsClear clear1;
 } sceGsDBuffDc;
 
-/* ---- libgraph functions (sceGsSyncV/sceGsSyncVCallback: pc/src/pc_kernel.c) ---- */
-int  sceGsSyncV(int mode);
-int  sceGsSyncVCallback(int (*func)(int));

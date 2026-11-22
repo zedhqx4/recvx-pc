@@ -2,6 +2,7 @@
 #include "../../../ps2/veronica/prog/ps2_dvd_image.h"
 #include "../../../ps2/veronica/prog/ps2_sg_maloc.h"
 #include "../../../ps2/veronica/prog/main.h"
+#include "pc_kernel.h"
 
 #include "../../../cri/mwlib/ee/lib/libadxe/adx_fs.h"
 #include "../../../cri/mwlib/ee/lib/libadxe/adx_sudv.h"
@@ -129,7 +130,7 @@ int CreatePartitionEx(AFS_PATINFO* ap)
                         break; 
                     }
                     
-                    sceGsSyncV(0); 
+                    pcKernelWaitVblank(); 
                 } 
                 
                 AfsInfo[ap->PartitionId].Flag = 1; 
@@ -168,7 +169,7 @@ int CreatePartitionEx(AFS_PATINFO* ap)
             break; 
         }
 
-        sceGsSyncV(0); 
+        pcKernelWaitVblank(); 
     } 
     
     return 0; 

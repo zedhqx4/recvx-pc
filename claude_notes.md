@@ -764,3 +764,6 @@ recalcula siempre, de modo que los cambios de paleta se detectan exactamente igu
 ## 0.9.213 - se borra pc/src/pc_libgraph.c (SyncPath/D2_SyncTag/loadImage/sceGsSyncPath inertes)
 - Funciones vacias (ya sin StoreImage/LoadImage/DMA tras 0.9.211-212). Se quitan sus 6 llamadas (screen.c 1, sub1.c 4, ps2_sfd_mw.c 1), prototipos (ps2_loadtim2.h, libgraph.h) y el archivo entero. Build: 27 archivos pc + 194 juego (pc_libgraph.c era el 28o). Grep de llamadores (src include pc/src pc/include) limpio.
 - Quedan sceGsSyncV/sceGsSyncVCallback (en pc_kernel.c; hacen trabajo real de espera de vblank): renombrar a API neutra en el siguiente paso.
+
+## 0.9.214 - sceGsSyncV/sceGsSyncVCallback -> pcKernelWaitVblank/pcKernelSetVblankCallback
+- API neutra de vblank en pc/include/pc_kernel.h (implementacion en pc_kernel.c, mismo cuerpo). 6 llamadas renombradas (adxwrap.c 2, ps2_sfd_mw.c 2, adx_mps2.c 1 + el retorno ahora es el puntero de funcion real, sin cast a int: el valor de retorno de sceGsSyncV (paridad) no lo usaba nadie). Declaraciones PS2 borradas de libgraph.h y sce_pc.h. Grep (src include pc/src pc/include) limpio.

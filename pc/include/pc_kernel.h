@@ -13,3 +13,9 @@ void pcKernelBusyWait(void);
 
 /* Number of VBLANK interrupts so far. */
 unsigned int pcKernelVblankCount(void);
+
+/* Block until the start of the next vertical blank. */
+void pcKernelWaitVblank(void);
+
+/* Install the function called on every VBLANK; returns the previous one (NULL if none). */
+int (*pcKernelSetVblankCallback(int (*func)(int)))(int);

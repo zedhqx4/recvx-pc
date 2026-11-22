@@ -4,6 +4,7 @@
 #include "../../../ps2/veronica/prog/ps2_dummy.h"
 #include "../../../ps2/veronica/prog/ps2_sg_sd.h"
 #include "../../../ps2/veronica/prog/main.h"
+#include "pc_kernel.h"
 
 //#include <string.h>
 
@@ -44,8 +45,8 @@ MWPLY ps2mwPlyCreateSofdec(MWS_PLY_CPRM_SFD* cprm, char* fname)
     sceCdRMode mode;
     int loop;
     
-    sceGsSyncV(0);
-    sceGsSyncV(0);
+    pcKernelWaitVblank();
+    pcKernelWaitVblank();
 
     for (i = 0; i < (unsigned int)strlen(fname); i++) // TODO: remove cast and import strlen() properly
     {

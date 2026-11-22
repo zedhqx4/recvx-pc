@@ -902,17 +902,17 @@ int EIntr(void)
     return 1;
 }
 
-int sceGsSyncVCallback(int (*func)(int))
+int (*pcKernelSetVblankCallback(int (*func)(int)))(int)
 {
     int (*old)(int) = gs_vsync_callback;
 
     gs_vsync_callback = func;
 
-    return (int)(size_t)old;
+    return old;
 }
 
 /* Wait for the start of the next vertical blank (busy wait on the EE). */
-int sceGsSyncV(int mode)
+void pcKernelWaitVblank(void)
 {
     unsigned int start;
 
@@ -924,8 +924,6 @@ int sceGsSyncV(int mode)
     {
         pcKernelBusyWait();
     }
-
-    return vblank_count & 1;
 }
 
 /* ------------------------------------------------------------------------------------------- */
