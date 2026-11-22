@@ -744,3 +744,6 @@ recalcula siempre, de modo que los cambios de paleta se detectan exactamente igu
 
 ## 0.9.208 - fix de 0.9.204: `unsigned long long` no compila en los archivos del juego
 - pc_prefix.h redefine `long` (long -> __int64), asi que `unsigned long long` da C2632 en MSVC dentro de src/ps2. PC_PRIM_SET_TOPOLOGY usa uint64_t. Los literales ULL son validos (sufijo, no tipo). Regla: en codigo incluido por archivos del juego, nunca escribir `long long`; usar uint64_t.
+
+## 0.9.209 - PC_PRIM_SET_TOPOLOGY sin ningun tipo
+- 0.9.208 (cast a uint64_t) podria no haber sido la compilacion que fallo, o el fallo persiste por otra via; se elimina cualquier nombre de tipo: (topologia) * 0x0000800000000000ULL. Preprocesado simulando `#define long long long`: sin tipos en la expansion.
