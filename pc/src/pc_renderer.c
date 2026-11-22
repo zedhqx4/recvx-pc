@@ -2299,6 +2299,50 @@ void pcRendererPresent(void)
         depth_override_write = saved_depth_write;
     }
 
+    /* Composicion 1x -> escena escalada: el UI se rasterizo en output_width x output_height,
+     * y aqui se amplifica sobre el framebuffer 3D usando el mismo mapeo logico de pantalla. */
+    if (ui_color_target) {
+        static const unsigned char corner[6] = { 0, 1, 2, 0, 2, 3 };
+        PcNativeVertex v[6];
+        PcNativeDrawState st;
+        GsBlend saved_blend = gs_blend;
+        int i;
+        for (i = 0; i < 6; i++) {
+            unsigned int c = corner[i];
+            v[i].x = (c == 0 || c == 3) ? 0.0f : (float)output_width;
+            v[i].y = (c < 2) ? 0.0f : (float)output_height;
+            v[i].z = 0.0f;
+            v[i].r = v[i].g = v[i].b = v[i].a = 1.0f;
+            v[i].u = (c == 0 || c == 3) ? 0.0f : (float)output_width;
+            v[i].v = (c < 2) ? 0.0f : (float)output_height;
+            v[i].q = 1.0f;
+            v[i].fog = 1.0f;
+        }
+        memset(&st, 0, sizeof(st));
+        st.texture = ui_color_target;
+        st.texture_width = (float)output_width;
+        st.texture_height = (float)output_height;
+        st.texture_function = 1;  /* reemplazar RGB y alfa por el pixel de la capa UI */
+        st.texture_alpha = 1;
+        st.textured = 1;
+        st.blend = 1;
+        st.immediate = 1;
+        st.depth_test = 0;
+        st.depth_write = 0;
+        st.alpha_test = 0;
+        st.linear_filter = 1;
+        st.screen_space = 1;
+        active_target = TARGET_SCREEN;
+        gs_blend.equation = GL_FUNC_ADD;
+        gs_blend.src = GL_SRC_ALPHA;
+        gs_blend.dst = GL_ONE_MINUS_SRC_ALPHA;
+        gs_blend.fix = 1.0f;
+        draw_immediate(v, 6, &st, GL_TRIANGLES);
+        batch_flush();
+        gs_blend = saved_blend;
+        gl_shadow_invalidate();
+    }
+
     SDL_Window* window;
     int ww = 0, wh = 0;
     float aspect;
