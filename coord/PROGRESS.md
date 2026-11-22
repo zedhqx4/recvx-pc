@@ -27,3 +27,4 @@ Cada paso: commit propio, version sube 1, notas en claude_notes.md, push, milest
 - 0.9.200-0.9.201 (2026-11-21): Ps2AddPrim->Ps2AddPrim2D (clip_3d_on era constante 0), OT antiguo borrado. Probar CI + juego. Siguiente: tipar PRIM (G4 paso 1) con harness 2048 valores.
 - 0.9.202 ok (usuario: funciona bien).
 - 0.9.203-0.9.204 ok (usuario: funciona bien). G4 pasos 1,3,5,6 hechos. Quedan G4 2 (TEX0/CLAMP/TEST/ZBUF estado de textura/profundidad tipado), 4 (PC_GIF/ps2_MovieFunc paquete), 7.
+- 0.9.208-0.9.209 ok (usuario: todo bien en 0.9.209).
