@@ -1,6 +1,6 @@
 # Registro de avance (lo mantiene Claude; leer esto primero al retomar)
 
-Ultima actualizacion: 0.9.192 VALIDADA por el usuario (log sin errores, juega normal). Base validada: 0.9.192.
+Ultima actualizacion: 0.9.197 VALIDADA por el usuario (CI compila, log limpio). Base validada: 0.9.197.
 Milestones: `milestone/0.9.181` (ultimo bueno), `0.9.180`, `0.9.171`... El hook "unpushed commits" es falso: comprobar con `git ls-remote origin optimizacion`.
 
 ## Hecho (resumen)
@@ -23,3 +23,4 @@ Cada paso: commit propio, version sube 1, notas en claude_notes.md, push, milest
 - 0.9.192 validada por el usuario (2026-11-21). milestone/0.9.192.
 - 2026-11-21: G3 paso 3 delegado a GPT como G4 (coord/TASKS.md, solo analisis -> coord/reports/G4.md). Al volver: `git fetch origin optimizacion-gpt:refs/remotes/origin/optimizacion-gpt`, leer G4.md, corregir, y ejecutar los pasos propuestos uno por uno.
 - 0.9.193-0.9.196 (2026-11-21): G4 paso 5 (colas muertas + funciones huerfanas, ~-1700 lineas) hecho; sin validar por usuario ni CI. Siguiente segun G4.md: pasos de retirada de macros GIF (clases A/B/C), ver coord/reports/G4.md (rama origin/optimizacion-gpt).
+- 0.9.197 validada (2026-11-21): CI ok tras restaurar Ps2BitCount; log sin errores. milestone/0.9.197. Siguiente: pasos de retirada de macros GIF segun coord/reports/G4.md (rama origin/optimizacion-gpt), clases A->B->C, con comprobacion de definiciones antes/despues en cada borrado.
