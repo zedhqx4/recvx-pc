@@ -23,19 +23,6 @@ int sceGsSyncPath(int mode, unsigned short timeout)
     return 0;
 }
 
-void sceGsSetDefLoadImage(sceGsLoadImage* lp, short dbp, short dbw, short dpsm,
-                          short x, short y, short w, short h)
-{
-    (void)dbp; (void)dbw; (void)dpsm; (void)x; (void)y; (void)w; (void)h;
-    if (lp != NULL) memset(lp, 0, sizeof(*lp));
-}
-
-int sceGsExecLoadImage(sceGsLoadImage* lp, u_long128* srcaddr)
-{
-    (void)lp; (void)srcaddr;
-    return 0;
-}
-
 void sceGsSetDefStoreImage(sceGsStoreImage* sp, short sbp, short sbw, short spsm,
                            short x, short y, short w, short h)
 {
@@ -135,21 +122,3 @@ int sceGsExecStoreImage(sceGsStoreImage* sp, u_long128* dstaddr)
     }
     return 0;
 }
-
-/* DMA to VIF/VU/GIF is not present in the native PC rendering pipeline. */
-int sceDmaSend(sceDmaChan* d, void* tag)
-{
-    (void)d; (void)tag;
-    return 0;
-}
-
-int sceDmaSync(sceDmaChan* d, int mode, int timeout)
-{
-    (void)d; (void)mode; (void)timeout;
-    return 0;
-}
-
-/* The PC build never uploads the PS2 VU microprograms. */
-int ps2_vu0sub0;
-int ps2_vu1sub0;
-int ps2_vu1sub1;

@@ -51,8 +51,6 @@ void Ps2ShadowDraw();
 void Ps2ShadowMain0();
 void Ps2ShadowMain1();
 void Ps2ShadowEnd();
-void Ps2Vu0ProgSend(unsigned int prog_no);
-void Ps2Vu1ProgSend(unsigned int prog_no);
 void Ps2AddPrim3DExI(unsigned long prim, void* dp, unsigned int num);
 void PS2_Render_Tex_Sub();
 

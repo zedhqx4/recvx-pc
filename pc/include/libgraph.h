@@ -364,15 +364,6 @@ typedef struct {
 } sceGsDBuffDc;
 
 typedef struct {
-    sceGifTag giftag0;
-    sceGsBitbltbuf bitbltbuf; u_long64_t bitbltbufaddr;
-    sceGsTrxpos trxpos;       u_long64_t trxposaddr;
-    sceGsTrxreg trxreg;       u_long64_t trxregaddr;
-    sceGsTrxdir trxdir;       u_long64_t trxdiraddr;
-    sceGifTag giftag1;
-} sceGsLoadImage;
-
-typedef struct {
     u_int vifcode[4];
     sceGifTag giftag;
     sceGsBitbltbuf bitbltbuf; u_long64_t bitbltbufaddr;
@@ -384,8 +375,6 @@ typedef struct {
 } sceGsStoreImage;
 
 /* ---- libgraph functions (pc/src/pc_libgraph.c) ---- */
-void sceGsSetDefLoadImage(sceGsLoadImage* lp, short dbp, short dbw, short dpsm, short x, short y, short w, short h);
-int  sceGsExecLoadImage(sceGsLoadImage* lp, u_long128* srcaddr);
 void sceGsSetDefStoreImage(sceGsStoreImage* sp, short sbp, short sbw, short spsm, short x, short y, short w, short h);
 int  sceGsExecStoreImage(sceGsStoreImage* sp, u_long128* dstaddr);
 int  sceGsSyncPath(int mode, unsigned short timeout);

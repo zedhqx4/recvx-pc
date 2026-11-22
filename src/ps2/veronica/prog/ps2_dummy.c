@@ -112,9 +112,6 @@ int _nj_tex_count;*/
 
 unsigned char* Ps2_MOVIE = &Ps2_PBUFF[1179648]; 
 
-extern int ps2_vu0sub0 __attribute__((section(".vudata")));
-extern int ps2_vu1sub0 __attribute__((section(".vudata")));
-extern int ps2_vu1sub1 __attribute__((section(".vudata")));
 
 
 
@@ -2110,31 +2107,6 @@ void Ps2ShadowEnd()
     pcRendererShadowEnd();
     { static const PcBlendEquation eq = { PC_BLEND_CS, PC_BLEND_CS, PC_BLEND_AS, PC_BLEND_CS, 0 }; pcRendererSetBlend2(&eq); }   /* (Cs - Cs) * As + Cs: sin mezcla */
     return;
-}
-
-// 99.44% matching
-void Ps2Vu0ProgSend(unsigned int prog_no)
-{
-    static void* prog_table[3] = {
-        &ps2_vu0sub0,
-        &ps2_vu0sub0, 
-        &ps2_vu0sub0
-    };
-    
-    sceDmaSend((sceDmaChan*)0x10008000, prog_table[prog_no]);
-    sceDmaSync((sceDmaChan*)0x10008000, 0, 0);
-}
-
-// 99.44% matching
-void Ps2Vu1ProgSend(unsigned int prog_no)
-{
-    static void* prog_table[2] = {
-        &ps2_vu1sub0,
-        &ps2_vu1sub1
-    };
-    
-    sceDmaSend((sceDmaChan*)0x10009000, prog_table[prog_no]);
-    sceDmaSync((sceDmaChan*)0x10009000, 0, 0);
 }
 
 // 100% matching!

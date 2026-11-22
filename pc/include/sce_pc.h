@@ -85,8 +85,6 @@ typedef struct {
 } sceMcTblGetDir;
 
 /* ---- libdma / sif ---- */
-typedef struct { volatile u_int chcr, p0[3], madr, p1[3], qwc, p2[3], tadr, p3[3],
-                 as0, p4[3], as1, p5[3], p6[8], sadr, p7[3]; } sceDmaChan;
 typedef struct { u_int data, addr, size, mode; } sceSifDmaData;
 typedef void (*sceSifEndFunc)(void* data);
 typedef struct { void* paddr; u_int pid; int tid; u_int mode; } sceSifRpcData;

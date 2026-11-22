@@ -751,3 +751,7 @@ recalcula siempre, de modo que los cambios de paleta se detectan exactamente igu
 ## 0.9.210 - se borran del arbol las fuentes PS2 que el PC ya reemplazaba (EXCLUDE vacio)
 - Borrados: src/ps2/veronica/prog/ps2_MovieFunc.c (1510 lineas; reemplazado por pc/src/pc_movie.c + pc_mpeg.c), libadxe/adx_rnap.c y ps2_rna.c (reemplazados por pc_adx_rna.c), libadxe/htci.c y htci_sub.c (sistema de archivos del host devkit). Ya estaban excluidos de la build: el numero de archivos compilados no cambia (194 juego + 28 pc = 222). El historial git los conserva.
 - Se conserva ps2_MovieFunc.h (tipos y prototipos que usan pc_movie.c/pc_stubs.c/sfd/sg_sd/sdfunc). compile_config.json/report.json (herramientas de la decompilacion PS2) quedan sin tocar: ya no pueden reconstruir la build PS2.
+
+## 0.9.211 - se borran envios de programas VU, shims sceDma* y LoadImage (sin llamadores)
+- Ps2Vu0ProgSend/Ps2Vu1ProgSend (solo definicion + prototipo; nunca llamadas), sceDmaSend/sceDmaSync, los simbolos ps2_vu0sub0/ps2_vu1sub0/ps2_vu1sub1, sceGsSetDefLoadImage/sceGsExecLoadImage, y los tipos sceGsLoadImage y sceDmaChan. check_defs.py: 6 desapariciones esperadas, 0 referencias restantes (grep incluye pc/src y pc/include).
+- Queda por retirar: StoreImage (viva, necesita API tipada de captura), sceGsSyncV/SyncPath, macros GS de libgraph.h/types.h.
