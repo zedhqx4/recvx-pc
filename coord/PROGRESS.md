@@ -1,6 +1,6 @@
 # Registro de avance (lo mantiene Claude; leer esto primero al retomar)
 
-Ultima actualizacion: 0.9.197 VALIDADA por el usuario (CI compila, log limpio). Base validada: 0.9.197.
+Ultima actualizacion: 0.9.199 (CI ok, usuario: "parece ir bien"). G4 pasos 5 y 6 hechos; siguen 1-4 y 7 (tipado PRIM/ALPHA/estados).
 Milestones: `milestone/0.9.181` (ultimo bueno), `0.9.180`, `0.9.171`... El hook "unpushed commits" es falso: comprobar con `git ls-remote origin optimizacion`.
 
 ## Hecho (resumen)
