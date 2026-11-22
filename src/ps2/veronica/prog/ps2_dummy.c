@@ -1716,12 +1716,6 @@ void Ps2AddPrim3DMod(unsigned long prim, void* dp, unsigned int num)
     }
 }
 
-/* Sin OT en PC: los primitivos con ABE esperan en la cola del renderer (pcRendererFlushTransparent*). Se conserva la funcion porque el
- * juego la llama al cambiar de escena/pantalla; ya no hay estructura que limpiar. */
-void Ps2ClearOT()
-{
-}
-
 // 100% matching! 
 /* CLAUDE-NOTE[N8]: en PC esto ya NO recorre el OT; solo vacia la cola de transparencias. El orden de pintado por prioridad
  * (otz) que implementaba Ps2DrawOTagSub no existe. Ademas ya no envuelve el dibujo con Ps2ZbuffOff()/Ps2ZbuffOn(). */

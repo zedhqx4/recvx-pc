@@ -1032,8 +1032,6 @@ void bhSysCallDoordemo()
         
         bhReleaseMainTexture();
         
-        Ps2ClearOT();
-        
         if (sys->fade_an > 0) 
         {
             bhDrawScreenFade();
@@ -1069,8 +1067,6 @@ void bhSysCallDoordemo()
             njSetBackColor(argb, argb, argb);
             
             bhReleaseMainTexture();
-            
-            Ps2ClearOT();
             
             if (sys->fade_an > 0) 
             {
@@ -1134,8 +1130,6 @@ void bhSysCallMovie()
                 njReleaseTexture((NJS_TEXLIST*)rom->mdl.texP);
                 
                 bhGarbageTexture(tbuf, 256);
-               
-                Ps2ClearOT();
                
                 if (sys->fade_an > 0) 
                 {
@@ -2068,8 +2062,6 @@ void bhSysCallMonitor()
                    
                     bhGarbageTexture((NJS_TEXMEMLIST*)&tbuf, 256);
                     
-                    Ps2ClearOT();
-                    
                     if (sys->fade_an > 0) 
                     {
                         bhDrawScreenFade();
@@ -2202,8 +2194,6 @@ void bhSysCallMonitor()
                 njReleaseTexture(rom->mdl.texP);
                 
                 bhGarbageTexture((NJS_TEXMEMLIST*)&tbuf, 256);
-                
-                Ps2ClearOT();
                 
                 if (sys->fade_an > 0) 
                 {

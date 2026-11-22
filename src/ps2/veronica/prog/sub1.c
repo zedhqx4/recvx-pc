@@ -3537,7 +3537,6 @@ void StatusMain()
         }
         
         Ps2DrawOTag();
-        Ps2ClearOT();
         
         njUserClipping(2, clip);
         
@@ -3554,8 +3553,6 @@ void StatusMain()
             Ps2DrawOTagI();
         }
             
-        Ps2ClearOT();
-        
         njUserClipping(0, clip);
     }
     else if ((swork.statusflg & 0x400000)) 

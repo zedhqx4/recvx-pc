@@ -773,3 +773,6 @@ recalcula siempre, de modo que los cambios de paleta se detectan exactamente igu
 - types.h: 37 #define sin uso (SCE_GS_*, GS_X/Y_COORD(_MOD), GS_COORD, SCR_WIDTH/HEIGHT, WORKBASE, DMA*, UNCACHED_BASE, DISP_*), macros.h: SCE_GIF_PRIM. Se conservan SCR_WIDTH2/HEIGHT2 (los usa ps2_dummy.c).
 - sce_pc.h: D0..D4_CHCR, SCE_VIF1_SET_*, 34 SCECd* sin uso. Se conservan sceGsTex0/sceGsTex1 (campos GsTex0/GsTex1 de la cabecera TIM2: formato de datos) y las constantes SCECd usadas.
 - Comprobacion: grep -w de cada nombre en src include pc/src pc/include = 0 referencias; sce_pc.h compila solo con gcc. No se pudo compilar la cadena types.h completa aqui (falla igual sin los cambios por intrinsics con `long` redefinido).
+
+## 0.9.216 - Ps2ClearOT borrada (funcion vacia, 15 llamadas)
+- Sin OT en PC, Ps2ClearOT() no hacia nada. Se borran definicion, prototipo y las 15 llamadas (door, event, map, ps2_NaSystem, screen x2, sub1 x2, system x5, pc_system). Cada llamada era una sentencia suelta (comprobado por script: la sentencia anterior termina en ; { o }, no hay if/else sin llaves). Grep de llamadores limpio.

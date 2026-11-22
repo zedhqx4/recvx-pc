@@ -362,8 +362,6 @@ void bhExitDoor()
 		
         bhGarbageTexture(NULL, 0);
 
-        Ps2ClearOT();
-
         if (sys->fade_an > 0) 
 		{
             bhDrawScreenFade();

@@ -843,8 +843,6 @@ void bhDrawFullScreenRenderTexture()
     
     Ps2DrawOTag();
     
-    Ps2ClearOT();
-    
     njSetTexture(&sys->ren_tlist);
     
     scr_tex.w = 640.0f;
@@ -1009,8 +1007,6 @@ void bhDrawSmallScreenRenderTexture()
         bhAllEasyDrawModel();
         
         Ps2DrawOTag();
-        
-        Ps2ClearOT();
         
         sys->st_flg &= ~0x20;
         

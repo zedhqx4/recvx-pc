@@ -9087,8 +9087,6 @@ unsigned int bhRankingCall()
     
     bhReleaseMainTexture();
     
-    Ps2ClearOT();
-    
     if (sys->fade_an > 0) 
     {
         bhDrawScreenFade();

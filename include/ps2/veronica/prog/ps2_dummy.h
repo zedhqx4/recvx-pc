@@ -34,7 +34,6 @@ void Ps2AddPrim3D(unsigned long prim, void* dp, unsigned int num);
 void Ps2AddPrim3DEx(unsigned long prim, void* dp, unsigned int num);
 void Ps2AddPrim3DEx1P(unsigned long prim, void* dp, unsigned int num);
 void Ps2AddPrim3DMod(unsigned long prim, void* dp, unsigned int num);
-void Ps2ClearOT();
 void Ps2DrawOTag();
 unsigned int Ps2BitCount(unsigned int value);
 void Ps2InitTexCache();

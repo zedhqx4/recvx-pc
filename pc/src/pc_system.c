@@ -30,7 +30,6 @@ void Ps2Init()
 
     Ps2SetVSyncCounter();
     Ps2InitFunc();
-    Ps2ClearOT();
     pcRendererSetClearColor(0.0f, 0.0f, 0.0f, 1.0f);
     pcRendererSetScissor(0, 0, 0, 0, 0);
 

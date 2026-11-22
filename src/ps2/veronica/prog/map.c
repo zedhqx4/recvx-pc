@@ -132,8 +132,6 @@ void bhInitMap(enum_2 set_mod)
             
             bhGarbageTexture(NULL, 0);
             
-            Ps2ClearOT();
-            
             if (sys->fade_an > 0) 
             {
                 bhDrawScreenFade();
