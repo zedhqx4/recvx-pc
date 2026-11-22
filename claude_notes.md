@@ -741,3 +741,6 @@ recalcula siempre, de modo que los cambios de paleta se detectan exactamente igu
 ## 0.9.207 - G4: se elimina el doble buffer GS (Db)
 - Db (sceGsDBuffDc) solo se escribia: njSetBackColor (clear0/1.rgbaq; el color real ya iba a pcRendererSetClearColor) y njAdjustDisplay (DISPLAY.DX/DY, sin efecto en PC). Se borran la variable, su extern y las escrituras; njAdjustDisplay queda con (void) y comentario. El tipo sceGsDBuffDc de libgraph.h queda sin uso (se borra con el resto de libgraph.h).
 - grep de llamadores incluyendo pc/src y pc/include; check_defs.py sin desapariciones inesperadas.
+
+## 0.9.208 - fix de 0.9.204: `unsigned long long` no compila en los archivos del juego
+- pc_prefix.h redefine `long` (long -> __int64), asi que `unsigned long long` da C2632 en MSVC dentro de src/ps2. PC_PRIM_SET_TOPOLOGY usa uint64_t. Los literales ULL son validos (sufijo, no tipo). Regla: en codigo incluido por archivos del juego, nunca escribir `long long`; usar uint64_t.

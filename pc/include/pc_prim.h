@@ -1,6 +1,8 @@
 #ifndef PC_PRIM_H
 #define PC_PRIM_H
 
+#include <stdint.h>
+
 /* Descriptor de primitiva que el juego entrega al renderer nativo (Ps2AddPrim2D, Ps2AddPrim3D*, vu1Draw*).
  * Es el campo PRIM del hardware original (11 bits) colocado desde el bit 47 de un entero de 64 bits:
  *   bits 47..49 topologia, 50 sombreado Gouraud, 51 textura, 52 niebla, 53 mezcla alfa, 54 antialias, 55 UV fijo (sin Q).
@@ -13,7 +15,7 @@
 #define PC_PRIM_FST  0x0080000000000000ULL   /* UV en punto fijo 12.4 en lugar de ST/Q */
 #define PC_PRIM_CTXT 0x0100000000000000ULL   /* contexto 2 (el renderer no lo lee) */
 #define PC_PRIM_FIX  0x0200000000000000ULL   /* control de fragmentos (el renderer no lo lee) */
-#define PC_PRIM_SET_TOPOLOGY(topology)  (((unsigned long long)(topology)) << 47)
+#define PC_PRIM_SET_TOPOLOGY(topology)  (((uint64_t)(topology)) << 47)
 
 #define PC_PRIM_TOPOLOGY(prim)  ((unsigned int)(((prim) >> 47) & 7u))
 enum { PC_PRIM_POINT = 0, PC_PRIM_LINE = 1, PC_PRIM_LINE_STRIP = 2, PC_PRIM_TRIANGLE = 3, PC_PRIM_TRIANGLE_STRIP = 4,
