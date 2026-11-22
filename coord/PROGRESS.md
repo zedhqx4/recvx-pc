@@ -1,6 +1,6 @@
 # Registro de avance (lo mantiene Claude; leer esto primero al retomar)
 
-Ultima actualizacion: 0.9.199 (CI ok, usuario: "parece ir bien"). G4 pasos 5 y 6 hechos; siguen 1-4 y 7 (tipado PRIM/ALPHA/estados).
+Ultima actualizacion: 0.9.201 (sin probar). Base validada: 0.9.199. Hecho G4 pasos 5,6 + Ps2AddPrim/Ps2AddOT. Pendiente G4: Ps2_tp_tag/Ps2InitPS2_GS_SAVE tags, setImageTag (dudoso), pasos 1-4 (tipar PRIM/ALPHA/estados), 7.
 Milestones: `milestone/0.9.181` (ultimo bueno), `0.9.180`, `0.9.171`... El hook "unpushed commits" es falso: comprobar con `git ls-remote origin optimizacion`.
 
 ## Hecho (resumen)
@@ -24,3 +24,4 @@ Cada paso: commit propio, version sube 1, notas en claude_notes.md, push, milest
 - 2026-11-21: G3 paso 3 delegado a GPT como G4 (coord/TASKS.md, solo analisis -> coord/reports/G4.md). Al volver: `git fetch origin optimizacion-gpt:refs/remotes/origin/optimizacion-gpt`, leer G4.md, corregir, y ejecutar los pasos propuestos uno por uno.
 - 0.9.193-0.9.196 (2026-11-21): G4 paso 5 (colas muertas + funciones huerfanas, ~-1700 lineas) hecho; sin validar por usuario ni CI. Siguiente segun G4.md: pasos de retirada de macros GIF (clases A/B/C), ver coord/reports/G4.md (rama origin/optimizacion-gpt).
 - 0.9.197 validada (2026-11-21): CI ok tras restaurar Ps2BitCount; log sin errores. milestone/0.9.197. Siguiente: pasos de retirada de macros GIF segun coord/reports/G4.md (rama origin/optimizacion-gpt), clases A->B->C, con comprobacion de definiciones antes/despues en cada borrado.
+- 0.9.200-0.9.201 (2026-11-21): Ps2AddPrim->Ps2AddPrim2D (clip_3d_on era constante 0), OT antiguo borrado. Probar CI + juego. Siguiente: tipar PRIM (G4 paso 1) con harness 2048 valores.
