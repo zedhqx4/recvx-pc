@@ -68,13 +68,14 @@ static float current_texture_width = 1.0f, current_texture_height = 1.0f;
 static int current_texture_function, current_texture_alpha = 1;
 
 static GLuint framebuffer;
+static GLuint ui_framebuffer, ui_color_target, ui_depth_target; /* interfaz 2D a resolucion nativa */
 static GLuint render_texture, render_texture_fbo;   /* copia reducida de la pantalla usada como textura */
 static GLuint render_copy_fbo;                     /* FBO reutilizable para copias GPU -> texturas dinamicas */
 static int render_texture_scale = -1;
 static GLuint color_target;
 static GLuint depth_target;
 static GLuint mask_target, mask_framebuffer;   /* contexto 2 de la GS: mascara de sombras, comparte la profundidad */
-enum { TARGET_SCREEN = 0, TARGET_MASK = 1 };
+enum { TARGET_SCREEN = 0, TARGET_MASK = 1, TARGET_UI = 2 };
 static int active_target = TARGET_SCREEN;
 static GLuint vertex_array;
 static GLuint vertex_buffer;
@@ -288,6 +289,10 @@ static int create_targets(int width, int height)
     if (color_target) glDeleteTextures(1, &color_target);
     if (mask_target) glDeleteTextures(1, &mask_target);
     if (depth_target) glDeleteTextures(1, &depth_target);
+    if (ui_framebuffer) glDeleteFramebuffers(1, &ui_framebuffer);
+    if (ui_color_target) glDeleteTextures(1, &ui_color_target);
+    if (ui_depth_target) glDeleteTextures(1, &ui_depth_target);
+    ui_framebuffer = ui_color_target = ui_depth_target = 0;
 
     glGenTextures(1, &color_target);
     glBindTexture(GL_TEXTURE_2D, color_target);
@@ -332,6 +337,32 @@ static int create_targets(int width, int height)
         pcLog("native renderer: shadow mask framebuffer incomplete (0x%04x)", (unsigned int)status);
         return 0;
     }
+
+    /* La interfaz se rasteriza a 1x con color RGBA y profundidad propios. */
+    glGenTextures(1, &ui_color_target);
+    glBindTexture(GL_TEXTURE_2D, ui_color_target);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, output_width, output_height, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glGenTextures(1, &ui_depth_target);
+    glBindTexture(GL_TEXTURE_2D, ui_depth_target);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT24, output_width, output_height, 0, GL_DEPTH_COMPONENT, GL_UNSIGNED_INT, NULL);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glGenFramebuffers(1, &ui_framebuffer);
+    glBindFramebuffer(GL_FRAMEBUFFER, ui_framebuffer);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, ui_color_target, 0);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, ui_depth_target, 0);
+    status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    if (status != GL_FRAMEBUFFER_COMPLETE) {
+        pcLog("native renderer: 1x UI framebuffer incomplete (0x%04x)", (unsigned int)status);
+        return 0;
+    }
+    pcLog("native renderer: 1x UI target initialized (%dx%d), scene target remains %dx%d",
+          output_width, output_height, width, height);
     gl_shadow_invalidate();
     return 1;
 }
@@ -410,10 +441,14 @@ void pcRendererShutdown(void)
     render_texture = render_texture_fbo = 0;
     glDeleteFramebuffers(1, &framebuffer);
     glDeleteFramebuffers(1, &mask_framebuffer);
+    if (ui_framebuffer) glDeleteFramebuffers(1, &ui_framebuffer);
+    glDeleteTextures(1, &ui_color_target);
+    glDeleteTextures(1, &ui_depth_target);
     glDeleteTextures(1, &color_target);
     glDeleteTextures(1, &mask_target);
     glDeleteTextures(1, &depth_target);
     vertex_buffer = framebuffer = color_target = depth_target = mask_framebuffer = mask_target = 0;
+    ui_framebuffer = ui_color_target = ui_depth_target = 0;
     ready = 0;
 }
 
@@ -579,6 +614,17 @@ void pcRendererBeginFrame(void)
     else glClearColor(clear_color[0], clear_color[1], clear_color[2], clear_color[3]);
     glClearDepth(1.0);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    /* UI transparente a 1x; su profundidad es independiente de la escena escalada. */
+    glBindFramebuffer(GL_FRAMEBUFFER, ui_framebuffer);
+    glViewport(0, 0, output_width, output_height);
+    glDisable(GL_SCISSOR_TEST);
+    glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+    glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
+    glClearDepth(1.0);
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    active_target = TARGET_SCREEN;
+    glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
+    glViewport(0, 0, render_width, render_height);
     gl_shadow_invalidate();
     gpu_timer_begin();
 }
@@ -791,11 +837,14 @@ static void apply_state(const PcNativeDrawState* st)
     }
 
     {
-        const GLuint want_fbo = (active_target == TARGET_MASK) ? mask_framebuffer : framebuffer;
+        const int target_w = (active_target == TARGET_UI) ? output_width : render_width;
+        const int target_h = (active_target == TARGET_UI) ? output_height : render_height;
+        const GLuint want_fbo = (active_target == TARGET_MASK) ? mask_framebuffer :
+                                (active_target == TARGET_UI) ? ui_framebuffer : framebuffer;
         if (!sv || gls.fbo != want_fbo) { glBindFramebuffer(GL_FRAMEBUFFER, want_fbo); gls.fbo = want_fbo; }
-        if (!sv || gls.vw != render_width || gls.vh != render_height) {
-            glViewport(0, 0, render_width, render_height);
-            gls.vw = render_width; gls.vh = render_height;
+        if (!sv || gls.vw != target_w || gls.vh != target_h) {
+            glViewport(0, 0, target_w, target_h);
+            gls.vw = target_w; gls.vh = target_h;
         }
     }
     {
@@ -847,11 +896,13 @@ static void apply_state(const PcNativeDrawState* st)
     }
 
     if (scissor_enabled) {
-        int sx = (int)((float)scissor_rect[0] * (float)render_width / (float)output_width + 0.5f);
-        int sy = (int)((float)scissor_rect[1] * (float)render_height / (float)output_height + 0.5f);
-        int sw = (int)((float)scissor_rect[2] * (float)render_width / (float)output_width + 0.5f);
-        int sh = (int)((float)scissor_rect[3] * (float)render_height / (float)output_height + 0.5f);
-        const int sc[4] = { sx, render_height - sy - sh, sw, sh };
+        const int target_w = (active_target == TARGET_UI) ? output_width : render_width;
+        const int target_h = (active_target == TARGET_UI) ? output_height : render_height;
+        int sx = (int)((float)scissor_rect[0] * (float)target_w / (float)output_width + 0.5f);
+        int sy = (int)((float)scissor_rect[1] * (float)target_h / (float)output_height + 0.5f);
+        int sw = (int)((float)scissor_rect[2] * (float)target_w / (float)output_width + 0.5f);
+        int sh = (int)((float)scissor_rect[3] * (float)target_h / (float)output_height + 0.5f);
+        const int sc[4] = { sx, target_h - sy - sh, sw, sh };
         if (!sv || !gls.scissor) glEnable(GL_SCISSOR_TEST);
         if (!sv || !gls.scissor || memcmp(gls.sc, sc, sizeof(sc)) != 0) {
             glScissor(sc[0], sc[1], sc[2], sc[3]);
@@ -1129,8 +1180,18 @@ static int compare_transparent(const void* a, const void* b)
 
 static void draw(const PcNativeVertex* v, int n, const PcNativeDrawState* state, GLenum topology)
 {
-    if (state && ((state->blend && !state->immediate) || state->ot_queue) && active_target == TARGET_SCREEN) queue_transparent(v, n, state, topology);
+    int saved_target = active_target;
+    if (state && state->ui_layer && active_target == TARGET_SCREEN) {
+        batch_flush();
+        active_target = TARGET_UI;
+    }
+    if (state && ((state->blend && !state->immediate) || state->ot_queue) &&
+        (active_target == TARGET_SCREEN || active_target == TARGET_UI)) queue_transparent(v, n, state, topology);
     else draw_immediate(v, n, state, topology);
+    if (state && state->ui_layer && saved_target == TARGET_SCREEN) {
+        batch_flush();
+        active_target = saved_target;
+    }
 }
 
 void pcRendererDrawTriangleStrip(const PcNativeVertex* v, int n, const PcNativeDrawState* s)
@@ -1233,6 +1294,7 @@ static void draw_queued_item(NativeQueuedDraw* item, int pass)
     alpha_pass = pass;
     ot_writes_depth = (pass != ALPHA_PASS_TRANSLUCENT);
     restore_frame_state(&item->frame);
+    active_target = item->state.ui_layer ? TARGET_UI : TARGET_SCREEN;
     depth_override_test = 1;   /* ZTE=1 GEQUAL */
     depth_override_write = ot_writes_depth ? 1 : 0;   /* ZMSK = 0 / 1 */
     draw_immediate(item->vertices, item->count, &item->state, item->topology);
