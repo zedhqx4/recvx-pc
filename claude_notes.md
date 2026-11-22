@@ -747,3 +747,7 @@ recalcula siempre, de modo que los cambios de paleta se detectan exactamente igu
 
 ## 0.9.209 - PC_PRIM_SET_TOPOLOGY sin ningun tipo
 - 0.9.208 (cast a uint64_t) podria no haber sido la compilacion que fallo, o el fallo persiste por otra via; se elimina cualquier nombre de tipo: (topologia) * 0x0000800000000000ULL. Preprocesado simulando `#define long long long`: sin tipos en la expansion.
+
+## 0.9.210 - se borran del arbol las fuentes PS2 que el PC ya reemplazaba (EXCLUDE vacio)
+- Borrados: src/ps2/veronica/prog/ps2_MovieFunc.c (1510 lineas; reemplazado por pc/src/pc_movie.c + pc_mpeg.c), libadxe/adx_rnap.c y ps2_rna.c (reemplazados por pc_adx_rna.c), libadxe/htci.c y htci_sub.c (sistema de archivos del host devkit). Ya estaban excluidos de la build: el numero de archivos compilados no cambia (194 juego + 28 pc = 222). El historial git los conserva.
+- Se conserva ps2_MovieFunc.h (tipos y prototipos que usan pc_movie.c/pc_stubs.c/sfd/sg_sd/sdfunc). compile_config.json/report.json (herramientas de la decompilacion PS2) quedan sin tocar: ya no pueden reconstruir la build PS2.

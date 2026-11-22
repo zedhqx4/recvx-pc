@@ -22,18 +22,9 @@ INCLUDES = [
 CFLAGS = ["/nologo", "/TC", "/std:c17", "/W3", "/wd4244", "/wd4305", "/wd4996", "/wd4828",
           "/wd4005", "/wd4068", "/we4716", "/wd4307", "/Zc:preprocessor", "/wd5105", "/DTARGET_PC", "/FIpc_prefix.h"]
 
-# Upstream sources replaced by the PC platform layer (pc/src). Grows as pieces are ported.
-EXCLUDE = {
-    # PS2 graphics: GS/VIF packet building and VU1 microcode drivers -> PC renderer
-    # MPEG movie playback through the IPU -> PC movie player
-    "src/ps2/veronica/prog/ps2_MovieFunc.c",
-    # CRI ADX output to the IOP -> pc/src/pc_adx_rna.c
-    "src/cri/mwlib/ee/lib/libadxe/adx_rnap.c",
-    "src/cri/mwlib/ee/lib/libadxe/ps2_rna.c",
-    # CRI host (devkit PC) file system, not used on retail discs
-    "src/cri/mwlib/ee/lib/libadxe/htci.c",
-    "src/cri/mwlib/ee/lib/libadxe/htci_sub.c",
-}
+# Upstream sources replaced by the PC platform layer (pc/src) are deleted from the tree, so nothing is excluded any more.
+# Left as a hook in case a future upstream merge brings one back.
+EXCLUDE = set()
 
 
 def sync_katana():
