@@ -256,7 +256,7 @@ int sceMcFormat(int port, int slot);
 int sceMcDelete(int port, int slot, const char* name);
 int sceMcSync(int mode, int* cmd, int* result);
 
-/* DMA channel registers (only used as channel identifiers on PC, see pc_libgraph.c) */
+/* DMA channel registers (only used as channel identifiers on PC) */
 #define D0_CHCR ((volatile u_int*)0x10008000)
 #define D1_CHCR ((volatile u_int*)0x10009000)
 #define D2_CHCR ((volatile u_int*)0x1000A000)

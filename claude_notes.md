@@ -760,3 +760,7 @@ recalcula siempre, de modo que los cambios de paleta se detectan exactamente igu
 - StoreRenderTex ya no usa sceGsStoreImage/SetDefStoreImage/ExecStoreImage (3 franjas 255/255/2 con maquina de estado en pc_libgraph.c). Ahora una sola llamada pcTextureCaptureScreen(imagen): vacia transparentes, invalida fuentes, copia GPU->GPU de 512x512 (INI rtt_gpu_copy, defecto 1) y, si falla o esta a 0, lectura completa por CPU con alfa 0x80 (mismo respaldo que antes). Se borran el tipo sceGsStoreImage y la rama de captura no-render-texture (sin llamadores).
 - Cambio de comportamiento posible: la copia GPU es una sola de 512 filas en vez de 3 franjas; mismo resultado esperado. Si las texturas de render (espejos/pantallas, fondos de menu) salen mal, revertir 0.9.212. Funcion nueva comprobada sintacticamente en aislamiento (ninja.h no esta aqui).
 - Queda en pc_libgraph.c solo sceGsSyncPath + loadImage/SyncPath/D2_SyncTag.
+
+## 0.9.213 - se borra pc/src/pc_libgraph.c (SyncPath/D2_SyncTag/loadImage/sceGsSyncPath inertes)
+- Funciones vacias (ya sin StoreImage/LoadImage/DMA tras 0.9.211-212). Se quitan sus 6 llamadas (screen.c 1, sub1.c 4, ps2_sfd_mw.c 1), prototipos (ps2_loadtim2.h, libgraph.h) y el archivo entero. Build: 27 archivos pc + 194 juego (pc_libgraph.c era el 28o). Grep de llamadores (src include pc/src pc/include) limpio.
+- Quedan sceGsSyncV/sceGsSyncVCallback (en pc_kernel.c; hacen trabajo real de espera de vblank): renombrar a API neutra en el siguiente paso.

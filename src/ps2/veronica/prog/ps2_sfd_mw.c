@@ -114,8 +114,6 @@ void mwPlyExecServer(void)
         readMpeg();
     } while ((movie_draw == 0) && (rmi.iMovieState != 3));
     
-    sceGsSyncPath(0, 0);
-    
     setImageTag((unsigned int*)test_tag, voBuf.data);
     
     vbrank_draw();

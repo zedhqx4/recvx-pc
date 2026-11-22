@@ -841,8 +841,6 @@ void bhDrawFullScreenRenderTexture()
     
     bhAllDrawModel();
     
-    SyncPath();
-    
     Ps2DrawOTag();
     
     Ps2ClearOT();

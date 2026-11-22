@@ -30,3 +30,5 @@ Cada paso: commit propio, version sube 1, notas en claude_notes.md, push, milest
 - 0.9.208-0.9.209 ok (usuario: todo bien en 0.9.209).
 - 0.9.211: borrados Ps2Vu*ProgSend, sceDma*, LoadImage (sin llamadores). Siguiente: reemplazar StoreImage por API tipada de captura, luego sceGsSyncV/SyncPath y poda de macros GS.
 - 0.9.211 validada (log sin errores). 0.9.212: StoreImage -> pcTextureCaptureScreen (toca ruta viva: render textures; validar visualmente). Siguiente: sceGsSyncV/SyncPath, poda macros GS.
+- 0.9.212 validada (log limpio, GPU-only capture 4x).
+- 0.9.213: borrado pc_libgraph.c (shims inertes SyncPath etc). Siguiente: sceGsSyncV/Callback -> API vsync neutra; poda macros GS de headers.

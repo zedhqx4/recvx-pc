@@ -3536,12 +3536,8 @@ void StatusMain()
             clip[0].y = 0;
         }
         
-        SyncPath();
-        
         Ps2DrawOTag();
         Ps2ClearOT();
-        
-        SyncPath();
         
         njUserClipping(2, clip);
         
@@ -3549,8 +3545,6 @@ void StatusMain()
         
         swork.statusflg |= 0x400000;
 
-        SyncPath();
-        
         if (st->itemid == 117) 
         {
             Ps2DrawOTag();
@@ -3561,8 +3555,6 @@ void StatusMain()
         }
             
         Ps2ClearOT();
-        
-        SyncPath();
         
         njUserClipping(0, clip);
     }

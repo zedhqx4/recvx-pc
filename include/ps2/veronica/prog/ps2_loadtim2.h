@@ -18,8 +18,5 @@ void StoreRenderTex(void* tex_adr);
 void *UncAddr(void *val);
 int Send_1024_Clut_data(void* clt_adr, unsigned long send_clut_adr);
 void Ps2PxlconvCheck(void* timadr);
-void SyncPath();
-void D2_SyncTag();
-void loadImage(void* tags);
 
 #endif

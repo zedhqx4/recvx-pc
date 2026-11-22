@@ -705,7 +705,7 @@ static void pc_wide_clip(unsigned int* v, unsigned int num, int uv)
  * CLAUDE-NOTE[N8]: la ruta nativa (clip_3d_on == 0) dibuja INMEDIATAMENTE en orden de llamada. El original metia el 2D en
  * el OT (Ps2AddOT, 4096 buckets por z) y lo pintaba en Ps2DrawOTag; esa prioridad se perdio. Los 2D con blend, ademas, se
  * difieren al flush (ver pc_renderer.c queue_transparent). Con clip_3d_on != 0 se cae al codigo PS2 original, que termina
- * en Ps2AddOT/loadImage (ambos inertes en PC): esos primitivos no se dibujan.
+ * en Ps2AddOT (inerte en PC): esos primitivos no se dibujan.
  * CLAUDE-NOTE[N11]: en la rama no-sprite de la ruta nativa, vertices[i].q no se inicializa (malloc sin memset). */
 /* pri de njDraw*2D (<= -1; -1 = mas cerca): la GS lo convertia con sz = a + b/pri, equivalente a un Z de vista = -pri */
 static float pcPriToViewZ(float pri)
