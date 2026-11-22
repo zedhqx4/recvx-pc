@@ -722,3 +722,7 @@ recalcula siempre, de modo que los cambios de paleta se detectan exactamente igu
 ## 0.9.202 - G4 paso 3: ecuacion de mezcla tipada (PcBlendEquation)
 - pcRendererSetGsAlpha/SetGsAlpha2(uint64_t) -> pcRendererSetBlend/SetBlend2(const PcBlendEquation*) con enums PC_BLEND_CS/CD/ZERO y PC_BLEND_AS/AD/FIX. gs_alpha_decode -> blend_decode (mismo cuerpo, campos en vez de bits). La tabla alpha_tbl de njColorBlendingModeSys y las llamadas de sombra usan structs; el centinela 0xFFFFFFFF es PC_BLEND_NONE (a=0xFF).
 - Validacion: pc/tools/test_blend_equation.c compara el decodificador viejo (registro) con el nuevo (struct) en los 65536 casos A/B/C/D x FIX: 0 diferencias; la tabla de 156 entradas convertida coincide con los valores originales (script).
+
+## 0.9.203 - G4 paso 1a: constantes PRIM con nombre (pc/include/pc_prim.h)
+- PC_PRIM_TME/FGE/ABE/FST y PC_PRIM_TOPOLOGY(prim) + enum de topologias sustituyen 59 literales (0x8000000000000, 0x20000000000000, 0x80000000000000, (prim>>47)&7) y las 4 mascaras SCE_GIF_SET_TAG(...PRIM ABE...) en ps2_dummy.c, ps2_NaDraw*.c, ps2_NaGraphics3D.c, ps2_NinjaCnk.c. Sustitucion mecanica, mismos valores: comprobado revirtiendo la sustitucion y comparando con el original (0 diferencias aparte de las 4 mascaras, equivalentes: SET_PRIM(...,abe=1) en el campo PRIM del tag = bit 53).
+- Pendiente del paso 1: los productores (macros SCE_GIF_SET_TAG/SCE_GS_SET_PRIM en ps2_NaSprite.c y ps2_NinjaCnk.c) aun codifican el descriptor con macros GIF; migrarlos a PC_PRIM_* requiere un harness de los 2048 valores.

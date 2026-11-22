@@ -238,12 +238,12 @@ void    njDrawLine3D(NJS_POINT3COL *p, Int n, Uint32 attr)
     
     if ((attr & 0x40)) 
     {
-        prim |= 0x20000000000000;
+        prim |= PC_PRIM_ABE;
     }
     
     if ((attr & 0x80000000)) 
     {
-        prim |= 0x8000000000000; 
+        prim |= PC_PRIM_TME; 
     }
     
     Ps2AddPrim3D(prim, buff, n);
@@ -402,12 +402,12 @@ label:
     
     if ((attr & 0x40)) 
     {
-        prim |= 0x20000000000000;
+        prim |= PC_PRIM_ABE;
     }
     
     if ((attr & 0x80000000)) 
     {
-        prim |= 0x8000000000000; 
+        prim |= PC_PRIM_TME; 
     }
     
     Ps2AddPrim3D(prim, buff, n);
@@ -479,12 +479,12 @@ void    njDrawTriangle3D(NJS_POINT3COL *p, Int n, Uint32 attr)
     
     if ((attr & 0x40)) 
     {
-        prim |= 0x20000000000000;
+        prim |= PC_PRIM_ABE;
     }
     
     if ((attr & 0x80000000)) 
     {
-        prim |= 0x8000000000000; 
+        prim |= PC_PRIM_TME; 
     }
     
     Ps2AddPrim3D(prim, buff, n);
@@ -533,12 +533,12 @@ void    njDrawPolygon3D(NJS_POINT3COL *p, Int n, Uint32 attr)
         
         if ((attr & 0x40)) 
         {
-            prim |= 0x20000000000000;
+            prim |= PC_PRIM_ABE;
         }
         
         if ((attr & 0x80000000)) 
         {
-            prim |= 0x8000000000000; 
+            prim |= PC_PRIM_TME; 
         }
         
         vu1DrawTriangleStripTransDouble(prim, vb, n, 0);
@@ -590,12 +590,12 @@ void    njDrawPolygon3D(NJS_POINT3COL *p, Int n, Uint32 attr)
         
         if ((attr & 0x40)) 
         {
-            prim |= 0x20000000000000;
+            prim |= PC_PRIM_ABE;
         }
         
         if ((attr & 0x80000000)) 
         {
-            prim |= 0x8000000000000; 
+            prim |= PC_PRIM_TME; 
         }
         
         Ps2AddPrim3D(prim, buff, n);

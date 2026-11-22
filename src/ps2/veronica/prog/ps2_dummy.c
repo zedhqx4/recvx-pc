@@ -748,7 +748,7 @@ static void pcPrimDiag(const char* who, unsigned long prim, const void* dp, unsi
     if (lines++ >= 220 || dp == NULL)
         return;
     pcLog("P3D %s: prim=%08x%08x type=%u TME=%u ABE=%u FGE=%u FST=%u IIP=%u num=%u tex=%s", who,
-          (unsigned int)(prim >> 32), (unsigned int)prim, (unsigned int)((prim >> 47) & 7u), (unsigned int)((prim >> 51) & 1u),
+          (unsigned int)(prim >> 32), (unsigned int)prim, PC_PRIM_TOPOLOGY(prim), (unsigned int)((prim >> 51) & 1u),
           (unsigned int)((prim >> 53) & 1u), (unsigned int)((prim >> 52) & 1u), (unsigned int)((prim >> 55) & 1u),
           (unsigned int)((prim >> 50) & 1u), num, Ps2_now_tex ? "set" : "NULL");
     for (i = 0; i < n; i++, v += 12) {
@@ -778,7 +778,7 @@ void Ps2AddPrim2D(unsigned long prim, void* dp, unsigned int num)
 
     pcPrimLog(NULL, prim, num);
     
-    if ((prim & 0x8000000000000))
+    if ((prim & PC_PRIM_TME))
     { 
         if (Ps2_now_tex == NULL) 
         { 
@@ -786,12 +786,12 @@ void Ps2AddPrim2D(unsigned long prim, void* dp, unsigned int num)
             return;
         }
         
-        if (((prim & 0x20000000000000)) && (Ps2_use_pt_flag != 0)) 
+        if (((prim & PC_PRIM_ABE)) && (Ps2_use_pt_flag != 0)) 
         { 
-            prim &= ~0x20000000000000; 
+            prim &= ~PC_PRIM_ABE; 
         }
         
-        if ((!(prim & 0x20000000000000)) && (((TIM2_PICTUREHEADER_EX*)(Ps2_now_tex->texinfo.texsurface.pSurface))->TpFlag != 0)) 
+        if ((!(prim & PC_PRIM_ABE)) && (((TIM2_PICTUREHEADER_EX*)(Ps2_now_tex->texinfo.texsurface.pSurface))->TpFlag != 0)) 
         { 
             Ps2_tex_load_tp_cancel = 1; 
             
@@ -801,7 +801,7 @@ void Ps2AddPrim2D(unsigned long prim, void* dp, unsigned int num)
         }
     } 
     
-    if ((prim & 0x8000000000000) && (prim & 0x80000000000000) && (num <= 64))
+    if ((prim & PC_PRIM_TME) && (prim & PC_PRIM_FST) && (num <= 64))
     {
         memcpy(wide_buf, dp, num * 48);
         dp = wide_buf;
@@ -879,8 +879,8 @@ void Ps2AddPrim2D(unsigned long prim, void* dp, unsigned int num)
             }
             else if ((x0 <= 1728.0f + 1.0f) && (x1 >= 2368.0f - 1.0f) && !pcWide2DKeep43)
             {
-                if (pcWide2DFullWidth || !(prim & 0x8000000000000) ||
-                    ((prim & 0x20000000000000) && (y0 <= 1808.0f + 1.0f) && (y1 >= 2288.0f - 1.0f)))
+                if (pcWide2DFullWidth || !(prim & PC_PRIM_TME) ||
+                    ((prim & PC_PRIM_ABE) && (y0 <= 1808.0f + 1.0f) && (y1 >= 2288.0f - 1.0f)))
                 {
                     wide_2d = 1.0f;
                 }
@@ -911,7 +911,7 @@ void Ps2AddPrim2D(unsigned long prim, void* dp, unsigned int num)
                         dp = wide_buf;
                     }
 
-                    pc_wide_clip((unsigned int*)wide_buf, num, (prim & 0x80000000000000) != 0);
+                    pc_wide_clip((unsigned int*)wide_buf, num, (prim & PC_PRIM_FST) != 0);
                 }
             }
         }
@@ -923,11 +923,11 @@ void Ps2AddPrim2D(unsigned long prim, void* dp, unsigned int num)
         PcNativeVertex* vertices;
         PcNativeVertex sprite[6];
         PcNativeDrawState state;
-        unsigned int topology = (unsigned int)((prim >> 47) & 7u);
+        unsigned int topology = PC_PRIM_TOPOLOGY(prim);
         unsigned int i;
-        int textured = (prim & 0x8000000000000ULL) != 0;
-        int transparent = (prim & 0x20000000000000ULL) != 0;
-        int use_uv = (prim & 0x80000000000000ULL) != 0;
+        int textured = (prim & PC_PRIM_TME) != 0;
+        int transparent = (prim & PC_PRIM_ABE) != 0;
+        int use_uv = (prim & PC_PRIM_FST) != 0;
         int count = (int)num;
         int owned = 0;
         float texture_width = 1.0f, texture_height = 1.0f;
@@ -1106,10 +1106,6 @@ typedef struct {
     float ot_z;             /* PC_OT_FIXED */
 } PcPrim3D;
 
-#define PC_GIF_PRIM_TME 0x0008000000000000ULL
-#define PC_GIF_PRIM_FGE 0x0010000000000000ULL
-#define PC_GIF_PRIM_ABE 0x0020000000000000ULL
-#define PC_GIF_PRIM_FST 0x0080000000000000ULL
 
 /* Ps2AddOT: con Ps2_ice_flag las texturas de hielo se ordenan con Z >> 12 en lugar de Z >> 4. */
 static int pcOtCoarse(void)
@@ -1199,9 +1195,9 @@ static void pcSubmitVertices(unsigned long prim, const PcNativeVertex* vertices,
 {
     PcNativeVertex* assembled;
     PcNativeDrawState state;
-    unsigned int i, n, topology = (unsigned int)((prim >> 47) & 7u);
-    int textured = (prim & PC_GIF_PRIM_TME) != 0;
-    int blend = (prim & PC_GIF_PRIM_ABE) != 0;
+    unsigned int i, n, topology = PC_PRIM_TOPOLOGY(prim);
+    int textured = (prim & PC_PRIM_TME) != 0;
+    int blend = (prim & PC_PRIM_ABE) != 0;
 
     assembled = (PcNativeVertex*)pcScratch(0, (size_t)count * 3u * sizeof(*assembled));
     if (assembled == NULL)
@@ -1225,9 +1221,9 @@ static void pcSubmitVertices(unsigned long prim, const PcNativeVertex* vertices,
         state.zbuff_a = Ps2_zbuff_a;
         state.zbuff_b = Ps2_zbuff_b;
     }
-    state.fog = !mode->shadow_mask && (prim & PC_GIF_PRIM_FGE) != 0;
+    state.fog = !mode->shadow_mask && (prim & PC_PRIM_FGE) != 0;
     /* espacio 1: el fragmento divide S/Q a mano; espacio 2 (homogeneo): la GPU ya interpola UV con correccion de perspectiva */
-    state.texture_perspective = (screen_space == 1 || screen_space == 4) && (prim & PC_GIF_PRIM_FST) == 0;
+    state.texture_perspective = (screen_space == 1 || screen_space == 4) && (prim & PC_PRIM_FST) == 0;
     state.cull_backfaces = 0;
     if (blend && !state.immediate) {
         state.ot_z_valid = 1;
@@ -1286,7 +1282,7 @@ static void pcSubmitPrepared3D(unsigned long prim, const void* data, unsigned in
     float* gs_z;
     unsigned int i;
     float tex_width = 1.0f, tex_height = 1.0f, average_z;
-    int textured = (prim & PC_GIF_PRIM_TME) != 0;
+    int textured = (prim & PC_PRIM_TME) != 0;
     unsigned int texture = pcRendererCurrentTexture();
 
     if (source == NULL || count < 1 || count > 16384)
@@ -1295,7 +1291,7 @@ static void pcSubmitPrepared3D(unsigned long prim, const void* data, unsigned in
         return;
     /* Conversion en el vertex shader. Los sprites (topologia 6) siguen aqui: copian Z/color/niebla del segundo
      * vertice y la Q del primero, y con vertices crudos la Z sale de la Q. */
-    if (((prim >> 47) & 7u) != 6u) {
+    if (PC_PRIM_TOPOLOGY(prim) != 6u) {
         pcSubmitPrepared3DGpu(prim, data, count, mode);
         return;
     }
@@ -1390,13 +1386,13 @@ static void pcSubmitPrepared3DGpu(unsigned long prim, const void* data, unsigned
     float* gs_z;
     unsigned int i, clip_hist = 0, texture = pcRendererCurrentTexture();
     float tex_width = 1.0f, tex_height = 1.0f, zsum = 0.0f;
-    const int blend = (prim & PC_GIF_PRIM_ABE) != 0;
+    const int blend = (prim & PC_PRIM_ABE) != 0;
     const int profile = pcGameProfileEnabled();
     double t_start = profile ? pcGameProfileNowMs() : 0.0, t_conv = 0.0;
 
     if (s == NULL || count < 1 || count > 16384)
         return;
-    if ((prim & PC_GIF_PRIM_TME) && texture == 0)
+    if ((prim & PC_PRIM_TME) && texture == 0)
         return;
 
     vertices = (PcNativeVertex*)pcScratch(2, (size_t)count * sizeof(*vertices));
@@ -1462,14 +1458,14 @@ static void pcSubmitStrip3D(unsigned long prim, const void* data, unsigned int c
     unsigned int clip_hist = 0;
     /* Sprite (topologia 6): la GS usa Z/color/niebla del SEGUNDO vertice y la Q del primero para dos esquinas; el vertex shader
      * saca Z de la Q del vertice, asi que no puede expresar eso. Ese caso sigue por la conversion de la CPU (mismo resultado). */
-    const int gpu = ((prim >> 47) & 7u) != 6u;
-    const int need_z = !gpu || (prim & PC_GIF_PRIM_ABE) != 0;   /* en GPU, la Z entera solo hace falta en CPU para ordenar el OT */
+    const int gpu = PC_PRIM_TOPOLOGY(prim) != 6u;
+    const int need_z = !gpu || (prim & PC_PRIM_ABE) != 0;   /* en GPU, la Z entera solo hace falta en CPU para ordenar el OT */
     const int profile = pcGameProfileEnabled();
     double t_start = profile ? pcGameProfileNowMs() : 0.0, t_conv = 0.0;
 
     if (rec == NULL || count < 3 || count > 16384)
         return;
-    if ((prim & PC_GIF_PRIM_TME) && texture == 0)
+    if ((prim & PC_PRIM_TME) && texture == 0)
         return;
 
     vertices = (PcNativeVertex*)pcScratch(2, (size_t)count * sizeof(*vertices));
@@ -1579,22 +1575,22 @@ void Ps2AddPrim3D(unsigned long prim, void* dp, unsigned int num)
     TIM2_PICTUREHEADER_EX* timp;  
     
     
-    if ((prim & 0x8000000000000)) 
+    if ((prim & PC_PRIM_TME)) 
     {
         if (Ps2_now_tex == NULL) 
         {
             return;
         }
 
-        if ((prim & 0x20000000000000)) 
+        if ((prim & PC_PRIM_ABE)) 
         {
             if (Ps2_use_pt_flag != 0)
             {
-                prim &= ~SCE_GIF_SET_TAG(0, 0, 0, SCE_GS_SET_PRIM(0, 0, 0, 0, 1, 0, 0, 0, 0), 0, 0);
+                prim &= ~PC_PRIM_ABE;
             }
         }
         
-        if (!(prim & 0x20000000000000)) 
+        if (!(prim & PC_PRIM_ABE)) 
         {
             timp = (TIM2_PICTUREHEADER_EX*)Ps2_now_tex->texinfo.texsurface.pSurface;
             
@@ -1623,22 +1619,22 @@ void Ps2AddPrim3DEx(unsigned long prim, void* dp, unsigned int num)
     TIM2_PICTUREHEADER_EX* timp;  
     
     
-    if ((prim & 0x8000000000000)) 
+    if ((prim & PC_PRIM_TME)) 
     {
         if (Ps2_now_tex == NULL) 
         {
             return;
         }
 
-        if ((prim & 0x20000000000000)) 
+        if ((prim & PC_PRIM_ABE)) 
         {
             if (Ps2_use_pt_flag != 0)
             {
-                prim &= ~SCE_GIF_SET_TAG(0, 0, 0, SCE_GS_SET_PRIM(0, 0, 0, 0, 1, 0, 0, 0, 0), 0, 0);
+                prim &= ~PC_PRIM_ABE;
             }
         }
         
-        if (!(prim & 0x20000000000000)) 
+        if (!(prim & PC_PRIM_ABE)) 
         {
             timp = (TIM2_PICTUREHEADER_EX*)Ps2_now_tex->texinfo.texsurface.pSurface;
             
@@ -1666,22 +1662,22 @@ void Ps2AddPrim3DEx1P(unsigned long prim, void* dp, unsigned int num)
     TIM2_PICTUREHEADER_EX* timp;  
     
     
-    if ((prim & 0x8000000000000)) 
+    if ((prim & PC_PRIM_TME)) 
     {
         if (Ps2_now_tex == NULL) 
         {
             return;
         }
 
-        if ((prim & 0x20000000000000)) 
+        if ((prim & PC_PRIM_ABE)) 
         {
             if (Ps2_use_pt_flag != 0)
             {
-                prim &= ~SCE_GIF_SET_TAG(0, 0, 0, SCE_GS_SET_PRIM(0, 0, 0, 0, 1, 0, 0, 0, 0), 0, 0);
+                prim &= ~PC_PRIM_ABE;
             }
         } 
         
-        if (!(prim & 0x20000000000000)) 
+        if (!(prim & PC_PRIM_ABE)) 
         {
             timp = (TIM2_PICTUREHEADER_EX*)Ps2_now_tex->texinfo.texsurface.pSurface;
             
@@ -2190,22 +2186,22 @@ void Ps2AddPrim3DExI(unsigned long prim, void* dp, unsigned int num)
     TIM2_PICTUREHEADER_EX* timp;      
 
     
-    if ((prim & 0x8000000000000)) 
+    if ((prim & PC_PRIM_TME)) 
     {
         if (Ps2_now_tex == NULL) 
         {
             return;
         }
 
-        if ((prim & 0x20000000000000)) 
+        if ((prim & PC_PRIM_ABE)) 
         {
             if (Ps2_use_pt_flag != 0)
             {
-                prim &= ~SCE_GIF_SET_TAG(0, 0, 0, SCE_GS_SET_PRIM(0, 0, 0, 0, 1, 0, 0, 0, 0), 0, 0);
+                prim &= ~PC_PRIM_ABE;
             }
         }
         
-        if (!(prim & 0x20000000000000)) 
+        if (!(prim & PC_PRIM_ABE)) 
         {
             timp = (TIM2_PICTUREHEADER_EX*)Ps2_now_tex->texinfo.texsurface.pSurface;
             

@@ -2,6 +2,7 @@
 #define _PS2_DUMMY_H_
 
 #include "types.h"
+#include "pc_prim.h"
 
 typedef struct PS2_TP_CACHE
 {

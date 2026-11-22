@@ -81,12 +81,12 @@ void	njDrawLine2D(NJS_POINT2COL *p, Int n, Float pri, Uint32 attr)
     
     if ((attr & 0x40)) 
     {
-        prim |= 0x20000000000000;
+        prim |= PC_PRIM_ABE;
     }
     
     if ((attr & 0x80000000)) 
     {
-        prim |= 0x8000000000000; 
+        prim |= PC_PRIM_TME; 
     }
     
     Ps2AddPrim2D(prim, buff, n + 1);
@@ -156,12 +156,12 @@ void	njDrawPolygon2D(NJS_POINT2COL *p, Int n, Float pri, Uint32 attr)
     
     if ((attr & 0x40)) 
     {
-        prim |= 0x20000000000000;
+        prim |= PC_PRIM_ABE;
     }
     
     if ((attr & 0x80000000)) 
     {
-        prim |= 0x8000000000000; 
+        prim |= PC_PRIM_TME; 
     }
     
     Ps2AddPrim2D(prim, buff, n);
@@ -269,12 +269,12 @@ void njDrawPolygon2DM(NJS_POINT2COL* p, int n, float pri, unsigned int attr)
     
     if ((attr & 0x40)) 
     {
-        prim |= 0x20000000000000;
+        prim |= PC_PRIM_ABE;
     }
     
     if ((attr & 0x80000000)) 
     {
-        prim |= 0x8000000000000; 
+        prim |= PC_PRIM_TME; 
     }
     
     Ps2AddPrim2D(prim, buff, n);

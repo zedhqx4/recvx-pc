@@ -1858,7 +1858,7 @@ CHUNK_HEAD* njCnkCs(CHUNK_HEAD* pCnk)
 
     if (((ulMode = ulNaCnkFlagConstAttr ? ucNaCnkAttr : pCnk->ucHeadBits) & 0x8)) 
     { 
-        ulType |= 0x20000000000000;
+        ulType |= PC_PRIM_ABE;
     }
 
     if (!(ulMode & 0x20)) 

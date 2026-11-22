@@ -385,7 +385,7 @@ void njDrawTextureSub3D1P(NJS_TEXTURE_VTX* polygon, int count, int flag)
     
     if (flag == 1) 
     {
-        prim |= 0x20000000000000; 
+        prim |= PC_PRIM_ABE; 
     }
 
     // this is likely undefined behavior, given that the function matches without the temp when ignoring vu1DrawTriangleStripTransDouble1P's prototype
