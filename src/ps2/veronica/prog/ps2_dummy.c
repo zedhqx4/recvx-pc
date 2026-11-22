@@ -773,28 +773,15 @@ static float pcFixedUv(float word)
     return (float)(bits & 0x3FFFu) / 16.0f;
 }
 
-void Ps2AddPrim(unsigned long prim, void* dp, unsigned int num, unsigned int clip_3d_on)
+void Ps2AddPrim2D(unsigned long prim, void* dp, unsigned int num)
 {
-    unsigned long* p;           
     unsigned int i;             
-    unsigned int clip_flag;     
-    unsigned int sc_flag;       
-    unsigned int out_clip_flag; 
-    unsigned int st_clip_flag;  
-    unsigned int nf_flag;       
-    float z;                    
-    float invz;                 
-    float sz;                   
     float x;                   
     float y;                    
     float wide_2d = 1.0f;
     static unsigned int wide_buf[64 * 12];
 
     pcPrimLog(NULL, prim, num);
-    clip_flag = 0; 
-    sc_flag = 0;
-    st_clip_flag = 0x8000;
-    nf_flag = 0; 
     
     if ((prim & 0x8000000000000))
     { 
@@ -819,7 +806,7 @@ void Ps2AddPrim(unsigned long prim, void* dp, unsigned int num, unsigned int cli
         }
     } 
     
-    if ((clip_3d_on == 0) && (prim & 0x8000000000000) && (prim & 0x80000000000000) && (num <= 64))
+    if ((prim & 0x8000000000000) && (prim & 0x80000000000000) && (num <= 64))
     {
         memcpy(wide_buf, dp, num * 48);
         dp = wide_buf;
@@ -869,7 +856,6 @@ void Ps2AddPrim(unsigned long prim, void* dp, unsigned int num, unsigned int cli
      * that cover the whole width stay full width when they are untextured (fades, flashes) or
      * translucent full screen overlays (room darkness filters); opaque full screen pictures
      * (logos, title) are 4:3 art and get pillarboxed like the rest. */
-    if (clip_3d_on == 0)
     {
         extern float pcVideoWideScale(void);
 
@@ -938,7 +924,6 @@ void Ps2AddPrim(unsigned long prim, void* dp, unsigned int num, unsigned int cli
 
     /* Native 2D path: consume Ninja's screen-space vertices directly. No VU1 packet,
        GIF tag, scratchpad DMA, GS register write or GS ordering-table submission. */
-    if (clip_3d_on == 0)
     {
         PcNativeVertex* vertices;
         PcNativeVertex sprite[6];
@@ -1102,145 +1087,8 @@ void Ps2AddPrim(unsigned long prim, void* dp, unsigned int num, unsigned int cli
             free(vertices);
         return;
     }
-    
-    p = (unsigned long*)WORKBASE; 
-    
-    D2_SyncTag(); 
-    
-    *p++ = DMAend | ((num * 3) + 3); 
-    *p++ = 0; 
-    
-    *p++ = SCE_GIF_SET_TAG(1, 0, 0, 0, 0, 1); 
-    *p++ = SCE_GIF_PACKED_AD; 
-    
-    if ((prim & 0x20000000000000)) 
-    { 
-        *p++ = Ps2_gs_save.TEST = SCE_GS_SET_TEST(1, 6, 0, 0, 0, 0, 1, 2); 
-    }
-    else
-    { 
-        *p++ = Ps2_gs_save.TEST = SCE_GS_SET_TEST(1, 6, 0, 0, 0, 0, 1, 2); 
-    }
-    
-    *p++ = SCE_GS_TEST_1; 
-    *p++ = SCE_GIF_SET_TAG(prim, 1, 1, 0, 0, 3) | num; // should be SCE_GIF_SET_TAG(num, ...) - maybe it's a custom macro and not the official one?
-    
-    if ((prim & 0x80000000000000)) 
-    {
-        *p++ = SCE_GS_UV << (0 * 4) | SCE_GS_RGBAQ << (1 * 4) | SCE_GS_XYZF2 << (2 * 4); 
-    } 
-    else 
-    { 
-        *p++ = SCE_GS_ST << (0 * 4) | SCE_GS_RGBAQ << (1 * 4) | SCE_GS_XYZF2 << (2 * 4); 
-    }
-    
-    for (i = 0; i < num; i++) 
-    { 
-        clip_flag >>= 1; 
-        nf_flag >>= 1; 
-        
-        ((u_long128*)p)[0] = ((u_long128*)dp)[0]; 
-        
-        out_clip_flag = ((UNKNOWN*)p)->unkC; 
-        
-        invz = ((float*)p)[2]; 
-        
-        ((u_long128*)p)[1] = ((u_long128*)dp)[1]; 
-        ((u_long128*)p)[2] = ((u_long128*)dp)[2]; 
-        
-        if (wide_2d < 1.0f)
-        {
-            ((float*)p)[8] = 2048.0f + ((((float*)p)[8] - 2048.0f) * wide_2d);
-        }
-        x = ((float*)p)[8]; 
-        y = ((float*)p)[9]; 
-            
-        sc_flag >>= 4;
-
-        if (((x < 0) || (x > 4095.0f)) || ((y < 0) || (y > 4095.0f))) 
-        { 
-            clip_flag |= 0x4;
-        }
-
-        z = ((float*)p)[3] = ((UNKNOWN*)(p + 4))->unk8;
-        
-        if ((z < 1.0f) || (z > 65535.0f)) 
-        { 
-            clip_flag |= 0x4;
-            nf_flag |= 0x4; 
-        }
-        
-        if (clip_3d_on != 0)
-        { 
-            sz = (-Ps2_zbuff_b * invz) - Ps2_zbuff_a; 
-            
-            if (sz < 0) 
-            {
-                sz = 0;
-            }
-            
-            if (sz > 65534.0f) 
-            {
-                sz = 65534.0f; 
-            }
-            
-            ((UNKNOWN*)(p + 4))->unk8 = sz; 
-        } 
-        else 
-        { 
-            sz = Ps2_zbuff_a + (Ps2_zbuff_b / z); 
-            
-            if (sz < 0) 
-            {
-                sz = 0; 
-            }
-            
-            if (sz > 65534.0f) 
-            {
-                sz = 65534.0f; 
-            }
-               
-            ((UNKNOWN*)(p + 4))->unk8 = sz; 
-        } 
-        
-        sceVu0FTOI4Vector((void*)(p + 4), (void*)(p + 4)); 
-        
-        if (clip_flag != 0) 
-        { 
-            ((UNKNOWN*)(p + 4))->unkC |= 0x8000;
-        }
-        
-        ((UNKNOWN*)(p + 4))->unkC |= out_clip_flag; 
-        
-        st_clip_flag &= ((UNKNOWN*)(p + 4))->unkC; 
-        
-        if (clip_3d_on == 0) 
-        { 
-            ((UNKNOWN*)(p + 4))->unkC &= ~0x8000;
-        }
-        
-        p = (unsigned long*)((int)p + 48); 
-        dp = (unsigned long*)((int)dp + 48);
-    } 
-    
-    if ((prim & 0x20000000000000)) 
-    { 
-        Ps2AddOT((void*)WORKBASE, num, sz, prim); 
-    } 
-    else
-    { 
-        SyncPath(); 
-        
-        loadImage((void*)0xF0000000); 
-    }
-} 
-
-// 100% matching!
-/* CLAUDE-NOTE[N8]: ver nota en Ps2AddPrim sobre el orden de pintado perdido. */
-void Ps2AddPrim2D(unsigned long prim, void* dp, unsigned int num)
-{
-    Ps2AddPrim(prim, dp, num, 0);
 }
+
 
 /* Etapa final del pipeline 3D (Ps2AddPrim3D*): lo que la GS recibia tras el empaquetador VU0.
  *

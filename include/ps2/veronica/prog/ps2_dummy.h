@@ -92,7 +92,6 @@ void Snd_init();
 void Cd_init();
 void Card_init();
 void PS2_jikken();
-void Ps2AddPrim(unsigned long prim, void* dp, unsigned int num, unsigned int clip_3d_on);
 void Ps2AddPrim2D(unsigned long prim, void* dp, unsigned int num);
 void Ps2AddPrim3D(unsigned long prim, void* dp, unsigned int num);
 void Ps2AddPrim3DEx(unsigned long prim, void* dp, unsigned int num);

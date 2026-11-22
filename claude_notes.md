@@ -711,3 +711,7 @@ recalcula siempre, de modo que los cambios de paleta se detectan exactamente igu
 
 ## 0.9.199 - fix de 0.9.198: Ps2PxlconvCheck restaurada
 - El borrado de 0.9.198 se llevo Ps2PxlconvCheck (la llama Ps2TexLoad en ps2_dummy.c). Detectado con la comprobacion global de definiciones (src + pc/src, 58856c94 vs HEAD): ahora solo faltan las 20 funciones huerfanas previstas. El script remove_funcs.py se uso con nombres exactos; la causa mas probable es el `#pragma divbyzerocheck on/off` entre funciones; revisar antes de usarlo de nuevo.
+
+## 0.9.200 - G4: Ps2AddPrim colapsada en Ps2AddPrim2D (el parametro clip_3d_on siempre era 0)
+- El unico llamador era el envoltorio Ps2AddPrim2D con clip_3d_on=0, asi que la ruta 2D nativa (que termina en `return`) era la unica que se ejecutaba. Ps2AddPrim2D es ahora la funcion real; se borra el resto del cuerpo (~130 lineas: paquete GIF/REGLIST, clip_3d_on!=0, llamada a Ps2AddOT) y las variables locales que solo usaba. Header: se quita Ps2AddPrim.
+- Sin cambio de comportamiento: se quitan condiciones constantes (clip_3d_on == 0 -> bloque directo). Comprobacion: check_defs.py (solo desaparece Ps2AddPrim), llaves 0/0.
