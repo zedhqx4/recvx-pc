@@ -708,3 +708,6 @@ recalcula siempre, de modo que los cambios de paleta se detectan exactamente igu
 - Borrados (sin llamadores en src/include/pc): Send_Tim2_dataEx, Send_Tim2_dataExClutOnly, Set_GsTex, Clut_Load_Func, P32_Image_Load, Tim2_Image_Load, LoadToVram, Tim2CalcBufWidth, ClearVram (ps2_loadtim2.c); Ps2BindTextureState, PS2_swap (ps2_dummy.c); prototipos en headers. Send_1024_Clut_data queda solo con pcTextureUploadVramClut (el bucle DMA/GIF era inerte: loadImage/D2_SyncTag/SyncPath son no-ops). clear_buff (sin usos) fuera.
 - Herramienta nueva: pc/tools/remove_funcs.py (borrado de funciones con emparejado de llaves; evita el fallo de 0.9.196).
 - Comprobado: conjunto de definiciones antes/despues = solo las previstas; llaves/parentesis 0/0.
+
+## 0.9.199 - fix de 0.9.198: Ps2PxlconvCheck restaurada
+- El borrado de 0.9.198 se llevo Ps2PxlconvCheck (la llama Ps2TexLoad en ps2_dummy.c). Detectado con la comprobacion global de definiciones (src + pc/src, 58856c94 vs HEAD): ahora solo faltan las 20 funciones huerfanas previstas. El script remove_funcs.py se uso con nombres exactos; la causa mas probable es el `#pragma divbyzerocheck on/off` entre funciones; revisar antes de usarlo de nuevo.

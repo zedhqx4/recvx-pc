@@ -142,3 +142,25 @@ int Send_1024_Clut_data(void* clt_adr, unsigned long send_clut_adr)
 
 
 
+
+#pragma divbyzerocheck off
+
+// 100% matching!
+void Ps2PxlconvCheck(void* timadr)
+{
+    TIM2_PICTUREHEADER* ph; 
+
+    if (((unsigned char*)timadr)[5] == 0) 
+    {
+        ph = (TIM2_PICTUREHEADER*)((int)timadr + 16);
+    }
+    else 
+    {
+        ph = (TIM2_PICTUREHEADER*)((int)timadr + 128);
+    }
+    
+    if (((ph->ImageWidth < 1024) && (ph->ImageHeight < 1024)) && ((ph->ImageWidth > 128) && (ph->ImageHeight > 128)) && ((ph->ImageType == 5) || (ph->ImageType == 4)))
+    {
+        Tim2_Format_Check(timadr); 
+    }
+}
