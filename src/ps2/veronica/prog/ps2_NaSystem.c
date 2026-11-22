@@ -132,13 +132,7 @@ void	njExitSystem( void )
 // 100% matching!
 void	njSetBackColor( Uint32 col1, Uint32 col2, Uint32 col3 ) 
 {
-    unsigned long tmp; 
-
-    tmp = SCE_GS_SET_RGBAQ((col1 >> 16) & 0xFF, (col1 >> 8) & 0xFF, col1 & 0xFF, (col1 >> 24) & 0xFF, 0); 
-    
-    *(unsigned long*)UNCACHED(&Db.clear0.rgbaq) = tmp; 
-    *(unsigned long*)UNCACHED(&Db.clear1.rgbaq) = tmp; 
-    /* Db.clear0/1 era el sprite con el que la GS limpiaba el frame buffer al cambiar de buffer (PS2_swap): el color de fondo.
+    /* En la PS2 el color de fondo se guardaba en los sprites de limpieza del frame buffer (Db.clear0/1).
      * El renderer limpia el FBO al empezar cada frame con ese mismo color (el logo ADX y otras pantallas usan fondo blanco). */
     {
         float a = (float)((col1 >> 24) & 0xFF) / 128.0f;
@@ -460,35 +454,11 @@ void    njChangeSystem( Int mode, Int frame, Int count )
 // 100% matching!
 void	njAdjustDisplay(Sint32 xadjust,Sint32 yadjust )
 { 
-    if (xadjust < -100) 
-    {
-        xadjust = -100;
-    }
-    
-    if (xadjust > 640) 
-    {
-        xadjust = 640; 
-    }
-    
-    if (yadjust < -15) 
-    {
-        yadjust = -15; 
-    }
-    
-    if (yadjust > 240) 
-    {
-        yadjust = 240; 
-    }
-    
-    Db.disp[0].display.DX = (xadjust * 3) + 636; 
-    Db.disp[0].display.DY = (yadjust * 2) + 32; 
-    
-    Db.disp[1].display.DX = (xadjust * 3) + 636; 
-    Db.disp[1].display.DY = (yadjust * 2) + 32; 
-    
-    FlushCache(0);
+    /* En la PS2 movia el origen de la pantalla (DISPLAY.DX/DY de la GS). El renderer nativo siempre presenta la imagen completa
+     * centrada en la ventana, asi que el ajuste de pantalla del juego no tiene efecto en PC. */
+    (void)xadjust;
+    (void)yadjust;
 }
-
 // 100% matching!
 void	njSetBorderColor(Uint32 color )
 {

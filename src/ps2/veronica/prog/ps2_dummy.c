@@ -69,7 +69,6 @@ extern unsigned long ulNaFogR;
 extern unsigned long ulNaFogG;
 extern unsigned long ulNaFogB;
 
-sceGsDBuffDc Db;
 void (*EorFunc)();
 void (*VsyncFunc)();
 unsigned int Ps2_vcount;

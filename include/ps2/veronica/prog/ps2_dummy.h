@@ -61,7 +61,6 @@ extern float Ps2AddPrimPrio;
 extern int ViewType;
 extern unsigned char Ps2_PBUFF[1835008];
 extern unsigned int Ps2_use_pt_flag;
-extern sceGsDBuffDc Db;
 extern PS2_GS_SAVE Ps2_gs_save;
 extern unsigned int Ps2_albinoid_flag;
 extern unsigned int Ps2_sys_cnt;

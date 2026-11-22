@@ -737,3 +737,7 @@ recalcula siempre, de modo que los cambios de paleta se detectan exactamente igu
 
 ## 0.9.206 - fix de 0.9.205: quedaba una llamada a Ps2InitPS2_GS_SAVE en pc/src/pc_system.c
 - Mi grep de llamadores solo miraba src/include (no pc/src). check_defs.py lo detecto (REF). Se quita la llamada: Ps2_gs_save es global (cero al inicio), y la funcion solo ponia a cero esos campos. Leccion: grep de llamadores SIEMPRE incluye pc/src y pc/include.
+
+## 0.9.207 - G4: se elimina el doble buffer GS (Db)
+- Db (sceGsDBuffDc) solo se escribia: njSetBackColor (clear0/1.rgbaq; el color real ya iba a pcRendererSetClearColor) y njAdjustDisplay (DISPLAY.DX/DY, sin efecto en PC). Se borran la variable, su extern y las escrituras; njAdjustDisplay queda con (void) y comentario. El tipo sceGsDBuffDc de libgraph.h queda sin uso (se borra con el resto de libgraph.h).
+- grep de llamadores incluyendo pc/src y pc/include; check_defs.py sin desapariciones inesperadas.
