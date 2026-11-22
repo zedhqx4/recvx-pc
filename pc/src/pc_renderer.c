@@ -879,7 +879,10 @@ static void apply_state(const PcNativeDrawState* st)
                 glBlendFuncSeparate(GL_ONE, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
             } else {
                 glBlendEquationSeparate(b->equation, GL_FUNC_ADD);
-                glBlendFuncSeparate(b->src, b->dst, GL_ONE, GL_ZERO);   /* alfa: lo escribe la fuente, como la GS */
+                if (active_target == TARGET_UI)
+                    glBlendFuncSeparate(b->src, b->dst, GL_ONE, GL_ONE_MINUS_SRC_ALPHA); /* alfa acumulado para componer la capa */
+                else
+                    glBlendFuncSeparate(b->src, b->dst, GL_ONE, GL_ZERO);   /* alfa GS: lo escribe la fuente */
             }
         }
         gls.blend = 1; gls.fix = b->fix; gls.premult = pm; gls.eq = eq; gls.src = src; gls.dst = dst;
@@ -2314,7 +2317,7 @@ void pcRendererPresent(void)
             v[i].z = 0.0f;
             v[i].r = v[i].g = v[i].b = v[i].a = 1.0f;
             v[i].u = (c == 0 || c == 3) ? 0.0f : (float)output_width;
-            v[i].v = (c < 2) ? 0.0f : (float)output_height;
+            v[i].v = (c < 2) ? (float)output_height : 0.0f; /* el FBO UI tiene origen GL abajo */
             v[i].q = 1.0f;
             v[i].fog = 1.0f;
         }
