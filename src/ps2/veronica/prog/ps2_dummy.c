@@ -88,12 +88,7 @@ NJS_MATRIX lcmat[12];
 float mbuf[128][16];
 unsigned int palbuf[4096];
 unsigned char Ps2_tex_mem[10485760];
-PS2_OT* Ps2_OT[4096][2] __attribute__((aligned(128)));
 unsigned char Ps2_PBUFF[1835008] __attribute__((aligned(64)));
-void* Ps2_PP;
-PS2_OT Ps2_ot_list[8192];
-unsigned int Ps2_ot_list_no;
-PS2_TP_TAG Ps2_tp_tag[64] __attribute__((aligned(64)));
 PS2_TP_CACHE ps2_tp_cache[64];
 float Ps2_shadow_vec[4];
 float Ps2_shadow_fog;
@@ -1729,117 +1724,11 @@ void Ps2AddPrim3DMod(unsigned long prim, void* dp, unsigned int num)
     }
 }
 
-// 100% matching! 
+/* Sin OT en PC: los primitivos con ABE esperan en la cola del renderer (pcRendererFlushTransparent*). Se conserva la funcion porque el
+ * juego la llama al cambiar de escena/pantalla; ya no hay estructura que limpiar. */
 void Ps2ClearOT()
 {
-    int i;
-
-    Ps2_ot_list->tp = NULL;
-    
-    Ps2_ot_list_no = 0;
-    
-    Ps2_PP = (void*)Ps2_PBUFF;
-    
-    for (i = 0; i < 4096; i++) 
-    {
-        *(unsigned long*)&Ps2_OT[i][0] = 0;
-    } 
 }
-
-// 100% matching!
-void Ps2AddOT(void* p, unsigned int num, float z, unsigned long prim)
-{
-    unsigned int i; 
-    unsigned int size; 
-    register unsigned int otz = 0; 
-    unsigned int id; 
-
-    if (Ps2_ice_flag != 0)
-    { 
-        id = Ps2_now_tex->globalIndex & 0xFFFFF; 
-        
-        if (((id >= 26510) && (id <= 26614)) || (id == 107170)) 
-        { 
-            otz = (unsigned int)(int)z;
-            /* (mfc1) */
-            
-            otz >>= 12;
-        } 
-        else 
-        { 
-            otz = (unsigned int)(int)z;
-            /* (mfc1) */
-            
-            otz >>= 4;
-        }
-    } 
-    else 
-    { 
-        otz = (unsigned int)(int)z;
-        /* (mfc1) */
-        
-        otz >>= 4; 
-    }
-        
-    if (otz > 4095) 
-    {
-        otz = 4095; 
-    }
-        
-    if (Ps2_OT[otz][0] != NULL) 
-    { 
-        Ps2_OT[otz][1]->op = (void*)&Ps2_ot_list[Ps2_ot_list_no]; 
-        
-        Ps2_OT[otz][1] = &Ps2_ot_list[Ps2_ot_list_no]; 
-        
-        Ps2_OT[otz][1]->op = NULL; 
-    } 
-    else 
-    { 
-        Ps2_OT[otz][0] = Ps2_OT[otz][1] = &Ps2_ot_list[Ps2_ot_list_no]; 
-        
-        Ps2_OT[otz][1]->op = NULL; 
-    }
-        
-    if ((prim & 0x8000000000000)) 
-    { 
-        Ps2_ot_list[Ps2_ot_list_no].tp = Ps2_now_tex; 
-        Ps2_ot_list[Ps2_ot_list_no].bank = Ps2_now_bank; 
-    }
-    else 
-    { 
-        Ps2_ot_list[Ps2_ot_list_no].tp = (void*)-1; 
-    }
-        
-    Ps2_ot_list[Ps2_ot_list_no].p = Ps2_PP; 
-    
-    Ps2_ot_list[Ps2_ot_list_no].TEX0 = Ps2_gs_save.TEX0 & 0xE0F8001FFFFFC000; 
-    Ps2_ot_list[Ps2_ot_list_no].TEX0_NEXT = Ps2_gs_save.TEX0_NEXT & 0xE0F8001FFFFFC000; 
-    
-    Ps2_ot_list[Ps2_ot_list_no].ALPHA = Ps2_gs_save.ALPHA; 
-    
-    num = (num * 3) + 1; 
-    
-    (char*)Ps2_PP += 16; 
-        
-    *((long*)Ps2_PP)++ = DMAnext | ((*(long*)p) & 0xFFFFFFF); 
-    *((long*)Ps2_PP)++ = 0; 
-    
-    *((long*)Ps2_PP)++ = SCE_GIF_SET_TAG(1, 0, 0, 0, 0, 1); 
-    *((long*)Ps2_PP)++ = SCE_GIF_PACKED_AD; 
-    
-    *((long*)Ps2_PP)++ = Ps2_gs_save.ALPHA; 
-    *((long*)Ps2_PP)++ = SCE_GS_ALPHA_1; 
-    
-    (char*)p += 48; 
-    
-    for (i = 0; i < num; i++) 
-    { 
-        *((u_long128*)Ps2_PP)++ = *((u_long128*)p)++; 
-    } 
-    
-    Ps2_ot_list_no++; 
-} 
 
 // 100% matching! 
 /* CLAUDE-NOTE[N8]: en PC esto ya NO recorre el OT; solo vacia la cola de transparencias. El orden de pintado por prioridad

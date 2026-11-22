@@ -3,40 +3,6 @@
 
 #include "types.h"
 
-typedef struct PS2_OT_LIST
-{
-    // total size: 0x0
-    int pad; // this isn't really here, but blocks an error
-} PS2_OT_LIST;
-
-typedef struct PS2_OT
-{
-    // total size: 0x30
-	NJS_TEXMEMLIST* tp;       // offset 0x0, size 0x4
-	unsigned char mode_bk[2]; // offset 0x4, size 0x2
-    unsigned char set_last;   // offset 0x6, size 0x1
-    unsigned char dc_alpha;   // offset 0x7, size 0x1
-    PS2_OT_LIST* op;          // offset 0x8, size 0x4
-    void* p;                  // offset 0xC, size 0x4
-    unsigned long ALPHA;      // offset 0x10, size 0x4
-    unsigned long TEX0;       // offset 0x18, size 0x4
-    unsigned long TEX0_NEXT;  // offset 0x20, size 0x4
-    unsigned int bank;        // offset 0x28, size 0x4
-    unsigned int pad;         // offset 0x2C, size 0x4
-} PS2_OT;
-
-typedef struct PS2_TP_TAG
-{
-    // total size: 0x40
-	unsigned long GIF_TAG[2];    // offset 0x0, size 0x8
-    unsigned long TEX0;          // offset 0x10, size 0x4
-    unsigned long TEX0_TAG;      // offset 0x18, size 0x4
-    unsigned long TEX0_NEXT;     // offset 0x20, size 0x4
-    unsigned long TEX0_NEXT_TAG; // offset 0x28, size 0x4
-    unsigned long CLAMP;         // offset 0x30, size 0x4
-    unsigned long CLAMP_TAG;     // offset 0x38, size 0x4
-} PS2_TP_TAG;
-
 typedef struct PS2_TP_CACHE
 {
     // total size: 0x10
@@ -98,7 +64,6 @@ void Ps2AddPrim3DEx(unsigned long prim, void* dp, unsigned int num);
 void Ps2AddPrim3DEx1P(unsigned long prim, void* dp, unsigned int num);
 void Ps2AddPrim3DMod(unsigned long prim, void* dp, unsigned int num);
 void Ps2ClearOT();
-void Ps2AddOT(void* p, unsigned int num, float z, unsigned long prim);
 void Ps2DrawOTag();
 unsigned int Ps2BitCount(unsigned int value);
 void Ps2InitTexCache();
