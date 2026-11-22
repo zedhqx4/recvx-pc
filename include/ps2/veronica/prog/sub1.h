@@ -24,7 +24,6 @@ typedef struct PULSE_WORK
     unsigned int count;           // offset 0x11C, size 0x4
 } PULSE_WORK;
 
-void Ps2ZbuffOffI();
 void Ps2DrawOTagI();
 void StatusInit(S_WORK* st);
 void ItemBoxInit(S_WORK* st);

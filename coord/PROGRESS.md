@@ -22,3 +22,4 @@ Cada paso: commit propio, version sube 1, notas en claude_notes.md, push, milest
 - 0.9.192: gpu_vertex colapsado. Siguientes: rtt_gpu_copy (respaldo), revisar sprites->GPU para poder borrar la conversion CPU, luego G3 pasos 3-7.
 - 0.9.192 validada por el usuario (2026-11-21). milestone/0.9.192.
 - 2026-11-21: G3 paso 3 delegado a GPT como G4 (coord/TASKS.md, solo analisis -> coord/reports/G4.md). Al volver: `git fetch origin optimizacion-gpt:refs/remotes/origin/optimizacion-gpt`, leer G4.md, corregir, y ejecutar los pasos propuestos uno por uno.
+- 0.9.193-0.9.196 (2026-11-21): G4 paso 5 (colas muertas + funciones huerfanas, ~-1700 lineas) hecho; sin validar por usuario ni CI. Siguiente segun G4.md: pasos de retirada de macros GIF (clases A/B/C), ver coord/reports/G4.md (rama origin/optimizacion-gpt).

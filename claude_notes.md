@@ -696,3 +696,7 @@ recalcula siempre, de modo que los cambios de paleta se detectan exactamente igu
 
 ## 0.9.195 - G4 paso 5c: colas muertas de Ps2DrawOTagI (sub1.c) y StoreRenderTex (ps2_loadtim2.c)
 - Ps2DrawOTagI: se quita la segunda pasada del OT (Ps2ZbuffOffI/Ps2DrawOTagSub/Ps2ZbuffOff2/Ps2ZbuffOn) que estaba tras el return PC. StoreRenderTex: se quita `Ps2ScreenClear()` tras el return (la limpieza real es pcRendererClear, antes).
+
+## 0.9.196 - G4 paso 5d: funciones huerfanas tras 5a-5c (-424 lineas)
+- Sin llamadores (git grep -w en src/include/pc): Ps2ScreenClear, Ps2DispScreenClear, Ps2ZbuffOff, Ps2ZbuffOff2, Ps2ZbuffOn, Ps2DrawOTagSub (215 lineas), Ps2ZbuffOffI (sub1.c) y los static Ps2EnsureTextureImage y pc_tim2_source_hashes. Declaraciones borradas de ps2_dummy.h/sub1.h.
+- Ojo: la profundidad/alfa del OT siguen modeladas en pc_renderer (pcRendererSetDepthMode etc. no se tocan).
