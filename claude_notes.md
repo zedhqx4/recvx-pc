@@ -731,3 +731,6 @@ recalcula siempre, de modo que los cambios de paleta se detectan exactamente igu
 - ps2_NaSprite.c (2 expresiones) y ps2_NinjaCnk.c (Ps2AddPrim3DMod + 10 en njCnkCsUvh/Uvn) dejan de usar SCE_GIF_SET_TAG/SCE_GIF_PRIM/SCE_GS_SET_PRIM; ahora PC_PRIM_SET_TOPOLOGY(...) | PC_PRIM_*. Nuevas constantes IIP/AA1/CTXT/FIX para conservar bit a bit el valor.
 - Validacion: pc/tools/test_prim_desc.c (gcc -I pc/include): los 2048 valores del campo PRIM reconstruidos y leidos con las constantes nuevas = macros GS originales, y las 6 expresiones de los productores iguales a las originales: 2048 casos, 0 fallos.
 - Queda en el juego un uso de SCE_GS_SET_PRIM: ps2_MovieFunc.c:347 (paquete real de transferencia de video, clase A, aparte).
+
+## 0.9.205 - G4: PS2_GS_SAVE reducido a los campos que se usan
+- Ps2InitPS2_GS_SAVE no tenia llamadores (solo definicion y prototipo): borrada. La estructura PS2_GS_SAVE pierde SC_TAG/GIF_TAG/TEX0/TEX1/CLAMP/TEST/FOGCOL/ALPHA/FBA/SCISSOR (+tags) que solo se escribian ahi; quedan mode_bk[2], set_last y dc_alpha (njColorBlendingModeSys/njSetBlendingMode).

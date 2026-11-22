@@ -96,7 +96,7 @@ int Ps2_shadow_z;
 void* Ps2_tex_cache_buff[4];
 unsigned int Ps2_tex_cache_beflag[4];
 unsigned int Ps2_tex_cache_num;
-PS2_GS_SAVE Ps2_gs_save __attribute__((aligned(64)));
+PS2_GS_SAVE Ps2_gs_save;
 NJS_TEXMEMLIST* Ps2_now_tex;
 unsigned int Ps2_now_bank;
 float Ps2AddPrimPrio;
@@ -1988,48 +1988,6 @@ int Ps2CheckTextureAlpha(void* pp)
     Ps2PxlconvCheck(pp);
     
     return flag;
-}
-
-// 100% matching! 
-void Ps2InitPS2_GS_SAVE()
-{
-    Ps2_gs_save.SC_TAG[0] = DMAend | 0xA;
-    Ps2_gs_save.SC_TAG[1] = 0;
-    
-    Ps2_gs_save.GIF_TAG[0] = SCE_GIF_SET_TAG(9, SCE_GS_TRUE, SCE_GS_FALSE, 0, SCE_GIF_PACKED, 1);
-    Ps2_gs_save.GIF_TAG[1] = SCE_GIF_PACKED_AD;
-    
-    Ps2_gs_save.TEX0 = 0;
-    Ps2_gs_save.TEX0_TAG = SCE_GS_TEX0_1;
-    
-    Ps2_gs_save.TEX0_NEXT = 0;
-    Ps2_gs_save.TEX0_NEXT_TAG = SCE_GS_TEX0_1;
-    
-    Ps2_gs_save.TEX1 = 0;
-    Ps2_gs_save.TEX1_TAG = SCE_GS_TEX1_1;
-    
-    Ps2_gs_save.CLAMP = 0;
-    Ps2_gs_save.CLAMP_TAG = SCE_GS_CLAMP_1;
-    
-    Ps2_gs_save.TEST = 0;
-    Ps2_gs_save.TEST_TAG = SCE_GS_TEST_1;
-    
-    Ps2_gs_save.FOGCOL = 0;
-    Ps2_gs_save.FOGCOL_TAG = SCE_GS_FOGCOL;
-    
-    Ps2_gs_save.ALPHA = 0;
-    Ps2_gs_save.ALPHA_TAG = SCE_GS_ALPHA_1;
-    
-    Ps2_gs_save.FBA = 0;
-    Ps2_gs_save.FBA_TAG = SCE_GS_FBA_1;
-    
-    Ps2_gs_save.SCISSOR = 0;
-    Ps2_gs_save.SCISSOR_TAG = SCE_GS_SCISSOR_1;
-
-    Ps2_gs_save.dmy = 0;
-    Ps2_gs_save.pad64 = 0;
-    
-    FlushCache(0);
 }
 
 // 100% matching! 
