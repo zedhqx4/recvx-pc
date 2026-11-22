@@ -31,7 +31,7 @@ void  sceVu0ITOF12Vector(sceVu0FVECTOR v0, sceVu0IVECTOR v1);
 void  sceVu0FTOI0Vector(sceVu0IVECTOR v0, sceVu0FVECTOR v1);
 void  sceVu0FTOI4Vector(sceVu0IVECTOR v0, sceVu0FVECTOR v1);
 
-/* ---- libgraph (GS registers are 64-bit bitfields) ---- */
+/* ---- GS texture register layouts (TIM2 picture header fields) ---- */
 typedef struct {
     u_long64 TBP0:14, TBW:6, PSM:6, TW:4, TH:4, TCC:1, TFX:2,
              CBP:14, CPSM:4, CSM:1, CSA:5, CLD:3;
@@ -165,42 +165,13 @@ typedef struct { int dummy[4]; } sceSifReceiveData;
 /* ---- libcdvd error / status codes ---- */
 #define SCECdErNO     0x00
 #define SCECdErEOM    0x32
-#define SCECdErTRMOPN 0x31
 #define SCECdErREAD   0x30
-#define SCECdErPRM    0x22
-#define SCECdErILI    0x21
-#define SCECdErIPI    0x20
-#define SCECdErABRT   0x01
 #define SCECdErCMD    0x14
 #define SCECdErOPENS  0x15
 #define SCECdErNODISC 0x16
-#define SCECdErNORDY  0x17
 #define SCECdErCUD    0x18
-#define SCECdErFAIL   (-1)
-#define SCECdNODISC   0x00
-#define SCECdDETCT    0x01
-#define SCECdDETCTCD  0x02
-#define SCECdDETCTDVDS 0x03
-#define SCECdDETCTDVDD 0x04
-#define SCECdUNKNOWN  0x05
-#define SCECdPSCD     0x10
-#define SCECdPSCDDA   0x11
-#define SCECdPS2CD    0x12
-#define SCECdPS2CDDA  0x13
 #define SCECdPS2DVD   0x14
-#define SCECdCDDA     0xfd
-#define SCECdDVDV     0xfe
-#define SCECdIllgalMedia 0xff
 #define SCECdEXIT     0x10
-#define SCECdINIT     0x00
-#define SCECdINon     0x01
-#define SCECdINoD     0x02
-#define SCECdCD       1
-#define SCECdDVD      2
-#define SCECdSpinMax  0
-#define SCECdSpinNom  1
-#define SCECdSpinStm  0
-#define SCECdSecS2048 0
 
 /* ---- libcdvd functions (pc/src/pc_cdvd.c) ---- */
 int sceCdInit(int mode);
@@ -253,18 +224,3 @@ int sceMcGetDir(int port, int slot, const char* name, unsigned int mode, int max
 int sceMcFormat(int port, int slot);
 int sceMcDelete(int port, int slot, const char* name);
 int sceMcSync(int mode, int* cmd, int* result);
-
-/* DMA channel registers (only used as channel identifiers on PC) */
-#define D0_CHCR ((volatile u_int*)0x10008000)
-#define D1_CHCR ((volatile u_int*)0x10009000)
-#define D2_CHCR ((volatile u_int*)0x1000A000)
-#define D3_CHCR ((volatile u_int*)0x1000B000)
-#define D4_CHCR ((volatile u_int*)0x1000B400)
-
-/* VIF codes (only built, never executed on PC: the VU1 path is disabled) */
-#define SCE_VIF1_SET_NOP(irq)                   ((u_int)(irq) << 31)
-#define SCE_VIF1_SET_BASE(base, irq)            (((u_int)(irq) << 31) | (0x03u << 24) | (u_int)(base))
-#define SCE_VIF1_SET_OFFSET(offset, irq)        (((u_int)(irq) << 31) | (0x02u << 24) | (u_int)(offset))
-#define SCE_VIF1_SET_MSCAL(vuaddr, irq)         (((u_int)(irq) << 31) | (0x14u << 24) | (u_int)(vuaddr))
-#define SCE_VIF1_SET_UNPACK(vuaddr, num, cmd, irq) \
-    (((u_int)(irq) << 31) | ((0x60u | (u_int)(cmd)) << 24) | ((u_int)(num) << 16) | (u_int)(vuaddr))

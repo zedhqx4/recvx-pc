@@ -1,7 +1,7 @@
 #include "../../../cri/mwlib/ee/lib/libadxe/adx_mps2.h"
 #include "../../../cri/mwlib/ee/lib/libadxe/adx_fsvr.h"
 
-#include <libgraph.h>
+#include <sce_pc.h>
 #include "pc_kernel.h"
 
 char* volatile adxps2_build = "\nADXPS2 Ver.1.01 Build:Mar 14 2001 14:23:33\n";

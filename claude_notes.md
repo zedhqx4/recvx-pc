@@ -767,3 +767,9 @@ recalcula siempre, de modo que los cambios de paleta se detectan exactamente igu
 
 ## 0.9.214 - sceGsSyncV/sceGsSyncVCallback -> pcKernelWaitVblank/pcKernelSetVblankCallback
 - API neutra de vblank en pc/include/pc_kernel.h (implementacion en pc_kernel.c, mismo cuerpo). 6 llamadas renombradas (adxwrap.c 2, ps2_sfd_mw.c 2, adx_mps2.c 1 + el retorno ahora es el puntero de funcion real, sin cast a int: el valor de retorno de sceGsSyncV (paridad) no lo usaba nadie). Declaraciones PS2 borradas de libgraph.h y sce_pc.h. Grep (src include pc/src pc/include) limpio.
+
+## 0.9.215 - poda de headers GS: libgraph.h borrado, types.h/macros.h/sce_pc.h limpios
+- pc/include/libgraph.h (365 lineas: registros GS, encoders SCE_GS_SET_*, tags GIF, structs sceGs*, DBuffDc, GSL/u_long64_t) borrado entero: ningun simbolo tenia uso fuera del propio header salvo SCE_GS_MODULATE (solo en un comentario de pc_texture.c). types.h y adx_mps2.c incluian <libgraph.h> para obtener sce_pc.h; ahora incluyen <sce_pc.h> directamente.
+- types.h: 37 #define sin uso (SCE_GS_*, GS_X/Y_COORD(_MOD), GS_COORD, SCR_WIDTH/HEIGHT, WORKBASE, DMA*, UNCACHED_BASE, DISP_*), macros.h: SCE_GIF_PRIM. Se conservan SCR_WIDTH2/HEIGHT2 (los usa ps2_dummy.c).
+- sce_pc.h: D0..D4_CHCR, SCE_VIF1_SET_*, 34 SCECd* sin uso. Se conservan sceGsTex0/sceGsTex1 (campos GsTex0/GsTex1 de la cabecera TIM2: formato de datos) y las constantes SCECd usadas.
+- Comprobacion: grep -w de cada nombre en src include pc/src pc/include = 0 referencias; sce_pc.h compila solo con gcc. No se pudo compilar la cadena types.h completa aqui (falla igual sin los cambios por intrinsics con `long` redefinido).

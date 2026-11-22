@@ -88,8 +88,6 @@
 
 #define PREFETCH(_v)
 
-#define SCE_GIF_PRIM(prim, iip, tme, fge, abe, aa1, fst, ctxt, fix) SCE_GIF_SET_TAG(0, 0, 0, SCE_GS_SET_PRIM(prim, iip, tme, fge, abe, aa1, fst, ctxt, fix), 0, 0)
-
 #define RAND_MAX 0x7fffffff
 
 #ifndef RAND_MAX

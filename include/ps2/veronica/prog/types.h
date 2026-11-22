@@ -16,7 +16,7 @@
 #include <libcdvd.h>
 #include <libipu.h>
 #include <libmpeg.h>
-#include <libgraph.h>
+#include <sce_pc.h>
 #include <libdma.h>
 #include <libpad.h>
 #include <libmc.h>
@@ -2405,64 +2405,9 @@ typedef struct {
 
 } VideoDec;
 
-#define SCE_GS_ALPHA_AS         (0)
-#define SCE_GS_ALPHA_AD         (1)
-#define SCE_GS_ALPHA_FIX        (2)
-
-#define SCR_WIDTH 640
-#define SCR_HEIGHT 224
-
-#define GS_X_COORD(x) ((2048 - (SCR_WIDTH / 2) + x) * 16)
-#define GS_Y_COORD(y) ((2048 - (SCR_HEIGHT / 2) + y) * 16)
-
 #define SCR_WIDTH2 640
 #define SCR_HEIGHT2 480
 
-#define GS_X_COORD_MOD(x) ((2048 - (SCR_WIDTH2 / 2) + x) * 16)
-#define GS_Y_COORD_MOD(y) ((2048 - (SCR_HEIGHT2 / 2) + y) * 16)
-
-#define GS_COORD(v) ((unsigned int)((v) * 16))
-
-#define WORKBASE (0x70000000)
-
-#define DMAnext             (2<<28)
-#define DMAend  (7<<28)
-
-#define    SCE_GS_FALSE         (0)
-#define    SCE_GS_TRUE          (1)
-
-#define SCE_GS_ALPHA_NEVER      (0)
-
-#define    SCE_GS_AFAIL_KEEP    (0)
-#define    SCE_GS_AFAIL_FB_ONLY (1)
-
-#define SCE_GS_DEPTH_ALWAYS     (1)
-#define SCE_GS_DEPTH_GEQUAL     (2)
-#define SCE_GS_ALPHA_GEQUAL     (5)
-#define SCE_GS_ALPHA_GREATER    (6)
-
-#define SCE_GS_ALPHA_CS         (0)
-#define SCE_GS_ALPHA_CD         (1)
-
-#define SCE_GS_ALPHA_FIX        (2)
-
-#define DMArefe             (0<<28)
-#define DMAcnt              (1<<28)
-#define DMAnext             (2<<28)
-#define DMAref              (3<<28)
-#define DMArefs             (4<<28)
-#define DMAcall             (5<<28)
-#define DMAret              (6<<28)
-#define DMAend              (7<<28)
-
-#define SCE_GS_CLAMP            (1)
-
-#define SCE_GS_REPEAT           (0)
-
-#define DISP_WIDTH 640
-#define DISP_HEIGHT 480
-
-#define UNCACHED_BASE 0x20000000
 #define UNCACHED(x) ((u_int)(x)) /* PC: no uncached mirror */
 
 // TODO: include the following define from cpureg.h

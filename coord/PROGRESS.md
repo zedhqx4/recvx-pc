@@ -34,3 +34,5 @@ Cada paso: commit propio, version sube 1, notas en claude_notes.md, push, milest
 - 0.9.213: borrado pc_libgraph.c (shims inertes SyncPath etc). Siguiente: sceGsSyncV/Callback -> API vsync neutra; poda macros GS de headers.
 - 0.9.213 validada (log limpio).
 - 0.9.214: sceGsSyncV/Callback -> pcKernelWaitVblank/SetVblankCallback. Siguiente: poda de macros/tipos GS en libgraph.h, types.h, macros.h, sce_pc.h (sceGsDBuffDc sin uso etc).
+- 0.9.214 validada (log limpio, 32k lineas). Siguiente: poda macros GS (types.h, macros.h, libgraph.h, sce_pc.h).
+- 0.9.215: borrado libgraph.h; podados types.h/macros.h/sce_pc.h (macros GS/DMA/VIF/CD sin uso). Siguiente: Ps2ClearOT (15 llamadas), headers EE (eekernel/eeregs/libdma...), opcional renombrar sceVu0* tipos.
