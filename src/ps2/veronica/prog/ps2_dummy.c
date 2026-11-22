@@ -1040,6 +1040,7 @@ void Ps2AddPrim2D(unsigned long prim, void* dp, unsigned int num)
         state.alpha_ref = 0.004f;
         state.linear_filter = 1;
         state.screen_space = 1;
+        state.ui_layer = 1;
         state.cull_backfaces = 0;
         {
             /* Ps2AddOT usa el sz del ultimo vertice como clave del OT */
