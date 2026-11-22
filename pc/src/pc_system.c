@@ -36,7 +36,6 @@ void Ps2Init()
 
     /* state initialised by the original Ps2Init that the native-renderer rewrite dropped */
     Ps2InitTexCache();
-    Ps2InitPS2_GS_SAVE();
 
     njColorBlendingMode(0, 8);
     njColorBlendingMode(1, 6);

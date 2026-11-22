@@ -734,3 +734,6 @@ recalcula siempre, de modo que los cambios de paleta se detectan exactamente igu
 
 ## 0.9.205 - G4: PS2_GS_SAVE reducido a los campos que se usan
 - Ps2InitPS2_GS_SAVE no tenia llamadores (solo definicion y prototipo): borrada. La estructura PS2_GS_SAVE pierde SC_TAG/GIF_TAG/TEX0/TEX1/CLAMP/TEST/FOGCOL/ALPHA/FBA/SCISSOR (+tags) que solo se escribian ahi; quedan mode_bk[2], set_last y dc_alpha (njColorBlendingModeSys/njSetBlendingMode).
+
+## 0.9.206 - fix de 0.9.205: quedaba una llamada a Ps2InitPS2_GS_SAVE en pc/src/pc_system.c
+- Mi grep de llamadores solo miraba src/include (no pc/src). check_defs.py lo detecto (REF). Se quita la llamada: Ps2_gs_save es global (cero al inicio), y la funcion solo ponia a cero esos campos. Leccion: grep de llamadores SIEMPRE incluye pc/src y pc/include.
