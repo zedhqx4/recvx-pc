@@ -363,20 +363,7 @@ typedef struct {
     sceGsClear clear1;
 } sceGsDBuffDc;
 
-typedef struct {
-    u_int vifcode[4];
-    sceGifTag giftag;
-    sceGsBitbltbuf bitbltbuf; u_long64_t bitbltbufaddr;
-    sceGsTrxpos trxpos;       u_long64_t trxposaddr;
-    sceGsTrxreg trxreg;       u_long64_t trxregaddr;
-    sceGsFinish finish;       u_long64_t finishaddr;
-    sceGsTrxdir trxdir;       u_long64_t trxdiraddr;
-    short pc_x, pc_y, pc_w, pc_h;   /* PC: rectangulo de pantalla a leer (sceGsSetDefStoreImage) */
-} sceGsStoreImage;
-
 /* ---- libgraph functions (pc/src/pc_libgraph.c) ---- */
-void sceGsSetDefStoreImage(sceGsStoreImage* sp, short sbp, short sbw, short spsm, short x, short y, short w, short h);
-int  sceGsExecStoreImage(sceGsStoreImage* sp, u_long128* dstaddr);
 int  sceGsSyncPath(int mode, unsigned short timeout);
 int  sceGsSyncV(int mode);
 int  sceGsSyncVCallback(int (*func)(int));

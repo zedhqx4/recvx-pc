@@ -755,3 +755,8 @@ recalcula siempre, de modo que los cambios de paleta se detectan exactamente igu
 ## 0.9.211 - se borran envios de programas VU, shims sceDma* y LoadImage (sin llamadores)
 - Ps2Vu0ProgSend/Ps2Vu1ProgSend (solo definicion + prototipo; nunca llamadas), sceDmaSend/sceDmaSync, los simbolos ps2_vu0sub0/ps2_vu1sub0/ps2_vu1sub1, sceGsSetDefLoadImage/sceGsExecLoadImage, y los tipos sceGsLoadImage y sceDmaChan. check_defs.py: 6 desapariciones esperadas, 0 referencias restantes (grep incluye pc/src y pc/include).
 - Queda por retirar: StoreImage (viva, necesita API tipada de captura), sceGsSyncV/SyncPath, macros GS de libgraph.h/types.h.
+
+## 0.9.212 - StoreImage GS sustituido por pcTextureCaptureScreen (pc/include/pc_texture.h)
+- StoreRenderTex ya no usa sceGsStoreImage/SetDefStoreImage/ExecStoreImage (3 franjas 255/255/2 con maquina de estado en pc_libgraph.c). Ahora una sola llamada pcTextureCaptureScreen(imagen): vacia transparentes, invalida fuentes, copia GPU->GPU de 512x512 (INI rtt_gpu_copy, defecto 1) y, si falla o esta a 0, lectura completa por CPU con alfa 0x80 (mismo respaldo que antes). Se borran el tipo sceGsStoreImage y la rama de captura no-render-texture (sin llamadores).
+- Cambio de comportamiento posible: la copia GPU es una sola de 512 filas en vez de 3 franjas; mismo resultado esperado. Si las texturas de render (espejos/pantallas, fondos de menu) salen mal, revertir 0.9.212. Funcion nueva comprobada sintacticamente en aislamiento (ninja.h no esta aqui).
+- Queda en pc_libgraph.c solo sceGsSyncPath + loadImage/SyncPath/D2_SyncTag.

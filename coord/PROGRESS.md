@@ -29,3 +29,4 @@ Cada paso: commit propio, version sube 1, notas en claude_notes.md, push, milest
 - 0.9.203-0.9.204 ok (usuario: funciona bien). G4 pasos 1,3,5,6 hechos. Quedan G4 2 (TEX0/CLAMP/TEST/ZBUF estado de textura/profundidad tipado), 4 (PC_GIF/ps2_MovieFunc paquete), 7.
 - 0.9.208-0.9.209 ok (usuario: todo bien en 0.9.209).
 - 0.9.211: borrados Ps2Vu*ProgSend, sceDma*, LoadImage (sin llamadores). Siguiente: reemplazar StoreImage por API tipada de captura, luego sceGsSyncV/SyncPath y poda de macros GS.
+- 0.9.211 validada (log sin errores). 0.9.212: StoreImage -> pcTextureCaptureScreen (toca ruta viva: render textures; validar visualmente). Siguiente: sceGsSyncV/SyncPath, poda macros GS.

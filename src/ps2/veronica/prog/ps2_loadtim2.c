@@ -1,6 +1,7 @@
 #include "../../../ps2/veronica/prog/ps2_loadtim2.h"
 #include "../../../ps2/veronica/prog/ps2_dummy.h"
 #include "../../../ps2/veronica/prog/ps2_pxlconv.h"
+#include "../../../../pc/include/pc_texture.h"
 
 //#include <string.h>
 
@@ -86,32 +87,8 @@ u_long128* MakeRenderTexHeader(void* tex_adr)
  * La captura usa GPU->GPU y solo cae a readback completo por CPU si falla la ruta GL. */
 void StoreRenderTex(void* tex_adr)
 {
-    sceGsStoreImage gs_simage; 
-    int loop; 
-    int l;
-    u_long128* p; 
-    u_long128* imagetop; 
-    
-    imagetop = MakeRenderTexHeader(tex_adr);
-    
-    l = 255;
-    
-    for (loop = 0; loop < 512; loop += l) 
-    {
-        p = &imagetop[loop * 128]; 
-        
-        if ((loop + l) > 512) 
-        {
-            l = 512 - loop;
-        }
-        
-        sceGsSetDefStoreImage(&gs_simage, 0, 10, SCE_GS_PSMCT32, 0, loop, 512, l);
-        
-        FlushCache(0);
-        
-        sceGsExecStoreImage(&gs_simage, p);
-    } 
-    
+    pcTextureCaptureScreen(MakeRenderTexHeader(tex_adr));
+
     /* La GS limpia aqui el framebuffer (Ps2ScreenClear, sprite RGBA 0): lo que se dibuje despues parte de una pantalla vacia. Ps2ScreenClear
      * es un no-op en PC (limpiaba trabajo ya dibujado), asi que se limpia el frame explicitamente. */
     {

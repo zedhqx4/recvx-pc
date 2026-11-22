@@ -9,6 +9,7 @@
 #include "../../include/ps2/veronica/prog/ps2_loadtim2.h"
 #include "pc_renderer.h"
 #include "pc_platform.h"
+#include "../include/pc_texture.h"
 #include "../include/pc_game_profile.h"
 
 #define PC_TEX_CACHE_MAX 4096
@@ -100,6 +101,32 @@ int pcTextureStoreScreenRect(const void* image, int x, int y, int width, int hei
         }
     }
     return 1;
+}
+
+void pcTextureCaptureScreen(void* image)
+{
+    static unsigned char rgba[512 * 512 * 4];
+    unsigned char* out = (unsigned char*)image;
+    int i;
+
+    if (image == NULL) return;
+
+    pcRendererFlushTransparent();
+    pcTextureInvalidateSources();
+
+    if (pcIniGetInt("rtt_gpu_copy", 1) != 0) {
+        if (pcTextureStoreScreenRect(image, 0, 0, 512, 512, 512, 512)) return;
+        pcLog("render texture: GPU capture failed; using full CPU readback fallback");
+    }
+    pcTextureInvalidateRenderTarget(image);
+
+    if (!pcRendererReadScreenRect(0, 0, 512, 512, rgba)) return;
+    for (i = 0; i < 512 * 512; i++) {
+        out[i * 4] = rgba[i * 4];
+        out[i * 4 + 1] = rgba[i * 4 + 1];
+        out[i * 4 + 2] = rgba[i * 4 + 2];
+        out[i * 4 + 3] = 0x80;
+    }
 }
 
 void pcTextureInvalidateRenderTarget(const void* image)
