@@ -2075,6 +2075,28 @@ void Ps2DrawOTag()
 }
 
 // 100% matching!
+unsigned int Ps2BitCount(register unsigned int value)
+{
+    {
+        unsigned int v = value - 1;
+        unsigned int n = 0;
+
+        if (value == 0)
+        {
+            return 0;
+        }
+
+        while (v != 0)
+        {
+            n++;
+            v >>= 1;
+        }
+
+        return n;
+    }
+}
+
+// 100% matching!
 void Ps2InitTexCache()
 {
     unsigned int i;
