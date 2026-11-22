@@ -57,10 +57,17 @@ void pcRendererClear(float r, float g, float b, float a, int clear_depth);
 void pcRendererSetDepthMode(int depth_test, int depth_write);
 void pcRendererSetScissor(int enabled, int x, int y, int width, int height);
 void pcRendererSetGlobalFog(int enabled, float r, float g, float b);
-/* Registro ALPHA de la GS (A,B,C,D en los bits 0..7, FIX en 32..39): mezcla (A-B)*C/128 + D. */
-void pcRendererSetGsAlpha(uint64_t reg);
-/* Same for ALPHA_2, the register of GS context 2 (offscreen shadow mask). */
-void pcRendererSetGsAlpha2(uint64_t reg);
+/* Ecuacion de mezcla de la GS: color = (A - B) * C / 128 + D. A, B y D son uno de {Cs, Cd, 0}; C es uno de {As, Ad, FIX}.
+ * fix es ALPHA.FIX (0..255; 128 = 1.0). Los valores numericos de los enums coinciden con los campos del registro ALPHA. */
+enum { PC_BLEND_CS = 0, PC_BLEND_CD = 1, PC_BLEND_ZERO = 2 };
+enum { PC_BLEND_AS = 0, PC_BLEND_AD = 1, PC_BLEND_FIX = 2 };
+typedef struct PcBlendEquation {
+    unsigned char a, b, c, d;
+    unsigned char fix;
+} PcBlendEquation;
+/* Mezcla del contexto 1 (el resto de las superficies) y del contexto 2 (mascara de sombra fuera de pantalla). */
+void pcRendererSetBlend(const PcBlendEquation* equation);
+void pcRendererSetBlend2(const PcBlendEquation* equation);
 void pcRendererDrawTriangleStrip(const PcNativeVertex* vertices, int count, const PcNativeDrawState* state);
 void pcRendererDrawTriangles(const PcNativeVertex* vertices, int count, const PcNativeDrawState* state);
 void pcRendererDrawPoints(const PcNativeVertex* vertices, int count, const PcNativeDrawState* state);

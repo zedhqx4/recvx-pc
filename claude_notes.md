@@ -718,3 +718,7 @@ recalcula siempre, de modo que los cambios de paleta se detectan exactamente igu
 
 ## 0.9.201 - G4: se retira el OT antiguo (Ps2AddOT y estructuras)
 - Ps2AddOT (94 lineas) ya no tenia llamadores tras 0.9.200. Se borran Ps2AddOT, Ps2_OT, Ps2_ot_list(_no), Ps2_PP, Ps2_tp_tag y los tipos PS2_OT_LIST/PS2_OT/PS2_TP_TAG. Ps2ClearOT queda como funcion vacia (17 llamadores del juego; se podran quitar luego).
+
+## 0.9.202 - G4 paso 3: ecuacion de mezcla tipada (PcBlendEquation)
+- pcRendererSetGsAlpha/SetGsAlpha2(uint64_t) -> pcRendererSetBlend/SetBlend2(const PcBlendEquation*) con enums PC_BLEND_CS/CD/ZERO y PC_BLEND_AS/AD/FIX. gs_alpha_decode -> blend_decode (mismo cuerpo, campos en vez de bits). La tabla alpha_tbl de njColorBlendingModeSys y las llamadas de sombra usan structs; el centinela 0xFFFFFFFF es PC_BLEND_NONE (a=0xFF).
+- Validacion: pc/tools/test_blend_equation.c compara el decodificador viejo (registro) con el nuevo (struct) en los 65536 casos A/B/C/D x FIX: 0 diferencias; la tabla de 156 entradas convertida coincide con los valores originales (script).

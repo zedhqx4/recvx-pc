@@ -2137,7 +2137,7 @@ void Ps2ShadowMain0()
 	Ps2_shadow_vec[3] = -65536.0f;
 
     /* cabecera del paquete: ZBUF_2 (ZMSK=1) y ALPHA_2 = 0x8000000029 -> Cs + Cd (suma las caras del volumen) */
-    pcRendererSetGsAlpha2(0x8000000029ULL);
+    { static const PcBlendEquation eq = { PC_BLEND_CD, PC_BLEND_ZERO, PC_BLEND_FIX, PC_BLEND_CS, 128 }; pcRendererSetBlend2(&eq); }
     return;
 }
 
@@ -2147,7 +2147,7 @@ void Ps2ShadowMain1()
 	static const unsigned long shadow_tail[6] = { 0x70000002UL, 0x0UL, 0x1000000000008001UL, 0x0EUL, 0x80000000A1UL, 0x43UL };
 
     /* ALPHA_2 = 0x80000000A1 -> Cd - Cs (resta las caras del otro sentido) */
-    pcRendererSetGsAlpha2(0x80000000A1ULL);
+    { static const PcBlendEquation eq = { PC_BLEND_CD, PC_BLEND_CS, PC_BLEND_FIX, PC_BLEND_ZERO, 128 }; pcRendererSetBlend2(&eq); }
     return;
 }
 
@@ -2155,7 +2155,7 @@ void Ps2ShadowMain1()
 void Ps2ShadowEnd()
 {
     pcRendererShadowEnd();
-    pcRendererSetGsAlpha2(0ULL);   /* ALPHA_2 = (Cs - Cs) * As + Cs: sin mezcla */
+    { static const PcBlendEquation eq = { PC_BLEND_CS, PC_BLEND_CS, PC_BLEND_AS, PC_BLEND_CS, 0 }; pcRendererSetBlend2(&eq); }   /* (Cs - Cs) * As + Cs: sin mezcla */
     return;
 }
 

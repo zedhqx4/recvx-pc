@@ -31,7 +31,7 @@ static int scratch_capacity;
 static struct { uint64_t reg; unsigned count; } alpha_histogram[ALPHA_HISTOGRAM];
 static int alpha_histogram_used;
 
-/* Estado de mezcla equivalente al registro ALPHA de la GS (ver pcRendererSetGsAlpha). */
+/* Estado de mezcla equivalente al registro ALPHA de la GS (ver pcRendererSetBlend). */
 typedef struct {
     GLenum equation;           /* GL_FUNC_ADD / GL_FUNC_SUBTRACT / GL_FUNC_REVERSE_SUBTRACT */
     GLenum src, dst;           /* factores sobre Cs y Cd */
@@ -735,10 +735,9 @@ static int gs_coef_to_factor(GsCoef k, int c, GLenum* factor)
 /* ALPHA = (A - B) * C / 128 + D con A,B,D en {Cs,Cd,0} y C en {As,Ad,FIX}. La suma de a lo mas dos terminos (uno por Cs y
  * otro por Cd) cabe en la mezcla fija de OpenGL: cada coeficiente es ka*C + kb con ka en {-1,0,1} y kb en {0,1}. El canal
  * alfa se escribe tal cual (la GS guarda As en el framebuffer; Ad lo lee de ahi). */
-static void gs_alpha_decode(uint64_t reg, GsBlend* out)
+static void blend_decode(const PcBlendEquation* eq, GsBlend* out)
 {
-    int a = (int)(reg & 3u), b = (int)((reg >> 2) & 3u), c = (int)((reg >> 4) & 3u), d = (int)((reg >> 6) & 3u);
-    unsigned int fix = (unsigned int)((reg >> 32) & 0xFFu);
+    int a = eq->a, b = eq->b, c = eq->c, d = eq->d;
     GsCoef cs, cd;
     int neg_s, neg_d;
     if (c > 2) c = 0;
@@ -749,19 +748,20 @@ static void gs_alpha_decode(uint64_t reg, GsBlend* out)
     out->equation = GL_FUNC_ADD;
     if (neg_d && !neg_s) out->equation = GL_FUNC_SUBTRACT;          /* Cs*f - Cd*g */
     else if (neg_s && !neg_d) out->equation = GL_FUNC_REVERSE_SUBTRACT; /* Cd*g - Cs*f */
-    out->fix = (float)fix / 128.0f;
+    out->fix = (float)eq->fix / 128.0f;
 }
 
-void pcRendererSetGsAlpha(uint64_t reg)
+void pcRendererSetBlend(const PcBlendEquation* eq)
 {
     int i;
+    const uint64_t reg = (uint64_t)eq->a | ((uint64_t)eq->b << 2) | ((uint64_t)eq->c << 4) | ((uint64_t)eq->d << 6) | ((uint64_t)eq->fix << 32);   /* clave del histograma de diagnostico */
     batch_flush();
     for (i = 0; i < alpha_histogram_used && alpha_histogram[i].reg != reg; i++);
     if (i == alpha_histogram_used && i < ALPHA_HISTOGRAM) { alpha_histogram[i].reg = reg; alpha_histogram[i].count = 0; alpha_histogram_used++; }
     if (i < ALPHA_HISTOGRAM) alpha_histogram[i].count++;
-    gs_alpha_decode(reg, &gs_blend);
+    blend_decode(eq, &gs_blend);
 }
-void pcRendererSetGsAlpha2(uint64_t reg) { batch_flush(); gs_alpha_decode(reg, &gs_blend2); }
+void pcRendererSetBlend2(const PcBlendEquation* eq) { batch_flush(); blend_decode(eq, &gs_blend2); }
 
 /* CLAUDE-NOTE[N3][CORREGIDO]: apply_state() lee GLOBALES (projection_value, aspect, offset, near/far, global_fog_*,
  * blend_*_rgb/alpha, scissor_*, depth_override_*), no el estado del draw. Para los draws opacos da igual (se dibujan al
@@ -1388,7 +1388,10 @@ static void shadow_compose_impl(float x0, float y0, float x1, float y1, int shad
         st.alpha_test = 1;
         st.alpha_ref = 0.004f;
         st.screen_space = 1;                             /* depth_test = 0: ZTST ALWAYS, ZMSK = 1 */
-        gs_alpha_decode(0x80000000A1ULL, &gs_blend);     /* (Cd - Cs) * FIX/128 */
+        {
+            static const PcBlendEquation shadow_fill = { PC_BLEND_CD, PC_BLEND_CS, PC_BLEND_FIX, PC_BLEND_ZERO, 128 };   /* (Cd - Cs) * FIX/128 */
+            blend_decode(&shadow_fill, &gs_blend);
+        }
         active_target = TARGET_SCREEN;
         draw_immediate(v, 6, &st, GL_TRIANGLES);
         batch_flush();
