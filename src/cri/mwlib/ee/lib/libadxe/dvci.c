@@ -1,8 +1,7 @@
 #include "../../../cri/mwlib/ee/lib/libadxe/dvci.h"
 #include "../../../cri/mwlib/ee/lib/libadxe/dvci_sub.h"
 
-#include <eetypes.h>
-#include <eekernel.h>
+#include <sce_pc.h>
 #include <stdio.h>
 //#include <string.h> /* ERROR: causes linker to fail */
 

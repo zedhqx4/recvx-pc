@@ -2,7 +2,7 @@
 #define _ADX_MPS2_H_
 
 #include <adx_ps2.h>
-#include <eekernel.h>
+#include <sce_pc.h>
 
 #define bss_align(val) \
     __attribute__ ((aligned(val))) __attribute__ ((section (".bss"))) 

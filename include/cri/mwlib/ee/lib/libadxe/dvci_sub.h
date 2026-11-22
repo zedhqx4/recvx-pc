@@ -2,7 +2,7 @@
 #define _DVCI_SUB_H_
 
 #include <../../../recvx-decomp-cri/cri/mwlib/ee/include/cri_xpt.h>
-#include <libcdvd.h>
+#include <sce_pc.h>
 
 typedef struct 
 { 

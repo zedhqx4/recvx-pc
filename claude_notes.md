@@ -776,3 +776,6 @@ recalcula siempre, de modo que los cambios de paleta se detectan exactamente igu
 
 ## 0.9.216 - Ps2ClearOT borrada (funcion vacia, 15 llamadas)
 - Sin OT en PC, Ps2ClearOT() no hacia nada. Se borran definicion, prototipo y las 15 llamadas (door, event, map, ps2_NaSystem, screen x2, sub1 x2, system x5, pc_system). Cada llamada era una sentencia suelta (comprobado por script: la sentencia anterior termina en ; { o }, no hay if/else sin llaves). Grep de llamadores limpio.
+
+## 0.9.217 - 21 headers EE de pega borrados; los includes apuntan a <sce_pc.h>
+- eekernel, eeregs, eestruct, eetypes, libcdvd, libdev, libdma, libipu, libmc, libmpeg, libpad, libsdr, libssyn, libvu0, csl, sdmacro, sdrcmd, sif, sifdev, sifrpc, PREFIX_PS2_DEBUG: cada uno era exactamente `#pragma once` + `#include "sce_pc.h"`. Se sustituyen las 43 lineas #include de 15 archivos por un unico `#include <sce_pc.h>` por archivo (types.h pasa de 17 includes a 1). Sin cambio de contenido efectivo: mismas declaraciones, mismo orden relativo. Grep de nombres de los headers borrados = 0 fuera de notas.

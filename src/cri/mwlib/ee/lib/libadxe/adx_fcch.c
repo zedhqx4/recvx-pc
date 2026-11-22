@@ -1,8 +1,6 @@
 #include "../../../cri/mwlib/ee/lib/libadxe/adx_fcch.h"
 
-#include <eetypes.h>
-#include <eekernel.h>
-#include <sifrpc.h>
+#include <sce_pc.h>
 
 // 100% matching!
 void ADXF_Ocbi(void *address, Uint64 size)

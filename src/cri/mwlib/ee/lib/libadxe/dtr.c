@@ -4,9 +4,7 @@
 #include <stdio.h>
 //#include <string.h>
 
-#include <eetypes.h>
-#include <eekernel.h>
-#include <sifrpc.h>
+#include <sce_pc.h>
 
 Char8* volatile dtr_build = "\nDTR Ver.0.91 Build:Jan 26 2001 09:57:01\n";
 Sint32 dtr_init_cnt = 0;

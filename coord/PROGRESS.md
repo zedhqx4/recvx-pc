@@ -38,3 +38,5 @@ Cada paso: commit propio, version sube 1, notas en claude_notes.md, push, milest
 - 0.9.215: borrado libgraph.h; podados types.h/macros.h/sce_pc.h (macros GS/DMA/VIF/CD sin uso). Siguiente: Ps2ClearOT (15 llamadas), headers EE (eekernel/eeregs/libdma...), opcional renombrar sceVu0* tipos.
 - 0.9.215 validada (log limpio).
 - 0.9.216: Ps2ClearOT borrada. Siguiente: headers EE (eekernel/eeregs/libdma/...), opcional tipos sceVu0*.
+- 0.9.216 validada (log limpio).
+- 0.9.217: 21 headers EE de pega borrados (todos = sce_pc.h). Etapa GS/EE casi cerrada; queda opcional renombrar sceVu0*/sce* en sce_pc.h y revisar ADX/SFD (libs terceros).

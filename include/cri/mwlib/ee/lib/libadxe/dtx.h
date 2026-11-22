@@ -3,9 +3,7 @@
 
 #include <../../../recvx-decomp-cri/cri/mwlib/ee/include/cri_xpt.h>
 #include <../../../recvx-decomp-cri/cri/mwlib/include/sj.h>
-#include <eetypes.h>
-#include <sif.h>
-#include <sifrpc.h>
+#include <sce_pc.h>
 
 // TODO: move this define somewhere else
 #define UNCBASE 0x20000000

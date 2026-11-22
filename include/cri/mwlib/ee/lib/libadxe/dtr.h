@@ -3,7 +3,7 @@
 
 #include <../../../recvx-decomp-cri/cri/mwlib/ee/include/cri_xpt.h>
 #include <../../../recvx-decomp-cri/cri/mwlib/include/sj.h>
-#include <sif.h>
+#include <sce_pc.h>
 #include "macros.h"
 
 typedef enum 

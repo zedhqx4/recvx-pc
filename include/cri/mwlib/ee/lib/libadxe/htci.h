@@ -2,8 +2,7 @@
 #define _HTCI_H_
 
 #include <../../../recvx-decomp-cri/cri/mwlib/ee/include/cri_xpt.h>
-#include <libcdvd.h>
-#include <sifdev.h>
+#include <sce_pc.h>
 #include "cri_cvfs.h"
 #include "macros.h"
 
