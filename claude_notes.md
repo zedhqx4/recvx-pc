@@ -726,3 +726,8 @@ recalcula siempre, de modo que los cambios de paleta se detectan exactamente igu
 ## 0.9.203 - G4 paso 1a: constantes PRIM con nombre (pc/include/pc_prim.h)
 - PC_PRIM_TME/FGE/ABE/FST y PC_PRIM_TOPOLOGY(prim) + enum de topologias sustituyen 59 literales (0x8000000000000, 0x20000000000000, 0x80000000000000, (prim>>47)&7) y las 4 mascaras SCE_GIF_SET_TAG(...PRIM ABE...) en ps2_dummy.c, ps2_NaDraw*.c, ps2_NaGraphics3D.c, ps2_NinjaCnk.c. Sustitucion mecanica, mismos valores: comprobado revirtiendo la sustitucion y comparando con el original (0 diferencias aparte de las 4 mascaras, equivalentes: SET_PRIM(...,abe=1) en el campo PRIM del tag = bit 53).
 - Pendiente del paso 1: los productores (macros SCE_GIF_SET_TAG/SCE_GS_SET_PRIM en ps2_NaSprite.c y ps2_NinjaCnk.c) aun codifican el descriptor con macros GIF; migrarlos a PC_PRIM_* requiere un harness de los 2048 valores.
+
+## 0.9.204 - G4 paso 1b: los productores PRIM usan pc_prim.h
+- ps2_NaSprite.c (2 expresiones) y ps2_NinjaCnk.c (Ps2AddPrim3DMod + 10 en njCnkCsUvh/Uvn) dejan de usar SCE_GIF_SET_TAG/SCE_GIF_PRIM/SCE_GS_SET_PRIM; ahora PC_PRIM_SET_TOPOLOGY(...) | PC_PRIM_*. Nuevas constantes IIP/AA1/CTXT/FIX para conservar bit a bit el valor.
+- Validacion: pc/tools/test_prim_desc.c (gcc -I pc/include): los 2048 valores del campo PRIM reconstruidos y leidos con las constantes nuevas = macros GS originales, y las 6 expresiones de los productores iguales a las originales: 2048 casos, 0 fallos.
+- Queda en el juego un uso de SCE_GS_SET_PRIM: ps2_MovieFunc.c:347 (paquete real de transferencia de video, clase A, aparte).

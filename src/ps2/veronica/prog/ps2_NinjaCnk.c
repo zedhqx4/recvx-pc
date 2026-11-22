@@ -1822,7 +1822,7 @@ CHUNK_HEAD* njCnkCoP3(CHUNK_HEAD* pCnk)
 
             uspCnk += usNext;
 
-            Ps2AddPrim3DMod(SCE_GIF_SET_TAG(0, SCE_GS_FALSE, SCE_GS_FALSE, SCE_GS_SET_PRIM(SCE_GS_PRIM_TRI, 0, 0, 0, 1, 0, 0, 1, 0), SCE_GIF_PACKED, 0), dp = NaCnkStrBufTop, 3);
+            Ps2AddPrim3DMod(PC_PRIM_SET_TOPOLOGY(PC_PRIM_TRIANGLE) | PC_PRIM_ABE | PC_PRIM_CTXT, dp = NaCnkStrBufTop, 3);
 
             usPoly--;
         } while (usPoly != 0);
@@ -2021,8 +2021,8 @@ CHUNK_HEAD* njCnkCsUvh(CHUNK_HEAD* pCnk)
     unsigned long vu1func_tag;                                                                                                                 
     unsigned long* p; // not from DWARF 
 
-    ulType  = SCE_GIF_PRIM(SCE_GS_PRIM_TRISTRIP, 0, /* textured */ SCE_GS_TRUE, /* fog */ SCE_GS_TRUE, 0, 0, 0, 0, 0);
-    ulType2 = SCE_GIF_PRIM(SCE_GS_PRIM_TRIFAN,   0, /* textured */ SCE_GS_TRUE, /* fog */ SCE_GS_TRUE, 0, 0, 0, 0, 0);
+    ulType  = PC_PRIM_SET_TOPOLOGY(PC_PRIM_TRIANGLE_STRIP) | PC_PRIM_TME | PC_PRIM_FGE;
+    ulType2 = PC_PRIM_SET_TOPOLOGY(PC_PRIM_TRIANGLE_FAN) | PC_PRIM_TME | PC_PRIM_FGE;
     
     if (ulNaCnkFlagConstAttr != 0) 
     { 
@@ -2035,14 +2035,14 @@ CHUNK_HEAD* njCnkCsUvh(CHUNK_HEAD* pCnk)
     
     if ((ucFlag & 0x8)) 
     {
-        ulType  |= SCE_GIF_PRIM(0, 0, 0, 0, /* Alpha blend */ SCE_GS_TRUE, 0, 0, 0, 0);
-        ulType2 |= SCE_GIF_PRIM(0, 0, 0, 0, /* Alpha blend */ SCE_GS_TRUE, 0, 0, 0, 0); 
+        ulType  |= PC_PRIM_ABE;
+        ulType2 |= PC_PRIM_ABE;
     }
    
     if (!(ucFlag & 0x20)) 
     {
-        ulType  |= SCE_GIF_PRIM(0, /* Gourand */ SCE_GS_TRUE, 0, 0, 0, 0, 0, 0, 0);
-        ulType2 |= SCE_GIF_PRIM(0, /* Gourand */ SCE_GS_TRUE, 0, 0, 0, 0, 0, 0, 0);
+        ulType  |= PC_PRIM_IIP;
+        ulType2 |= PC_PRIM_IIP;
     }
     
     if (ulNaCnkFlagConstMaterial != 0)
@@ -2162,8 +2162,8 @@ CHUNK_HEAD* njCnkCsUvn(CHUNK_HEAD* pCnk)
     unsigned long vu1func_tag;                                                                                                                 
     unsigned long* p; // not from DWARF 
 
-    ulType  = SCE_GIF_PRIM(SCE_GS_PRIM_TRISTRIP, 0, /* textured */ SCE_GS_TRUE, /* fog */ SCE_GS_TRUE, 0, 0, 0, 0, 0);
-    ulType2 = SCE_GIF_PRIM(SCE_GS_PRIM_TRIFAN,   0, /* textured */ SCE_GS_TRUE, /* fog */ SCE_GS_TRUE, 0, 0, 0, 0, 0);
+    ulType  = PC_PRIM_SET_TOPOLOGY(PC_PRIM_TRIANGLE_STRIP) | PC_PRIM_TME | PC_PRIM_FGE;
+    ulType2 = PC_PRIM_SET_TOPOLOGY(PC_PRIM_TRIANGLE_FAN) | PC_PRIM_TME | PC_PRIM_FGE;
     
     if (ulNaCnkFlagConstAttr != 0) 
     { 
@@ -2176,14 +2176,14 @@ CHUNK_HEAD* njCnkCsUvn(CHUNK_HEAD* pCnk)
     
     if ((ucFlag & 0x8)) 
     {
-        ulType  |= SCE_GIF_PRIM(0, 0, 0, 0, /* Alpha blend */ SCE_GS_TRUE, 0, 0, 0, 0);
-        ulType2 |= SCE_GIF_PRIM(0, 0, 0, 0, /* Alpha blend */ SCE_GS_TRUE, 0, 0, 0, 0); 
+        ulType  |= PC_PRIM_ABE;
+        ulType2 |= PC_PRIM_ABE;
     }
    
     if (!(ucFlag & 0x20)) 
     {
-        ulType  |= SCE_GIF_PRIM(0, /* Gourand */ SCE_GS_TRUE, 0, 0, 0, 0, 0, 0, 0);
-        ulType2 |= SCE_GIF_PRIM(0, /* Gourand */ SCE_GS_TRUE, 0, 0, 0, 0, 0, 0, 0);
+        ulType  |= PC_PRIM_IIP;
+        ulType2 |= PC_PRIM_IIP;
     }
     
     if (ulNaCnkFlagConstMaterial != 0)

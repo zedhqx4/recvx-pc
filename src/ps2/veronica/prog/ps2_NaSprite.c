@@ -305,7 +305,7 @@ void	njDrawSprite2D( NJS_SPRITE *sp, Int n, Float pri, Uint32 attr )
     *(float*)&bp[11][2] = pri;
     *(float*)&bp[11][3] = 0;
     
-    prim = SCE_GIF_SET_TAG(0, 0, 0, SCE_GS_SET_PRIM(SCE_GS_PRIM_TRISTRIP, SCE_GS_TRUE, SCE_GS_TRUE, SCE_GS_FALSE, SCE_GS_FALSE, SCE_GS_FALSE, SCE_GS_TRUE, SCE_GS_FALSE, SCE_GS_FALSE), 0, 0);
+    prim = PC_PRIM_SET_TOPOLOGY(PC_PRIM_TRIANGLE_STRIP) | PC_PRIM_IIP | PC_PRIM_TME | PC_PRIM_FST;
     
     if (!(attr & NJD_SPRITE_ALPHA))
     {
@@ -316,7 +316,7 @@ void	njDrawSprite2D( NJS_SPRITE *sp, Int n, Float pri, Uint32 attr )
     
     if ((attr & NJD_SPRITE_ALPHA))
     {
-        prim |= SCE_GIF_SET_TAG(0, 0, 0, SCE_GS_SET_PRIM(SCE_GS_PRIM_POINT, SCE_GS_FALSE, SCE_GS_FALSE, SCE_GS_FALSE, SCE_GS_TRUE, SCE_GS_FALSE, SCE_GS_FALSE, SCE_GS_FALSE, SCE_GS_FALSE), 0, 0);
+        prim |= PC_PRIM_ABE;
     }
     
     Ps2AddPrim2D(prim, &buff, 4);
