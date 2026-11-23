@@ -796,3 +796,6 @@ recalcula siempre, de modo que los cambios de paleta se detectan exactamente igu
 - INI ui_uv_gs_sample (defecto 0 = ruta anterior; 1 = correccion, desactiva pc_snap_uv y el recorte ui_uv_crop_*). Se puede combinar con ui_uv_clamp=1 (acotado a medio texel del rectangulo ya corregido). Si queda bien a 1x y a escala alta: borrar pc_snap_uv, pc_crop_uv_edges, afinador F10, rot90 y las 8 claves ui_uv_crop_*.
 
 ## 0.9.221 - log de ui_uv_gs_sample / ui_uv_clamp al primer uso (para saber con que ajustes se hizo cada captura). Sin cambio de comportamiento.
+
+## 0.9.222 - fix de compilacion de 0.9.221 (C2371 pcLog)
+- 0.9.221 anadio `extern void pcLog(...)` dentro de pcUiGsSample; en los archivos del juego pcLog ya esta declarado (pc_platform.h con otro tipo base por el `#define long`), de ahi C2371 "redefinition; different basic types". Era la misma advertencia que ya figura en el comentario de pcPrimLog ("no extern pcLog aqui"); se elimina la declaracion. Leccion: en ps2_dummy.c no redeclarar funciones de pc_platform.h.

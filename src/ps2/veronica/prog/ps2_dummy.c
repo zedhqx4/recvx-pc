@@ -776,8 +776,6 @@ static int pcUiGsSample(void)
 
     if (mode < 0)
     {
-        extern void pcLog(const char* fmt, ...);
-
         mode = pcIniGetInt("ui_uv_gs_sample", 0) != 0;
         pcLog("UI UV: ui_uv_gs_sample=%d ui_uv_clamp=%d", mode, pcIniGetInt("ui_uv_clamp", 0));
     }
