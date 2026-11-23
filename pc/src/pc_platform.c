@@ -961,6 +961,7 @@ static void texture_view_present(void)
                 if (pixels == NULL) {
                     pcLog("texture inspector: not enough memory for %ux%u texture", info.width, info.height);
                     texture_view_gl_id = 0;
+                    have_info = 0;
                 } else {
                     texture_view_pixels = pixels;
                     if (pcRendererReadTextureRGBA(info.texture, texture_view_pixels, bytes,
@@ -979,10 +980,12 @@ static void texture_view_present(void)
                             texture_view_gl_id = info.texture;
                         } else {
                             texture_view_gl_id = 0;
+                            have_info = 0;
                             pcLog("texture inspector: SDL texture update failed: %s", SDL_GetError());
                         }
                     } else {
                         texture_view_gl_id = 0;
+                        have_info = 0;
                         pcLog("texture inspector: OpenGL readback failed for texture %u", info.texture);
                     }
                 }
