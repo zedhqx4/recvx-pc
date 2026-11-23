@@ -872,6 +872,9 @@ static void texture_view_open(void)
         SDL_SetWindowPosition(texture_view_window, x + w + 12, y);
     }
 
+    /* SDL's selected 2D backend may switch contexts while creating the second renderer. */
+    SDL_GL_MakeCurrent(window, gl_context);
+
     texture_view_index = -1;
     texture_view_last_count = -1;
     texture_view_follow_latest = 1;
@@ -886,6 +889,8 @@ static void texture_view_close(void)
     if (texture_view_image != NULL) SDL_DestroyTexture(texture_view_image);
     if (texture_view_renderer != NULL) SDL_DestroyRenderer(texture_view_renderer);
     if (texture_view_window != NULL) SDL_DestroyWindow(texture_view_window);
+    /* Keep the primary renderer's context current after destroying the auxiliary renderer. */
+    if (window != NULL && gl_context != NULL) SDL_GL_MakeCurrent(window, gl_context);
     free(texture_view_pixels);
     texture_view_image = NULL;
     texture_view_renderer = NULL;
