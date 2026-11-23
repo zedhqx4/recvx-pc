@@ -764,6 +764,48 @@ static float pcFixedUv(float word)
     return (float)(bits & 0x3FFFu) / 16.0f;
 }
 
+/* Punto de muestreo de la GS. La GS evalua UV en la coordenada ENTERA del pixel (su centro esta en i, no en i+0.5); el juego lo
+ * sabe: sus piezas 2D traen UV = texel + 0.5 en el borde (40..104 px <-> u 4.5..68.5: el borde izquierdo muestrea el centro
+ * del texel 4). GL evalua en el centro del pixel (i+0.5): sin corregir, lee medio texel adelantado (mezcla de dos texels, y con
+ * pc_snap_uv, un texel entero). Se evalua en el mismo punto que la GS: uv' = uv(X - 0.5, Y - 0.5) = uv - 0.5 * (duv/dx + duv/dy),
+ * con el gradiente en pixeles del juego (antes del ajuste de widescreen). Vale para cualquier escala, orientacion o espejo.
+ * ui_uv_gs_sample=1 lo activa y desactiva pc_snap_uv y el recorte; 0 deja la ruta anterior. */
+static int pcUiGsSample(void)
+{
+    static int mode = -1;
+
+    if (mode < 0)
+        mode = pcIniGetInt("ui_uv_gs_sample", 0) != 0;
+    return mode;
+}
+
+/* Desplazamiento de UV (du, dv) para una pieza de n vertices; dp: 12 floats por vertice (UV en palabras 0/1, XY en 8/9) */
+static void pcUiGsSampleShift(const float* dp, unsigned int n, float* du, float* dv)
+{
+    const unsigned int* w = (const unsigned int*)dp;
+    unsigned int t;
+
+    *du = *dv = 0.0f;
+    for (t = 0; t + 2 < n; t++)
+    {
+        const float x0 = dp[(t * 12) + 8], y0 = dp[(t * 12) + 9];
+        const float x1 = dp[((t + 1) * 12) + 8] - x0, y1 = dp[((t + 1) * 12) + 9] - y0;
+        const float x2 = dp[((t + 2) * 12) + 8] - x0, y2 = dp[((t + 2) * 12) + 9] - y0;
+        const float det = x1 * y2 - x2 * y1;
+        float u1, u2, v1, v2;
+
+        if (fabsf(det) < 1e-3f)
+            continue;
+        u1 = (float)(w[((t + 1) * 12) + 0] & 0x3FFFu) / 16.0f - (float)(w[(t * 12) + 0] & 0x3FFFu) / 16.0f;
+        u2 = (float)(w[((t + 2) * 12) + 0] & 0x3FFFu) / 16.0f - (float)(w[(t * 12) + 0] & 0x3FFFu) / 16.0f;
+        v1 = (float)(w[((t + 1) * 12) + 1] & 0x3FFFu) / 16.0f - (float)(w[(t * 12) + 1] & 0x3FFFu) / 16.0f;
+        v2 = (float)(w[((t + 2) * 12) + 1] & 0x3FFFu) / 16.0f - (float)(w[(t * 12) + 1] & 0x3FFFu) / 16.0f;
+        *du = -0.5f * (((u1 * y2 - u2 * y1) + (u2 * x1 - u1 * x2)) / det);
+        *dv = -0.5f * (((v1 * y2 - v2 * y1) + (v2 * x1 - v1 * x2)) / det);
+        return;
+    }
+}
+
 /* Diagnostico (rafaga F8, 2 primeros frames): piezas 2D con UV enteras tal como llegan del juego ("raw") y tras el ajuste
  * pc_snap_uv + recorte ("fix"): posicion en pantalla (sin el offset 1728/1808) y UV en texels de cada vertice, mas la textura.
  * Sirve para ver como se relacionan las UV del juego con los pixeles que cubre cada pieza. */
@@ -828,8 +870,10 @@ void Ps2AddPrim2D(unsigned long prim, void* dp, unsigned int num)
         memcpy(wide_buf, dp, num * 48);
         dp = wide_buf;
         pcUiUvDiag("raw", dp, num);
-        pc_snap_uv((unsigned int*)wide_buf, num);
+        if (!pcUiGsSample())
+            pc_snap_uv((unsigned int*)wide_buf, num);
 
+        if (!pcUiGsSample())
         {
             static int crop_logged;
             int crop[4], crop_rot90_cw[4];
@@ -955,6 +999,7 @@ void Ps2AddPrim2D(unsigned long prim, void* dp, unsigned int num)
         int use_uv = (prim & PC_PRIM_FST) != 0;
         int count = (int)num;
         int owned = 0;
+        int sprite_expanded = 0;
         float texture_width = 1.0f, texture_height = 1.0f;
         float use_last_pri = ((const float*)dp)[(size_t)(count > 0 ? count - 1 : 0) * 12u + 10u];
 
@@ -1018,6 +1063,7 @@ void Ps2AddPrim2D(unsigned long prim, void* dp, unsigned int num)
             vertices = sprite;
             count = 6;
             topology = 3u;
+            sprite_expanded = 1;
         }
         else
         {
@@ -1070,6 +1116,30 @@ void Ps2AddPrim2D(unsigned long prim, void* dp, unsigned int num)
         state.linear_filter = 1;
         state.screen_space = 1;
         state.cull_backfaces = 0;
+        if (textured && use_uv && pcUiGsSample() && count > 0)
+        {
+            float du, dv;
+            int k;
+
+            if (sprite_expanded)   /* sprite ya expandido a dos triangulos: dp trae solo 2 vertices */
+            {
+                const float* sa = (const float*)dp;
+                const float sx = sa[12 + 8] - sa[8], sy = sa[12 + 9] - sa[9];
+                const float su = pcFixedUv(sa[12]) - pcFixedUv(sa[0]), sv = pcFixedUv(sa[13]) - pcFixedUv(sa[1]);
+
+                du = (fabsf(sx) >= 1e-3f) ? -0.5f * su / sx : 0.0f;
+                dv = (fabsf(sy) >= 1e-3f) ? -0.5f * sv / sy : 0.0f;
+            }
+            else
+            {
+                pcUiGsSampleShift((const float*)dp, num, &du, &dv);
+            }
+            for (k = 0; k < count; k++)
+            {
+                vertices[k].u += du;
+                vertices[k].v += dv;
+            }
+        }
         if (state.textured && use_uv && count > 0)
         {
             /* Piezas 2D (UV enteras) cortadas de un atlas: ampliadas, el filtrado en su borde mezclaria la pieza vecina del atlas.

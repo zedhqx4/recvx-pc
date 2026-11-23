@@ -43,3 +43,4 @@ Cada paso: commit propio, version sube 1, notas en claude_notes.md, push, milest
 - 0.9.217 validada (log limpio).
 - 0.9.218: ui_uv_clamp (acotado UV 2D, estilo pc-port; INI, defecto 0). Probar ui_uv_clamp=1 con INI en blanco y con tus crop; milestone/0.9.217 es el punto seguro.
 - 0.9.219: diag UIUV en rafaga F8 (sin cambio de comportamiento). 0.9.218 ui_uv_clamp NO corrige el menu: pendiente analizar UV/pixel con el log.
+- 0.9.220: ui_uv_gs_sample (causa raiz: GS evalua UV en el pixel entero; UV del juego = texel+0.5). Probar ui_uv_gs_sample=1 (+ ui_uv_clamp=1 opcional) a 1x y escala alta, INI sin crop.
