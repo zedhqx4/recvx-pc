@@ -15,6 +15,7 @@
 #include "pc_renderer.h"
 #include "pc_bindings.h"
 #include "pc_audio.h"
+#include "../include/pc_texture.h"
 
 static unsigned int frames;   /* frames presented */
 static struct { double last, sum, worst, swap, present; int n; } frame_time;
@@ -65,6 +66,23 @@ static int pc_sdl_show_cursor(int toggle)
 
 static SDL_GLContext gl_context;
 static FILE* log_file;
+
+/* Debug texture inspector: independent SDL window, fed by readback of the decoded native cache. */
+static SDL_Window* texture_view_window;
+static SDL_Renderer* texture_view_renderer;
+static SDL_Texture* texture_view_image;
+static unsigned char* texture_view_pixels;
+static unsigned int texture_view_gl_id;
+static int texture_view_width, texture_view_height;
+static int texture_view_index = -1, texture_view_last_count = -1;
+static int texture_view_follow_latest = 1;
+static int texture_view_gl_error_logged;
+static char texture_view_title[192];
+static int pc_debug_mode_enabled(void);
+static void texture_view_open(void);
+static void texture_view_close(void);
+static int texture_view_handle_event(const SDL_Event* ev);
+static void texture_view_present(void);
 
 /* ------------------------------------------------------------------------------------------- */
 /* file output on a thread of its own: recvx.log and the input recording are written there, so a
@@ -820,9 +838,186 @@ void pcVideoInit(void)
     pcPadInit();
     pcOsStartupLog("pcVideoInit: controller initialized");
 
+    if (pc_debug_mode_enabled()) texture_view_open();
+
     pcLog("video: SDL %d.%d.%d, window %dx%d%s, aspect %.3f", SDL_MAJOR_VERSION, SDL_MINOR_VERSION, SDL_MICRO_VERSION,
           video_cfg.win_w, video_cfg.win_h, video_cfg.fullscreen ? " (fullscreen)" : "", video_cfg.aspect);
     pcOsStartupLog("pcVideoInit: complete");
+}
+
+/* Open a separate, non-OpenGL SDL window. The game window/context remains the sole owner of
+ * rendering; only the selected cached texture is read back when the selection changes. */
+static void texture_view_open(void)
+{
+    int x = 0, y = 0, w = 640, h = 480;
+    if (texture_view_window != NULL) return;
+
+    texture_view_window = SDL_CreateWindow("Texture Inspector", w, h, SDL_WINDOW_RESIZABLE);
+    if (texture_view_window == NULL) {
+        pcLog("texture inspector: could not create window: %s", SDL_GetError());
+        return;
+    }
+
+    texture_view_renderer = SDL_CreateRenderer(texture_view_window, NULL);
+    if (texture_view_renderer == NULL) {
+        pcLog("texture inspector: could not create SDL renderer: %s", SDL_GetError());
+        SDL_DestroyWindow(texture_view_window);
+        texture_view_window = NULL;
+        return;
+    }
+
+    if (window != NULL) {
+        SDL_GetWindowPosition(window, &x, &y);
+        SDL_GetWindowSize(window, &w, &h);
+        SDL_SetWindowPosition(texture_view_window, x + w + 12, y);
+    }
+
+    texture_view_index = -1;
+    texture_view_last_count = -1;
+    texture_view_follow_latest = 1;
+    texture_view_gl_id = 0;
+    texture_view_width = texture_view_height = 0;
+    texture_view_title[0] = 0;
+    pcLog("texture inspector: opened (Left/Right browse textures; F7 toggles this window)");
+}
+
+static void texture_view_close(void)
+{
+    if (texture_view_image != NULL) SDL_DestroyTexture(texture_view_image);
+    if (texture_view_renderer != NULL) SDL_DestroyRenderer(texture_view_renderer);
+    if (texture_view_window != NULL) SDL_DestroyWindow(texture_view_window);
+    free(texture_view_pixels);
+    texture_view_image = NULL;
+    texture_view_renderer = NULL;
+    texture_view_window = NULL;
+    texture_view_pixels = NULL;
+    texture_view_gl_id = 0;
+    texture_view_width = texture_view_height = 0;
+    texture_view_last_count = -1;
+    texture_view_title[0] = 0;
+    pcLog("texture inspector: closed");
+}
+
+static int texture_view_handle_event(const SDL_Event* ev)
+{
+    Uint32 id;
+    int count;
+    if (texture_view_window == NULL) return 0;
+    id = SDL_GetWindowID(texture_view_window);
+
+    if ((ev->type == SDL_EVENT_WINDOW_CLOSE_REQUESTED) && (ev->window.windowID == id)) {
+        texture_view_close();
+        return 1;
+    }
+
+    if ((ev->type == SDL_EVENT_KEY_DOWN) && (ev->key.windowID == id) && !ev->key.repeat) {
+        count = pcTextureDebugCount();
+        if (count > 0 && (ev->key.scancode == SDL_SCANCODE_LEFT || ev->key.scancode == SDL_SCANCODE_RIGHT)) {
+            if (texture_view_index < 0 || texture_view_index >= count) texture_view_index = count - 1;
+            else if (ev->key.scancode == SDL_SCANCODE_RIGHT) texture_view_index = (texture_view_index + 1) % count;
+            else texture_view_index = (texture_view_index + count - 1) % count;
+            texture_view_follow_latest = 0;
+            texture_view_gl_id = 0;
+        }
+        return 1;
+    }
+
+    /* Do not let inspector focus/resize/expose events affect the game's pause/window handling. */
+    if ((pc_window_event(ev->type) != PC_WINDOW_EVENT_NONE) && (ev->window.windowID == id)) return 1;
+    return 0;
+}
+
+static void texture_view_present(void)
+{
+    int count, output_w = 0, output_h = 0;
+    PcTextureDebugInfo info;
+    int have_info = 0;
+
+    if (texture_view_window == NULL || texture_view_renderer == NULL) return;
+
+    if (!SDL_GL_MakeCurrent(window, gl_context)) {
+        if (!texture_view_gl_error_logged) {
+            pcLog("texture inspector: could not make the game OpenGL context current: %s", SDL_GetError());
+            texture_view_gl_error_logged = 1;
+        }
+        return;
+    }
+
+    count = pcTextureDebugCount();
+    if (count != texture_view_last_count) {
+        if (texture_view_follow_latest && count > 0) texture_view_index = count - 1;
+        texture_view_last_count = count;
+    }
+
+    if (count > 0) {
+        if (texture_view_index < 0) texture_view_index = count - 1;
+        if (texture_view_index >= count) texture_view_index = count - 1;
+        if (pcTextureDebugGet(texture_view_index, &info)) {
+            size_t bytes = (size_t)info.width * (size_t)info.height * 4u;
+            have_info = 1;
+            if (texture_view_gl_id != info.texture ||
+                texture_view_width != (int)info.width || texture_view_height != (int)info.height) {
+                unsigned char* pixels = (unsigned char*)realloc(texture_view_pixels, bytes);
+                if (pixels == NULL) {
+                    pcLog("texture inspector: not enough memory for %ux%u texture", info.width, info.height);
+                    texture_view_gl_id = 0;
+                } else {
+                    texture_view_pixels = pixels;
+                    if (pcRendererReadTextureRGBA(info.texture, texture_view_pixels, bytes,
+                                                  &texture_view_width, &texture_view_height)) {
+                        if (texture_view_image == NULL ||
+                            texture_view_width != (int)info.width || texture_view_height != (int)info.height) {
+                            if (texture_view_image != NULL) SDL_DestroyTexture(texture_view_image);
+                            texture_view_image = SDL_CreateTexture(texture_view_renderer, SDL_PIXELFORMAT_RGBA32,
+                                                                   SDL_TEXTUREACCESS_STREAMING,
+                                                                   texture_view_width, texture_view_height);
+                            if (texture_view_image != NULL)
+                                SDL_SetTextureScaleMode(texture_view_image, SDL_SCALEMODE_NEAREST);
+                        }
+                        if (texture_view_image != NULL &&
+                            SDL_UpdateTexture(texture_view_image, NULL, texture_view_pixels, texture_view_width * 4)) {
+                            texture_view_gl_id = info.texture;
+                        } else {
+                            texture_view_gl_id = 0;
+                            pcLog("texture inspector: SDL texture update failed: %s", SDL_GetError());
+                        }
+                    } else {
+                        texture_view_gl_id = 0;
+                        pcLog("texture inspector: OpenGL readback failed for texture %u", info.texture);
+                    }
+                }
+            }
+
+            snprintf(texture_view_title, sizeof(texture_view_title),
+                     "Texture Inspector [%d/%d] Gindex %u  Bank %u  %ux%u  |  Left/Right",
+                     texture_view_index + 1, count, info.gindex, info.bank, info.width, info.height);
+        }
+    } else {
+        texture_view_gl_id = 0;
+        snprintf(texture_view_title, sizeof(texture_view_title), "Texture Inspector - waiting for loaded textures");
+    }
+
+    if (texture_view_title[0] != 0) SDL_SetWindowTitle(texture_view_window, texture_view_title);
+    SDL_SetRenderDrawColor(texture_view_renderer, 24, 24, 28, 255);
+    SDL_RenderClear(texture_view_renderer);
+
+    if (have_info && texture_view_image != NULL &&
+        SDL_GetCurrentRenderOutputSize(texture_view_renderer, &output_w, &output_h) &&
+        output_w > 0 && output_h > 0) {
+        float sx = (float)output_w / (float)texture_view_width;
+        float sy = (float)output_h / (float)texture_view_height;
+        float scale = sx < sy ? sx : sy;
+        SDL_FRect destination;
+        destination.w = (float)texture_view_width * scale;
+        destination.h = (float)texture_view_height * scale;
+        destination.x = ((float)output_w - destination.w) * 0.5f;
+        destination.y = ((float)output_h - destination.h) * 0.5f;
+        SDL_RenderTexture(texture_view_renderer, texture_view_image, NULL, &destination);
+    }
+
+    SDL_RenderPresent(texture_view_renderer);
+    /* SDL's 2D renderer may switch its internal graphics context; restore the game's context. */
+    SDL_GL_MakeCurrent(window, gl_context);
 }
 
 /* testing aids drive the game without the window being active: never pause for them */
@@ -1043,6 +1238,11 @@ int pcVideoPumpEvents(void)
             return 0;
         }
 
+        if (texture_view_handle_event(&ev))
+        {
+            continue;
+        }
+
         if (pc_window_event(ev.type) != PC_WINDOW_EVENT_NONE)
         {
             if ((pc_window_event(ev.type) == PC_WINDOW_EVENT_MOVED) || (pc_window_event(ev.type) == PC_WINDOW_EVENT_SIZE_CHANGED) ||
@@ -1052,6 +1252,7 @@ int pcVideoPumpEvents(void)
             }
 
             if ((pc_window_event(ev.type) == PC_WINDOW_EVENT_FOCUS_LOST) && video_cfg.pause_unfocused && !scripted_run() &&
+                !(texture_view_window != NULL && SDL_GetKeyboardFocus() == texture_view_window) &&
                 !pause_until_active())
             {
                 return 0;
@@ -1068,6 +1269,15 @@ int pcVideoPumpEvents(void)
         /* Live UV crop tuner; changes take effect on the next UI draw and are saved to recvx.ini. */
         if (ui_uv_crop_handle_event(&ev))
         {
+            continue;
+        }
+
+        /* F7: toggle the separate native texture inspector (debug=1 only). */
+        if ((ev.type == SDL_EVENT_KEY_DOWN) && !ev.key.repeat && (ev.key.scancode == SDL_SCANCODE_F7) &&
+            pc_debug_mode_enabled())
+        {
+            if (texture_view_window != NULL) texture_view_close();
+            else texture_view_open();
             continue;
         }
 
@@ -1142,7 +1352,8 @@ void pcVideoPresent(void)
     fps_tick();
 
     pcRendererFlushTransparent();
-        pcRendererPresent();
+    pcRendererPresent();
+    texture_view_present();
 
     frame_time.present += pcOsTime() - present_start;
 

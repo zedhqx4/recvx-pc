@@ -97,6 +97,11 @@ Live tuning (requires `debug=1`; no restart required after the initial config is
 - `Backspace` resets the selected edge to zero; `Shift+Backspace` resets all four edges to zero. `F12` toggles the wireframe while tuning.
 - Every live change takes effect on the next UI draw and is written to `recvx.ini` automatically.
 
+Native texture inspector (requires `debug=1`):
+- A second window opens automatically and displays the decoded textures currently held by the native TIM2 cache.
+- The title shows cache index, Gindex, bank and dimensions. Focus this window and use `Left` / `Right` to browse; `F7` toggles the window from the game.
+- The image is the actual RGBA texture uploaded to OpenGL, not a synthetic preview. This milestone does not keep one contiguous 4 MiB GS VRAM image: TIM2 assets are separate native textures and the runtime CLUT is tracked separately.
+
 Environment variables for testing:
 
 | Variable | Effect |

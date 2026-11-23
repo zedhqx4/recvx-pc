@@ -82,6 +82,9 @@ void pcRendererDeleteTexture(unsigned int texture);
 void pcRendererBindTexture(unsigned int texture);
 unsigned int pcRendererCurrentTexture(void);
 void pcRendererCurrentTextureSize(float* width, float* height);
+/* Debug-only readback of a registered native texture. RGBA rows are returned top-to-bottom. */
+int pcRendererReadTextureRGBA(unsigned int texture, unsigned char* rgba, size_t capacity,
+                              int* width, int* height);
 void pcRendererSetTextureCombine(int function, int texture_alpha);
 void pcRendererCurrentTextureCombine(int* function, int* texture_alpha);
 void pcRendererConfigureTexture(unsigned int texture, int linear, int wrap_u, int wrap_v);

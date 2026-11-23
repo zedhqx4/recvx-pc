@@ -494,6 +494,36 @@ static PcNativeTextureEntry* allocate_entry(void)
     return NULL;
 }
 
+int pcTextureDebugCount(void)
+{
+    unsigned int i;
+    int count = 0;
+    for (i = 0; i < PC_TEX_CACHE_MAX; i++)
+        if (texture_cache[i].used && texture_cache[i].texture != 0) count++;
+    return count;
+}
+
+int pcTextureDebugGet(int index, PcTextureDebugInfo* out)
+{
+    unsigned int i;
+    int current = 0;
+    if (index < 0 || out == NULL) return 0;
+    for (i = 0; i < PC_TEX_CACHE_MAX; i++) {
+        PcNativeTextureEntry* entry = &texture_cache[i];
+        if (!entry->used || entry->texture == 0) continue;
+        if (current++ != index) continue;
+        out->texture = entry->texture;
+        out->gindex = entry->gindex;
+        out->bank = entry->bank;
+        out->width = entry->width;
+        out->height = entry->height;
+        out->image_type = entry->image_type;
+        out->pict_format = entry->pict_format;
+        return 1;
+    }
+    return 0;
+}
+
 /* log each (gindex, reason) once: the same texture is requested every frame */
 static int log_once(unsigned int gindex, unsigned int reason)
 {

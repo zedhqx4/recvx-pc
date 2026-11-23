@@ -7,6 +7,20 @@
 extern "C" {
 #endif
 
+typedef struct PcTextureDebugInfo {
+    unsigned int texture;
+    unsigned int gindex;
+    unsigned int bank;
+    unsigned short width;
+    unsigned short height;
+    unsigned char image_type;
+    unsigned char pict_format;
+} PcTextureDebugInfo;
+
+/* Snapshot-style enumeration of decoded TIM2 textures currently held by the native cache. */
+int pcTextureDebugCount(void);
+int pcTextureDebugGet(int index, PcTextureDebugInfo* out);
+
 /* Capture the current 512x512 render area into the render texture bound to `image` (the
  * TIM2 payload of a render texture). GPU->GPU copy; falls back to a full CPU readback
  * written into `image` (RGBA, alpha 0x80) when the copy fails or INI rtt_gpu_copy=0. */

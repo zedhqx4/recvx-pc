@@ -1939,6 +1939,69 @@ void pcRendererCurrentTextureSize(float* width, float* height)
     if (height) *height = current_texture_height;
 }
 
+/* Debug-only readback of a decoded texture. It uses a temporary read FBO and restores the
+ * renderer's read target and pack alignment; the scene framebuffer and draw state are untouched. */
+int pcRendererReadTextureRGBA(unsigned int texture, unsigned char* rgba, size_t capacity,
+                              int* width, int* height)
+{
+    GLint saved_read_fbo = 0, saved_pack = 4;
+    GLuint read_fbo = 0;
+    int tex_width = 0, tex_height = 0, i;
+    size_t row_bytes, required;
+    unsigned char* row;
+
+    batch_flush();
+    if (!ready || texture == 0 || rgba == NULL) return 0;
+
+    for (i = 0; i < native_texture_count; i++) {
+        if (native_textures[i].id == (GLuint)texture) {
+            tex_width = native_textures[i].width;
+            tex_height = native_textures[i].height;
+            break;
+        }
+    }
+    if (i == native_texture_count || tex_width <= 0 || tex_height <= 0) return 0;
+
+    row_bytes = (size_t)tex_width * 4u;
+    required = row_bytes * (size_t)tex_height;
+    if (capacity < required) return 0;
+
+    glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &saved_read_fbo);
+    glGetIntegerv(GL_PACK_ALIGNMENT, &saved_pack);
+    glGenFramebuffers(1, &read_fbo);
+    if (read_fbo == 0) return 0;
+
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, read_fbo);
+    glFramebufferTexture2D(GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, (GLuint)texture, 0);
+    if (glCheckFramebufferStatus(GL_READ_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
+        glBindFramebuffer(GL_READ_FRAMEBUFFER, (GLuint)saved_read_fbo);
+        glDeleteFramebuffers(1, &read_fbo);
+        return 0;
+    }
+
+    glPixelStorei(GL_PACK_ALIGNMENT, 1);
+    glReadPixels(0, 0, tex_width, tex_height, GL_RGBA, GL_UNSIGNED_BYTE, rgba);
+    glPixelStorei(GL_PACK_ALIGNMENT, saved_pack);
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, (GLuint)saved_read_fbo);
+    glDeleteFramebuffers(1, &read_fbo);
+
+    /* OpenGL returns bottom-up rows; the inspector uses ordinary top-down image coordinates. */
+    row = (unsigned char*)malloc(row_bytes);
+    if (row == NULL) return 0;
+    for (i = 0; i < tex_height / 2; i++) {
+        unsigned char* top = rgba + (size_t)i * row_bytes;
+        unsigned char* bottom = rgba + (size_t)(tex_height - 1 - i) * row_bytes;
+        memcpy(row, top, row_bytes);
+        memcpy(top, bottom, row_bytes);
+        memcpy(bottom, row, row_bytes);
+    }
+    free(row);
+
+    if (width) *width = tex_width;
+    if (height) *height = tex_height;
+    return 1;
+}
+
 int pcRendererGetOutputSize(int* w, int* h)
 {
     if (w) *w = output_width;
