@@ -764,6 +764,32 @@ static float pcFixedUv(float word)
     return (float)(bits & 0x3FFFu) / 16.0f;
 }
 
+/* Diagnostico (rafaga F8, 2 primeros frames): piezas 2D con UV enteras tal como llegan del juego ("raw") y tras el ajuste
+ * pc_snap_uv + recorte ("fix"): posicion en pantalla (sin el offset 1728/1808) y UV en texels de cada vertice, mas la textura.
+ * Sirve para ver como se relacionan las UV del juego con los pixeles que cubre cada pieza. */
+static void pcUiUvDiag(const char* tag, const void* dp, unsigned int num)
+{
+    extern int pcRendererBurstDiag(void);
+    extern void pcRendererCurrentTextureSize(float* w, float* h);
+    static unsigned int lines;
+    const unsigned int* w = (const unsigned int*)dp;
+    const float* f = (const float*)dp;
+    float tw = 1.0f, th = 1.0f;
+    unsigned int i, n = num < 6 ? num : 6;
+    char buf[400];
+    int len;
+
+    if (!pcRendererBurstDiag()) { lines = 0; return; }
+    if (lines++ >= 400 || dp == NULL)
+        return;
+    pcRendererCurrentTextureSize(&tw, &th);
+    len = snprintf(buf, sizeof(buf), "UIUV %s n=%u tex=%.0fx%.0f:", tag, num, tw, th);
+    for (i = 0; i < n && len < (int)sizeof(buf) - 60; i++)
+        len += snprintf(buf + len, sizeof(buf) - (size_t)len, " (%.2f,%.2f)->(%.4f,%.4f)", f[(i * 12) + 8] - 1728.0f, f[(i * 12) + 9] - 1808.0f,
+                        (float)(w[(i * 12) + 0] & 0x3FFFu) / 16.0f, (float)(w[(i * 12) + 1] & 0x3FFFu) / 16.0f);
+    pcLog("%s", buf);
+}
+
 void Ps2AddPrim2D(unsigned long prim, void* dp, unsigned int num)
 {
     unsigned int i;             
@@ -801,6 +827,7 @@ void Ps2AddPrim2D(unsigned long prim, void* dp, unsigned int num)
     {
         memcpy(wide_buf, dp, num * 48);
         dp = wide_buf;
+        pcUiUvDiag("raw", dp, num);
         pc_snap_uv((unsigned int*)wide_buf, num);
 
         {
@@ -826,6 +853,8 @@ void Ps2AddPrim2D(unsigned long prim, void* dp, unsigned int num)
                 crop_logged = 1;
             }
         }
+
+        pcUiUvDiag("fix", wide_buf, num);
 
         if (pcWide2DTrimRight)
         {
