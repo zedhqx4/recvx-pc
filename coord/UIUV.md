@@ -39,3 +39,8 @@ tabla que el juego importe. "200 quads no son nada".
   -> Blender (editar UV; exportar con "Objects as OBJ Objects" + UV, sin triangular) -> `uiuv_obj_to_table.py editado.obj recvx_uiuv.tsv ui_uv_table.txt` -> copiar junto al exe.
 - PENDIENTE (usuario): compilar 0.9.223 en el CI; F8 en opciones, terminal Umbrella, inventario, mapa...; mandar `recvx_uiuv.tsv` + `recvx.log` (+ volcados de textura de los Gindex que salgan).
 - PENDIENTE (Claude): con el volcado real, ver n/FST/ST de las piezas problematicas (hipotesis 5 de arriba) y corregir lo sistematico en codigo antes de editar a mano.
+
+## Actualizacion 2026-11-25
+- El usuario NO puede probar hasta el sabado (fuera de casa). Se reforzo `pc/tools/test_uiuv_tools.py` para que corra con solo Python 3 (sin gcc) y se escribio `pc/tools/UIUV_README.md`
+  (guia paso a paso con comandos de Windows). Probado aqui con y sin gcc: TODO BIEN.
+- Nada mas que hacer de mi lado hasta recibir `recvx_uiuv.tsv` + `recvx.log` (+ CI compilando 0.9.223). No tocar el codigo del juego antes de ver esos datos.
