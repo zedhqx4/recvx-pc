@@ -799,3 +799,9 @@ recalcula siempre, de modo que los cambios de paleta se detectan exactamente igu
 
 ## 0.9.222 - fix de compilacion de 0.9.221 (C2371 pcLog)
 - 0.9.221 anadio `extern void pcLog(...)` dentro de pcUiGsSample; en los archivos del juego pcLog ya esta declarado (pc_platform.h con otro tipo base por el `#define long`), de ahi C2371 "redefinition; different basic types". Era la misma advertencia que ya figura en el comentario de pcPrimLog ("no extern pcLog aqui"); se elimina la declaracion. Leccion: en ps2_dummy.c no redeclarar funciones de pc_platform.h.
+
+## 0.9.223 - volcado de piezas 2D y tabla de correcciones de UV (pc_uvtable)
+- Respuesta a "las UV estan mal" en menu de opciones y terminal: los 3 logs UIUV disponibles son solo del inventario (200 piezas n=4 FST), no hay datos de esas pantallas. El diagnostico de 0.9.219 solo veia FST, <=200 piezas y sin Gindex.
+- Nuevo: pc/src/pc_uvtable.c (+ pc_uvtable.h): clave de pieza = FNV-1a64(gindex, tex w/h, topologia, fst, n, x16,y16,u16,v16 crudos, antes de pantalla ancha/ajustes); volcado `recvx_uiuv.tsv` en la rafaga F8 (todas las piezas 2D texturizadas: FST/ST, sprites, n<=64, sin duplicados) y tabla `ui_uv_table.txt`. Ps2AddPrim2D: construye la pieza cruda solo si hay tabla o rafaga (pcUiUvWanted), vuelca con las UV por defecto y, si hay entrada y la pieza no fue recortada por pantalla ancha, sustituye las UV de los vertices (sprite: esquinas 0 y 2) y la acota. ui_uv_clamp tambien acota ST.
+- Herramientas: pc/tools/uiuv_common.py, uiuv_dump_to_obj.py, uiuv_obj_to_table.py; prueba pc/tools/test_uiuv_tools.py (+ test_uiuv.c): clave C = Python en 6 piezas sinteticas, OBJ sin editar -> tabla vacia, edicion de quad y sprite llega al lookup. Sin compilar ps2_dummy.c (balance llaves 0/0) ni MSVC.
+- Registro del tema: coord/UIUV.md.

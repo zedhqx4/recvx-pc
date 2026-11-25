@@ -15,6 +15,7 @@
 #include "../../../ps2/veronica/prog/sdfunc.h"
 #include "../../../ps2/veronica/prog/main.h"
 #include "pc_renderer.h"
+#include "pc_uvtable.h"
 
 #define PC_TIM2_FINGERPRINT_SLOTS 1024
 typedef struct {
@@ -835,8 +836,56 @@ static void pcUiUvDiag(const char* tag, const void* dp, unsigned int num)
     pcLog("%s", buf);
 }
 
+/* Pieza 2D cruda para el volcado/tabla de UV (pc_uvtable.h): lo que llega del juego, antes de cualquier ajuste de UV o de pantalla ancha.
+ * Los sprites (topologia 6) solo usan sus dos primeras esquinas. Devuelve 0 si la pieza no se puede describir. */
+static int pcUiPieceFromPrim(PcUiPiece* p, unsigned long prim, const void* dp, unsigned int num)
+{
+    const float* f = (const float*)dp;
+    const unsigned int* w = (const unsigned int*)dp;
+    float tw = 1.0f, th = 1.0f;
+    unsigned int i, n = num;
+    TIM2_PICTUREHEADER_EX* ext;
+
+    if ((Ps2_now_tex == NULL) || (n < 1) || (n > PC_UIPIECE_MAX))
+        return 0;
+    ext = (TIM2_PICTUREHEADER_EX*)(Ps2_now_tex->texinfo.texsurface.pSurface);
+    if (ext == NULL)
+        return 0;
+    pcRendererCurrentTextureSize(&tw, &th);
+    p->gindex = (unsigned int)ext->Gindex;
+    p->tex_w = (int)(tw + 0.5f);
+    p->tex_h = (int)(th + 0.5f);
+    p->topology = (int)PC_PRIM_TOPOLOGY(prim);
+    p->fst = (prim & PC_PRIM_FST) != 0;
+    if (p->topology == PC_PRIM_SPRITE)
+    {
+        if (n < 2)
+            return 0;
+        n = 2;
+    }
+    p->n = (int)n;
+    for (i = 0; i < n; i++, f += 12, w += 12)
+    {
+        p->x16[i] = (int)floorf((f[8] - 1728.0f) * 16.0f + 0.5f);
+        p->y16[i] = (int)floorf((f[9] - 1808.0f) * 16.0f + 0.5f);
+        if (p->fst)
+        {
+            p->u16[i] = (int)(w[0] & 0x3FFFu);
+            p->v16[i] = (int)(w[1] & 0x3FFFu);
+        }
+        else
+        {
+            p->u16[i] = (int)floorf(f[0] * tw * 16.0f + 0.5f);
+            p->v16[i] = (int)floorf(f[1] * th * 16.0f + 0.5f);
+        }
+    }
+    return 1;
+}
+
 void Ps2AddPrim2D(unsigned long prim, void* dp, unsigned int num)
 {
+    PcUiPiece ui_piece;
+    int ui_piece_valid = 0;
     unsigned int i;             
     float x;                   
     float y;                    
@@ -868,6 +917,9 @@ void Ps2AddPrim2D(unsigned long prim, void* dp, unsigned int num)
         }
     } 
     
+    if ((prim & PC_PRIM_TME) && pcUiUvWanted())
+        ui_piece_valid = pcUiPieceFromPrim(&ui_piece, prim, dp, num);
+
     if ((prim & PC_PRIM_TME) && (prim & PC_PRIM_FST) && (num <= 64))
     {
         memcpy(wide_buf, dp, num * 48);
@@ -1003,6 +1055,7 @@ void Ps2AddPrim2D(unsigned long prim, void* dp, unsigned int num)
         int count = (int)num;
         int owned = 0;
         int sprite_expanded = 0;
+        int ui_table_hit = 0;
         float texture_width = 1.0f, texture_height = 1.0f;
         float use_last_pri = ((const float*)dp)[(size_t)(count > 0 ? count - 1 : 0) * 12u + 10u];
 
@@ -1143,16 +1196,61 @@ void Ps2AddPrim2D(unsigned long prim, void* dp, unsigned int num)
                 vertices[k].v += dv;
             }
         }
-        if (state.textured && use_uv && count > 0)
+        if (ui_piece_valid && state.textured && count > 0)
+        {
+            /* Volcado (rafaga F8) y tabla de correcciones: la pieza se identifica por su geometria cruda (pc_uvtable.h). */
+            float def_uv[2 * PC_UIPIECE_MAX], tab_uv[2 * PC_UIPIECE_MAX];
+            const float* chk = (const float*)dp;
+            int j, unchanged = 1;
+
+            for (j = 0; j < ui_piece.n; j++)
+            {
+                const int vi = sprite_expanded ? (j ? 2 : 0) : j;   /* sprite expandido: esquina 0 -> vertice 0, esquina 2 -> vertice 2 */
+                def_uv[2 * j] = vertices[vi].u;
+                def_uv[2 * j + 1] = vertices[vi].v;
+            }
+            pcUiUvCapture(&ui_piece, def_uv);
+            /* una pieza recortada por el ajuste de pantalla ancha ya no es la medida: se deja como esta */
+            for (j = 0; j < ui_piece.n && unchanged; j++)
+            {
+                if (((int)floorf((chk[j * 12 + 8] - 1728.0f) * 16.0f + 0.5f) != ui_piece.x16[j]) ||
+                    ((int)floorf((chk[j * 12 + 9] - 1808.0f) * 16.0f + 0.5f) != ui_piece.y16[j]))
+                    unchanged = 0;
+            }
+            if (unchanged && pcUiUvTableLookup(&ui_piece, tab_uv))
+            {
+                if (sprite_expanded)
+                {
+                    static const unsigned char corner_map[6] = { 0, 1, 2, 0, 2, 3 };
+                    for (j = 0; j < 6; j++)
+                    {
+                        const int c = corner_map[j];   /* 0:(u0,v0) 1:(u1,v0) 2:(u1,v1) 3:(u0,v1) */
+                        vertices[j].u = tab_uv[(c == 1 || c == 2) ? 2 : 0];
+                        vertices[j].v = tab_uv[(c == 2 || c == 3) ? 3 : 1];
+                    }
+                }
+                else
+                {
+                    for (j = 0; j < count; j++)
+                    {
+                        vertices[j].u = tab_uv[2 * j];
+                        vertices[j].v = tab_uv[2 * j + 1];
+                    }
+                }
+                ui_table_hit = 1;
+            }
+        }
+        if (state.textured && count > 0)
         {
             /* Piezas 2D (UV enteras) cortadas de un atlas: ampliadas, el filtrado en su borde mezclaria la pieza vecina del atlas.
              * Solo pueden muestrear sus propios texels: desde medio texel dentro de su rectangulo UV (lo que hacia el renderer
-             * GS de pc-port). Los modelos 3D usan ST y no pasan por aqui. */
+             * GS de pc-port). Tambien las piezas 2D con ST (FST=0): ui_uv_clamp las acota igual.
+             * Las piezas con entrada en la tabla de UV siempre se acotan. */
             static int uv_clamp_mode = -1;
 
             if (uv_clamp_mode < 0)
                 uv_clamp_mode = pcIniGetInt("ui_uv_clamp", 0);
-            if (uv_clamp_mode != 0)
+            if ((uv_clamp_mode != 0) || ui_table_hit)
             {
                 float u0 = vertices[0].u, v0 = vertices[0].v, u1 = u0, v1 = v0;
                 int k;

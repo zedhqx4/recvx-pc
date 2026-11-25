@@ -1,6 +1,6 @@
 # Registro: UVs de la interfaz 2D (LEER PRIMERO al retomar este tema)
 
-Ultima actualizacion: 2026-11-24. Version de codigo: 0.9.222 (rama optimizacion). Usuario prueba en el cuarto de agua / menus.
+Ultima actualizacion: 2026-11-24 (tarde). Version de codigo: 0.9.223 (rama optimizacion). Usuario prueba en el cuarto de agua / menus.
 
 ## Objetivo del usuario
 UVs de las piezas 2D (menus, inventario, opciones, terminal Umbrella) correctas a 1x Y a escala alta, sin valores `ui_uv_crop_*` generales.
@@ -19,9 +19,9 @@ tabla que el juego importe. "200 quads no son nada".
    clamp; (c) sprites. Sin datos no se sabe: HACE FALTA EL VOLCADO NUEVO.
 
 ## Plan (en orden; marcar al terminar)
-- [ ] 0.9.223 modulo `pc/src/pc_uvtable.c`: volcado `recvx_uiuv.tsv` de TODAS las piezas 2D texturizadas (FST y ST, sprites, cualquier n<=64, con Gindex y
+- [x] 0.9.223 (HECHO, sin compilar con MSVC) modulo `pc/src/pc_uvtable.c`: volcado `recvx_uiuv.tsv` de TODAS las piezas 2D texturizadas (FST y ST, sprites, cualquier n<=64, con Gindex y
       sin tope de 200) en la rafaga F8 + tabla de correcciones `ui_uv_table.txt` (INI `ui_uv_table`), clave = hash(gindex, tex, topologia, fst, n, x,y,u,v crudos).
-- [ ] tools: `pc/tools/uiuv_dump_to_obj.py` (volcado -> OBJ+MTL con atlas), `pc/tools/uiuv_obj_to_table.py` (OBJ editado -> tabla), `pc/tools/test_uiuv_tools.py`.
+- [x] (HECHO, probado con gcc: `python3 pc/tools/test_uiuv_tools.py` -> TODO BIEN) tools: `pc/tools/uiuv_dump_to_obj.py` (volcado -> OBJ+MTL con atlas), `pc/tools/uiuv_obj_to_table.py` (OBJ editado -> tabla), `pc/tools/test_uiuv_tools.py`.
 - [ ] Usuario: F8 en cada pantalla problematica (opciones, terminal, inventario, mapa...) -> `recvx_uiuv.tsv` + `recvx.log` + volcado de texturas.
 - [ ] Segun el volcado: si el fallo es sistematico (ST sin shift, multi-quad), corregirlo en el codigo y reducir la tabla a excepciones.
 - [ ] Usuario edita UVs en Blender -> tabla -> el juego la carga. Validar a 1x y escala alta. Borrar pc_snap_uv, recorte, afinador F10 y claves ui_uv_crop_*.
@@ -30,3 +30,12 @@ tabla que el juego importe. "200 quads no son nada".
 - Los logs UIUV viejos ya estan analizados: no repetir.
 - Cada paso termina en un commit con entregable; no mas de 3 comandos de exploracion seguidos sin escribir codigo o documentacion.
 - Actualizar ESTE archivo al terminar cada paso.
+
+## Estado actual (0.9.223)
+- Codigo: `pc/src/pc_uvtable.c` + `pc/include/pc_uvtable.h`; integracion en `Ps2AddPrim2D` (ps2_dummy.c): pieza cruda -> volcado (rafaga F8) -> tabla.
+  Las piezas con entrada en la tabla usan sus UV finales y SIEMPRE se acotan (medio texel dentro de su bbox). INI nuevo: `ui_uv_table` (1 por defecto; 0 la ignora);
+  archivo `ui_uv_table.txt` junto al exe (o env RECVX_UI_UV_TABLE). `ui_uv_clamp` ahora tambien acota piezas ST (FST=0).
+- Flujo del usuario: F8 en cada pantalla -> `recvx_uiuv.tsv` (se acumula, sin duplicados) -> `uiuv_dump_to_obj.py recvx_uiuv.tsv m.obj --atlas-dir <carpeta con recvx_tex_*>`
+  -> Blender (editar UV; exportar con "Objects as OBJ Objects" + UV, sin triangular) -> `uiuv_obj_to_table.py editado.obj recvx_uiuv.tsv ui_uv_table.txt` -> copiar junto al exe.
+- PENDIENTE (usuario): compilar 0.9.223 en el CI; F8 en opciones, terminal Umbrella, inventario, mapa...; mandar `recvx_uiuv.tsv` + `recvx.log` (+ volcados de textura de los Gindex que salgan).
+- PENDIENTE (Claude): con el volcado real, ver n/FST/ST de las piezas problematicas (hipotesis 5 de arriba) y corregir lo sistematico en codigo antes de editar a mano.
