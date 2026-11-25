@@ -1,5 +1,7 @@
 # Registro de avance (lo mantiene Claude; leer esto primero al retomar)
 
+> Tema activo: UVs de la interfaz 2D -> leer `coord/UIUV.md` (estado, hechos, plan). Ultimo codigo: 0.9.222.
+
 Ultima actualizacion: 0.9.201 (sin probar). Base validada: 0.9.199. Hecho G4 pasos 5,6 + Ps2AddPrim/Ps2AddOT. Pendiente G4: Ps2_tp_tag/Ps2InitPS2_GS_SAVE tags, setImageTag (dudoso), pasos 1-4 (tipar PRIM/ALPHA/estados), 7.
 Milestones: `milestone/0.9.181` (ultimo bueno), `0.9.180`, `0.9.171`... El hook "unpushed commits" es falso: comprobar con `git ls-remote origin optimizacion`.
 
