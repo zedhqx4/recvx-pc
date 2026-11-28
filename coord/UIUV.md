@@ -44,3 +44,6 @@ tabla que el juego importe. "200 quads no son nada".
 - El usuario NO puede probar hasta el sabado (fuera de casa). Se reforzo `pc/tools/test_uiuv_tools.py` para que corra con solo Python 3 (sin gcc) y se escribio `pc/tools/UIUV_README.md`
   (guia paso a paso con comandos de Windows). Probado aqui con y sin gcc: TODO BIEN.
 - Nada mas que hacer de mi lado hasta recibir `recvx_uiuv.tsv` + `recvx.log` (+ CI compilando 0.9.223). No tocar el codigo del juego antes de ver esos datos.
+
+## Actualizacion 2026-11-27
+- CI de 0.9.223 FALLO: C2632 en pc_uvtable.c (`long long`, el archivo no estaba en NATIVE_LONG de pc/tools/common.py). Corregido en 0.9.224 (solo se anade a la lista). Pendiente: que el CI compile 0.9.224.
